@@ -1,0 +1,129 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<include>
+    <!-- AUDIT by Jackson -->
+	<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+		<size>4</size>
+		<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() +"_audit"+ fileEnding</fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>		
+		<tableChangedEventTemplate><!-- 
+			//reset counters at statistics file change
+			for ( int i = 0 ; i < counter.length; i++) {
+				counter[i].set(0L);
+			}
+			
+			int batchID= (updateID + 1);
+			keyValueStore.put("batchID", Integer.valueOf(batchID));
+			
+			//store current table update id in counter 3
+		   counter[3].set((long)output.getCurrentTableUpdateID());
+			
+		-->
+		</tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!-- 
+		
+			//P_RECORDS == counter[0];
+			//P_C_MATCHING== counter[1]
+			//P_NEW== counter[2]		
+		
+		
+			int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+			
+			//Prospect, b, null, P_C_MATCHING, v, null
+				buf.append("Prospect");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("P_C_MATCHING");
+				buf.append(delimiter);
+				buf.append(counter[1]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+			//Prospect, b, null, P_RECORDS, v, null
+				buf.append("Prospect");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("P_RECORDS");
+				buf.append(delimiter);
+				buf.append(counter[0]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+			//Prospect, b, null, P_NEW, v, null
+				buf.append("Prospect");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("P_NEW");
+				buf.append(delimiter);
+				buf.append(counter[2]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));	;		
+			-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+			//P_RECORDS == counter[0];
+			//P_C_MATCHING== counter[1]
+			//P_NEW== counter[2]		
+			//counter[3] == current table updateid set in "<tableChangedEventTemplate>"
+			
+			//P_RECORDS == counter[0];
+			counter[0].incrementAndGet();
+			
+			//P_C_MATCHING== counter[1]:	Total number of matching customers in historical load
+			
+			boolean isValidCustomer =((Boolean)field[1].getPlainValue()).booleanValue();
+
+			if(isValidCustomer){
+				//P_C_MATCHING== counter[1]	Total number of matching customers in historical load
+				counter[1].incrementAndGet();
+			}
+			
+			//[begin change michael 18.02.2013 , ticket #144]
+			//P_NEW== counter[2] The number of Prospect file records in batch b that are new prospects in this batch (new AgencyID value)		
+			//check if update.getUpdateID  of row/field is from current table update id, //counter[3] == current table updateid
+			
+			boolean p_new = counter[3].get() == field[0].getUpdateIDField(); // id updateID of first column equals counter, this prospect is "new" 
+
+			if(p_new ){
+				counter[2].incrementAndGet();
+			}
+			//[end change michael 18.02.2013 , ticket t#144]
+			
+			-->
+		</counterTemplate>
+	</output>
+</include>

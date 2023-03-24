@@ -1,0 +1,320 @@
+US1;U.S. Income Tax Bracket for the poor;0.15000
+US2;U.S. Income Tax Bracket for the huddled masses;0.27500
+US3;U.S. Income Tax Bracket for the masses;0.30500
+US4;U.S. Income Tax Bracket for the well to do;0.35500
+US5;U.S. Income Tax Bracket for the filthy rich;0.39100
+CN1;Canadian Income Tax for the poor;0.16000
+CN2;Canadian Income Tax for the huddled masses;0.22000
+CN3;Canadian Income Tax for the well to do;0.26000
+CN4;Canadian Income Tax for the filthy rich;0.29000
+AB1;Alberta Income Tax for children;0.00000
+AB2;Alberta Income Tax for blue collar workers;0.16000
+AB3;Alberta Income Tax for shcool teachers;0.26000
+AB4;Alberta Income Tax for white collar workers;0.32000
+AB5;Alberta Income Tax for doctors and lawyers;0.36000
+AB6;Alberta Income Tax for inherited wealth;0.39000
+AK1;Alaska Income Tax for children;0.00000
+AL1;Alabama Tax for blue collar workers;0.02000
+AL2;Alabama Tax for school teachers;0.04000
+AL3;Alabama Tax for inherited wealth;0.05000
+AR1;Arkansas Tax for children;0.01000
+AR2;Arkansas Tax for blue collar workers;0.02160
+AR3;Arkansas Tax for school teachers;0.03330
+AR4;Arkansas Tax for white collar workers;0.04500
+AR5;Arkansas Tax for doctors and lawyers;0.05670
+AR6;Arkansas Tax for inherited wealth;0.07000
+AZ1;Arizona Income Tax for school teachers;0.02870
+AZ2;Arizona Income Tax for blue collar workers;0.03410
+AZ3;Arizona Income Tax for the masses;0.04000
+AZ4;Arizona Income Tax for doctors and lawyers;0.04500
+AZ5;Arizona Income Tax for inherited wealth;0.05040
+BC1;British Columbia Income Tax for children;0.00000
+BC2;British Columbia Income Tax for school teachers;0.16000
+BC3;British Columbia Income Tax for the elderly;0.23300
+BC4;British Columbia Income Tax for lawyers;0.26500
+BC5;British Columbia Income Tax for workers;0.32500
+BC6;British Columbia Income Tax for the unemployed;0.35700
+BC7;British Columbia Income Tax for the masses;0.39700
+BC8;British Columbia Income Tax for everyone else;0.41700
+BC9;British Columbia Income Tax for those driving SUVs;0.42700
+BC10;British Columbia Income Tax for inherited wealth;0.45000
+CA1;California Tax for children;0.01000
+CA2;California Tax for school teachers;0.02660
+CA3;California Tax for the masses;0.04320
+CA4;California Tax for doctors and lawyers;0.05980
+CA5;California Tax for blue collar workers;0.07640
+CA6;California Tax for inherited wealth;0.09300
+CO1;Colorado Income Tax for inherited wealth;0.04750
+CT1;Connecticut Tax for the masses;0.03000
+CT2;Connecticut Tax for inherited wealth;0.04500
+DC1;District of Columbia Income Tax for teachers;0.05000
+DC2;District of Columbia Income Tax for teachers;0.07250
+DC3;District of Columbia Income Tax for workers;0.09500
+DE1;Delaware Income Tax for blue collar workers;0.02200
+DE2;Delaware Income Tax for the elderly;0.02830
+DE3;Delaware Income Tax for the unemployed;0.03470
+DE4;Delaware Income Tax for doctors and lawyers;0.04100
+DE5;Delaware Income Tax for everyone else;0.04730
+DE6;Delaware Income Tax for the masses;0.05370
+DE7;Delaware Income Tax for inherited wealth;0.06000
+FL1;Florida Income Tax for children;0.00000
+GA1;Georgia Income Tax for children;0.01000
+GA2;Georgia Income Tax for school teachers;0.02000
+GA3;Georgia Income Tax for blue collar workers;0.03000
+GA4;Georgia Income Tax for doctors and lawyers;0.04000
+GA5;Georgia Income Tax for the elderly;0.05000
+GA6;Georgia Income Tax for inherited wealth;0.06000
+HI1;Hawaii Income Tax for school teachers;0.01600
+HI2;Hawaii Income Tax for blue collar workers;0.02490
+HI3;Hawaii Income Tax for the elderly;0.03390
+HI4;Hawaii Income Tax for the masses;0.04280
+HI5;Hawaii Income Tax for the unemployed;0.05180
+HI6;Hawaii Income Tax for doctors and lawyers;0.06070
+HI7;Hawaii Income Tax for everyone else;0.06960
+HI8;Hawaii Income Tax for those driving SUVs;0.07860
+HI9;Hawaii Income Tax for inherited wealth;0.08750
+IA1;Iowa Income Tax for the elderly;0.00360
+IA2;Iowa Income Tax for school teachers;0.01440
+IA3;Iowa Income Tax for the masses;0.02520
+IA4;Iowa Income Tax for blue collar workers;0.03590
+IA5;Iowa Income Tax for the unemployed;0.04670
+IA6;Iowa Income Tax for doctors and lawyers;0.05750
+IA7;Iowa Income Tax for everyone else;0.06830
+IA8;Iowa Income Tax for those driving SUVs;0.07900
+IA9;Iowa Income Tax for inherited wealth;0.08980
+ID1;Idaho Income Tax for the elderly;0.02000
+ID2;Idaho Income Tax for the masses;0.02890
+ID3;Idaho Income Tax for school teachers;0.03770
+ID4;Idaho Income Tax for doctors and lawyers;0.04660
+ID5;Idaho Income Tax for blue collar workers;0.05540
+ID6;Idaho Income Tax for the unemployed;0.06430
+ID7;Idaho Income Tax for everyone else;0.07310
+ID8;Idaho Income Tax for inherited wealth;0.08200
+IL1;Illinois Income Tax for school teachers;0.03000
+IN1;Indiana Income Tax for the masses;0.03400
+KS1;Kansas Income Tax for doctors and lawyers;0.03500
+KS2;Kansas Income Tax for inherited wealth;0.04980
+KS3;Kansas Income Tax for blue collar workers;0.06450
+KY1;Kentucky Income Tax for the elderly;0.02000
+KY2;Kentucky Income Tax for school teachers;0.03000
+KY3;Kentucky Income Tax for blue collar workers;0.04000
+KY4;Kentucky Income Tax for the masses;0.05000
+KY5;Kentucky Income Tax for inherited wealth;0.06000
+LA1;Louisana Income Tax for the elderly;0.02000
+LA2;Louisana Income Tax for school teachers;0.04000
+LA3;Louisana Income Tax for inherited wealth;0.06000
+MA1;Massachussets Income Tax for school teachers;0.05850
+MB1;Manitoba Income Tax for children;0.00000
+MB2;Manitoba Income Tax for the masses;0.16000
+MB3;Manitoba Income Tax for doctors and lawyers;0.27900
+MB4;Manitoba Income Tax for blue collar workers;0.26900
+MB5;Manitoba Income Tax for the elderly;0.32200
+MB6;Manitoba Income Tax for school teachers;0.38200
+MB7;Manitoba Income Tax for the unemployed;0.39400
+MB8;Manitoba Income Tax for everyone else;0.43400
+MB9;Manitoba Income Tax for inherited wealth;0.46400
+MD1;Maryland Income Tax for school teachers;0.02000
+MD2;Maryland Income Tax for blue collar workers;0.02950
+MD3;Maryland Income Tax for the masses;0.03900
+MD4;Maryland Income Tax for inherited wealth;0.04850
+ME1;Maine Income Tax for doctors and lawyers;0.02000
+ME2;Maine Income Tax for blue collar workers;0.04170
+ME3;Maine Income Tax for school teachers;0.06330
+ME4;Maine Income Tax for inherited wealth;0.08500
+MI1;Michigan Income Tax for blue collar workers;0.04300
+MN1;Minnesota Income Tax for school teachers;0.05350
+MN2;Minnesota Income Tax for doctors and lawyers;0.06600
+MN3;Minnesota Income Tax for inherited wealth;0.07850
+MO1;Missouri Income Tax for doctors and lawyers;0.01500
+MO2;Missouri Income Tax for school teachers;0.02000
+MO3;Missouri Income Tax for the elderly;0.02500
+MO4;Missouri Income Tax for the masses;0.03000
+MO5;Missouri Income Tax for the unemployed;0.03500
+MO6;Missouri Income Tax for blue collar workers;0.04000
+MO7;Missouri Income Tax for everyone else;0.04500
+MO8;Missouri Income Tax for doctors and lawyers;0.05000
+MO9;Missouri Income Tax for those driving SUVs;0.05500
+MO10;Missouri Income Tax for blue collar workers;0.06000
+MS1;Mississippi Income Tax for the elderly;0.03000
+MS2;Mississippi Income Tax for school teachers;0.04000
+MS3;Mississippi Income Tax for inherited wealth;0.05000
+MT1;Montana Income Tax for blue collar workers;0.02000
+MT2;Montana Income Tax for the masses;0.03000
+MT3;Montana Income Tax for doctors and lawyers;0.04000
+MT4;Montana Income Tax for school teachers;0.05000
+MT5;Montana Income Tax for the elderly;0.06000
+MT6;Montana Income Tax for the unemployed;0.07000
+MT7;Montana Income Tax for everyone else;0.08000
+MT8;Montana Income Tax for those driving SUVs;0.09000
+MT9;Montana Income Tax for university students;0.10000
+MT10;Montana Income Tax for inherited wealth;0.11000
+NB1;New Brunswick Income Tax for children;0.00000
+NB2;New Brunswick Income Tax for doctors and lawyers;0.16000
+NB3;New Brunswick Income Tax for blue collar workers;0.30680
+NB4;New Brunswick Income Tax for school teachers;0.25680
+NB5;New Brunswick Income Tax for the elderly;0.36820
+NB6;New Brunswick Income Tax for the masses;0.42520
+NB7;New Brunswick Income Tax for inherited wealth;0.46840
+NC1;North Carolina Income Tax for school teachers;0.06000
+NC2;North Carolina Income Tax for doctors and lawyers;0.06880
+NC3;North Carolina Income Tax for inherited wealth;0.07750
+ND1;North Dakota Income Tax for the elderly;0.02670
+ND2;North Dakota Income Tax for blue collar workers;0.04000
+ND3;North Dakota Income Tax for school teachers;0.05340
+ND4;North Dakota Income Tax for the unemployed;0.06670
+ND5;North Dakota Income Tax for the masses;0.08000
+ND6;North Dakota Income Tax for everyone else;0.09330
+ND7;North Dakota Income Tax for those driving SUVs;0.10670
+ND8;North Dakota Income Tax for inherited wealth;0.12000
+NE1;Nebraska Income Tax for blue collar workers;0.02510
+NE2;Nebraska Income Tax for school teachers;0.03900
+NE3;Nebraska Income Tax for the masses;0.05290
+NE4;Nebraska Income Tax for inherited wealth;0.06680
+NF1;Newfoundland Income Tax for children;0.00000
+NF2;Newfoundland Income Tax for doctors and lawyers;0.10570
+NF3;Newfoundland Income Tax for blue collar workers;0.26570
+NF4;Newfoundland Income Tax for school teachers;0.32160
+NF5;Newfoundland Income Tax for the masses;0.38160
+NF6;Newfoundland Income Tax for the elderly;0.39620
+NF7;Newfoundland Income Tax for the unemployed;0.41640
+NF8;Newfoundland Income Tax for everyone else;0.45540
+NF9;Newfoundland Income Tax for inherited wealth;0.48640
+NH1;New Hampshire Income Tax for children;0.00000
+NJ1;New Jersey Income Tax for the masses;0.01400
+NJ2;New Jersey Income Tax for blue collar workers;0.02390
+NJ3;New Jersey Income Tax for school teachers;0.03390
+NJ4;New Jersey Income Tax for doctors and lawyers;0.04380
+NJ5;New Jersey Income Tax for the elderly;0.05380
+NJ6;New Jersey Income Tax for inherited wealth;0.06370
+NM1;New Mexico Income Tax for the elderly;0.01700
+NM2;New Mexico Income Tax for blue collar workers;0.02780
+NM3;New Mexico Income Tax for doctors and lawyers;0.03870
+NM4;New Mexico Income Tax for school teachers;0.04950
+NM5;New Mexico Income Tax for the masses;0.06030
+NM6;New Mexico Income Tax for the unemployed;0.07120
+NM7;New Mexico Income Tax for inherited wealth;0.08200
+NS1;Nova Scotia Income Tax for children;0.00000
+NS2;Nova Scotia Income Tax for the masses;0.16000
+NS3;Nova Scotia Income Tax for doctors and lawyers;0.25770
+NS4;Nova Scotia Income Tax for blue collar workers;0.30770
+NS5;Nova Scotia Income Tax for the elderly;0.25770
+NS6;Nova Scotia Income Tax for school teachers;0.30950
+NS7;Nova Scotia Income Tax for everyone else;0.36940
+NS8;Nova Scotia Income Tax for the unemployed;0.38670
+NS9;Nova Scotia Income Tax for those driving SUVs;0.42670
+NS10;Nova Scotia Income Tax for inherited wealth;0.44340
+NT1;Northwest Territories Income Tax for children;0.00000
+NT2;Northwest Territories Income Tax for the masses;0.16000
+NT3;Northwest Territories Income Tax for doctors;0.27900
+NT4;Northwest Territories Income Tax for lawyers;0.26900
+NT5;Northwest Territories Income Tax for the elderly;0.32200
+NT6;Northwest Territories Income Tax for the employed;0.38200
+NT7;Northwest Territories Income Tax for workers;0.39400
+NT8;Northwest Territories Income Tax for everyone else;0.43400
+NT9;Northwest Territories Income Tax for the wealthy;0.46400
+NU1;Nunavut Income Tax for children;0.00000
+NU2;Nunavut Income Tax for school teachers;0.21950
+NU3;Nunavut Income Tax for the masses;0.22200
+NU4;Nunavut Income Tax for the elderly;0.30900
+NU5;Nunavut Income Tax for blue collar workers;0.31150
+NU6;Nunavut Income Tax for doctors and lawyers;0.36950
+NU7;Nunavut Income Tax for the unemployed;0.37700
+NU8;Nunavut Income Tax for inherited wealth;0.42050
+NV1;New York Income Tax for children;0.00000
+NY1;New York Income Tax for the masses;0.04000
+NY2;New York Income Tax for blue collar workers;0.04710
+NY3;New York Income Tax for doctors and lawyers;0.05430
+NY4;New York Income Tax for school teachers;0.06140
+NY5;New York Income Tax for inherited wealth;0.06850
+OH1;Ohio Income Tax for blue collar workers;0.00690
+OH2;Ohio Income Tax for school teachers;0.01480
+OH3;Ohio Income Tax for the masses;0.02260
+OH4;Ohio Income Tax for the elderly;0.03050
+OH5;Ohio Income Tax for doctors and lawyers;0.03840
+OH6;Ohio Income Tax for the unemployed;0.03620
+OH7;Ohio Income Tax for everyone else;0.05410
+OH8;Ohio Income Tax for those driving SUVs;0.06190
+OH9;Ohio Income Tax for inherited wealth;0.06980
+OK1;Oklahoma Income Tax for children;0.00500
+OK2;Oklahoma Income Tax for school teachers;0.01390
+OK3;Oklahoma Income Tax for blue collar workers;0.02290
+OK4;Oklahoma Income Tax for the masses;0.03180
+OK5;Oklahoma Income Tax for doctors and lawyers;0.04070
+OK6;Oklahoma Income Tax for the elderly;0.04960
+OK7;Oklahoma Income Tax for the unemployed;0.05860
+OK8;Oklahoma Income Tax for inherited wealth;0.06750
+ON1;Ontario Income Tax for children;0.00000
+ON2;Ontario Income Tax for blue collar workers;0.16000
+ON3;Ontario Income Tax for doctors and lawyers;0.28320
+ON4;Ontario Income Tax for the masses;0.22160
+ON5;Ontario Income Tax for school teachers;0.28160
+ON6;Ontario Income Tax for the elderly;0.31220
+ON7;Ontario Income Tax for the unemployed;0.33060
+ON8;Ontario Income Tax for everyone else;0.38540
+ON9;Ontario Income Tax for those driving SUVs;0.39390
+ON10;Ontario Income Tax for inherited wealth;0.43410
+OR1;Oregon Income Tax for the masses;0.05000
+OR2;Oregon Income Tax for doctors and lawyers;0.07000
+OR3;Oregon Income Tax for inherited wealth;0.09000
+PA1;Pennsylvania Income Tax for the masses;0.02800
+PE1;Prince Edward Island Income Tax for children;0.00000
+PE2;Prince Edward Island Income Tax for teachers;0.16000
+PE3;Prince Edward Island Income Tax for workers;0.25800
+PE4;Prince Edward Island Income Tax for the masses;0.30800
+PE5;Prince Edward Island Income Tax for the elderly;0.25800
+PE6;Prince Edward Island Income Tax for doctors;0.35800
+PE7;Prince Edward Island Income Tax for the unemployed;0.37180
+PE8;Prince Edward Island Income Tax for everyone else;0.44370
+PE9;Prince Edward Island Income Tax for the wealthy;0.47370
+QC1;Quebec Income Tax for blue collar workers;0.17000
+QC2;Quebec Income Tax for the masses;0.21250
+QC3;Quebec Income Tax for inherited wealth;0.24500
+RI1;Rhode Island Income Tax for children;0.00000
+SC1;South Carolina Income Tax for blue collar workers;0.02500
+SC2;South Carolina Income Tax for school teachers;0.03400
+SC3;South Carolina Income Tax for doctors and lawyers;0.04300
+SC4;South Carolina Income Tax for the masses;0.05200
+SC5;South Carolina Income Tax for the elderly;0.06100
+SC6;South Carolina Income Tax for inherited wealth;0.07000
+SD1;South Dakota Income Tax for children;0.00000
+SK1;Saskatchewan Income Tax for children;0.00000
+SK2;Saskatchewan Income Tax for blue collar workers;0.16000
+SK3;Saskatchewan Income Tax for the masses;0.27500
+SK4;Saskatchewan Income Tax for school teachers;0.29500
+SK5;Saskatchewan Income Tax for the elderly;0.35500
+SK6;Saskatchewan Income Tax for doctors and lawyers;0.38000
+SK7;Saskatchewan Income Tax for the unemployed;0.42000
+SK8;Saskatchewan Income Tax for inherited wealth;0.45000
+TN1;Tennesse Income Tax for the masses;0.00000
+TX1;Texas Income Tax for the masses;0.00000
+UT1;Utah Income Tax for the masses;0.02300
+UT2;Utah Income Tax for school teachers;0.03240
+UT3;Utah Income Tax for the elderly;0.04180
+UT4;Utah Income Tax for blue collar workers;0.05120
+UT5;Utah Income Tax for doctors and lawyers;0.06060
+UT6;Utah Income Tax for inherited wealth;0.07000
+VA1;Virginia Income Tax for the masses;0.02000
+VA2;Virginia Income Tax for the elderly;0.03250
+VA3;Virginia Income Tax for blue collar workers;0.04500
+VA4;Virginia Income Tax for inherited wealth;0.05750
+VT1;Vermont Income Tax for school teachers;0.00000
+WA1;Washington Income Tax for doctors and lawyers;0.00000
+WI1;Wisconsin Income Tax for blue collar workers;0.04730
+WI2;Wisconsin Income Tax for the elderly;0.05400
+WI3;Wisconsin Income Tax for doctors and lawyers;0.06080
+WI4;Wisconsin Income Tax for inherited wealth;0.06750
+WV1;West Virginia Income Tax for school teachers;0.03000
+WV2;West Virginia Income Tax for the masses;0.03880
+WV3;West Virginia Income Tax for doctors and lawyers;0.04750
+WV4;West Virginia Income Tax for the elderly;0.05630
+WV5;West Virginia Income Tax for inherited wealth;0.06500
+WY1;Wyoming Income Tax for blue collar workers;0.00000
+YT1;Yukon Income Tax for the masses;0.00000
+YT2;Yukon Income Tax for school teachers;0.17470
+YT3;Yukon Income Tax for the elderly;0.23360
+YT4;Yukon Income Tax for the unemployed;0.26360
+YT5;Yukon Income Tax for blue collar workers;0.23360
+YT6;Yukon Income Tax for everyone else;0.32120
+YT7;Yukon Income Tax for those driving SUVs;0.37960
+YT8;Yukon Income Tax for doctors and lawyers;0.38550
+YT9;Yukon Income Tax for inherited wealth;0.43010

@@ -1,0 +1,2846 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<!-- <!DOCTYPE schema SYSTEM "structure/pdgfSchema.dtd">  BROKEN if used with "xmlns:xsi="-->
+
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<schema name="tpc-di" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xsi:noNamespaceSchemaLocation="structure/pdgfSchema.xsd">	
+	<!-- All data is derived from this starting seed. 
+	If this seed is the same, the generated data will the same on each computer/node/platform. 
+	Change this seed to generate a different data set.-->
+	<seed>1234567890</seed>
+
+	<rng name="PdgfDefaultRandom"/>
+
+	<property name="${SF}" type="double">5000</property>
+	<!--Note: if a table has a size of ${SF}=5000 (e.g. 5000 rows) and you decide to set the ${SF} to 10000, 
+	then the first 5000 lines will be the same as for ${SF}=5000. So by increasing the ${SF} you can expand the table
+	HOWEVER: some custom Generator plugins may decide to base their output on the value of the ${SF}. 
+	In this case the framework can not guarantee, that the first half of the sf10000 data will be the same.
+	-->
+
+	<property name="${NUMBER_OF_INCREMENTAL_BATCHES}" type="double">2</property>
+	<property name="${FIRST_BATCH_DATE_START}" type="datetime">2017-07-07 00:00:00</property>
+	<property name="${FIRST_BATCH_DATE_END}" type="datetime">2017-07-08 00:00:00</property>
+	<property name="${PERCENT_NULL}" type="double">0.05</property>	
+	<property name="${DoubleCalculationsRoundPlainValue}" type="double">1</property>	
+
+	<property name="${PermuationReferenceGenerator_ErrorCheckDisabled}" type="double">0</property>
+	<property name="${WATCH_HIST_VALIDATION}" type="double">0</property>
+	<property name="${DEBUG_SYMBOL_REFERENCES_TIMESTAMP_VALIDITY}" type="double">0</property>
+
+	<property name="${ONE_DAY_IN_MILLISECONDS}" type="double">86400000.0</property>
+	<property name="${ONE_QUARTER_IN_MILLISECONDS}" type="double">7889400000.0</property>
+	<property name="${ONE_YEAR_IN_MILLISECONDS}" type="double">4 * ${ONE_QUARTER_IN_MILLISECONDS}</property>
+
+	<property name="${DateBeginDate}" type="datetime">1950-01-01 00:00:00</property>
+	<property name="${DateEndDate}" type="datetime">2021-01-01 00:00:00</property>
+
+	<property name="${HRScaling}" type="double">5</property>
+	<property name="${HRBrokerScale}" type="double">0.3</property>
+
+	<property name="${CScaling}" type="double">0.005</property>
+	<property name="${CInsertPct}" type="double">0.7</property>	
+	<property name="${CInactPct}" type="double">0.1</property>
+	<property name="${CUpdatePct}" type="double">0.2</property>
+	<property name="${CFieldUpdatePct}" type="double">0.2</property>	
+	<property name="${CMultipleRecPerDayPct}" type="double">0.1</property>
+
+	<property name="${AScaling}" type="double">0.01</property>
+	<property name="${AInsertPct}" type="double">0.7</property>
+	<property name="${AInactPct}" type="double">0.1</property>
+	<property name="${AUpdatePct}" type="double">0.2</property>
+	<property name="${AFieldUpdatePct}" type="double">0.2</property>
+
+	<property name="${CMScaling}" type="double">5</property>  
+	<property name="${CMNewCustPct}" type="double">0.6</property>
+	<property name="${CMInactCustPct}" type="double">0.02</property>
+	<property name="${CMUpdateCustPct}" type="double">0.08</property>
+	<property name="${CMAddAcctPct}" type="double">0.2</property>
+	<property name="${CMCloseAcctPct}" type="double">0.02</property>
+	<property name="${CMUpdateAcctPct}" type="double">0.08</property>
+	<property name="${CMAcctPerCustomerMax}" type="double">3</property>
+	<property name="${CMMultipleRecPerDayPct}" type="double">0.01</property>
+	<property name="${CMExcPct}" type="double">0.02</property>
+	<property name="${CMAcctCTierErrPct}" type="double">0.001</property>
+	<property name="${CMAcctDOBErrPct}" type="double">0.001</property>
+	<property name="${CMFieldUpdatePct}" type="double">0.5</property>
+	<property name="${CMFinalRowCount}" type="longDown">${CMScaling} * ${SF}</property> 
+	<property name="${CMminHistoricalSize}" type="longDown">(1-${AInsertPct})*${AScaling} * ${SF}</property>
+	<property name="${CMRowsPerUpdate}" type="longUp">( 1 - ${CInsertPct} ) * ${CScaling} * ${SF} + ( ${AScaling} * ${SF} )</property>
+	<property name="${CMUpdateLastID}" type="longDown">( ${CMFinalRowCount} - ${CMminHistoricalSize} ) / ${CMRowsPerUpdate}</property>
+	<property name="${CMHistoricalSize}" type="longDown">${CMFinalRowCount} - (${CMRowsPerUpdate} * ${CMUpdateLastID})</property>
+	<property name="${CMBeginDate}" type="double">0; result = pdgf.util.StaticHelper.computeDate((long)${FIRST_BATCH_DATE_START}, java.util.Calendar.YEAR, -10)</property>
+	<property name="${CMEndDate}" type="double">${FIRST_BATCH_DATE_END}</property>
+	<property name="${C_minUpdateSize}" type="double"> ${CScaling} * ${SF}</property>
+	<property name="${C_updateFirstID}" type="double"> ${CMUpdateLastID} + 1</property>
+	<property name="${C_updateLastID}" type="double"> ${CMUpdateLastID} + ${NUMBER_OF_INCREMENTAL_BATCHES}</property>
+	<property name="${C_historicalSize}" type="double"> ${CMHistoricalSize}</property>
+
+	<property name="${PHistScaling}" type="double">5</property>
+	<property name="${PNewPct}" type="double">0.3</property>
+	<property name="${PUpdatedPct}" type="double">0.4</property>
+	<property name="${PDeletedPct}" type="double">1 - ${PNewPct} - ${PUpdatedPct}</property>
+	<property name="${PMatchPct}" type="double">0.25</property>
+	<property name="${PIncScaling}" type="double">${CScaling} / ${PMatchPct}</property>
+
+	<property name="${FWCMPScaling}" type="double">0.5</property>
+	<property name="${FWSECScaling}" type="double">0.8</property>
+	<property name="${FWBeginDate}" type="datetime">1967-01-01 00:00:00</property>
+	<property name="${FWEndDate}" type="datetime">${FIRST_BATCH_DATE_END}</property>
+	<property name="${FWSPRatingErrPct}" type="double">0.1</property>
+	<property name="${FWCIKPct}" type="double">0.5</property>
+	<property name="${FWQuarters}" type="longUp">(${FWEndDate} - ${FWBeginDate}) / ${ONE_QUARTER_IN_MILLISECONDS}</property>
+	<property name="${FWCMPsPerQuarter}" type="longDown">${FWCMPScaling} * ${SF} / ${FWQuarters}</property>
+	<property name="${FWSECsPerQuarter}" type="longDown">${FWSECScaling} * ${SF} / (${FWQuarters} - 1)</property>
+
+	<property name="${THistScaling}" type="double">130</property>
+	<property name="${TIncScaling}" type="double">1.3</property>
+	<property name="${TLBRatio}" type="double">0.2</property>
+	<property name="${TLSRatio}" type="double">0.3</property>
+	<property name="${TMBRatio}" type="double">0.2</property>
+	<property name="${TMSRatio}" type="double">0.3</property>
+	<property name="${TPNDGRatio}" type="double">0.2</property>
+	<property name="${TSMBDRatio}" type="double">0.3</property>
+	<property name="${TCMPLRatio}" type="double">0.2</property>
+	<property name="${TSETLRatio}" type="double">0.3</property>
+	<property name="${TLBCNCLRatio}" type="double">0.1</property>
+	<property name="${TCommInvalidRatio}" type="double">0.0001</property>
+	<property name="${TChargeInvalidRatio}" type="double">0.0001</property>
+	<property name="${TMaxSubmitTime}" type="double">7776000.0</property>
+	<property name="${TMaxCompleteTime}" type="double">300.0</property>
+	<property name="${TMaxCashedTime}" type="double">432000.0</property>
+	<property name="${THistBeginDate}" type="double">0; result = pdgf.util.StaticHelper.computeDate((long)${FIRST_BATCH_DATE_START}, java.util.Calendar.YEAR, -5)</property>
+	<property name="${THistEndDate}" type="double">${FIRST_BATCH_DATE_END}</property>
+	<property name="${FWQuartersBeforeT}" type="long">( (${THistBeginDate} - ${FWBeginDate}) / ${ONE_QUARTER_IN_MILLISECONDS} )</property>
+
+	<property name="${TLBPerc}" type="double">0.30</property>
+	<property name="${TLSPerc}" type="double">0.30</property>
+	<property name="${TMBPerc}" type="double">0.20</property>
+	<property name="${TMSPerc}" type="double">1 - ${TLBPerc} - ${TLSPerc} - ${TMBPerc}</property>
+	<property name="${TSUpdateCount}" type="long">(${THistEndDate} - ${THistBeginDate}) / ${ONE_DAY_IN_MILLISECONDS}</property>
+	<property name="${TSTradesPerDay}" type="longUp">(${THistScaling} * ${SF}) / ${TSUpdateCount}</property>
+
+	<property name="${DMBeginDate}" type="datetime">0; result = pdgf.util.StaticHelper.computeDate((long)${FIRST_BATCH_DATE_START}, java.util.Calendar.YEAR, -2) - ${ONE_DAY_IN_MILLISECONDS}</property>
+	<property name="${DMEndDate}" type="double">${FIRST_BATCH_DATE_END} - ${ONE_DAY_IN_MILLISECONDS}</property>
+	<property name="${FWQuartersBeforeDM}" type="long">(${DMBeginDate} - ${FWBeginDate}) / ${ONE_QUARTER_IN_MILLISECONDS}</property>
+	<property name="${DMUpdatesCountHist}" type="long">(${DMEndDate} - ${DMBeginDate}) / ${ONE_DAY_IN_MILLISECONDS}</property>
+	<property name="${DM_minUpdateSize}" type="double">1</property> 
+	<property name="${DM_updateFirstID}" type="double">0</property>
+	<property name="${DM_updateLastID}" type="double">${DMUpdatesCountHist} + ${NUMBER_OF_INCREMENTAL_BATCHES} - 1</property>
+	<property name="${DM_size}" type="double">${DMUpdatesCountHist} * ${FWSECScaling} * ${SF}</property>
+
+	<property name="${WHScalingH}" type="double">300.0</property>
+	<property name="${WHScalingI}" type="double">100.0</property> 
+	<property name="${WHHistBeginDate}" type="double">${THistBeginDate}</property>
+	<property name="${WHHistEndDate}" type="double">${FIRST_BATCH_DATE_END}</property>
+	<property name="${WHBeginDate}" type="double">${FIRST_BATCH_DATE_END}</property>
+	<property name="${WHEndDate}" type="double">${FIRST_BATCH_DATE_END} + ${ONE_DAY_IN_MILLISECONDS} * ${NUMBER_OF_INCREMENTAL_BATCHES}</property>
+	<property name="${WHActivePct}" type="double">0.8</property>
+	<property name="${WHHistUpdatesLastID}" type="longDown">${CMUpdateLastID}</property>
+	<property name="${WHSizeHist}" type="longDown">${WHScalingH} * ${SF}</property>
+	<property name="${WHRowsPerUpdate}" type="longUp">${WHSizeHist} / (${WHHistUpdatesLastID}+1)</property>
+
+	<property name="${FW_CMP_newPercentage}" type="double">97</property>
+	<property name="${FW_CMP_changePercentage}" type="double">1</property>
+	<property name="${FW_CMP_deletePercentage}" type="double">2</property>
+	<property name="${FW_CMP_minUpdateSize}" type="double">${FWCMPsPerQuarter}</property>
+	<property name="${FW_CMP_updateFirstID}" type="double">0</property>
+	<property name="${FW_CMP_updateLastID}" type="double">${FWQuarters} - 1</property>
+	<property name="${FW_CMP_histSize}" type="double">${FWCMPScaling} * ${SF} - ((${FWQuarters} - 1) * ${FWCMPsPerQuarter}) </property>
+
+	<property name="${FW_SEC_beginDate}" type="double">0; result = pdgf.util.StaticHelper.computeDate((long)${FWBeginDate}, java.util.Calendar.MONTH, 3)</property>
+	<property name="${FW_SEC_endDate}" type="double">${FWEndDate}</property>
+	<property name="${FW_SEC_minUpdateSize}" type="double">${FWSECsPerQuarter}</property>
+	<property name="${FW_SEC_updateFirstID}" type="double">0</property>
+	<property name="${FW_SEC_updateLastID}" type="double">${FWQuarters} - 1</property>
+	<property name="${FW_SEC_histSize}" type="double">${FWSECScaling} * ${SF} - ((${FWQuarters} - 2) * ${FWSECsPerQuarter})</property>
+
+	<property name="${FW_FIN_beginDate}" type="double">0; result = pdgf.util.StaticHelper.computeDate((long)${FWBeginDate}, java.util.Calendar.MONTH, 3)</property>
+	<property name="${FW_FIN_endDate}" type="double">${FWEndDate}</property>
+	<property name="${FW_FIN_newPercentage}" type="double">100</property>
+	<property name="${FW_FIN_changePercentage}" type="double">0</property>
+	<property name="${FW_FIN_deletePercentage}" type="double">0</property>
+	<property name="${FW_FIN_minUpdateSize}" type="double">1</property>
+	<property name="${FW_FIN_updateFirstID}" type="double">0</property>
+	<property name="${FW_FIN_updateLastID}" type="double">${FWQuarters} - 1</property>
+	<property name="${FW_FIN_histSize}" type="double">1</property>
+
+	<property name="${TS_newPercentage}" type="double">(${TLBPerc} + ${TMBPerc}) * 100 </property>
+	<property name="${TS_changePercentage}" type="double">0</property>
+	<property name="${TS_deletePercentage}" type="double">(${TLSPerc} + ${TMSPerc}) * 100</property>
+	<property name="${TS_minUpdateSize}" type="double">${TSTradesPerDay}</property>
+	<property name="${TS_updateFirstID}" type="double">0</property>
+	<property name="${TS_updateLastID}" type="double">${TSUpdateCount} - 1 + ${NUMBER_OF_INCREMENTAL_BATCHES}</property>
+	<property name="${TS_histSize}" type="double">${TSTradesPerDay} </property>
+
+	<table name="StatusType">
+		<size>6.0</size>
+
+		<field name="st_id" size="4" type="VARCHAR" >
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/status_id.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="st_name" size="10" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/status_name.dict</file>
+			</gen_DictList>
+		</field>
+	</table>
+
+	<table name="TaxRate">
+		<size>320.0</size>
+
+		<field name="tx_id" size="4" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/taxrate_id.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="tx_name" size="50" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/taxrate_name.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="tx_rate" size="5" type="NUMERIC">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/taxrate_rate.dict</file>
+			</gen_DictList>
+		</field>
+	</table>
+
+	<table name="Date">
+		<size>(${DateEndDate} - ${DateBeginDate}) / ${ONE_DAY_IN_MILLISECONDS}</size>
+
+		<field name="SK_DateID" size="8" type="NUMERIC">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<useFixedStepSize>true</useFixedStepSize>
+				<startDate>${DateBeginDate}</startDate>
+				<endDate>${DateEndDate}</endDate>
+				<outputFormat>yyyyMMdd</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+		<field name="DateValue" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy-MM-dd</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="DateDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>MMMM d, yyyy</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarYearID" size="4" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarYearDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarQtrID" size="5" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy'QUARTER_OF_YEAR'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarQtrDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy 'QQUARTER_OF_YEAR'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarMonthID" size="6" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyyM</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarMonthDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy MMMM</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarWeekID" size="6" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyyw</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="CalendarWeekDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy'-W'w</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="DayOfWeekNum" size="1" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>'DAY_OF_WEEK_NUM'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="DayOfWeekDesc" size="10" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>EEEE</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="FiscalYearID" size="4" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy</outputFormat>
+				<isFiscal>true</isFiscal>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="FiscalYearDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy</outputFormat>
+				<isFiscal>true</isFiscal>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="FiscalQtrID" size="5" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy'QUARTER_OF_YEAR'</outputFormat>
+				<isFiscal>true</isFiscal>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="FiscalQtrDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>yyyy 'QQUARTER_OF_YEAR'</outputFormat>
+				<isFiscal>true</isFiscal>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="HolidayFlag" size="" type="BOOLEAN">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_DateID" />
+				<outputFormat>'IS_HOLIDAY'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+	</table>
+
+	<table name="Time">
+		<size>${ONE_DAY_IN_MILLISECONDS} / 1000.0</size>
+
+		<field name="SK_TimeID" size="8" type="NUMERIC">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<useFixedStepSize>true</useFixedStepSize>
+				<startDate>${FIRST_BATCH_DATE_START}</startDate>
+				<endDate>${FIRST_BATCH_DATE_END}</endDate>
+				<outputFormat>HHmmss</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+		<field name="TimeValue" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>HH:mm:ss</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="HourID" size="2" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>HH</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="HourDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>HH</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="MinuteID" size="2" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>mm</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="MinuteDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>HH:mm</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="SecondID" size="2" type="NUMERIC">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>ss</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="SecondDesc" size="20" type="VARCHAR">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>HH:mm:ss</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="MarketHoursFlag" size="" type="BOOLEAN">
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>'IS_MARKET_HOUR'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="OfficeHoursFlag" size="" type="BOOLEAN" >
+			<gen_DetailFromDateGenerator>
+				<reference field="SK_TimeID" />
+				<outputFormat>'IS_OFFICE_HOUR'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+	</table>
+
+	<table name="BatchDate" type="update">
+		<newPercentage>100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>0</deletePercentage>
+		<minUpdateSize>1</minUpdateSize>
+		<updateLastID>${NUMBER_OF_INCREMENTAL_BATCHES}</updateLastID>
+		<size>1.0</size>
+
+		<field name="batchdate" size="" type="DATE" updatePercentage="100">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<useFixedStepSize>true</useFixedStepSize>
+				<!-- <historicalStartDate>${FIRST_BATCH_DATE_START}</historicalStartDate>
+				<historicalEndDate>${FIRST_BATCH_DATE_END}</historicalEndDate> -->
+				<startDate>${FIRST_BATCH_DATE_START}</startDate>
+				<endDate>${FIRST_BATCH_DATE_END} + ${NUMBER_OF_INCREMENTAL_BATCHES} * ${ONE_DAY_IN_MILLISECONDS}</endDate>
+				<outputFormat>yyyy-MM-dd</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+	</table>
+
+	<table name="HR">
+		<size>${HRScaling} * ${SF}</size>
+
+		<field name="employeeid" size="" type="NUMERIC" primary="true" unique="true">
+			<gen_IdGenerator>
+			</gen_IdGenerator>
+		</field>
+		<field name="managerid" size="" type="NUMERIC">
+			<gen_LongGenerator>
+				<min>1.0</min>
+				<max>${HRScaling} * 0.1 * ${SF}</max>
+			</gen_LongGenerator>
+		</field>
+		<field name="employeefirstname" size="30" type="VARCHAR">
+			<gen_DictList>
+				<file>dicts/Family-Names.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="employeelastname" size="30" type="VARCHAR">
+			<gen_DictList>
+				<file>dicts/Given-Names.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="employeemi" size="1" type="VARCHAR">
+			<gen_NullGenerator>
+				<probability>0.25</probability>
+				<gen_RandomAString>
+					<max>1</max>
+					<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZ</characters>
+					<disableRng>true</disableRng>
+				</gen_RandomAString>
+			</gen_NullGenerator>
+		</field>
+		<field name="employeejobcode" size="3" type="NUMERIC">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_tpc.di.generators.HRJobIdGenerator id="HRJobIdGenerator">
+				</gen_tpc.di.generators.HRJobIdGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="employeebranch" size="30" type="VARCHAR">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_RandomAString>
+					<max>30.0</max>
+					<min>20.0</min>
+					<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz </characters>
+				</gen_RandomAString>
+			</gen_NullGenerator>
+		</field>
+		<field name="employeeoffice" size="30" type="VARCHAR">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_PrePostfixGenerator>
+					<prefix>OFFICE</prefix>
+					<gen_LongGenerator>
+						<min>1000.0</min>
+						<max>9999.0</max>
+					</gen_LongGenerator>
+				</gen_PrePostfixGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="employeephone" size="30" type="VARCHAR">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_SimpleFormatNumberGenerator>
+					<gen_LongGenerator>
+						<min>10010001.0</min>
+						<max>9999999999.0</max>
+					</gen_LongGenerator>
+					<format>(%d%d%d) %d%d%d-%d%d%d%d</format>
+				</gen_SimpleFormatNumberGenerator>
+			</gen_NullGenerator>
+		</field>
+	</table>
+
+	<table name="CustomerMgmt" type="compositeUpdate">
+		<newPercentage>100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>0</deletePercentage>
+
+		<minUpdateSize>${CMRowsPerUpdate}</minUpdateSize>
+
+		<updateFirstID>0</updateFirstID>
+		<updateLastID>${CMUpdateLastID}</updateLastID>
+
+		<size>${CMHistoricalSize}</size>
+
+		<subTable name="Customer"/>
+		<subTable name="Account"/>
+		<subTable name="CustomerMgmtHelper"/>
+	</table>
+	
+	<table name="CustomerMgmtHelper" type="update">
+		<newPercentage>100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>0</deletePercentage>
+		<minUpdateSize>${CMRowsPerUpdate}</minUpdateSize>
+
+		<updateFirstID>0</updateFirstID>
+		<updateLastID>${CMUpdateLastID}</updateLastID>
+		<size>${CMHistoricalSize}</size>
+
+		<field name="ActionType" size="9" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator/>
+		</field>
+		<field name="ActionTS" size="25" type="VARCHAR" updatePercentage="100">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<startDate>${CMBeginDate}</startDate>
+				<endDate>${CMEndDate}</endDate>
+				<outputFormat>yyyy-MM-dd'T'HH:mm:ss</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+	</table>
+
+	<table name="Customer" type="update">
+		<newPercentage>${CInsertPct} * 100</newPercentage>
+		<changePercentage>${CUpdatePct} * 100</changePercentage>
+		<deletePercentage>${CInactPct} * 100</deletePercentage>
+		<minUpdateSize>${C_minUpdateSize}</minUpdateSize>
+		<updateFirstID>${C_updateFirstID}</updateFirstID>
+		<updateLastID>${C_updateLastID}</updateLastID>
+		<size>${C_historicalSize}</size>
+
+		<field name="cdc_flag" size="" type="VARCHAR">
+			<gen_UpdateActionTypeGenerator>
+				<newName>I</newName>
+				<changeName>U</changeName>
+				<deleteName>U</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+		<field name="cdc_dsn" size="" type="NUMERIC" primary="true" unique="true" updatePercentage="100">
+			<gen_CDCSequenceGenerator>
+				<substractHistoricalSize>false</substractHistoricalSize>
+			</gen_CDCSequenceGenerator>
+		</field>
+		<field name="c_id" size="" type="NUMERIC" updatePercentage="100">
+			<gen_IdGenerator>
+			</gen_IdGenerator>
+		</field>
+		<field name="c_tax_id" size="20" type="VARCHAR" updatePercentage="0">
+			<gen_SimpleFormatNumberGenerator>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>999999999.0</max>
+				</gen_LongGenerator>
+				<format>%d%d%d-%d%d-%d%d%d%d</format>
+			</gen_SimpleFormatNumberGenerator>
+		</field>
+		<field name="c_st_id" size="4" type="VARCHAR" updatePercentage="100">
+			<gen_UpdateActionTypeGenerator>
+				<newName>ACTV</newName>
+				<changeName>ACTV</changeName>
+				<deleteName>INAC</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+		<field name="c_l_name" size="25" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/Family-Names.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_f_name" size="20" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/Given-Names.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_m_name" size="1" type="VARCHAR" updatePercentage="0">
+			<gen_NullGenerator>
+				<probability>0.25</probability>
+				<gen_RandomAString>
+					<max>1.0</max>
+					<disableRng>true</disableRng>
+					<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZ</characters>
+				</gen_RandomAString>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_gndr" size="1" type="VARCHAR" updatePercentage="0">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_ProbabilityGenerator>
+					<probability value="0.98">
+						<gen_RandomAString>
+							<max>1.0</max>
+							<characters>mMfF</characters>
+						</gen_RandomAString>
+					</probability>
+					<probability value="0.02">
+						<gen_RandomAString>
+							<max>1.0</max>
+							<characters>ABCDEGHIJKLNOPQRSTUVWXYZabcdeghijklnopqrstuvwxyz</characters>
+						</gen_RandomAString>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_NullGenerator>	
+		</field>
+		<field name="c_tier" size="" type="NUMERIC" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_ProbabilityGenerator>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>0</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.1 - 2 * ${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>1</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.3 - 2 * ${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>2</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.6 - 3 * ${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>3</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>4</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>5</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>6</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>7</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>8</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="${CMAcctCTierErrPct} / 7">
+						<gen_StaticValueGenerator>
+							<value>9</value>
+						</gen_StaticValueGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_dob" size="" type="DATE" updatePercentage="0">
+			<gen_tpc.di.generators.BirthdayGenerator>
+				<reference table="BatchDate" field="batchdate" />
+				<format>yyyy-MM-dd</format>
+			</gen_tpc.di.generators.BirthdayGenerator>
+		</field>
+		<field name="c_adline1" size="80" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_DictList>
+				<file>dicts/tpc-e/address_line1.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_adline2" size="80" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator>
+				<probability>0.9</probability>
+				<gen_DictList>
+					<file>dicts/tpc-e/address_line2.dict</file>
+				</gen_DictList>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_zipcode" size="12" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_DictList>
+				<file>dicts/tpc-e/zip_code_code.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_city" size="25" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_DictList>
+				<file>dicts/tpc-e/cities.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_state_prov" size="80" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_DictList>
+				<file>dicts/tpc-e/provinces.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_ctry" size="80" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_SwitchGenerator>
+				<gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator/>
+				<case value="NEW">
+					<gen_ProbabilityGenerator>
+						<probability value="0.8">
+							<gen_StaticValueGenerator>
+								<value>United States of America</value>
+							</gen_StaticValueGenerator>
+						</probability>
+						<probability value="0.2">
+							<gen_StaticValueGenerator>
+								<value>Canada</value>
+							</gen_StaticValueGenerator>
+						</probability>
+					</gen_ProbabilityGenerator>
+				</case>
+				<default>
+					<gen_NullGenerator>
+						<probability>${PERCENT_NULL}</probability>
+						<gen_ProbabilityGenerator>
+							<probability value="0.8">
+								<gen_StaticValueGenerator>
+									<value>United States of America</value>
+								</gen_StaticValueGenerator>
+							</probability>
+							<probability value="0.2">
+								<gen_StaticValueGenerator>
+									<value>Canada</value>
+								</gen_StaticValueGenerator>
+							</probability>
+						</gen_ProbabilityGenerator>
+					</gen_NullGenerator>
+				</default>
+			</gen_SwitchGenerator>		
+		</field>
+		<field name="c_ctry_1"  size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_1" />
+				<sameChoiceAsByID>Phone1Chooser</sameChoiceAsByID>
+				<probability>0.02</probability>
+				<gen_NullGenerator>
+					<reference field="c_area_1" />
+					<sameChoiceAsByID>Area1Chooser</sameChoiceAsByID>
+					<probability>0.5</probability>
+					<gen_NullGenerator>
+						<probability>0.5</probability>
+						<gen_StaticValueGenerator>
+							<value>1</value>
+						</gen_StaticValueGenerator>
+					</gen_NullGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_area_1" size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_1" />
+				<sameChoiceAsByID>Phone1Chooser</sameChoiceAsByID>
+				<probability>0.02</probability>
+				<gen_NullGenerator id="Area1Chooser">
+					<probability>0.5</probability>
+					<gen_LongGenerator>
+						<min>201.0</min>
+						<max>999.0</max>
+					</gen_LongGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_local_1" size="10" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator id="Phone1Chooser">
+				<probability>0.02</probability>
+				<gen_SimpleFormatNumberGenerator>
+					<gen_LongGenerator>
+						<min>10001.0</min>
+						<max>9999999.0</max>
+					</gen_LongGenerator>
+					<format>%d%d%d-%d%d%d%d</format>
+				</gen_SimpleFormatNumberGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_ext_1" size="5" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<reference field="c_local_1" />
+				<sameChoiceAsByID>Phone1Chooser</sameChoiceAsByID>
+				<probability>0.02</probability>
+				<gen_NullGenerator>
+					<probability>0.9</probability>
+					<gen_SimpleFormatNumberGenerator>
+						<gen_LongGenerator>
+							<min>1.0</min>
+							<max>99999.0</max>
+						</gen_LongGenerator>
+						<format>%d%d%d%d%d</format>
+					</gen_SimpleFormatNumberGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_ctry_2" size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_2" />
+				<sameChoiceAsByID>Phone2Chooser</sameChoiceAsByID>
+				<probability>0.25</probability>
+				<gen_NullGenerator>
+					<reference field="c_area_2" />
+					<sameChoiceAsByID>Area2Chooser</sameChoiceAsByID>
+					<probability>0.5</probability>
+					<gen_NullGenerator>
+						<probability>0.5</probability>
+						<gen_StaticValueGenerator>
+							<value>1</value>
+						</gen_StaticValueGenerator>
+					</gen_NullGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_area_2" size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_2" />
+				<sameChoiceAsByID>Phone2Chooser</sameChoiceAsByID>
+				<probability>0.25</probability>
+				<gen_NullGenerator id="Area2Chooser">
+					<probability>0.5</probability>
+					<gen_LongGenerator>
+						<min>201.0</min>
+						<max>999.0</max>
+					</gen_LongGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_local_2" size="10" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator id="Phone2Chooser">
+				<probability>0.25</probability>
+				<gen_SimpleFormatNumberGenerator>
+					<gen_LongGenerator>
+						<min>10001.0</min>
+						<max>9999999.0</max>
+					</gen_LongGenerator>
+					<format>%d%d%d-%d%d%d%d</format>
+				</gen_SimpleFormatNumberGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_ext_2" size="5" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<reference field="c_local_2" />
+				<sameChoiceAsByID>Phone2Chooser</sameChoiceAsByID>
+				<probability>0.25</probability>
+				<gen_NullGenerator>
+					<probability>0.9</probability>
+					<gen_SimpleFormatNumberGenerator>
+						<gen_LongGenerator>
+							<min>1.0</min>
+							<max>99999.0</max>
+						</gen_LongGenerator>
+						<format>%d%d%d%d%d</format>
+					</gen_SimpleFormatNumberGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_ctry_3" size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_3" />
+				<sameChoiceAsByID>Phone3Chooser</sameChoiceAsByID>
+				<probability>0.7</probability>
+				<gen_NullGenerator>
+					<reference field="c_area_3" />
+					<sameChoiceAsByID>Area3Chooser</sameChoiceAsByID>
+					<probability>0.5</probability>
+					<gen_NullGenerator>
+						<probability>0.5</probability>
+						<gen_StaticValueGenerator>
+							<value>1</value>
+						</gen_StaticValueGenerator>
+					</gen_NullGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_area_3" size="3" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 0.5 * 100">
+			<gen_NullGenerator>
+				<reference field="c_local_3" />
+				<sameChoiceAsByID>Phone3Chooser</sameChoiceAsByID>
+				<probability>0.7</probability>
+				<gen_NullGenerator id="Area3Chooser">
+					<probability>0.5</probability>
+					<gen_LongGenerator>
+						<min>201.0</min>
+						<max>999.0</max>
+					</gen_LongGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_local_3" size="10" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator id="Phone3Chooser">
+				<probability>0.7</probability>
+				<gen_SimpleFormatNumberGenerator>
+					<gen_LongGenerator>
+						<min>10001.0</min>
+						<max>9999999.0</max>
+					</gen_LongGenerator>
+					<format>%d%d%d-%d%d%d%d</format>
+				</gen_SimpleFormatNumberGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_ext_3" size="5" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<reference field="c_local_3" />
+				<sameChoiceAsByID>Phone3Chooser</sameChoiceAsByID>
+				<probability>0.7</probability>
+				<gen_NullGenerator>
+					<probability>0.9</probability>
+					<gen_SimpleFormatNumberGenerator>
+						<gen_LongGenerator>
+							<min>1.0</min>
+							<max>99999.0</max>
+						</gen_LongGenerator>
+						<format>%d%d%d%d%d</format>
+					</gen_SimpleFormatNumberGenerator>
+				</gen_NullGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_email_1" size="50" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_tpc.di.generators.CustomerEmailGenerator>
+				<file>dicts/tpc-e/mail_provider.dict</file>
+				<reference id="c_l_name" field="c_l_name"/>
+				<reference id="c_f_name" field="c_f_name"/>
+				<reference id="c_m_name" field="c_m_name"/>
+			</gen_tpc.di.generators.CustomerEmailGenerator>
+		</field>
+		<field name="c_email_2" size="50" type="VARCHAR" updatePercentage="${CFieldUpdatePct} * 100">
+			<gen_NullGenerator>
+				<probability>0.5</probability>
+				<gen_tpc.di.generators.CustomerEmailGenerator>
+					<file>dicts/tpc-e/mail_provider.dict</file>
+					<reference id="c_l_name" field="c_l_name"/>
+					<reference id="c_f_name" field="c_f_name"/>
+					<reference id="c_m_name" field="c_m_name"/>
+				</gen_tpc.di.generators.CustomerEmailGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="c_lcl_tx_id" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/taxrate_id.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="c_nat_tx_id" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/taxrate_id.dict</file>
+			</gen_DictList>	
+		</field>
+	</table>
+
+	<table name="Account" type="update">
+		<updateBlackBox name="tpc.di.CustomerAccountBlackBox"/>
+
+		<newPercentage>${AInsertPct} * 100</newPercentage>
+		<changePercentage>${AUpdatePct} * 100</changePercentage>
+		<deletePercentage>${AInactPct} * 100</deletePercentage>
+
+		<minUpdateSize>${AScaling} * ${SF}</minUpdateSize>
+		<updateFirstID>${CMUpdateLastID} + 1</updateFirstID>
+		<updateLastID>${CMUpdateLastID} + ${NUMBER_OF_INCREMENTAL_BATCHES}</updateLastID>
+
+		<size>${CMHistoricalSize}</size>
+
+		<field name="cdc_flag" size="" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator>
+				<newCustomer>I</newCustomer>
+				<changeCustomer>U</changeCustomer>
+				<deleteCustomer>U</deleteCustomer>
+				<newAccount>I</newAccount>
+				<deletAccount>U</deletAccount>
+				<changeAccount>U</changeAccount>
+			</gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator>
+		</field>
+		<field name="cdc_dsn" size="" type="NUMERIC" updatePercentage="100" primary="true" unique="true">
+			<gen_CDCSequenceGenerator/>
+		</field>
+		<field name="ca_id" size="" type="NUMERIC" updatePercentage="100">
+			<gen_IdGenerator/>
+		</field>
+		<field name="ca_b_id" size="" type="NUMERIC" updatePercentage="${AFieldUpdatePct} * 100">
+			<gen_tpc.di.generators.RandomBrokerGenerator>
+				<reference table="HR" field="employeejobcode" />
+			</gen_tpc.di.generators.RandomBrokerGenerator>
+		</field>
+		<field name="ca_c_id" size="" type="NUMERIC" updatePercentage="0">
+			<gen_tpc.di.generators.CustomerIdGenerator/>
+		</field>
+		<field name="ca_name" size="50" type="VARCHAR" updatePercentage="${AFieldUpdatePct} * 100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_RandomAString>
+					<max>50.0</max>
+					<min>30.0</min>
+					<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz </characters>
+				</gen_RandomAString>
+			</gen_NullGenerator>
+		</field>
+		<field name="ca_tax_st" size="" type="NUMERIC" updatePercentage="${AFieldUpdatePct} * 100">
+			<gen_ProbabilityGenerator>
+				<probability value="0.1">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.7">
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.2">
+					<gen_StaticValueGenerator>
+						<value>2</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="ca_st_id" size="4" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator>
+				<newCustomer>ACTV</newCustomer>
+				<changeCustomer>ACTV</changeCustomer>
+				<deleteCustomer>INAC</deleteCustomer>
+				<newAccount>ACTV</newAccount>
+				<deletAccount>INAC</deletAccount>
+				<changeAccount>ACTV</changeAccount>
+			</gen_tpc.di.generators.CustMgmtUpdateActionTypeGenerator>
+		</field>		
+	</table>
+
+	<table name="Prospect" type="update">
+		<newPercentage>${PNewPct} * 100 - 100/(${PIncScaling} * ${SF})  </newPercentage>
+		<changePercentage>${PUpdatedPct} * 100</changePercentage>
+		<deletePercentage>${PDeletedPct} * 100 + 100/(${PIncScaling} * ${SF})</deletePercentage>
+		<minUpdateSize>${PIncScaling} * ${SF}</minUpdateSize>
+		<updateLastID>${NUMBER_OF_INCREMENTAL_BATCHES}</updateLastID>
+		<size>${PHistScaling} * ${SF}</size>
+
+		<field name="agencyid" size="30" type="VARCHAR" updatePercentage="0">
+			<gen_tpc.di.generators.ProspectAgencyIDGenerator>
+				<reference field="lastname" />
+			</gen_tpc.di.generators.ProspectAgencyIDGenerator>
+		</field>
+		<field name="lastname" size="30" type="VARCHAR" updatePercentage="0">
+			<gen_SequentialGenerator>
+				<gen_tpc.di.generators.ProspectReferenceGenerator choose="globalUnique" from="sameTimeFrame" updateIDOffset="${CMUpdateLastID}" id="Prospect_CustomerReferenceSource">
+					<reference table="Customer" field="c_l_name" />
+					<gen_RandomAString>
+						<max>30.0</max>
+						<min>5.0</min>
+						<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+					</gen_RandomAString>
+				</gen_tpc.di.generators.ProspectReferenceGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.5">
+						<gen_UpperLowerCaseGenerator>
+							<mode>first_uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>lowercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_SequentialGenerator>
+		</field>
+		<field name="firstname" size="30" type="VARCHAR" updatePercentage="0">
+			<gen_SequentialGenerator>
+				<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+					<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+					<reference table="Customer" field="c_f_name" />
+					<gen_RandomAString>
+						<max>30.0</max>
+						<min>5.0</min>
+						<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+					</gen_RandomAString>
+				</gen_ReferenceGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.5">
+						<gen_UpperLowerCaseGenerator>
+							<mode>first_uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>lowercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_SequentialGenerator>
+		</field>
+		<field name="middleinitial" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+				<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+				<reference table="Customer" field="c_m_name" />
+				<gen_NullGenerator>
+					<probability>${PERCENT_NULL}</probability>
+					<gen_RandomAString>
+						<max>1.0</max>
+						<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+					</gen_RandomAString>
+				</gen_NullGenerator>
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="gender" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+				<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+				<reference table="Customer" field="c_gndr" />
+				<gen_NullGenerator>
+					<probability>${PERCENT_NULL}</probability>
+					<gen_ProbabilityGenerator>
+						<probability value="0.98">
+							<gen_RandomAString>
+								<max>1.0</max>
+								<characters>mMfF</characters>
+							</gen_RandomAString>
+						</probability>
+						<probability value="0.02">
+							<gen_RandomAString>
+								<max>1.0</max>
+								<characters>ABCDEGHIJKLNOPQRSTUVWXYZabcdeghijklnopqrstuvwxyz </characters>
+							</gen_RandomAString>
+						</probability>
+					</gen_ProbabilityGenerator>
+				</gen_NullGenerator>
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="addressline1" size="80" type="VARCHAR" updatePercentage="0">
+			<gen_SequentialGenerator>
+				<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+					<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+					<reference table="Customer" field="c_adline1" />
+					<gen_NullGenerator>
+						<probability>${PERCENT_NULL}</probability>
+						<gen_RandomAString>
+							<max>80.0</max>
+							<min>5.0</min>
+							<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+						</gen_RandomAString>
+					</gen_NullGenerator>
+				</gen_ReferenceGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.5">
+						<gen_UpperLowerCaseGenerator>
+							<mode>first_uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>lowercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_SequentialGenerator>
+		</field>
+		<field name="addressline2" size="80" type="VARCHAR" updatePercentage="0">
+			<gen_SequentialGenerator>
+				<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+					<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+					<reference table="Customer" field="c_adline2" />
+					<gen_NullGenerator>
+						<probability>${PERCENT_NULL}</probability>
+						<gen_RandomAString>
+							<max>80.0</max>
+							<min>5.0</min>
+							<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+						</gen_RandomAString>
+					</gen_NullGenerator>
+				</gen_ReferenceGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.5">
+						<gen_UpperLowerCaseGenerator>
+							<mode>first_uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>lowercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_SequentialGenerator>
+		</field>
+		<field name="postalcode" size="12" type="VARCHAR" updatePercentage="0">
+			<gen_SequentialGenerator>
+				<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+					<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+					<reference table="Customer" field="c_zipcode" />
+					<gen_NullGenerator>
+						<probability>${PERCENT_NULL}</probability>
+						<gen_RandomAString>
+							<max>12.0</max>
+							<min>5.0</min>
+							<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+						</gen_RandomAString>
+					</gen_NullGenerator>
+				</gen_ReferenceGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.5">
+						<gen_UpperLowerCaseGenerator>
+							<mode>first_uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>uppercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+					<probability value="0.25">
+						<gen_UpperLowerCaseGenerator>
+							<mode>lowercase</mode>
+						</gen_UpperLowerCaseGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_SequentialGenerator>
+		</field>
+		<field name="city" size="25" type="VARCHAR" updatePercentage="100">
+			<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+				<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+				<reference table="Customer" field="c_city" />
+				<gen_ReferenceGenerator choose="random" from="sameTimeFrame" updateIDOffset="${CMUpdateLastID}" id="Prospect_cityReferenceSource" >
+					<reference table="Customer" field="c_city" />
+				</gen_ReferenceGenerator>
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="state" size="80" type="VARCHAR" updatePercentage="100">
+			<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+				<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+				<reference table="Customer" field="c_state_prov" />
+				<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+					<sameChoiceAs field="city" generatorByID="Prospect_cityReferenceSource"/>
+					<reference table="Customer" field="c_state_prov" />
+				</gen_ReferenceGenerator>
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="country" size="80" type="VARCHAR" updatePercentage="100">
+			<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+				<sameChoiceAs field="lastname" generatorByID="Prospect_CustomerReferenceSource"/>
+				<reference table="Customer" field="c_ctry" />
+				<gen_NullGenerator>
+					<probability>${PERCENT_NULL}</probability>
+					<gen_ReferenceGenerator choose="sameChoiceAs" from="">
+						<sameChoiceAs field="city" generatorByID="Prospect_cityReferenceSource"/>
+						<reference table="Customer" field="c_ctry" />
+					</gen_ReferenceGenerator>
+				</gen_NullGenerator>
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="phone" size="30" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_SimpleFormatNumberGenerator>
+					<gen_LongGenerator>
+						<min>10010010001.0</min>
+						<max>19999999999.0</max>
+					</gen_LongGenerator>
+					<format>%d-%d%d%d-%d%d%d-%d%d%d%d</format>
+				</gen_SimpleFormatNumberGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="income" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>500000.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="numbercars" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>5.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="numberchildren" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>5.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="maritalstatus" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_ProbabilityGenerator>
+					<probability value="0.2">
+						<gen_StaticValueGenerator>
+							<value>S</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.4">
+						<gen_StaticValueGenerator>
+							<value>M</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.1">
+						<gen_StaticValueGenerator>
+							<value>D</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.1">
+						<gen_StaticValueGenerator>
+							<value>W</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.2">
+						<gen_StaticValueGenerator>
+							<value>U</value>
+						</gen_StaticValueGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="age" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>100.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="creditrating" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>300.0</min>
+					<max>850.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="ownorrentflag" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_ProbabilityGenerator>
+					<probability value="0.7">
+						<gen_StaticValueGenerator>
+							<value>O</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.2">
+						<gen_StaticValueGenerator>
+							<value>R</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.1">
+						<gen_StaticValueGenerator>
+							<value>U</value>
+						</gen_StaticValueGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="employer" size="30" type="VARCHAR" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_DictList>
+					<file>dicts/tpc-e/employers.dict</file>
+				</gen_DictList>
+			</gen_NullGenerator>
+		</field>
+		<field name="numbercreditcards" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>0.0</min>
+					<max>10.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="Networth" size="" type="NUMERIC" updatePercentage="100">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_LongGenerator>
+					<min>10000.0</min>
+					<max>4000000.0</max>
+				</gen_LongGenerator>
+			</gen_NullGenerator>
+		</field>
+	</table>
+
+	<table name="Industry">
+		<size>102.0</size>
+
+		<field name="in_id" size="2" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/industry_id.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="in_name" size="50" type="VARCHAR">
+			<gen_DictList>
+				<file>dicts/tpc-e/industry_name.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="in_sc_id" size="4" type="VARCHAR">
+			<gen_DictList>
+				<file>dicts/tpc-e/industry_sc_id.dict</file>
+			</gen_DictList>
+		</field>
+	</table>
+
+	<table name="FINWIRE-cmp" type="update">
+		<newPercentage>${FW_CMP_newPercentage}</newPercentage>
+		<changePercentage>${FW_CMP_changePercentage}</changePercentage>
+		<deletePercentage>${FW_CMP_deletePercentage}</deletePercentage>
+		<minUpdateSize>${FW_CMP_minUpdateSize}</minUpdateSize>
+		<updateFirstID>${FW_CMP_updateFirstID}</updateFirstID>
+		<updateLastID>${FW_CMP_updateLastID}</updateLastID>
+		<size>${FW_CMP_histSize}</size>
+
+		<field name="PTS" size="15" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.FinwirePTSGenerator>
+				<startDate>${FWBeginDate}</startDate>
+				<endDate>${FWEndDate}</endDate>
+				<format>yyyyMMdd-HHmmss</format>
+			</gen_tpc.di.generators.FinwirePTSGenerator>
+		</field>
+		<field name="RecType" size="3" type="VARCHAR" updatePercentage="0">
+			<gen_StaticValueGenerator>
+				<value>CMP</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="CompanyName" size="60" type="VARCHAR" updatePercentage="0">
+			<gen_RandomAString>
+				<max>60.0</max>
+				<min>15.0</min>
+				<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+			</gen_RandomAString>
+		</field>
+		<field name="CIK" size="10" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_IdGenerator>
+				</gen_IdGenerator>
+				<character>0</character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Status" size="4" type="VARCHAR" updatePercentage="100">
+			<gen_UpdateActionTypeGenerator>
+				<newName>ACTV</newName>
+				<changeName>ACTV</changeName>
+				<deleteName>INAC</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+		<field name="IndustryID" size="2" type="VARCHAR" updatePercentage="2">
+			<gen_ReferenceGenerator choose="random" from="historical">
+				<reference table="Industry" field="in_id" />
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="SPrating" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_ProbabilityGenerator>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>AAA</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>AA</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>AA+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>AA-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>A</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>A+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>A-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BBB</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BBB+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BBB-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BB</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BB+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>BB-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>B</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>B+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>B-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>CCC</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>CCC+</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>CCC-</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>CC</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>C</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="(1 - ${FWSPRatingErrPct}) / 22">
+					<gen_StaticValueGenerator>
+						<value>D</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${FWSPRatingErrPct}">
+					<gen_RandomAString>
+						<max>4.0</max>
+						<min>1.0</min>
+						<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz</characters>
+					</gen_RandomAString>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="FoundingDate" size="8" type="VARCHAR" updatePercentage="0">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_tpc.di.generators.FoundingDateGenerator>
+					<startDate>1850-01-01 00:00:00</startDate>
+					<format>yyyyMMdd</format>
+				</gen_tpc.di.generators.FoundingDateGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="AddrLine1" size="80" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/address_line1.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="AddrLine2" size="80" type="VARCHAR" updatePercentage="0">
+			<gen_NullGenerator>
+				<probability>0.9</probability>
+				<gen_DictList>
+					<file>dicts/tpc-e/address_line2.dict</file>
+				</gen_DictList>
+			</gen_NullGenerator>
+		</field>
+		<field name="PostalCode" size="12" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/zip_code_code.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="City" size="25" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/cities.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="StateProvince" size="20" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/provinces.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="Country" size="24" type="VARCHAR" updatePercentage="0">
+			<gen_NullGenerator>
+				<probability>${PERCENT_NULL}</probability>
+				<gen_ProbabilityGenerator>
+					<probability value="0.8">
+						<gen_StaticValueGenerator>
+							<value>United States of America</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.2">
+						<gen_StaticValueGenerator>
+							<value>Canada</value>
+						</gen_StaticValueGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_NullGenerator>
+		</field>
+		<field name="CEOname" size="46" type="VARCHAR" updatePercentage="0">
+			<gen_DictList>
+				<file>dicts/tpc-e/last_names.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="Description" size="150" type="VARCHAR" updatePercentage="0">
+			<gen_RandomAString>
+				<max>150</max>
+				<min>10.0</min>
+				<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz </characters>
+			</gen_RandomAString>
+		</field>	
+	</table>
+
+	<table name="FINWIRE-sec" type="update">
+		<newPercentage>97</newPercentage>
+		<changePercentage>1</changePercentage>
+		<deletePercentage>2</deletePercentage>
+		<minUpdateSize>${FW_SEC_minUpdateSize}</minUpdateSize>
+		<updateFirstID>${FW_SEC_updateFirstID}</updateFirstID>
+		<updateLastID>${FW_SEC_updateLastID}</updateLastID>
+		<size>${FW_SEC_histSize}</size>
+
+		<field name="PTS" size="15" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.FinwirePTSGenerator>
+				<reference table="FINWIRE-cmp" field="PTS" />
+				<startDate>${FWBeginDate}</startDate>
+				<endDate>${FWEndDate}</endDate>
+				<format>yyyyMMdd-HHmmss</format>
+				<updateIDOffset>1</updateIDOffset>
+			</gen_tpc.di.generators.FinwirePTSGenerator>
+		</field>
+		<field name="RecType" size="3" type="VARCHAR" updatePercentage="100">
+			<gen_StaticValueGenerator>
+				<value>SEC</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="Symbol" size="15" type="VARCHAR" updatePercentage="0">
+			<gen_ConvertNumberToStringGenerator>
+				<gen_IdGenerator/>
+				<size>15.0</size>
+				<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZ</characters>
+			</gen_ConvertNumberToStringGenerator>
+		</field>
+		<field name="IssueType" size="6" type="VARCHAR" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<probability value="0.73">
+					<gen_StaticValueGenerator>
+						<value>COMMON</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.15">
+					<gen_StaticValueGenerator>
+						<value>PREF_A</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.07">
+					<gen_StaticValueGenerator>
+						<value>PREF_B</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.04">
+					<gen_StaticValueGenerator>
+						<value>PREF_C</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.01">
+					<gen_StaticValueGenerator>
+						<value>PREF_D</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="Status" size="4" type="VARCHAR" updatePercentage="100">
+			<gen_UpdateActionTypeGenerator>
+				<newName>ACTV</newName>
+				<changeName>ACTV</changeName>
+				<deleteName>INAC</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+		<field name="Name" size="70" type="VARCHAR" updatePercentage="100">
+			<gen_RandomAString>
+				<max>70.0</max>
+				<min>10.0</min>
+				<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz </characters>
+			</gen_RandomAString>
+		</field>
+		<field name="ExID" size="6" type="VARCHAR" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<probability value="0.25">
+					<gen_StaticValueGenerator>
+						<value>NYSE</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.25">
+					<gen_StaticValueGenerator>
+						<value>NASDAQ</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.25">
+					<gen_StaticValueGenerator>
+						<value>AMEX</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="0.25">
+					<gen_StaticValueGenerator>
+						<value>PCX</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="ShOut" size="13" type="VARCHAR" updatePercentage="100">
+			<gen_LongGenerator>
+				<min>100000.0</min>
+				<max>1000000000.0</max>
+			</gen_LongGenerator>
+		</field>
+		<field name="FirstTradeDate" size="8" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.FoundingDateGenerator>
+				<startDate>1850-01-01 00:00:00</startDate>
+				<format>yyyyMMdd</format>
+			</gen_tpc.di.generators.FoundingDateGenerator>
+		</field>
+		<field name="FirstTradeExchg" size="8" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.FoundingDateGenerator>
+				<startDate>1850-01-01 00:00:00</startDate>
+				<format>yyyyMMdd</format>
+			</gen_tpc.di.generators.FoundingDateGenerator>
+		</field>
+		<field name="Dividend" size="12" type="VARCHAR" updatePercentage="100">
+			<gen_PaddingGenerator>
+				<gen_DoubleGenerator>
+					<minD>0.0</minD>
+					<maxD>3.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="CoNameOrCIK" size="0" type="VARCHAR" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<probability value="${FWCIKPct}">
+					<gen_PaddingGenerator>
+						<size>10.0</size>
+						<gen_ReferenceGenerator choose="random" from="sameTimeFrame">
+							<reference table="FINWIRE-cmp" field="CIK" />
+						</gen_ReferenceGenerator>
+					</gen_PaddingGenerator>
+				</probability>
+				<probability value="1 - ${FWCIKPct}">
+					<gen_PaddingGenerator>
+						<size>60.0</size>
+						<gen_ReferenceGenerator choose="random" from="sameTimeFrame">
+							<reference table="FINWIRE-cmp" field="CompanyName" />
+						</gen_ReferenceGenerator>
+					</gen_PaddingGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+	</table>
+
+	<table name="FINWIRE-fin" type="update">
+		<updateBlackBox name="tpc.di.FinWireFinBlackBox"/>
+
+		<newPercentage>${FW_FIN_newPercentage}</newPercentage>
+		<changePercentage>${FW_FIN_changePercentage}</changePercentage>
+		<deletePercentage>${FW_FIN_deletePercentage}</deletePercentage>
+		<minUpdateSize>${FW_FIN_minUpdateSize}</minUpdateSize>
+		<updateFirstID>${FW_FIN_updateFirstID}</updateFirstID>
+		<updateLastID>${FW_FIN_updateLastID}</updateLastID>
+		<size>${FW_FIN_histSize}</size>
+
+		<field name="PTS" size="15" type="VARCHAR" updatePercentage="100">
+			<gen_tpc.di.generators.FinwirePTSGenerator>
+				<reference table="FINWIRE-cmp" field="PTS" />
+				<startDate>${FWBeginDate}</startDate>
+				<endDate>${FWEndDate}</endDate>
+				<format>yyyyMMdd-HHmmss</format>
+				<updateIDOffset>1</updateIDOffset>
+			</gen_tpc.di.generators.FinwirePTSGenerator>
+		</field>
+		<field name="RecType" size="3" type="VARCHAR" updatePercentage="0">
+			<gen_StaticValueGenerator>
+				<value>FIN</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="Year" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_DetailFromDateGenerator>
+				<reference field="PTS" />
+				<outputFormat>yyyy</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="Quarter" size="1" type="VARCHAR" updatePercentage="0">
+			<gen_DetailFromDateGenerator>
+				<reference field="PTS" />
+				<outputFormat>'QUARTER_OF_YEAR'</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="QtrStartDate" size="8" type="VARCHAR" updatePercentage="0">
+			<gen_SwitchGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="Quarter" />
+				</gen_OtherFieldValueGenerator>
+				<case value="1">
+					<gen_PrePostfixGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="Year" />
+						</gen_OtherFieldValueGenerator>
+						<postfix>0101</postfix>
+					</gen_PrePostfixGenerator>
+				</case>
+				<case value="2">
+					<gen_PrePostfixGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="Year" />
+						</gen_OtherFieldValueGenerator>
+						<postfix>0401</postfix>
+					</gen_PrePostfixGenerator>
+				</case>
+				<case value="3">
+					<gen_PrePostfixGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="Year" />
+						</gen_OtherFieldValueGenerator>
+						<postfix>0701</postfix>
+					</gen_PrePostfixGenerator>
+				</case>
+				<case value="4">
+					<gen_PrePostfixGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="Year" />
+						</gen_OtherFieldValueGenerator>
+						<postfix>1001</postfix>
+					</gen_PrePostfixGenerator>
+				</case>
+				<default>
+					<gen_StaticValueGenerator>
+						<value>An error has occured</value>
+					</gen_StaticValueGenerator>
+				</default>
+			</gen_SwitchGenerator>
+		</field>
+		<field name="PostingDate" size="8" type="VARCHAR" updatePercentage="0">
+			<gen_DetailFromDateGenerator>
+				<reference field="PTS" />
+				<outputFormat>yyyyMMdd</outputFormat>
+			</gen_DetailFromDateGenerator>
+		</field>
+		<field name="Revenue" size="17" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_DoubleGenerator>
+					<minD>1.0</minD>
+					<maxD>10000000000.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Earnings" size="17" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_ComputeGenerator>
+					<gen_DoubleGenerator>
+						<minD>0.0</minD>
+						<maxD>0.7</maxD>
+					</gen_DoubleGenerator>
+					<operator>*</operator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="Revenue" />
+					</gen_OtherFieldValueGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>				
+				</gen_ComputeGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="EPS" size="12" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_ComputeGenerator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="Earnings" />
+					</gen_OtherFieldValueGenerator>
+					<operator>/</operator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="ShOut" />
+					</gen_OtherFieldValueGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_ComputeGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="DilutedEPS" size="12" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_ComputeGenerator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="Earnings" />
+					</gen_OtherFieldValueGenerator>
+					<operator>/</operator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="DilutedShOut" />
+					</gen_OtherFieldValueGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_ComputeGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Margin" size="12" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_ComputeGenerator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="Earnings" />
+					</gen_OtherFieldValueGenerator>
+					<operator>/</operator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="Revenue" />
+					</gen_OtherFieldValueGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_ComputeGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Inventory" size="17" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_DoubleGenerator>
+					<minD>0</minD>
+					<maxD>1000000000.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Assets" size="17" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_DoubleGenerator>
+					<minD>0.0</minD>
+					<maxD>1000000000000.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="Liabilities" size="17" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_DoubleGenerator>
+					<minD>0</minD>
+					<maxD>10000000000.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="ShOut" size="13" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_LongGenerator>
+					<min>100000.0</min>
+					<max>1000000000.0</max>
+				</gen_LongGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="DilutedShOut" size="13" type="VARCHAR" updatePercentage="0">
+			<gen_PaddingGenerator>
+				<gen_ComputeGenerator>
+					<gen_DoubleGenerator>
+						<minD>1.0</minD>
+						<maxD>1.2</maxD>
+					</gen_DoubleGenerator>
+					<operator>*</operator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="ShOut" />
+					</gen_OtherFieldValueGenerator>
+					<decimalPlaces>0</decimalPlaces>
+				</gen_ComputeGenerator>
+				<character> </character>
+				<padToLeft>true</padToLeft>
+			</gen_PaddingGenerator>
+		</field>
+		<field name="CoNameOrCIK" size="0" type="VARCHAR" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<probability value="${FWCIKPct}">
+					<gen_PaddingGenerator>
+						<gen_PermutationReferenceGenerator>
+							
+							<reference table="FINWIRE-cmp" field="CIK" />
+						</gen_PermutationReferenceGenerator>
+						<size>10.0</size>
+					</gen_PaddingGenerator>
+				</probability>
+				<probability value="1 - ${FWCIKPct}">
+					<gen_PaddingGenerator>
+						<gen_PermutationReferenceGenerator>
+							
+							<reference table="FINWIRE-cmp" field="CompanyName" />
+						</gen_PermutationReferenceGenerator>
+						<size>60.0</size>
+					</gen_PaddingGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+	</table>
+
+	<table name="FINWIRE" type="compositeUpdate">
+		<updateBlackBox name="tpc.di.MergeUpdateBlackBox"/>
+
+		<newPercentage>100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>0</deletePercentage>
+		<minUpdateSize>10</minUpdateSize>
+		<updateFirstID>0</updateFirstID>
+		<updateLastID>${FWQuarters} - 1</updateLastID>
+		<size>1.0</size>
+
+		<subTable name="FINWIRE-cmp"></subTable>
+		<subTable name="FINWIRE-sec"></subTable>
+		<subTable name="FINWIRE-fin"></subTable>
+	</table>
+
+	<table name="DailyMarket" type="update">
+		<updateBlackBox name="tpc.di.DailyMarketBlackBox"/>
+
+		<newPercentage>100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>0</deletePercentage>
+
+		<minUpdateSize>${DM_minUpdateSize}</minUpdateSize>  
+		<updateFirstID>${DM_updateFirstID}</updateFirstID>
+		<updateLastID>${DM_updateLastID}</updateLastID>
+		<size>${DM_size}</size>  
+
+		<field name="cdc_flag" size="" type="VARCHAR" updatePercentage="100">
+			<gen_UpdateActionTypeGenerator>
+				<newName>I</newName>
+				<changeName>U</changeName>
+				<deleteName>U</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+		<field name="cdc_dsn" size="" type="NUMERIC" updatePercentage="100" primary="true" unique="true">
+			<gen_CDCSequenceGenerator>
+				<substractHistoricalSize>false</substractHistoricalSize>
+			</gen_CDCSequenceGenerator>
+		</field>
+		<field name="dm_date" size="" type="DATE" updatePercentage="100">
+			<gen_tpc.di.generators.DailyMarketPTSGenerator>
+				<disableRng>true</disableRng>
+				<startDate>${DMBeginDate}</startDate>
+				<endDate>${DMEndDate} + ${ONE_DAY_IN_MILLISECONDS} * ${NUMBER_OF_INCREMENTAL_BATCHES}</endDate>
+				<outputFormat>yyyy-MM-dd</outputFormat>
+			</gen_tpc.di.generators.DailyMarketPTSGenerator>
+		</field>
+		<field name="dm_s_symb" size="15" type="VARCHAR" updatePercentage="100"> 
+			<gen_ReferenceGenerator  choose="relativeUnique_withoutDeletedInNextUpdate" from="DailyMarket-FinWireSecMapping" >
+				<reference table="FINWIRE-sec" field="Symbol" />
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="dm_close" size="" type="NUMERIC" updatePercentage="100">
+			<gen_DoubleGenerator>
+				<minD>0.5</minD>
+				<maxD>1000.00</maxD>
+				<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+			</gen_DoubleGenerator>
+		</field>
+		<field name="dm_high" size="" type="NUMERIC" updatePercentage="100">
+			<gen_ComputeGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="dm_close" />
+				</gen_OtherFieldValueGenerator>
+				<operator>*</operator>
+				<gen_DoubleGenerator>
+					<minD>1.0</minD>
+					<maxD>1.5</maxD>
+				</gen_DoubleGenerator>
+				<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+			</gen_ComputeGenerator>
+		</field>
+		<field name="dm_low" size="" type="NUMERIC" updatePercentage="100">
+			<gen_ComputeGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="dm_close" />
+				</gen_OtherFieldValueGenerator>
+				<operator>*</operator>
+				<gen_DoubleGenerator>
+					<minD>0.5</minD>
+					<maxD>1.0</maxD>
+				</gen_DoubleGenerator>
+				<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+			</gen_ComputeGenerator>
+		</field>
+		<field name="dm_vol" size="" type="NUMERIC" updatePercentage="100">
+			<gen_LongGenerator>
+				<min>1000.0</min>
+				<max>1000000000.0</max>
+			</gen_LongGenerator>
+		</field>
+	</table>
+
+	<table name="WatchHistory" type="update">
+		<updateBlackBox name="tpc.di.WatchHistoryBlackBox"/>
+
+		<newPercentage>${WHActivePct} * 100</newPercentage>
+		<changePercentage>0</changePercentage>
+		<deletePercentage>(1.0 - ${WHActivePct}) * 100</deletePercentage>
+
+		<minUpdateSize>${WHRowsPerUpdate}</minUpdateSize>
+		<updateFirstID>0</updateFirstID>			
+		<updateLastID>(${WHHistUpdatesLastID}) + ${NUMBER_OF_INCREMENTAL_BATCHES} </updateLastID>
+		<size>${WHRowsPerUpdate}</size>
+
+		<field name="cdc_flag" size="" type="VARCHAR" updatePercentage="100">
+			<gen_StaticValueGenerator>
+				<value>I</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="cdc_dsn" size="" type="NUMERIC" updatePercentage="100" primary="true" unique="true">
+			<gen_CDCSequenceGenerator>
+				<substractHistoricalSize>false</substractHistoricalSize>
+			</gen_CDCSequenceGenerator>
+		</field>
+		<field name="w_c_id" size="" type="NUMERIC" updatePercentage="0">
+			<gen_tpc.di.generators.CustomerIdGenerator debug="${WATCH_HIST_VALIDATION}"/>
+		</field>
+		<field name="w_s_symb" size="15" type="VARCHAR" updatePercentage="0">
+			<gen_tpc.di.generators.FinwireSecSymbolGenerator>
+				<reference table="FINWIRE-sec" field="Symbol" />
+			</gen_tpc.di.generators.FinwireSecSymbolGenerator>
+		</field>
+		<field name="w_dts" size="20" type="DATE" updatePercentage="100">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<historicalUpdateIDsCount>${WHHistUpdatesLastID} +1 </historicalUpdateIDsCount>
+				<historicalStartDate>${WHHistBeginDate}</historicalStartDate>
+				<historicalEndDate>${WHHistEndDate}</historicalEndDate>	
+				<startDate>${WHBeginDate}</startDate>
+				<endDate>${WHEndDate}</endDate>
+				<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+		<field name="w_action" size="4" type="VARCHAR" updatePercentage="100">
+			<gen_UpdateActionTypeGenerator>
+				<newName>ACTV</newName>
+				<changeName>ERROR!ChangeAction!ERROR</changeName>
+				<deleteName>CNCL</deleteName>
+			</gen_UpdateActionTypeGenerator>
+		</field>
+	</table>
+
+	<table name="TradeSource" type="update">
+		<newPercentage>${TS_newPercentage}</newPercentage>
+		<changePercentage>${TS_changePercentage}</changePercentage>
+		<deletePercentage>${TS_deletePercentage}</deletePercentage>
+
+		<minUpdateSize>${TS_minUpdateSize}</minUpdateSize>
+		<updateFirstID>${TS_updateFirstID}</updateFirstID>
+		<updateLastID>${TS_updateLastID}</updateLastID>
+		<size>${TS_histSize}</size>
+
+		<field name="cdc_flag_insert" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_StaticValueGenerator>
+				<value>I</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="cdc_flag_update" size="1" type="VARCHAR" updatePercentage="100">
+			<gen_StaticValueGenerator>
+				<value>U</value>
+			</gen_StaticValueGenerator>
+		</field>
+		<field name="t_id" size="" type="NUMERIC" updatePercentage="0">
+			<gen_GlobalRowGenerator/>
+		</field>
+		<field name="t_is_cash" size="" type="BOOLEAN" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="0.8">
+						<gen_StaticValueGenerator>
+							<value>0</value>
+						</gen_StaticValueGenerator>
+					</probability>
+					<probability value="0.2">
+						<gen_StaticValueGenerator>
+							<value>1</value>
+						</gen_StaticValueGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="dts" size="" type="DATE" updatePercentage="0">
+			<gen_DateTimeGenerator>
+				<disableRng>true</disableRng>
+				<startDate>${THistBeginDate}</startDate>
+				<endDate>${THistEndDate} + ${NUMBER_OF_INCREMENTAL_BATCHES} * ${ONE_DAY_IN_MILLISECONDS}</endDate>
+				<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+			</gen_DateTimeGenerator>
+		</field>
+		<field name="cdc_dsn_dts" size="" type="NUMERIC" updatePercentage="100">
+			<gen_FormulaGenerator>
+				<formula>gc.getUpdate().getGlobalRowID() * 4</formula>
+				<decimalPlaces>0</decimalPlaces>
+			</gen_FormulaGenerator>
+		</field>
+		<field name="t_exec_name" size="49" type="VARCHAR" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_tpc.di.generators.RandomBrokerGenerator>
+					<reference table="HR" field="employeejobcode" />
+				</gen_tpc.di.generators.RandomBrokerGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_tt_id" size="3" type="VARCHAR" updatePercentage="0">
+			<gen_tpc.di.generators.TradeSourceTradeTypeGenerator id="modeChooser">
+				<probability value="${TLBPerc}">
+					<gen_StaticValueGenerator>
+						<value>TLB</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_StaticValueGenerator>
+						<value>TLS</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_StaticValueGenerator>
+						<value>TMB</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_StaticValueGenerator>
+						<value>TMS</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_tpc.di.generators.TradeSourceTradeTypeGenerator>
+		</field>
+		<field name="hh_h_t_id" size="" type="NUMERIC" updatePercentage="0">
+			<gen_tpc.di.generators.GlobalRowIDOfInsertGenerator/>
+		</field>
+		<field name="t_ca_id" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ReferenceGenerator choose="random" from="relativeTimeFrame">
+				<reference table="Customer" field="c_id" />
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="t_s_symb" size="15" type="VARCHAR" updatePercentage="0">
+			<gen_ReferenceGenerator  choose="random" from="Trade-FinWireSecMapping"  >
+				<reference table="FINWIRE-sec" field="Symbol" />
+			</gen_ReferenceGenerator>
+		</field>
+		<field name="t_qty" size="" type="NUMERIC" updatePercentage="0">
+			<gen_LongGenerator>
+				<min>10.0</min>
+				<max>10000.0</max>
+			</gen_LongGenerator>
+		</field>
+		<field name="th_st_id_pndg" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_StaticValueGenerator>
+						<value>PNDG</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_StaticValueGenerator>
+						<value>PNDG</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_StaticValueGenerator>
+						<value></value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_StaticValueGenerator>
+						<value></value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="th_st_id_sbmt_or_cncl" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_ProbabilityGenerator>
+						<probability value="1 - ${TLBCNCLRatio}">
+							<gen_StaticValueGenerator>
+								<value>SBMT</value>
+							</gen_StaticValueGenerator>
+						</probability>
+						<probability value="${TLBCNCLRatio}">
+							<gen_StaticValueGenerator>
+								<value>CNCL</value>
+							</gen_StaticValueGenerator>
+						</probability>
+					</gen_ProbabilityGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_ProbabilityGenerator>
+						<probability value="1 - ${TLBCNCLRatio}">
+							<gen_StaticValueGenerator>
+								<value>SBMT</value>
+							</gen_StaticValueGenerator>
+						</probability>
+						<probability value="${TLBCNCLRatio}">
+							<gen_StaticValueGenerator>
+								<value>CNCL</value>
+							</gen_StaticValueGenerator>
+						</probability>
+					</gen_ProbabilityGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_StaticValueGenerator>
+						<value>SBMT</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_StaticValueGenerator>
+						<value>SBMT</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="th_dts_sbmt_or_cncl" size="" type="DATE" updatePercentage="0">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_AddRandomSecondsGenerator>
+						<reference field="dts" />
+						<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+						<min>1.0</min>
+						<max>7776000.0</max>
+					</gen_AddRandomSecondsGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_AddRandomSecondsGenerator>
+						<reference field="dts" />
+						<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+						<min>1.0</min>
+						<max>7776000.0</max>
+					</gen_AddRandomSecondsGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_OtherFieldValueGenerator>
+						<reference field="dts" />
+					</gen_OtherFieldValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_OtherFieldValueGenerator>
+						<reference field="dts" />
+					</gen_OtherFieldValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="cdc_dsn_dts_sbmt_or_cncl" size="" type="NUMERIC" updatePercentage="100">
+			<gen_FormulaGenerator>
+				<formula>gc.getUpdate().getGlobalRowID() * 4 + 1</formula>
+				<decimalPlaces>0</decimalPlaces>
+			</gen_FormulaGenerator>
+		</field>
+		<field name="th_st_id_cmpt" size="4" type="VARCHAR" updatePercentage="0">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_SwitchGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="th_st_id_sbmt_or_cncl" />
+						</gen_OtherFieldValueGenerator>
+						<case value="SBMT">
+							<gen_StaticValueGenerator>
+								<value>CMPT</value>
+							</gen_StaticValueGenerator>
+						</case>
+						<default>
+							<gen_StaticValueGenerator>
+								<value></value>
+							</gen_StaticValueGenerator>
+						</default>
+					</gen_SwitchGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_SwitchGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="th_st_id_sbmt_or_cncl" />
+						</gen_OtherFieldValueGenerator>
+						<case value="SBMT">
+							<gen_StaticValueGenerator>
+								<value>CMPT</value>
+							</gen_StaticValueGenerator>
+						</case>
+						<default>
+							<gen_StaticValueGenerator>
+								<value></value>
+							</gen_StaticValueGenerator>
+						</default>
+					</gen_SwitchGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_StaticValueGenerator>
+						<value>CMPT</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_StaticValueGenerator>
+						<value>CMPT</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="th_dts_cmpt" size="" type="DATE" updatePercentage="0">
+			<gen_SwitchGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="th_st_id_cmpt" />
+				</gen_OtherFieldValueGenerator>
+				<case value="CMPT">
+					<gen_AddRandomSecondsGenerator>
+						<reference field="th_dts_sbmt_or_cncl" />
+						<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+						<min>1.0</min>
+						<max>300.0</max>
+					</gen_AddRandomSecondsGenerator>
+				</case>
+				<default>
+					<gen_StaticValueGenerator>
+						<value></value>
+					</gen_StaticValueGenerator>
+				</default>
+			</gen_SwitchGenerator>
+		</field>
+		<field name="cdc_dsn_dts_cmpt" size="" type="NUMERIC" updatePercentage="100">
+			<gen_FormulaGenerator>
+				<formula>gc.getUpdate().getGlobalRowID() * 4 + 2</formula>
+				<decimalPlaces>0</decimalPlaces>
+			</gen_FormulaGenerator>
+		</field>
+		<field name="hh_before_qty" size="" type="NUMERIC" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_ReferenceGenerator choose="intraTupel" from="atInsert">
+						<reference field="t_qty" />
+					</gen_ReferenceGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_ReferenceGenerator choose="intraTupel" from="atInsert">
+						<reference field="t_qty" />
+					</gen_ReferenceGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="hh_after_qty" size="" type="NUMERIC" updatePercentage="100">
+			<gen_ProbabilityGenerator>
+				<reference field="t_tt_id" />
+				<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+				<probability value="${TLBPerc}">
+					<gen_OtherFieldValueGenerator>
+						<reference field="t_qty" />
+					</gen_OtherFieldValueGenerator>
+				</probability>
+				<probability value="${TLSPerc}">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</probability>
+				<probability value="${TMBPerc}">
+					<gen_OtherFieldValueGenerator>
+						<reference field="t_qty" />
+					</gen_OtherFieldValueGenerator>
+				</probability>
+				<probability value="${TMSPerc}">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</probability>
+			</gen_ProbabilityGenerator>
+		</field>
+		<field name="ct_dts" size="" type="DATE" updatePercentage="0">
+			<gen_SwitchGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="th_st_id_cmpt" />
+				</gen_OtherFieldValueGenerator>
+				<case value="CMPT">
+					<gen_AddRandomSecondsGenerator>
+						<reference field="th_dts_cmpt" />
+						<outputFormat>yyyy-MM-dd HH:mm:ss</outputFormat>
+						<min>1.0</min>
+						<max>432000.0</max>
+					</gen_AddRandomSecondsGenerator>
+				</case>
+				<default>
+					<gen_StaticValueGenerator>
+						<value></value>
+					</gen_StaticValueGenerator>
+				</default>
+			</gen_SwitchGenerator>
+		</field>
+		<field name="cdc_dsn_dts_ct" size="" type="NUMERIC" updatePercentage="100">
+			<gen_FormulaGenerator>
+				<formula>gc.getUpdate().getGlobalRowID() * 4 + 3</formula>
+				<decimalPlaces>0</decimalPlaces>
+			</gen_FormulaGenerator>
+		</field>
+		<field name="ct_amt" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ProbabilityGenerator>
+					<reference field="t_tt_id" />
+					<sameChoiceAsByID>modeChooser</sameChoiceAsByID>
+					<probability value="${TLBPerc}">
+						<gen_DoubleGenerator>
+							<minD>-1000000.00</minD>
+							<maxD>-1000.00</maxD>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_DoubleGenerator>
+					</probability>
+					<probability value="${TLSPerc}">
+						<gen_DoubleGenerator>
+							<minD>1000.00</minD>
+							<maxD>1000000.00</maxD>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_DoubleGenerator>
+					</probability>
+					<probability value="${TMBPerc}">
+						<gen_DoubleGenerator>
+							<minD>-1000000.00</minD>
+							<maxD>-1000.00</maxD>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_DoubleGenerator>
+					</probability>
+					<probability value="${TMSPerc}">
+						<gen_DoubleGenerator>
+							<minD>1000.00</minD>
+							<maxD>1000000.00</maxD>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_DoubleGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="ct_name" size="100" type="VARCHAR" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_RandomAString>
+					<max>100.0</max>
+					<min>10.0</min>
+					<characters>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz </characters>
+				</gen_RandomAString>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_bid_price" size="50" type="VARCHAR" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_DoubleGenerator>
+					<minD>1.01</minD>
+					<maxD>10.0</maxD>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_DoubleGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_trade_price" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ComputeGenerator>
+					<gen_OtherFieldValueGenerator>
+						<reference field="t_bid_price" />
+					</gen_OtherFieldValueGenerator>
+					<operator>*</operator>
+					<gen_DoubleGenerator>
+						<minD>0.95</minD>
+						<maxD>1.05</maxD>
+					</gen_DoubleGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_ComputeGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_chrg" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="${TChargeInvalidRatio}">
+						<gen_ComputeGenerator>
+							<gen_ComputeGenerator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_trade_price" />
+								</gen_OtherFieldValueGenerator>
+								<operator>*</operator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_qty" />
+								</gen_OtherFieldValueGenerator>
+							</gen_ComputeGenerator>
+							<operator>*</operator>
+							<gen_DoubleGenerator>
+								<minD>1.01</minD>
+								<maxD>10.00</maxD>
+							</gen_DoubleGenerator>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_ComputeGenerator>
+					</probability>
+					<probability value="1 - ${TChargeInvalidRatio}">
+						<gen_ComputeGenerator>
+							<gen_ComputeGenerator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_trade_price" />
+								</gen_OtherFieldValueGenerator>
+								<operator>*</operator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_qty" />
+								</gen_OtherFieldValueGenerator>
+							</gen_ComputeGenerator>
+							<operator>*</operator>
+							<gen_DoubleGenerator>
+								<minD>0.0001</minD>
+								<maxD>0.005</maxD>
+							</gen_DoubleGenerator>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_ComputeGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_comm" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ProbabilityGenerator>
+					<probability value="${TCommInvalidRatio}">
+						<gen_ComputeGenerator>
+							<gen_ComputeGenerator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_trade_price" />
+								</gen_OtherFieldValueGenerator>
+								<operator>*</operator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_qty" />
+								</gen_OtherFieldValueGenerator>
+							</gen_ComputeGenerator>
+							<operator>*</operator>
+							<gen_DoubleGenerator>
+								<minD>1.01</minD>
+								<maxD>10.00</maxD>
+							</gen_DoubleGenerator>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_ComputeGenerator>
+					</probability>
+					<probability value="1 - ${TCommInvalidRatio}">
+						<gen_ComputeGenerator>
+							<gen_ComputeGenerator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_trade_price" />
+								</gen_OtherFieldValueGenerator>
+								<operator>*</operator>
+								<gen_OtherFieldValueGenerator>
+									<reference field="t_qty" />
+								</gen_OtherFieldValueGenerator>
+							</gen_ComputeGenerator>
+							<operator>*</operator>
+							<gen_DoubleGenerator>
+								<minD>0.0001</minD>
+								<maxD>0.005</maxD>
+							</gen_DoubleGenerator>
+							<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+						</gen_ComputeGenerator>
+					</probability>
+				</gen_ProbabilityGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+		<field name="t_tax" size="" type="NUMERIC" updatePercentage="0">
+			<gen_ActionDeleteIsAlsoUpdateGenerator>
+				<gen_ComputeGenerator>
+					<gen_ComputeGenerator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="t_trade_price" />
+						</gen_OtherFieldValueGenerator>
+						<operator>*</operator>
+						<gen_OtherFieldValueGenerator>
+							<reference field="t_qty" />
+						</gen_OtherFieldValueGenerator>
+					</gen_ComputeGenerator>
+					<operator>*</operator>
+					<gen_DoubleGenerator>
+						<minD>0.05</minD>
+						<maxD>0.4</maxD>
+					</gen_DoubleGenerator>
+					<decimalPlaces roundPlainValue="${DoubleCalculationsRoundPlainValue}">2</decimalPlaces>
+				</gen_ComputeGenerator>
+			</gen_ActionDeleteIsAlsoUpdateGenerator>
+		</field>
+	</table>
+
+	<table name="TradeType">
+		<size>5.0</size>
+		<field name="tt_id" size="3" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/tradetype_id.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="tt_name" size="12" type="VARCHAR">
+			<gen_DictList>
+				<disableRng>true</disableRng>
+				<file>dicts/tpc-e/tradetype_name.dict</file>
+			</gen_DictList>
+		</field>
+		<field name="tt_is_sell" size="" type="BOOLEAN">
+			<gen_SwitchGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="tt_name" />
+				</gen_OtherFieldValueGenerator>
+				<case value="Limit Buy">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Limit Sell">
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Market Buy">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Market Sell">
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<default>
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</default>
+			</gen_SwitchGenerator>
+		</field>
+		<field name="tt_is_mrkt" size="" type="BOOLEAN">
+			<gen_SwitchGenerator>
+				<gen_OtherFieldValueGenerator>
+					<reference field="tt_name" />
+				</gen_OtherFieldValueGenerator>
+				<case value="Limit Buy">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Limit Sell">
+					<gen_StaticValueGenerator>
+						<value>0</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Market Buy">
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<case value="Market Sell">
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</case>
+				<default>
+					<gen_StaticValueGenerator>
+						<value>1</value>
+					</gen_StaticValueGenerator>
+				</default>
+			</gen_SwitchGenerator>
+		</field>
+	</table>
+</schema>

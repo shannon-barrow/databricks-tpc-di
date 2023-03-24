@@ -1,0 +1,1115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+	<generation xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:xi="http://www.w3.org/2001/XInclude"
+	xsi:noNamespaceSchemaLocation="structure/pdgfGeneration.xsd">
+
+	<loadPlugin name="tpc.di.output.AuditTotalRecordsSummaryWriter"/>
+	<property name="${sortedOutput}" type="double">1</property>
+	<property name="${AuditingAndReportingSystemActive}" type="double">1</property>
+	<property name="${FinwireDebugFileOutputActive}" type="double">0</property>
+	<property name="${Finwire_SEC_DebugFileOutputActive}" type="double">0</property>
+	<property name="${TradeSourceDebugFileOutputActive}" type="double">0</property>	
+	<property name="${CustomerMgmtDebugFileOutputActive}" type="double">0</property>
+
+	<scheduler name="DefaultScheduler"></scheduler>
+
+	<output name="CSVRowOutput">
+		<fileTemplate>outputDir + table.getName() + fileEnding</fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.txt</fileEnding>
+		<delimiter>|</delimiter>
+		<sortByRowID>${sortedOutput}</sortByRowID>
+	</output>
+
+	<schema name="tpc-di">
+		<tables>
+			<table name="StatusType" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+
+					<xi:include href="config/tpc-di-Audit/StatusType-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/2)" parse="xml"/> 
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/3)" parse="xml"/> 
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/4)" parse="xml"/>
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/5)" parse="xml"/>
+					<xi:include href="config/tpc-di-Audit/General-Audit.xml" xpointer="element(/1/6)" parse="xml"/> 
+				</output>
+			</table>
+
+			<table name="TaxRate" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/TaxRate-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="Date" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Date-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="Time" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Time-Audit.xml" xpointer="element(/1/1)"  parse="xml"/>
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="BatchDate" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="CSVRowOutput">
+					<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+					<outputDir>output/</outputDir>
+					<fileEnding>.txt</fileEnding>
+					<delimiter>|</delimiter>
+					<sortByRowID>${sortedOutput}</sortByRowID>
+				</output>
+			</table>
+			
+			<table name="HR" exclude="false">
+				<output name="SplitFileOutputWrapper">
+
+					<xi:include href="config/tpc-di-Audit/HR-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="CustomerMgmtHelper" exclude="true">
+				<scheduler name="UpdateScheduler"></scheduler>
+			</table>
+
+			<table name="CustomerMgmt" exclude="false">
+				<scheduler name="tpc.di.scheduler.CustomerMgmtScheduler"></scheduler>
+
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/CustomerMgmt-audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput" active="${CustomerMgmtDebugFileOutputActive}">
+						<fileTemplate>outputDir + table.getName() + "_debug" + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+
+					<output name="CompiledTemplateOutput">
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<fileTemplate>outputDir + "Batch1" + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.xml</fileEnding>
+						<header><!--"<?xml version=\"1.0\" encoding=\""+ output.getCharset().displayName() +"\"?>" + pdgf.util.Constants.DEFAULT_LINESEPARATOR + "<TPCDI:Actions xmlns:TPCDI=\"http://www.tpc.org/tpc-di\">" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer><!--"</TPCDI:Actions>"--></footer>
+						<template><!--
+
+					String type = fields[0].toString();
+					String val; // temp var for fields[x].toString()
+					if (type.equalsIgnoreCase("NEW")) {
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						//start <Customer ... tag
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append('"');
+
+						if((val=fields[3].toString()).length()>0){
+							buffer.append(" C_TAX_ID=\"").append(val).append('"');
+						}
+						if((val=fields[4].toString()).length()>0){
+							buffer.append(" C_GNDR=\"").append(val).append('"');
+						}
+						if((val=fields[5].toString()).length()>0){
+							buffer.append(" C_TIER=\"").append(val).append('"');
+						}
+						if((val=fields[6].toString()).length()>0){
+							buffer.append(" C_DOB=\"").append(val).append('"');
+						}
+						buffer.append(">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);//end <customer ... > != </customer>
+						buffer.append("\t\t\t<Name>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						if((val=fields[7].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_L_NAME>").append(val).append("</C_L_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_L_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[8].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_F_NAME>").append(val).append("</C_F_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_F_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[9].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_M_NAME>").append(val).append("</C_M_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_M_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t</Name>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						buffer.append("\t\t\t<Address>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if((val=fields[10].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_ADLINE1>").append(val).append("</C_ADLINE1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_ADLINE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[11].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_ADLINE2>").append(val).append("</C_ADLINE2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_ADLINE2/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[12].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_ZIPCODE>").append(val).append("</C_ZIPCODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_ZIPCODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[13].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_CITY>").append(val).append("</C_CITY>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_CITY/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[14].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_STATE_PROV>").append(val).append("</C_STATE_PROV>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_STATE_PROV/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[15].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_CTRY>").append(val).append("</C_CTRY>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_CTRY/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t</Address>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						buffer.append("\t\t\t<ContactInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if((val=fields[16].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_PRIM_EMAIL>").append(val).append("</C_PRIM_EMAIL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_PRIM_EMAIL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[17].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_ALT_EMAIL>").append(val).append("</C_ALT_EMAIL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_ALT_EMAIL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t\t<C_PHONE_1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if((val=fields[18].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE>").append(val).append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[19].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_AREA_CODE>").append(val).append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);;
+						}
+						if((val=fields[20].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_LOCAL>").append(val).append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[21].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_EXT>").append(val).append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+
+						buffer.append("\t\t\t\t</C_PHONE_1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t\t\t<C_PHONE_2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						if((val=fields[22].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE>").append(val).append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[23].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_AREA_CODE>").append(val).append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[24].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_LOCAL>").append(val).append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[25].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_EXT>").append(val).append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t\t</C_PHONE_2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);		
+						buffer.append("\t\t\t\t<C_PHONE_3>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if((val=fields[26].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE>").append(val).append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[27].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_AREA_CODE>").append(val).append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[28].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_LOCAL>").append(val).append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[29].toString()).length()>0){
+							buffer.append("\t\t\t\t\t<C_EXT>").append(val).append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t\t</C_PHONE_3>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t\t</ContactInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						buffer.append("\t\t\t<TaxInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if((val=fields[30].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_LCL_TX_ID>").append(val).append("</C_LCL_TX_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_LCL_TX_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[31].toString()).length()>0){
+							buffer.append("\t\t\t\t<C_NAT_TX_ID>").append(val).append("</C_NAT_TX_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<C_NAT_TX_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t</TaxInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						buffer.append("\t\t\t<Account CA_ID=\"");
+						buffer.append(fields[32].toString());
+						buffer.append('"');
+
+						if((val=fields[33].toString()).length()>0){
+							buffer.append(" CA_TAX_ST=\"").append(val).append('"');
+						}
+						buffer.append(">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						if((val=fields[34].toString()).length()>0){
+							buffer.append("\t\t\t\t<CA_B_ID>").append(val).append("</CA_B_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<CA_B_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[35].toString()).length()>0){
+							buffer.append("\t\t\t\t<CA_NAME>").append(val).append("</CA_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<CA_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+
+						buffer.append("\t\t\t</Account>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+					} else if (type.equalsIgnoreCase("ADDACCT")) {
+
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append("\" >").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t\t<Account CA_ID=\"");
+						buffer.append(fields[3].toString());
+						buffer.append('"');
+
+						if((val=fields[4].toString()).length()>0){
+							buffer.append(" CA_TAX_ST=\"").append(val).append('"');
+						}
+						buffer.append(">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						
+						if((val=fields[5].toString()).length()>0){
+							buffer.append("\t\t\t\t<CA_B_ID>").append(val).append("</CA_B_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<CA_B_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if((val=fields[6].toString()).length()>0){
+							buffer.append("\t\t\t\t<CA_NAME>").append(val).append("</CA_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}else{
+							buffer.append("\t\t\t\t<CA_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t\t</Account>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+					} else if (type.equalsIgnoreCase("CLOSEACCT")) {
+
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t\t<Account CA_ID=\"");
+						buffer.append(fields[3].toString());
+						buffer.append("\" />").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+					} else if (type.equalsIgnoreCase("INACT")) {
+
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+					} else if (type.equalsIgnoreCase("UPDCUST")) {
+
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append('"');
+
+						if(fields[3].changedThisUpdate()){
+							buffer.append("\" C_TAX_ID=\"");
+							buffer.append(fields[3].toString());
+							buffer.append('"');
+						}
+						if(fields[4].changedThisUpdate()){
+							buffer.append(" C_GNDR=\"");
+							buffer.append(fields[4].toString());
+							buffer.append('"');
+						}
+						if(fields[5].changedThisUpdate()){
+							buffer.append(" C_TIER=\"");
+							buffer.append(fields[5].toString());
+							buffer.append('"');
+						}
+						if(fields[6].changedThisUpdate()){
+							buffer.append(" C_DOB=\"");
+							buffer.append(fields[6].toString());
+							buffer.append('"');
+						}
+						buffer.append(">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						if(fields[7].changedThisUpdate() || fields[8].changedThisUpdate() || fields[8].changedThisUpdate()){
+							buffer.append("\t\t\t<Name>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							if(fields[7].changedThisUpdate()){
+								if((val=fields[7].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_L_NAME>");
+									buffer.append(val);
+									buffer.append("</C_L_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_L_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);	
+								}
+							}
+							if(fields[8].changedThisUpdate()){
+								if((val=fields[8].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_F_NAME>");
+									buffer.append(val);
+									buffer.append("</C_F_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_F_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[9].changedThisUpdate()){
+								if((val=fields[9].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_F_NAME>");
+									buffer.append(val);
+									buffer.append("</C_M_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_F_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							buffer.append("\t\t\t</Name>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						if(fields[10].changedThisUpdate() || fields[11].changedThisUpdate() || fields[12].changedThisUpdate() || fields[13].changedThisUpdate() || fields[14].changedThisUpdate() || fields[15].changedThisUpdate()){
+						buffer.append("\t\t\t<Address>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							if(fields[10].changedThisUpdate()){
+								if((val=fields[10].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_ADLINE1>");
+									buffer.append(val);
+									buffer.append("</C_ADLINE1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_ADLINE1/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[11].changedThisUpdate()){
+								if((val=fields[11].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_ADLINE2>");
+									buffer.append(val);
+									buffer.append("</C_ADLINE2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_ADLINE2/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[12].changedThisUpdate()){
+								if((val=fields[12].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_ZIPCODE>");
+									buffer.append(val);
+									buffer.append("</C_ZIPCODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_ZIPCODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[13].changedThisUpdate()){
+								if((val=fields[13].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_CITY>");
+									buffer.append(val);
+									buffer.append("</C_CITY>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_CITY/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[14].changedThisUpdate()){
+								if((val=fields[14].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_STATE_PROV>");
+									buffer.append(val);
+									buffer.append("</C_STATE_PROV>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_STATE_PROV/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[15].changedThisUpdate()){
+								if((val=fields[15].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_CTRY>");
+									buffer.append(val);
+									buffer.append("</C_CTRY>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_CTRY/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}	
+							}
+							buffer.append("\t\t\t</Address>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+
+						boolean printContactInfo = false;
+						for(int i = 16; i<=29; i++){
+							if(fields[i].changedThisUpdate()){
+								printContactInfo=true;
+								break;
+							}
+						}
+						if(printContactInfo){
+							buffer.append("\t\t\t<ContactInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								if(fields[16].changedThisUpdate()){
+									if((val=fields[16].toString()).length()>0){
+										buffer.append("\t\t\t\t<C_PRIM_EMAIL>");
+										buffer.append(val);
+										buffer.append("</C_PRIM_EMAIL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t<C_PRIM_EMAIL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+								}
+								if(fields[17].changedThisUpdate()){
+									if((val=fields[17].toString()).length()>0){
+										buffer.append("\t\t\t\t<C_ALT_EMAIL>");
+										buffer.append(val);
+										buffer.append("</C_ALT_EMAIL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t<C_ALT_EMAIL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+								}
+								if(fields[18].changedThisUpdate() || fields[19].changedThisUpdate() || fields[20].changedThisUpdate() || fields[21].changedThisUpdate()){
+									buffer.append("\t\t\t\t<C_PHONE_1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+									if((val=fields[18].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE>");
+										buffer.append(val);
+										buffer.append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[19].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_AREA_CODE>");
+										buffer.append(val);
+										buffer.append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);	
+									}
+									if((val=fields[20].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_LOCAL>");
+										buffer.append(val);
+										buffer.append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[21].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_EXT>");
+										buffer.append(val);
+										buffer.append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									buffer.append("\t\t\t\t</C_PHONE_1>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}//end <C_PHONE_1>
+
+								if(fields[22].changedThisUpdate() || fields[23].changedThisUpdate()|| fields[24].changedThisUpdate() ||fields[25].changedThisUpdate()){
+									buffer.append("\t\t\t\t<C_PHONE_2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);	
+									if((val=fields[22].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE>");
+										buffer.append(val);
+										buffer.append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[23].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_AREA_CODE>");
+										buffer.append(val);
+										buffer.append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[24].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_LOCAL>");
+										buffer.append(val);
+										buffer.append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[25].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_EXT>");
+										buffer.append(val);
+										buffer.append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									buffer.append("\t\t\t\t</C_PHONE_2>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}//end <C_PHONE_2>
+
+								if(fields[26].changedThisUpdate() || fields[27].changedThisUpdate() ||fields[28].changedThisUpdate()|| fields[29].changedThisUpdate()){
+									buffer.append("\t\t\t\t<C_PHONE_3>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									if((val=fields[26].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE>");
+										buffer.append(val);
+										buffer.append("</C_CTRY_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_CTRY_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[27].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_AREA_CODE>");
+										buffer.append(val);
+										buffer.append("</C_AREA_CODE>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_AREA_CODE/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[28].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_LOCAL>");
+										buffer.append(val);
+										buffer.append("</C_LOCAL>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_LOCAL/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									if((val=fields[29].toString()).length()>0){
+										buffer.append("\t\t\t\t\t<C_EXT>");
+										buffer.append(val);
+										buffer.append("</C_EXT>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}else{
+										buffer.append("\t\t\t\t\t<C_EXT/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+									}
+									buffer.append("\t\t\t\t</C_PHONE_3>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}//end <C_PHONE_3>
+							buffer.append("\t\t\t</ContactInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+
+						if(fields[30].changedThisUpdate() || fields[31].changedThisUpdate()){
+							buffer.append("\t\t\t<TaxInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							if(fields[30].changedThisUpdate()){
+								if((val=fields[30].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_LCL_TX_ID>");
+									buffer.append(val);
+									buffer.append("</C_LCL_TX_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_LCL_TX_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							if(fields[31].changedThisUpdate()){
+								if((val=fields[31].toString()).length()>0){
+									buffer.append("\t\t\t\t<C_NAT_TX_ID>");
+									buffer.append(val);
+									buffer.append("</C_NAT_TX_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}else{
+									buffer.append("\t\t\t\t<C_NAT_TX_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+								}
+							}
+							buffer.append("\t\t\t</TaxInfo>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						}
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+					} else if (type.equalsIgnoreCase("UPDACCT")) {
+
+						buffer.append("\t<TPCDI:Action ActionType=\"");
+						buffer.append(fields[0].toString());
+						buffer.append("\" ActionTS=\"");
+						buffer.append(fields[1].toString());
+						buffer.append("\">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t<Customer C_ID=\"");
+						buffer.append(fields[2].toString());
+						buffer.append("\" >").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t\t<Account CA_ID=\"");
+						buffer.append(fields[3].toString());
+						buffer.append('"');
+						if(fields[4].changedThisUpdate()){
+							buffer.append(" CA_TAX_ST=\"");
+							buffer.append(fields[4].toString());
+							buffer.append('"');
+						}
+						buffer.append(">").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						if(fields[5].changedThisUpdate()){
+							if((val=fields[5].toString()).length()>0){
+								buffer.append("\t\t\t\t<CA_B_ID>");
+								buffer.append(val);
+								buffer.append("</CA_B_ID>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							}else{
+								buffer.append("\t\t\t\t<CA_B_ID/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							}
+							
+						}
+						if(fields[6].changedThisUpdate()){
+							if((val=fields[6].toString()).length()>0){
+								buffer.append("\t\t\t\t<CA_NAME>");
+								buffer.append(val);
+								buffer.append("</CA_NAME>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							}else{
+								buffer.append("\t\t\t\t<CA_NAME/>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+							}
+						}
+						buffer.append("\t\t\t</Account>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t\t</Customer>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						buffer.append("\t</TPCDI:Action>").append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+					}else{
+						if(!pdgf.util.Constants.BENCHMARK_GENERATORS_DISABLED)
+							throw new RuntimeException("DEVELOPER Exception.  Action type not recognized fields[0]==" +type);
+					}
+				}
+				--></template>
+					</output>
+				</output>
+			</table>
+			
+			<table name="Customer" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Customer-Audit.xml" xpointer="element(/1/1)" parse="xml"/>
+
+					<output name="CSVRowOutput">
+						<fileTemplate><!-- "";
+						int batchID = updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID();
+
+						result = result + outputDir + "Batch" + batchID + "/" + table.getName() + fileEnding;
+						-->
+						</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="Account" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Account-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID()) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="Prospect" exclude="false">
+				<scheduler name="DbDumpUpdateScheduler">
+					<excludeDeletedIDs>true</excludeDeletedIDs>
+				</scheduler>
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Prospect-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="Industry" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/Industry-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="DailyMarket" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/DailyMarket-Audit.xml" xpointer="element(/1/1)" parse="xml"/>
+
+					<output name="tpc.di.output.DailyMarketSymbolValidationOutput" active="${DEBUG_SYMBOL_REFERENCES_TIMESTAMP_VALIDITY} " >
+						<fileTemplate>outputDir + "dm_debug.txt"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+
+					<output name="CSVRowOutput">
+						<!--<template>
+							var len = $fields.length-1;
+							var i = 0;
+							if (updateID == 0) i = 2;
+							for(i ; i < len ; i++){
+								$buffer.append($fields[i].toString());
+								$buffer.append('|');
+							}
+							$buffer.append($fields[$fields.length-1].toString());
+							$buffer.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						</template>-->
+
+						<fileTemplate><!--  "";
+							int batch = updateID - (table.getUpdateLastID() - (int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES") - 1);
+							if(batch < 1){
+								batch=1;
+							}
+							result= result + outputDir + "Batch" + batch  + "/" + table.getName() + fileEnding;
+							-->
+						</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<ExcludedHistoricalFields historicalUpdateIDsCount="${DMUpdatesCountHist}">2</ExcludedHistoricalFields>
+					</output>
+				</output>
+			</table>
+
+			<table name="WatchHistory" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/WatchHistory-Audit.xml" xpointer="element(/1/1)" parse="xml"/> 
+
+					<output name="tpc.di.output.WatchHistoryValidationOutput" active="${DEBUG_SYMBOL_REFERENCES_TIMESTAMP_VALIDITY}">	
+						<fileTemplate>outputDir +"wh_debug.txt"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+
+					<output name="CSVRowOutput">
+						<fileTemplate><!--  "";
+
+							int batchID=1;
+							int histThreashold = table.getUpdateLastID() - ( (int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES") );
+							if(updateID>histThreashold){
+								batchID=updateID-histThreashold + 1; 
+							}
+
+							result= result + outputDir + "Batch" + batchID  + "/" + table.getName() + fileEnding;
+
+							-->
+						</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+
+						<ExcludedHistoricalFields historicalUpdateIDsCount="${WHHistUpdatesLastID} + 1">2</ExcludedHistoricalFields>
+					</output>
+
+					<output name="StatisticsOutput" active="${WATCH_HIST_VALIDATION}">	
+						<size>2</size>
+						<fileTemplate>outputDir + "" + table.getName() +"_validation"+ fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!-- "" --></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!--
+							if(	pdgf.Controller.getInstance().getProject().getWorkers() != 1){
+								throw new java.lang.RuntimeException("WatchHistory verification output requires the workercount to be 1! becaus it cannot run concurrently.");
+							}
+							java.util.List errors = java.util.Collections.synchronizedList(new java.util.ArrayList());
+							errors.add("first\n");
+							keyValueStore.put("errors", java.util.Collections.synchronizedList(new java.util.ArrayList()));
+						-->
+						</tableChangedEventTemplate>
+
+						<formaterTemplate><!--
+						java.util.List errors =(java.util.List)keyValueStore.get("errors");
+						int size=errors.size();
+						buf.append("Messages: ").append(size).append("\n");
+						System.out.println("tpc-di-generation.xml:StatisticsOutput WATCH HISTORY VERIFICATON ERRORS: " + size);
+
+						for(int i=0; i< size; i++){
+							buf.append(errors.get(i));
+							buf.append("\n");
+						}
+						-->
+						 </formaterTemplate>
+
+						<counterTemplate><!-- 
+							java.util.List errors = (java.util.List) keyValueStore
+							.get("errors");
+
+							String cid_debug = field[2].toString();
+							String cid =field[2].getPlainValue().toString();
+							String symbol = field[3].toString();
+							String action = field[5].toString();
+							String key = cid + symbol;
+
+							Object o = keyValueStore.get(key);
+
+							// first apperance of c_id/symbol pair,
+							if (o == null) {
+								if (action.equals("ACTV")) {
+
+									// first apperance of c_id/symbol pair, set statemachine to 1
+									keyValueStore.put(key, Integer.valueOf(1));
+								} else {
+									errors.add("First apperance of pair but action !=ACTV |"
+										+ cid_debug + "|" + symbol + "|" + action + "\n");
+									}
+								} else {
+									// second apperance must be CNCL! no third aperance allowed!
+									// val is statemachine for c_id/symb pair: 1== actv 2==cncl
+
+									int val = ((Integer) o).intValue();
+									if (val == 1) {
+										if (action.equals("CNCL")) {
+											// deletion of c_id/symb pair, set statemachine to 2
+											keyValueStore.put(key, Integer.valueOf(2));
+										} else {
+											errors.add("ACTION mismatch. previous state was ACTV, expected: CNCL |"
+												+ cid_debug + "|" + symbol + "|" + action + "\n");
+										}
+									} else if (val == 2) {
+										errors.add("previous state was CNCL! no further updates allowed |" + cid_debug + "|" + symbol + "|" + action + "\n");
+										// ERROR
+									}else{
+										errors.add("statemachine error val: " + val  + " |"
+											+ cid_debug + "|" + symbol + "|" + action + "\n");
+									}
+								}
+							-->
+						</counterTemplate>
+					</output>
+				</output>
+			</table>
+			
+			<table name="FINWIRE-cmp" exclude="true">
+				
+				<scheduler name="UpdateScheduler"></scheduler>
+				
+				<output name="CSVRowOutput">
+					<fileTemplate>outputDir + "Batch1/" + table.getName() + (1950 + ((updateID - (updateID % 4)) / 4)) + "Q" + ((updateID % 4) + 1)</fileTemplate>
+					<outputDir>output/</outputDir>
+					<fileEnding>.txt</fileEnding>
+					<sortByRowID>${sortedOutput}</sortByRowID>
+					<padding>true</padding>
+					<paddingObjectArray>false</paddingObjectArray>
+				</output>
+			</table>
+			
+			<table name="FINWIRE-sec" exclude="true">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="CSVRowOutput">
+					<fileTemplate>outputDir  + table.getName()+"_debug" + fileEnding</fileTemplate>
+					<outputDir>output/</outputDir>
+					<fileEnding>.txt</fileEnding>
+					<sortByRowID>${sortedOutput}</sortByRowID>
+					<delimiter>|</delimiter>
+				</output>
+			</table>
+
+			<table name="FINWIRE-fin" exclude="true">
+				<scheduler name="DbDumpUpdateScheduler">
+					<excludeDeletedIDs>true</excludeDeletedIDs>
+				</scheduler>
+
+				<output name="CSVRowOutput">
+					<fileTemplate>outputDir + "Batch1/" + table.getName() + (1950 + ((updateID - (updateID % 4)) / 4)) + "Q" + ((updateID % 4) + 1)</fileTemplate>
+					<outputDir>output/</outputDir>
+					<fileEnding>.txt</fileEnding>
+					<sortByRowID>${sortedOutput}</sortByRowID>
+					<padding>true</padding>
+					<paddingObjectArray>false</paddingObjectArray>
+				</output>
+			</table>
+
+			<table name="FINWIRE" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/FINWIRE-Audit.xml"  xpointer="element(/1/1)"  parse="xml"/>
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch1/" + table.getName() + (1967 + ((updateID - (updateID % 4)) / 4)) + "Q" + ((updateID % 4) + 1)</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<padding>true</padding>
+						<delimiter></delimiter>
+						<paddingObjectArray>false</paddingObjectArray>
+					</output>
+
+					<output name="CSVRowOutput" active="${FinwireDebugFileOutputActive}">
+						<fileTemplate>outputDir + table.getName()+ "_AllInOne" + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<padding>true</padding>
+						<paddingObjectArray>false</paddingObjectArray>
+					</output>
+
+					<output name="CompiledTemplateOutput" active="${Finwire_SEC_DebugFileOutputActive}">
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<fileTemplate>outputDir +  table.getName() + "_FIN_SEC"+ fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<header><!--""--></header>
+						<footer><!--""--></footer>
+						<template><!--
+						if(rowDataDTO.getUpdate().getAction() == pdgf.core.dataGenerator.UpdateBlackBox.ACTION.ACTION_NEW){
+							if(fields[1].toString().equals("SEC")){
+								buffer.append( fields[2].toString()).append(LINESEPARATOR);
+							}
+						}
+						--></template>
+					</output>
+					<output name="CompiledTemplateOutput" active="${DEBUG_SYMBOL_REFERENCES_TIMESTAMP_VALIDITY}">
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<fileTemplate>outputDir +  table.getName() + "_FIN_SECandDTS"+ fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+						<header><!--""--></header>
+						<footer><!--""--></footer>
+						<template><!--
+						if(rowDataDTO.getUpdate().getAction() == pdgf.core.dataGenerator.UpdateBlackBox.ACTION.ACTION_NEW){
+							if(fields[1].toString().equals("SEC")){
+								buffer.append( fields[0].toString()).append("|").append( fields[2].toString()).append(LINESEPARATOR);
+							}
+						}
+						--></template>
+					</output>
+				</output>
+			</table>
+
+			<table name="TradeSource" exclude="false">
+				<scheduler name="UpdateScheduler"></scheduler>
+				<output name="SplitFileOutputWrapper">
+
+					<output name="tpc.di.output.TradeSourceOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + var[0] + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+
+						<output name="tpc.di.output.TradeSourceAuditOutput" active="${AuditingAndReportingSystemActive}">
+							<bufferSize></bufferSize>
+							<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + var[0] +"_audit"+ fileEnding</fileTemplate>
+							<outputDir>output/</outputDir>
+							<fileEnding>.csv</fileEnding>
+							<delimiter>,</delimiter>
+							<sortByRowID>${sortedOutput}</sortByRowID>
+							<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+							<footer></footer>
+						</output>
+					</output>
+
+					<output name="tpc.di.output.TradeSymbolValidationOutput" active="${DEBUG_SYMBOL_REFERENCES_TIMESTAMP_VALIDITY}" >
+						<fileTemplate>outputDir + "trade_debug.txt"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+
+					<output name="CSVRowOutput" active="${TradeSourceDebugFileOutputActive}">
+						<fileTemplate>outputDir + table.getName()+ "_debug"+ fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+
+			<table name="TradeType" exclude="false">
+				<output name="SplitFileOutputWrapper">
+					<xi:include href="config/tpc-di-Audit/TradeType-Audit.xml" xpointer="element(/1/1)" parse="xml"/>
+
+					<output name="CSVRowOutput">
+						<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + fileEnding</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.txt</fileEnding>
+						<delimiter>|</delimiter>
+						<sortByRowID>${sortedOutput}</sortByRowID>
+					</output>
+				</output>
+			</table>
+		</tables>
+	</schema>
+</generation>

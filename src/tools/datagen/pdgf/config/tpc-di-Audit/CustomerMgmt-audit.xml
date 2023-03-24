@@ -1,0 +1,383 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ *
+
+ ******************************************************************************/
+-->
+<include>
+    <output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+		<size>12</size><!-- Number of available counters in countertemplate -->
+		<fileTemplate>outputDir +  "Batch1" + "/" + table.getName() + "_audit"+ fileEnding</fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>
+				
+		<tableChangedEventTemplate><!--
+			java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+			long firstBatchDate =	((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));
+			long updateIDOffset = ((long)project.getXMLProperty("CMUpdateLastID"));
+			updateIDOffset = 0 ; //updated by jackson July 17 for tickets 157, 158
+			long batchDate = firstBatchDate + (updateID - updateIDOffset)* pdgf.util.Constants.ONE_DAY_IN_ms;
+			int batchID=1;
+			
+			keyValueStore.put("batchID", Integer.valueOf(batchID));
+			keyValueStore.put("BATCHDATE_PLAIN", df.format(new java.util.Date(batchDate)));
+			keyValueStore.put("BATCHDATE_PLAIN", Long.valueOf(batchDate));
+			//((Long)keyValueStore.get("BATCHDATE_PLAIN")).longValue(); 
+				
+			//do not reset counters
+			//	for ( int i = 0 ; i < counter.length; i++) {
+			//		counter[i].set(0L);
+			//	}
+		-->
+		</tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!--
+		int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+		
+		//DimAccount,1,null,CA_ADDACCT,v,null
+		        buf.append("DimAccount");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("CA_ADDACCT");
+		        buf.append(delimiter);
+				buf.append(counter[1]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+		        
+		//DimAccount,1,null,CA_CLOSEACCT,v,null
+				buf.append("DimAccount");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("CA_CLOSEACCT");
+		        buf.append(delimiter);
+				buf.append(counter[2]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+		        
+		//DimAccount,1,null,CA_UPDACCT,v,null
+				buf.append("DimAccount");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("CA_UPDACCT");
+		        buf.append(delimiter);
+				buf.append(counter[3]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+		        
+		//DimAccount,1,null,CA_ID_HIST,v,null
+				buf.append("DimAccount");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("CA_ID_HIST");
+		        buf.append(delimiter);
+				buf.append(counter[4]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);						   
+		
+		//DimCustomer,1,null,C_NEW,v,null   //DimAccount,1,null,C_NEW,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_NEW");
+		        buf.append(delimiter);
+				buf.append(counter[5]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);								
+		
+		//DimCustomer,1,null,C_UPDCUST,v,null.  //DimAccount,1,null,C_UPDCUST,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_UPDCUST");
+		        buf.append(delimiter);
+				buf.append(counter[6]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);					
+
+		//DimCustomer,1,null,C_ID_HIST,v,null. //DimAccount,1,null,C_ID_HIST,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_ID_HIST");
+		        buf.append(delimiter);
+				buf.append(counter[7]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);						   
+
+		//DimCustomer,1,null,C_INACT,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_INACT");
+		        buf.append(delimiter);
+				buf.append(counter[8]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);						   
+		      
+		//DimCustomer,1,null,C_DOB_TO,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_DOB_TO");
+		        buf.append(delimiter);
+				buf.append(counter[9]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);						      
+
+		//DimCustomer,1,null,C_DOB_TY,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_DOB_TY");
+		        buf.append(delimiter);
+				buf.append(counter[10]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);							      
+
+		//DimCustomer,1,null,C_TIER_INV,v,null
+				buf.append("DimCustomer");
+		        buf.append(delimiter);
+		        buf.append("1");
+		        buf.append(delimiter);
+		        buf.append("");
+		        buf.append(delimiter);
+		        buf.append("C_TIER_INV");
+		        buf.append(delimiter);
+				buf.append(counter[11]);
+		        buf.append(delimiter);						        
+		        buf.append("");
+		        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);	
+		        
+		        
+		        
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));						        
+			-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+				long batchDate = ((Long) keyValueStore.get("BATCHDATE_PLAIN"))
+					.longValue();
+		
+				pdgf.core.dataGenerator.beans.FieldValueDTO cDobField=null, cTierField=null;
+				String fieldName;
+				for (int i = 0; i < field.length; i++) {
+					fieldName = field[i].getField().getName();
+				
+					if(fieldName.equals("c_tier")){
+						cTierField=field[i];
+					}else if(fieldName.equals("c_dob")){
+						cDobField=field[i];
+					}
+				}
+								
+			
+				//CM_ RECORDS ==counter[0]	Records generated for this ActionDate
+				counter[0].incrementAndGet();
+										
+				//CA_ADDACCT ==counter[1]	Number of times action type ADDACCT was used
+				//CA_CLOSEACCT ==counter[2]	Number of times action type CLOSEACCT was used
+				//CA_UPDACCT ==counter[3]	Number of times action type UPDACCT was used
+				//CA_ID_HIST ==counter[4]	Number of updates to a ca_id that was inserted or already updated on the same day
+				//C_NEW ==counter[5]		Number of times action type NEW was used
+				//C_UPDCUST ==counter[6]	Number of times action type UPDCUST was used
+				//C_ID_HIST ==counter[7]	Number of updates or INACT action to a c_id that was inserted or already updated on the same day
+				//C_INACT ==counter[8]		Number of times action type INACT was used
+				//C_DOB_TO ==counter[9]		Number of times C_DOB results in an age less more than 100 years from CustomerMgmt.xml
+				//C_DOB_TY ==counter[10]	Number of times C_DOB results in an age less than zero from CustomerMgmt.xml
+				//C_TIER_INV ==counter[11]	Number of times C_TIER is not 1,2 or 3 from CustomerMgmt.xml
+				
+				String cdcFlag =  field[0].toString();
+			
+				//CA_ADDACCT ==counter[1]
+				if (cdcFlag.equals("ADDACCT")) {
+					counter[1].incrementAndGet();
+				
+				// CA_CLOSEACCT ==counter[2]
+				} else if (cdcFlag.equals("CLOSEACCT")) {
+					counter[2].incrementAndGet();
+				
+				// CA_UPDACCT ==counter[3]
+				} else if (cdcFlag.equals("UPDACCT")) {
+					counter[3].incrementAndGet();
+				
+				// C_NEW ==counter[5]	
+				} else if (cdcFlag.equals("NEW")) {
+					counter[5].incrementAndGet();
+				
+				// C_UPDCUST ==counter[6]
+				}else if (cdcFlag.equals("UPDCUST")) {
+					counter[6].incrementAndGet();
+				
+				//C_INACT ==counter[8]	
+				}else if (cdcFlag.equals("INACT")) {
+					counter[8].incrementAndGet();
+				}
+			
+//CA_ID_HIST and C_ID_HIST are waited to add...
+				counter[4].set(-1L);
+				counter[7].set(0L);
+			
+			
+				//C_DOB_TO ==counter[9]	Number of times C_DOP between FIRST_BATCH_DATE_START-100years and FIRST_BATCH_DATE_START-200 years
+				//C_DOB_TY ==counter[10]	 Number of times C_DOP between FIRST_BATCH_DATE_START and FIRST_BATCH_DATE_START + 100 years
+
+				if(cdcFlag.equals("NEW")) {
+				}else if(cdcFlag.equals("UPDCUST")) {
+					if(cDobField.changedThisUpdate()==false) cDobField = null;
+				}else{
+					cDobField = null;
+				}	
+				if(cDobField!=null && cDobField.getPlainValue()!=null){
+					long c_dob = ((Number)cDobField.getPlainValue()).longValue();
+					
+					if( c_dob < batchDate - 1*pdgf.util.Constants.ONE_CENTURY_IN_MS){  //fix for ticket 157)
+						counter[9].incrementAndGet();
+					}else if(c_dob <= batchDate){ // Updated by Jackson Jan 11,2013
+						//
+					}else {
+						counter[10].incrementAndGet();
+					}
+												
+//					long c_dob = ((Number)cDobField.getPlainValue()).longValue();
+//					if(c_dob < batchDate - 200 *  pdgf.util.Constants.ONE_CENTURY_IN_MS  ){
+//						//invalid, to small: C_DOB  <  BATCH_DATE-200years
+//					}else if( c_dob < batchDate - 100 *pdgf.util.Constants.ONE_CENTURY_IN_MS){
+//						counter[9].incrementAndGet();
+//					}else if(c_dob < batchDate){ // Updated by Jackson Jan 11,2013
+//						//
+//					}else if(c_dob < batchDate + 100 *pdgf.util.Constants.ONE_CENTURY_IN_MS){
+//						counter[10].incrementAndGet();
+//					}else{
+//						//invalid, to big: DOB >  BATCH_DATE+100years
+//					}
+				}												
+
+			
+			//C_TIER_INV ==counter[11]	Number of times C_TIER was 0,4,5,6,7,8,9,””
+			//New requirement:  1. In all cases, C_TIER is set to any number other than 1,2,3
+			//                  2. If NEW and the C_TIER field is not given at all
+			if(cdcFlag.equals("NEW")) {
+				if(cTierField!=null){
+						int ctier=-1;
+						Object c_tier_obj=cTierField.getValue();
+						if(c_tier_obj!=null){
+								if(c_tier_obj instanceof Number){
+										ctier=((Number)c_tier_obj).intValue();
+								}else{
+										try{
+											ctier= Integer.valueOf(c_tier_obj.toString()).intValue();
+										}catch (java.lang.NumberFormatException e) {
+										}
+								}
+						}
+               	
+						switch (ctier) {
+							case 0:
+								counter[11].incrementAndGet();
+								break;
+							case 1:;
+							case 2:;
+							case 3:;
+								break;
+							default:
+								//""
+								counter[11].incrementAndGet();
+								break;
+						}
+					} else{
+						counter[11].incrementAndGet();
+					}
+					
+				}	
+			
+			}else if(cdcFlag.equals("UPDCUST")) {
+					if(cTierField!=null && cTierField.changedThisUpdate()==true){
+						int ctier=-1;
+						Object c_tier_obj=cTierField.getValue();
+						if(c_tier_obj!=null){
+								if(c_tier_obj instanceof Number){
+										ctier=((Number)c_tier_obj).intValue();
+								}else{
+										try{
+											ctier= Integer.valueOf(c_tier_obj.toString()).intValue();
+										}catch (java.lang.NumberFormatException e) {
+										}
+								}
+						}
+						switch (ctier) {
+							case 0:
+								counter[11].incrementAndGet();
+								break;
+							case 1:;
+							case 2:;
+							case 3:;
+								break;
+							default:
+								//""
+								counter[11].incrementAndGet();
+								break;
+						}
+					}
+				}	
+		
+			}				
+			
+				-->
+		</counterTemplate>
+	</output>
+</include>

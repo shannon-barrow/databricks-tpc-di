@@ -1,0 +1,794 @@
+{
+        "email_notifications": {},
+        "name": "tpcdi_sql_alextests",
+        "max_concurrent_runs": 1,
+        "tasks": [
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/_init/7.2.3.1_DwCreate",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "0",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "init__DwCreate"
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/_init/7.2.3.5_BatchValidation",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "0",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "init__BatchValidation",
+                "depends_on": [
+                    {
+                        "task_key": "init__DwCreate"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/_init/PhaseComplete",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "0",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "init__PhaseComplete",
+                "depends_on": [
+                    {
+                        "task_key": "init__BatchValidation"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimDate",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimDate",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/CustomerMgmtRaw",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__CustomerMgmtRaw",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/BatchDate",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__BatchDate",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/HR",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__HR",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimTime",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimTime",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/Industry",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__Industry",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/TaxRate",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__TaxRate",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/TradeType",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__TradeType",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/StatusType",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__StatusType",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/HoldingHistoryHistorical",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__HoldingHistoryHistorical",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/ProspectRaw",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__ProspectRaw",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/CashTransactionHistorical",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__CashTransactionHistorical",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DailyMarketHistorical",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DailyMarketHistorical",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/TradeHistorical",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__TradeHistorical",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/TradeHistory",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__TradeHistory",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/WatchHistoryHistorical",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__WatchHistoryHistorical",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FinwireCmp",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FinwireCmp",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FinwireSec",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FinwireSec",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FinwireFin",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FinwireFin",
+                "depends_on": [
+                    {
+                        "task_key": "init__PhaseComplete"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/Prospect",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__Prospect",
+                "depends_on": [
+                    {
+                        "task_key": "historical__ProspectRaw"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimCompany",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimCompany",
+                "depends_on": [
+                    {
+                        "task_key": "historical__FinwireCmp"
+                    },
+                    {
+                        "task_key": "historical__Industry"
+                    },
+                    {
+                        "task_key": "historical__StatusType"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimCustomer",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimCustomer",
+                "depends_on": [
+                    {
+                        "task_key": "historical__TaxRate"
+                    },
+                    {
+                        "task_key": "historical__Prospect"
+                    },
+                    {
+                        "task_key": "historical__CustomerMgmtRaw"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimBroker",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimBroker",
+                "depends_on": [
+                    {
+                        "task_key": "historical__HR"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimSecurity",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimSecurity",
+                "depends_on": [
+                    {
+                        "task_key": "historical__DimCompany"
+                    },
+                    {
+                        "task_key": "historical__FinwireSec"
+                    },
+                    {
+                        "task_key": "historical__FinwireCmp"
+                    },
+                    {
+                        "task_key": "historical__StatusType"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimAccount",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimAccount",
+                "depends_on": [
+                    {
+                        "task_key": "historical__DimBroker"
+                    },
+                    {
+                        "task_key": "historical__DimCustomer"
+                    },
+                    {
+                        "task_key": "historical__CustomerMgmtRaw"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FactWatches",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FactWatches",
+                "depends_on": [
+                    {
+                        "task_key": "historical__WatchHistoryHistorical"
+                    },
+                    {
+                        "task_key": "historical__DimCustomer"
+                    },
+                    {
+                        "task_key": "historical__DimSecurity"
+                    },
+                    {
+                        "task_key": "historical__DimDate"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/Financial",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__Financial",
+                "depends_on": [
+                    {
+                        "task_key": "historical__FinwireCmp"
+                    },
+                    {
+                        "task_key": "historical__FinwireFin"
+                    },
+                    {
+                        "task_key": "historical__DimCompany"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/DimTrade",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__DimTrade",
+                "depends_on": [
+                    {
+                        "task_key": "historical__StatusType"
+                    },
+                    {
+                        "task_key": "historical__TradeType"
+                    },
+                    {
+                        "task_key": "historical__TradeHistorical"
+                    },
+                    {
+                        "task_key": "historical__TradeHistory"
+                    },
+                    {
+                        "task_key": "historical__DimDate"
+                    },
+                    {
+                        "task_key": "historical__DimTime"
+                    },
+                    {
+                        "task_key": "historical__DimSecurity"
+                    },
+                    {
+                        "task_key": "historical__DimAccount"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FactMarketHistory",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FactMarketHistory",
+                "depends_on": [
+                    {
+                        "task_key": "historical__DailyMarketHistorical"
+                    },
+                    {
+                        "task_key": "historical__Financial"
+                    },
+                    {
+                        "task_key": "historical__DimDate"
+                    },
+                    {
+                        "task_key": "historical__DimSecurity"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FactCashBalances",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FactCashBalances",
+                "depends_on": [
+                    {
+                        "task_key": "historical__CashTransactionHistorical"
+                    },
+                    {
+                        "task_key": "historical__DimAccount"
+                    },
+                    {
+                        "task_key": "historical__DimDate"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/historical/FactHoldings",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__FactHoldings",
+                "depends_on": [
+                    {
+                        "task_key": "historical__HoldingHistoryHistorical"
+                    },
+                    {
+                        "task_key": "historical__DimTrade"
+                    }
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/_init/7.2.3.5_BatchValidation",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__BatchValidation",
+                "depends_on": [
+                        { "task_key": "historical__BatchDate"},
+                        { "task_key": "historical__CashTransactionHistorical"},
+                        { "task_key": "historical__CustomerMgmtRaw"},
+                        { "task_key": "historical__DailyMarketHistorical"},
+                        { "task_key": "historical__DimAccount"},
+                        { "task_key": "historical__DimBroker"},
+                        { "task_key": "historical__DimCompany"},
+                        { "task_key": "historical__DimCustomer"},
+                        { "task_key": "historical__DimDate"},
+                        { "task_key": "historical__DimSecurity"},
+                        { "task_key": "historical__DimTime"},
+                        { "task_key": "historical__DimTrade"},
+                        { "task_key": "historical__FactCashBalances"},
+                        { "task_key": "historical__FactHoldings"},
+                        { "task_key": "historical__FactMarketHistory"},
+                        { "task_key": "historical__FactWatches"},
+                        { "task_key": "historical__Financial"},
+                        { "task_key": "historical__FinwireCmp"},
+                        { "task_key": "historical__FinwireFin"},
+                        { "task_key": "historical__FinwireSec"},
+                        { "task_key": "historical__HoldingHistoryHistorical"},
+                        { "task_key": "historical__HR"},
+                        { "task_key": "historical__Industry"},
+                        { "task_key": "historical__Prospect"},
+                        { "task_key": "historical__ProspectRaw"},
+                        { "task_key": "historical__StatusType"},
+                        { "task_key": "historical__TaxRate"},
+                        { "task_key": "historical__TradeHistorical"},
+                        { "task_key": "historical__TradeHistory"},
+                        { "task_key": "historical__TradeType"},
+                        { "task_key": "historical__WatchHistoryHistorical"}
+                ]
+            },
+            {
+                "existing_cluster_id": "0119-142338-q3eet8rj",
+                "notebook_task": {
+                    "notebook_path": "/Repos/alexander.desroches@databricks.com/tpcdi-sql/tpc-di__benchmark_run/_init/PhaseComplete",
+                    "base_parameters": {
+                        "env": "a01",
+                        "files_directory": "/tmp/tpc-di",
+                        "batch_id": "1",
+                        "scale_factor": "1000"
+                    }
+                },
+                "email_notifications": {},
+                "task_key": "historical__PhaseComplete",
+                "depends_on": [
+                        { "task_key": "historical__BatchValidation"}
+
+                ]
+            }
+        ]
+    }

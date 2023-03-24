@@ -1,0 +1,110 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<include>
+    <!-- AUDIT by Jackson -->
+	<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+		<size>2</size>
+		<fileTemplate><!--"";
+		int batchID=1;
+		int histThreashold = table.getUpdateLastID() - ( (int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES") );
+		if(updateID>histThreashold){
+			batchID=updateID-histThreashold + 1; 
+		}
+				
+		//	System.out.println("uid:  " + updateID + " batchID: " + batchID + " table updateLastID: " +table.getUpdateLastID()  + " NUMBER_OF_INCREMENTAL_BATCHES: " + ((int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES")) );
+		result = result +  outputDir + "Batch" + batchID  + "/"  + table.getName() +"_audit"+ fileEnding--></fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>
+		<tableChangedEventTemplate><!-- 
+			//reset counters at statistics file change
+			
+			int batchID=1;
+			int histThreashold = table.getUpdateLastID() - ( (int)project.getXMLProperty("NUMBER_OF_INCREMENTAL_BATCHES") );
+			if(updateID>histThreashold){
+				batchID=updateID-histThreashold + 1; 
+			}
+			
+			for ( int i = 0 ; i < counter.length; i++) {
+				counter[i].set(0L);
+			}
+				
+			//BatchId of current statisticsFile
+		
+			keyValueStore.put("batchID", Integer.valueOf(batchID));
+		-->
+		</tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!-- 
+			int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+
+			//FactWatches, b,  null, WH_ACTIVE, v, null
+				buf.append("FactWatches");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("WH_ACTIVE");
+				buf.append(delimiter);
+				buf.append(counter[1]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+			//FactWatches, b,  null, WH_RECORDS, v, null
+				buf.append("FactWatches");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("WH_RECORDS");
+				buf.append(delimiter);
+				buf.append(counter[0]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);							
+
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));		
+			-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+			
+			//WH_RECORDS==counter[0]	Number of records generated for this BATCH_DATE
+			counter[0].incrementAndGet();
+			
+			
+			//WH_ACTIVE==counter[1]	Number of records generated wit W_ACTION=”ACTV”
+			
+			String stringValue= field[5].toString();
+			// check if it is CIK
+			
+	
+			// if record string starts is 'ACTIVE'
+			if (stringValue.length()>0 && stringValue.charAt(0) == 'A') {
+					counter[1].incrementAndGet();
+			}
+								
+			-->
+		</counterTemplate>
+	</output>
+    
+</include>

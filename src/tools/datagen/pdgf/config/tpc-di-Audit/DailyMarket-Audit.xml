@@ -1,0 +1,89 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<include>
+    	<!-- AUDIT by Jackson -->
+		<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+			<size>1</size><!-- Number of available counters in countertemplate -->
+			<!-- <fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + "_audit" + fileEnding</fileTemplate> -->
+			<fileTemplate><!--  "";  	
+					int batch = updateID - (table.getUpdateLastID() - (int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES") - 1);
+					if(batch < 1){
+					 batch=1;
+					}
+
+					result= result + outputDir + "Batch" + batch  + "/" + table.getName() + "_audit" + fileEnding; 
+					//DEBUG
+					//System.out.println("[DEBUG tpc-di-generation.xml line:3615]curr updateID:" + updateID + " determind Batch:" + batch + " write to file:" + result);
+					-->
+			</fileTemplate>
+			<outputDir>output/</outputDir>
+			<fileEnding>.csv</fileEnding>
+			<delimiter>,</delimiter>
+			<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+			<footer></footer>
+					
+			<tableChangedEventTemplate><!-- 
+				//reset counters at statistics file change
+				for ( int i = 0 ; i < counter.length; i++) {
+					counter[i].set(0L);
+				}
+
+				//BatchId of current statisticsFile
+				int batchID = updateID - (table.getUpdateLastID() - ((int) project.getXMLProperty("NUMBER_OF_INCREMENTAL_BATCHES"))-1);
+				if(batchID < 1){
+				 batchID=1;
+				}
+				
+				keyValueStore.put("batchID", Integer.valueOf(batchID));
+				
+				//DEBUG
+				//System.out.println("[DEBUG tpc-di-generation.xml line:3979]curr updateID:" + updateID + " determind Batch:" + batchID );
+					
+			-->
+			</tableChangedEventTemplate>
+			
+			<!-- Format the collected counter statistics -->
+			<formaterTemplate><!-- 
+				int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+				
+				//FactMarketHistory, b, null, DM_RECORDS, v, null
+					buf.append("FactMarketHistory");
+					buf.append(delimiter);
+					buf.append(batchID);
+					buf.append(delimiter);
+					buf.append("");
+					buf.append(delimiter);
+					buf.append("DM_RECORDS");
+					buf.append(delimiter);
+					buf.append(counter[0]);
+					buf.append(delimiter);
+					buf.append("");
+					buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+					
+				//FEATURE: record total number of records per batch
+		       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+			    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+		
+			    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+			    long RECORDS = counter[0].get();
+			    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));		
+					
+			 -->
+			 </formaterTemplate>
+			 
+			<counterTemplate><!-- 
+				//DM_RECORDS == counter[0];
+				counter[0].incrementAndGet();
+											
+			-->
+			</counterTemplate>						
+		</output>
+    
+    
+</include>

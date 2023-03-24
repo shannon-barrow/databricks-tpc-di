@@ -1,0 +1,253 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ *
+
+ ******************************************************************************/
+-->
+
+<include>
+    <output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+		<size>8</size>
+	
+		<fileTemplate><!-- "";  
+					
+				int batchID= updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID();
+				
+				//System.out.println("uid:  " + updateID + " batch: " + batchID + " table updateLastID: " +table.getUpdateLastID()  + " NUMBER_OF_INCREMENTAL_BATCHES: " + ((int)getProperty("NUMBER_OF_INCREMENTAL_BATCHES")) );
+				
+				result = result + outputDir + "Batch" + batchID + "/" + table.getName() + "_audit"+ fileEnding;
+		--></fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>
+
+		<tableChangedEventTemplate><!-- 
+			int batchID=updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID();
+				
+			java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+			long firstBatchDate =	((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));
+			long updateIDOffset = ((long)project.getXMLProperty("CMUpdateLastID"));
+			updateIDOffset = 0 ;  //add by jackson 2013-7-7
+			long batchDate = firstBatchDate + (updateID - updateIDOffset)* pdgf.util.Constants.ONE_DAY_IN_ms;
+	
+	
+			keyValueStore.put("batchID", Integer.valueOf(batchID));
+			keyValueStore.put("BATCHDATE_PLAIN", df.format(new java.util.Date(batchDate)));
+			keyValueStore.put("BATCHDATE_PLAIN", Long.valueOf(batchDate));
+			//((Long)keyValueStore.get("BATCHDATE_PLAIN")).longValue();
+			
+			//reset counters at statistics file change
+			for ( int i = 0 ; i < counter.length; i++) {
+				counter[i].set(0L);
+			}
+		
+		--></tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!-- 
+				int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+				
+				//DimCustomer,b,null,C_NEW,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_NEW");
+				buf.append(delimiter);
+				buf.append(counter[1]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+				//DimCustomer,b,null,C_UPDCUST,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_UPDCUST");
+				buf.append(delimiter);
+				buf.append(counter[2]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+				//DimCustomer,b,null,C_ID_HIST,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_ID_HIST");
+				buf.append(delimiter);
+				buf.append(counter[3]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);								
+				
+				//DimCustomer,b,null,C_INACT,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_INACT");
+				buf.append(delimiter);
+				buf.append(counter[4]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);	
+				
+				//DimCustomer,b,null,C_DOB_TO,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_DOB_TO");
+				buf.append(delimiter);
+				buf.append(counter[5]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);									
+				
+				//DimCustomer,b,null,C_DOB_TY,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_DOB_TY");
+				buf.append(delimiter);
+				buf.append(counter[6]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);																										
+
+				//DimCustomer,b,null,C_TIER_INV,v,null
+				buf.append("DimCustomer");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("C_TIER_INV");
+				buf.append(delimiter);
+				buf.append(counter[7]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);										
+			
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));			
+			
+			-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+			long batchDate = ((Long) keyValueStore.get("BATCHDATE_PLAIN")).longValue();
+			
+			//C_RECORDS ==counter[0]
+			counter[0].incrementAndGet();
+			
+			String cdcFlag = field[0].toString();
+			String cST = field[4].toString();							
+										
+			//C_NEW ==counter[1]
+			if (cdcFlag.equals("I")) {
+				counter[1].incrementAndGet();
+			//C_UPDCUST == counter[2]
+			} else if (cdcFlag.equals("U")) {
+				if (!cST.equals("INAC")){
+					counter[2].incrementAndGet();
+				}
+			}
+			
+			//C_ID_HIST ==counter[3]
+			counter[3].set(0L);
+			
+
+			//C_INACT ==counter[4]
+			if (cST.equals("INAC")){
+				counter[4].incrementAndGet();
+			}
+										
+			//C_DOB_TO == counter[5] Total number of records with  C_DOB < BATCH_DATE-100years
+			//C_DOB_TY == counter[6] Total number of records with C_DOB > BATCH_DATE
+			if(field[10].getPlainValue()!=null){
+			    
+				long c_dob = ((Number)field[10].getPlainValue()).longValue();
+
+				if( c_dob < batchDate - 1 *pdgf.util.Constants.ONE_CENTURY_IN_MS){  //fix for ticket 157
+					counter[5].incrementAndGet();
+				}else if(c_dob <= batchDate){ // Updated by Jackson Jun 19, 2013
+					//
+				}else {
+					counter[6].incrementAndGet();
+					//DEBUG jackson
+			        //System.out.print("bd:"+batchDate+" "+"dt:"+field[10].toString()+" " +field[10].getPlainValue()+"_"+pdgf.util.Constants.ONE_CENTURY_IN_MS );
+					
+				}
+			}
+						
+			//C_TIER_INV ==counter[7]  number of records with c_tier = 0,4-9,””
+			
+			int ctier=-1;
+			Object c_tier_obj=field[9].getValue();
+			if(c_tier_obj!=null){
+					if(c_tier_obj instanceof Number){
+							ctier=((Number)c_tier_obj).intValue();
+					}else{
+							try{
+								ctier= Integer.valueOf(c_tier_obj.toString()).intValue();
+							}catch (java.lang.NumberFormatException e) {
+							}
+					}
+			}
+	
+			switch (ctier) {
+			case 0:
+				counter[7].incrementAndGet();
+				break;
+			case 1:;
+			case 2:;
+			case 3:;
+				break;
+			case 4:;
+			case 5:;
+			case 6:;
+			case 7:;
+			case 8:;
+			case 9:;
+				//4-9
+				counter[7].incrementAndGet();
+				break;
+			default:
+				//""
+				counter[7].incrementAndGet();
+				break;
+			}
+			
+			-->
+		</counterTemplate>
+	</output>
+</include>

@@ -1,0 +1,3 @@
+The version is 1.1.0:
+java -jar DIGen.jar -v
+DIGen Version: 1.1.0

@@ -1,0 +1,60 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<include>
+     <output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">				
+		<size>1</size>
+		<fileTemplate>outputDir + "Batch" + (updateID + 1) + "/" + table.getName() + "_audit" + fileEnding</fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>
+				
+		<tableChangedEventTemplate><!-- 
+			//reset counters at statistics file change
+			for ( int i = 0 ; i < counter.length; i++) {
+				counter[i].set(0L);
+			}
+			
+			//BatchId of current statisticsFile
+			int batchID=1;
+			keyValueStore.put("batchID", Integer.valueOf(batchID));	
+		-->
+		</tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!-- 
+		
+			int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));		
+		-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+	
+			//###############
+			// START COUNTING
+			//###############
+	
+			// RECORDS==counter[0] Number of records generated for this
+			counter[0].incrementAndGet();
+
+		-->
+		</counterTemplate>
+	</output>	y
+    
+</include>

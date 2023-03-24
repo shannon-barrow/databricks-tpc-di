@@ -1,0 +1,126 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ ******************************************************************************/
+-->
+<include>
+	<!-- AUDIT by Jackson -->
+	<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+		<size>5</size><!-- Number of available counters in countertemplate -->
+		<fileTemplate>outputDir + "Batch" + (updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID()) + "/" + table.getName() + "_audit" + fileEnding</fileTemplate>
+		<outputDir>output/</outputDir>
+		<fileEnding>.csv</fileEnding>
+		<delimiter>,</delimiter>
+		<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+		<footer></footer>
+		<tableChangedEventTemplate><!-- 
+			//reset counters at statistics file change
+			for ( int i = 0 ; i < counter.length; i++) {
+				counter[i].set(0L);
+			}
+			
+			int batchID=(updateID + 1 - table.getProject().getTable("CustomerMgmtHelper").getUpdateLastID());
+			keyValueStore.put("batchID", Integer.valueOf(batchID));
+		
+		--></tableChangedEventTemplate>
+		
+		<!-- Format the collected counter statistics -->
+		<formaterTemplate><!-- 
+				int batchID=((Integer)keyValueStore.get("batchID")).intValue();
+				
+				//DimAccount,b,null,CA_ADDACCT,v,null
+				buf.append("DimAccount");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("CA_ADDACCT");
+				buf.append(delimiter);
+				buf.append(counter[1]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+				//DimAccount,b,null,CA_CLOSEACCT,v,null
+				buf.append("DimAccount");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("CA_CLOSEACCT");
+				buf.append(delimiter);
+				buf.append(counter[2]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+				
+				//DimAccount,b,null,CA_UPDACCT,v,null
+				buf.append("DimAccount");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("CA_UPDACCT");
+				buf.append(delimiter);
+				buf.append(counter[3]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);								
+				
+				//DimAccount,b,null,CA_ID_HIST,v,null
+				buf.append("DimAccount");
+				buf.append(delimiter);
+				buf.append(batchID);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(delimiter);
+				buf.append("CA_ID_HIST");
+				buf.append(delimiter);
+				buf.append(counter[4]);
+				buf.append(delimiter);
+				buf.append("");
+				buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);																		
+					
+			//FEATURE: record total number of records per batch
+	       	String key = tpc.di.TPC_DI_CONSTANTS.AUDIT.TOTAL_RECORDS_PER_BATCH.toString();
+		    Object o = tpc.di.output.AuditPersistenceStore.instance().getStore().get(key);
+	
+		    java.util.List []  perBatchRecordCounters = (java.util.List []) o;
+		    long RECORDS = counter[0].get();
+		    perBatchRecordCounters[batchID-1].add(Long.valueOf(RECORDS));		
+			-->
+		 </formaterTemplate>
+		
+		<!-- collect statistics -->
+		<counterTemplate><!-- 
+			//CDC_FLAG = field[0]
+			//CA_ST_ID = field[7]
+			String val = field[0].toString();
+			String val2 = field[7].toString();
+			
+			//total records counter
+			counter[0].incrementAndGet();
+			
+			if(val.equals("I")){
+				counter[1].incrementAndGet();
+			}else if (val.equals("U")){
+				if (val2.equals("INAC")){
+					counter[2].incrementAndGet();
+				}else if(val2.equals("ACTV")){
+					counter[3].incrementAndGet();
+				}
+			}
+			
+			counter[4].set(-1L);
+			
+			-->
+		</counterTemplate>
+	</output>
+	
+</include>

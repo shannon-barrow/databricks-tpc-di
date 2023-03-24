@@ -1,0 +1,1286 @@
+<!--
+/*******************************************************************************
+ * Copyright (c) 2013, bankmark and/or its affiliates. All rights reserved. 
+ * bankmark UG PROPRIETARY/CONFIDENTIAL. Use is subject to license terms.
+ *
+ *
+ *
+
+ ******************************************************************************/
+-->
+<Include>
+
+					
+					<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+						<size>2</size> <!-- number of used counters -->
+						<fileTemplate>outputDir + "Batch1_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!--
+								////System.out.println("Generating " + output.getCurrentOutputFileWriter().getFileName());
+								//Batch,b,d,FirstDay,null,null.
+								//Batch,b,d,LastDay,null,null.
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("1");
+						        buf.append(delimiter);
+						        
+								//get the DateBeginDate
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long mydate =	((long) project.getXMLProperty("DateBeginDate"));		
+								buf.append(df.format(new java.util.Date(mydate)));
+						        buf.append(delimiter);
+						        
+						        buf.append("FirstDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("1");
+						        buf.append(delimiter);
+
+								//get the FIRST_BATCH_DATE_START
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long firstBatchDate =	((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(firstBatchDate)));
+						        buf.append(delimiter);
+
+						        buf.append("LastDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						        
+						
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>
+					<output name="StatisticsOutput" active="(${NUMBER_OF_INCREMENTAL_BATCHES}>0?1:0)*${AuditingAndReportingSystemActive}">
+						<size>2</size><!-- number of used counters -->
+						<fileTemplate>outputDir + "Batch2_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR --></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!-- 
+								//Batch,b,d,FirstDay,null,null.
+								//Batch,b,d,LastDay,null,null.
+								//System.out.println("Generating " + output.getCurrentOutputFileWriter().getFileName());
+								
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("2");
+						        buf.append(delimiter);
+						        
+								//get the DateBeginDate
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long mydate = 24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(mydate)));
+						        buf.append(delimiter);
+						        
+						        buf.append("FirstDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("2");
+						        buf.append(delimiter);
+
+								//get the FIRST_BATCH_DATE_START
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long firstBatchDate = 24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(firstBatchDate)));
+						        buf.append(delimiter);
+
+						        buf.append("LastDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>
+					<output name="StatisticsOutput" active="(${NUMBER_OF_INCREMENTAL_BATCHES}>1?1:0)*${AuditingAndReportingSystemActive}">
+						<size>2</size><!-- number of used counters -->
+						<fileTemplate>outputDir + "Batch3_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!-- 
+								//System.out.println("Generating " + output.getCurrentOutputFileWriter().getFileName());
+						
+								//Batch,b,d,FirstDay,null,null.
+								//Batch,b,d,LastDay,null,null.
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("3");
+						        buf.append(delimiter);
+						        
+								//get the DateBeginDate
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long mydate =2*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(mydate)));
+						        buf.append(delimiter);
+						        
+						        buf.append("FirstDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("3");
+						        buf.append(delimiter);
+
+								//get the FIRST_BATCH_DATE_START
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long firstBatchDate =2*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(firstBatchDate)));
+						        buf.append(delimiter);
+
+						        buf.append("LastDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>
+<!--					<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">  
+-->
+					<output name="StatisticsOutput" active="(${NUMBER_OF_INCREMENTAL_BATCHES}>2?1:0)*${AuditingAndReportingSystemActive}">					
+						<size>2</size><!-- number of used counters -->
+						<fileTemplate>outputDir + "Batch4_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!--
+						 		//System.out.println("Generating " + output.getCurrentOutputFileWriter().getFileName());
+						 						
+						 								//Batch,b,d,FirstDay,null,null.
+								//Batch,b,d,LastDay,null,null.
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("4");
+						        buf.append(delimiter);
+						        
+								//get the DateBeginDate
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long mydate =3*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(mydate)));
+						        buf.append(delimiter);
+						        
+						        buf.append("FirstDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("4");
+						        buf.append(delimiter);
+
+								//get the FIRST_BATCH_DATE_START
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long firstBatchDate = 3*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(firstBatchDate)));
+						        buf.append(delimiter);
+
+						        buf.append("LastDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						 
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>
+					<output name="StatisticsOutput" active="(${NUMBER_OF_INCREMENTAL_BATCHES}>3?1:0)*${AuditingAndReportingSystemActive}">
+						<size>2</size><!-- number of used counters -->
+						<fileTemplate>outputDir + "Batch5_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!-- 
+								//Batch,b,d,FirstDay,null,null.
+								//Batch,b,d,LastDay,null,null.
+								
+								//System.out.println("Generating " + output.getCurrentOutputFileWriter().getFileName());
+								
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("5");
+						        buf.append(delimiter);
+						        
+								//get the DateBeginDate
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long mydate =4*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(mydate)));
+						        buf.append(delimiter);
+						        
+						        buf.append("FirstDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+						        buf.append("Batch");
+						        buf.append(delimiter);
+						        buf.append("5");
+						        buf.append(delimiter);
+
+								//get the FIRST_BATCH_DATE_START
+								java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+								long firstBatchDate =4*24*3600*1000 + ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));		
+								buf.append(df.format(new java.util.Date(firstBatchDate)));
+						        buf.append(delimiter);
+
+						        buf.append("LastDay");
+						        buf.append(delimiter);
+								buf.append("");
+						        buf.append(delimiter);						        
+						        buf.append("");
+						        //buf.append(delimiter);
+						        buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+						
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>					
+
+					<output name="StatisticsOutput" active="${AuditingAndReportingSystemActive}">
+						<size>0</size><!-- number of used counters -->
+						<fileTemplate>outputDir + "Generator_audit.csv"</fileTemplate>
+						<outputDir>output/</outputDir>
+						<fileEnding>.csv</fileEnding>
+						<delimiter>,</delimiter>
+						<header><!--"DataSet, BatchID ,Date , Attribute , Value, DValue" + pdgf.util.Constants.DEFAULT_LINESEPARATOR--></header>
+						<footer></footer>
+						<tableChangedEventTemplate><!-- 
+						-->
+						</tableChangedEventTemplate>
+						<formaterTemplate><!--
+			//System.out.println("Generating "+ output.getCurrentOutputFileWriter().getFileName());
+
+			// uncomment this code block to print ALL properties
+			// java.util.HashMap props = project.getXMLProperties();
+			// for (java.util.Iterator iterator = props.entrySet().iterator();
+			// iterator.hasNext();) {
+			// java.util.Map.Entry entry = (java.util.Map.Entry)
+			// iterator.next();
+			// String key = ((String)entry.getKey());
+			// String value= entry.getValue()).toString();
+			//
+			// buf.append("Generator");
+			// buf.append(delimiter);
+			// buf.append("1");
+			// buf.append(delimiter);
+			// buf.append("");
+			// buf.append(delimiter);
+			// buf.append(key);
+			// buf.append(delimiter);
+			// buf.append("");
+			// buf.append(delimiter);
+			// buf.append(value);
+			// buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			// }
+			
+			
+			java.text.SimpleDateFormat df = new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT);
+					
+
+			// Generator,1,d,a,null,dv
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("SF").append(delimiter).append("").append(delimiter);
+			// get the SF
+			double sF = project.getXMLProperty("SF");
+			buf.append(Double.toString(sF));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AuditingAndReportingSystemActive").append(delimiter).append("").append(delimiter);
+			// get the AuditingAndReportingSystemActive
+			double auditingAndReportingSystemActive = project
+					.getXMLProperty("AuditingAndReportingSystemActive");
+			buf.append(Double.toString(auditingAndReportingSystemActive));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PermuationReferenceGenerator_ErrorCheckDisabled").append(delimiter).append("").append(delimiter);
+			// get the PermuationReferenceGenerator_ErrorCheckDisabled
+			double permuationReferenceGenerator_ErrorCheckDisabled = project
+					.getXMLProperty("PermuationReferenceGenerator_ErrorCheckDisabled");
+			buf.append(Double
+					.toString(permuationReferenceGenerator_ErrorCheckDisabled));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("ONE_DAY_IN_MILLISECONDS").append(delimiter).append("").append(delimiter);
+			// get the ONE_DAY_IN_MILLISECONDS
+			long oneDayInMilliSeconds = ((long) project
+					.getXMLProperty("ONE_DAY_IN_MILLISECONDS"));
+			buf.append(Long.toString(oneDayInMilliSeconds));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("ONE_QUARTER_IN_MILLISECONDS").append(delimiter).append("").append(delimiter);
+			// get the ONE_QUARTER_IN_MILLISECONDS
+			long oneQuarterInMilliSeconds = ((long) project
+					.getXMLProperty("ONE_QUARTER_IN_MILLISECONDS"));
+			buf.append(Long.toString(oneQuarterInMilliSeconds));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("ONE_YEAR_IN_MILLISECONDS").append(delimiter).append("").append(delimiter);
+			// get the ONE_YEAR_IN_MILLISECONDS
+			long oneYearInMilliSeconds = 4 * ((long) project
+					.getXMLProperty("ONE_QUARTER_IN_MILLISECONDS"));
+			buf.append(Long.toString(oneYearInMilliSeconds));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PERCENT_NULL").append(delimiter).append("").append(delimiter);
+			// get the PERCENT_NULL
+			double percentNull = project.getXMLProperty("PERCENT_NULL");
+			buf.append(Double.toString(percentNull));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the FIRST_BATCH_DATE_START
+			long firstBatchDate = ((long) project
+					.getXMLProperty("FIRST_BATCH_DATE_START"));
+			buf.append(df.format(new java.util.Date(firstBatchDate)));
+			buf.append(delimiter);
+			buf.append("FIRST_BATCH_DATE_START").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2014-07-07");
+			 * buf.append(delimiter); buf.append("HL_START_DATE");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2017-07-07");
+			 * buf.append(delimiter); buf.append("HL_END_DATE");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("NUMBER_OF_INCREMENTAL_BATCHES").append(delimiter).append("").append(delimiter);
+			// get the NUMBER_OF_INCREMENTAL_BATCHES
+			double numberOfIncrementalBatches = project
+					.getXMLProperty("NUMBER_OF_INCREMENTAL_BATCHES");
+			buf.append(Double.toString(numberOfIncrementalBatches));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the DateBeginDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("DateBeginDate")))));
+
+			buf.append(delimiter);
+			buf.append("DateBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the DateEndDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("DateEndDate")))));
+
+			buf.append(delimiter);
+			buf.append("DateEndDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("HRScaling").append(delimiter).append("").append(delimiter);
+			// get the HRScaling
+			double hrScaling = project.getXMLProperty("HRScaling");
+			buf.append(Double.toString(hrScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("HRBrokerScale").append(delimiter).append("").append(delimiter);
+			// get the HRBrokerScale
+			double hrBrokerScale = project.getXMLProperty("HRBrokerScale");
+			buf.append(Double.toString(hrBrokerScale));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CScaling").append(delimiter).append("").append(delimiter);
+			// get the CScaling
+			double cScaling = project.getXMLProperty("CScaling");
+			buf.append(Double.toString(cScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CInsertPct").append(delimiter).append("").append(delimiter);
+			// get the CInsertPct
+			double cInsertPct = project.getXMLProperty("CInsertPct");
+			buf.append(Double.toString(cInsertPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CInactPct").append(delimiter).append("").append(delimiter);
+			// get the CInactPct
+			double cInactPct = project.getXMLProperty("CInactPct");
+			buf.append(Double.toString(cInactPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CUpdatePct").append(delimiter).append("").append(delimiter);
+			// get the CUpdatePct
+			double cUpdatePct = project.getXMLProperty("CUpdatePct");
+			buf.append(Double.toString(cUpdatePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CFieldUpdatePct").append(delimiter).append("").append(delimiter);
+			// get the CFieldUpdatePct
+			double cFieldUpdatePct = project.getXMLProperty("CFieldUpdatePct");
+			buf.append(Double.toString(cFieldUpdatePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMultipleRecPerDayPct").append(delimiter).append("").append(delimiter);
+			// get the CMultipleRecPerDayPct
+			double cMultipleRecPerDayPct = project
+					.getXMLProperty("CMultipleRecPerDayPct");
+			buf.append(Double.toString(cMultipleRecPerDayPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AScaling").append(delimiter).append("").append(delimiter);
+			// get the AScaling
+			double aScaling = project.getXMLProperty("AScaling");
+			buf.append(Double.toString(aScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AInsertPct").append(delimiter).append("").append(delimiter);
+			// get the AInsertPct
+			double aInsertPct = project.getXMLProperty("AInsertPct");
+			buf.append(Double.toString(aInsertPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AInactPct").append(delimiter).append("").append(delimiter);
+			// get the AInactPct
+			double aInactPct = project.getXMLProperty("AInactPct");
+			buf.append(Double.toString(aInactPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AUpdatePct").append(delimiter).append("").append(delimiter);
+			// get the AUpdatePct
+			double aUpdatePct = project.getXMLProperty("AUpdatePct");
+			buf.append(Double.toString(aUpdatePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("AFieldUpdatePct").append(delimiter).append("").append(delimiter);
+			// get the AFieldUpdatePct
+			double aFieldUpdatePct = project.getXMLProperty("AFieldUpdatePct");
+			buf.append(Double.toString(aFieldUpdatePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMScaling").append(delimiter).append("").append(delimiter);
+			// get the CMScaling
+			double cMScaling = project.getXMLProperty("CMScaling");
+			buf.append(Double.toString(cMScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMNewCustPct").append(delimiter).append("").append(delimiter);
+			// get the CMNewCustPct
+			double cMNewCustPct = project.getXMLProperty("CMNewCustPct");
+			buf.append(Double.toString(cMNewCustPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMInactCustPct").append(delimiter).append("").append(delimiter);
+			// get the CMInactCustPct
+			double cMInactCustPct = project.getXMLProperty("CMInactCustPct");
+			buf.append(Double.toString(cMInactCustPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMUpdateCustPct").append(delimiter).append("").append(delimiter);
+			// get the CMUpdateCustPct
+			double cMUpdateCustPct = project.getXMLProperty("CMUpdateCustPct");
+			buf.append(Double.toString(cMUpdateCustPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMAddAcctPct").append(delimiter).append("").append(delimiter);
+			// get the CMAddAcctPct
+			double cMAddAcctPct = project.getXMLProperty("CMAddAcctPct");
+			buf.append(Double.toString(cMAddAcctPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMCloseAcctPct").append(delimiter).append("").append(delimiter);
+			// get the CMCloseAcctPct
+			double cMCloseAcctPct = project.getXMLProperty("CMCloseAcctPct");
+			buf.append(Double.toString(cMCloseAcctPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMUpdateAcctPct").append(delimiter).append("").append(delimiter);
+			// get the CMUpdateAcctPct
+			double cMUpdateAcctPct = project.getXMLProperty("CMUpdateAcctPct");
+			buf.append(Double.toString(cMUpdateAcctPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMAcctCTierErrPct").append(delimiter).append("").append(delimiter);
+			// get the CMAcctCTierErrPct
+			double cMAcctCTierErrPct = project
+					.getXMLProperty("CMAcctCTierErrPct");
+			buf.append(Double.toString(cMAcctCTierErrPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMAcctDOBErrPct").append(delimiter).append("").append(delimiter);
+			// get the CMAcctDOBErrPct
+			double cMAcctDOBErrPct = project.getXMLProperty("CMAcctDOBErrPct");
+			buf.append(Double.toString(cMAcctDOBErrPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMFieldUpdatePct").append(delimiter).append("").append(delimiter);
+			// get the CMFieldUpdatePct
+			double cMFieldUpdatePct = project
+					.getXMLProperty("CMFieldUpdatePct");
+			buf.append(Double.toString(cMFieldUpdatePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMExcPct").append(delimiter).append("").append(delimiter);
+			// get the CMExcPct
+			double cMExcPct = project.getXMLProperty("CMExcPct");
+			buf.append(Double.toString(cMExcPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMAcctPerCustomerMax").append(delimiter).append("").append(delimiter);
+			// get the CMAcctPerCustomerMax
+			double cMAcctPerCustomerMax = project
+					.getXMLProperty("CMAcctPerCustomerMax");
+			buf.append(Double.toString(cMAcctPerCustomerMax));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMMultipleRecPerDayPct").append(delimiter).append("").append(delimiter);
+			// get the CMMultipleRecPerDayPct
+			double cMMultipleRecPerDayPct = project
+					.getXMLProperty("CMMultipleRecPerDayPct");
+			buf.append(Double.toString(cMMultipleRecPerDayPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMFinalRowCount").append(delimiter).append("").append(delimiter);
+			// get the CMFinalRowCount
+			long cMFinalRowCount = (long) (project.getXMLProperty("CMScaling") * project
+					.getXMLProperty("SF"));
+			buf.append(Long.toString(cMFinalRowCount));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMminHistoricalSize").append(delimiter).append("").append(delimiter);
+			// get the CMminHistoricalSize
+			long cMminHistoricalSize = (long) ((1 - project
+					.getXMLProperty("AInsertPct"))
+					* project.getXMLProperty("AScaling") * project
+					.getXMLProperty("SF"));
+			buf.append(Long.toString(cMminHistoricalSize));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMRowsPerUpdate").append(delimiter).append("").append(delimiter);
+			// get the CMRowsPerUpdate(58)
+			double myValue2 = (1 - project.getXMLProperty("CInsertPct"))
+					* project.getXMLProperty("CScaling")
+					* project.getXMLProperty("SF")
+					+ project.getXMLProperty("AScaling")
+					* project.getXMLProperty("SF");
+			long cMRowsPerUpdate = (long) myValue2;
+			// judge whether to carry bit
+			if (myValue2 > (double) cMRowsPerUpdate) {
+				cMRowsPerUpdate += 1;
+			}
+			buf.append(Long.toString(cMRowsPerUpdate));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMUpdateLastID").append(delimiter).append("").append(delimiter);
+			// get the CMUpdateLastID
+			long CMUpdateLastID = (long) ((project
+					.getXMLProperty("CMFinalRowCount") - project
+					.getXMLProperty("CMminHistoricalSize")) / project
+					.getXMLProperty("CMRowsPerUpdate"));
+			buf.append(Long.toString(CMUpdateLastID));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("CMHistoricalSize").append(delimiter).append("").append(delimiter);
+			// get the CMUpdateLastID
+			long cMHistoricalSize = (long) (project
+					.getXMLProperty("CMFinalRowCount") - (project
+					.getXMLProperty("CMRowsPerUpdate") * project
+					.getXMLProperty("CMUpdateLastID")));
+			buf.append(Long.toString(cMHistoricalSize));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the CMBeginDate
+			long CMBeginDate = ((long) project.getXMLProperty("CMBeginDate"));
+			buf.append(df.format(new java.util.Date(CMBeginDate)));
+			buf.append(delimiter);
+			buf.append("CMBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			
+			
+			
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the CMEndDate
+			long CMEndDate = ((long) project.getXMLProperty("CMEndDate"));
+			buf.append(df.format(new java.util.Date(CMEndDate)));
+			buf.append(delimiter);
+			buf.append("CMEndDate").append(delimiter).append("").append(delimiter);
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PHistScaling").append(delimiter).append("").append(delimiter);
+			// get the PHistScaling
+			double pHistScaling = project.getXMLProperty("PHistScaling");
+			buf.append(Double.toString(pHistScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PNewPct").append(delimiter).append("").append(delimiter);
+			// get the PNewPct
+			double pNewPct = project.getXMLProperty("PNewPct");
+			buf.append(Double.toString(pNewPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PUpdatedPct").append(delimiter).append("").append(delimiter);
+			// get the PUpdatedPct
+			double pUpdatedPct = project.getXMLProperty("PUpdatedPct");
+			buf.append(Double.toString(pUpdatedPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PDeletedPct").append(delimiter).append("").append(delimiter);
+			// get the PDeletedPct
+			double pDeletedPct = (1 * 10 - project.getXMLProperty("PNewPct") * 10 - project
+					.getXMLProperty("PUpdatedPct") * 10) / 10;
+			buf.append(Double.toString(pDeletedPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PIncScaling").append(delimiter).append("").append(delimiter);
+			// get the PIncScaling
+			double pIncScaling = project.getXMLProperty("PHistScaling");
+			buf.append(Double.toString(pIncScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("PMatchPct").append(delimiter).append("").append(delimiter);
+			// get the PMatchPct
+			double pMatchPct = project.getXMLProperty("PMatchPct");
+			buf.append(Double.toString(pMatchPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2009-01-01");
+			 * buf.append(delimiter); buf.append("DMBeginDate");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2010-12-31");
+			 * buf.append(delimiter); buf.append("DMEndDate");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("WHScalingH"); buf.append(delimiter); buf.append("");
+			 * buf.append(delimiter); buf.append("300");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("WHScalingI"); buf.append(delimiter); buf.append("");
+			 * buf.append(delimiter); buf.append("100");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2005-01-01");
+			 * buf.append(delimiter); buf.append("WHBeginDate");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append("2010-12-31");
+			 * buf.append(delimiter); buf.append("WHEndDate");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+			/*
+			 * buf.append("Generator"); buf.append(delimiter); buf.append("1");
+			 * buf.append(delimiter); buf.append(""); buf.append(delimiter);
+			 * buf.append("WHActivePct"); buf.append(delimiter); buf.append("");
+			 * buf.append(delimiter); buf.append("0.5");
+			 * buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			 */
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWCMPScaling").append(delimiter).append("").append(delimiter);
+			// get the FWCMPScaling
+			double fWCMPScaling = project.getXMLProperty("FWCMPScaling");
+			buf.append(Double.toString(fWCMPScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWSECScaling").append(delimiter).append("").append(delimiter);
+			// get the FWSECScaling
+			double fWSECScaling = project.getXMLProperty("FWSECScaling");
+			buf.append(Double.toString(fWSECScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the FWBeginDate
+			long FWBeginDate = ((long) project
+					.getXMLProperty("FIRST_BATCH_DATE_START"))
+					- ((long) project
+							.getXMLProperty("ONE_YEAR_IN_MILLISECONDS")) * 50;
+			buf.append(df.format(new java.util.Date(FWBeginDate)));
+			buf.append(delimiter);
+			buf.append("FWBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the FWEndDate
+			long FWEndDate = ((long) project.getXMLProperty("FIRST_BATCH_DATE_START"));
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(FWEndDate)));
+			buf.append(delimiter);
+			buf.append("FWEndDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWSPRatingErrPct").append(delimiter).append("").append(delimiter);
+			// get the FWSPRatingErrPct
+			double fWSPRatingErrPct = project
+					.getXMLProperty("FWSPRatingErrPct");
+			buf.append(Double.toString(fWSPRatingErrPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWCIKPct").append(delimiter).append("").append(delimiter);
+			// get the FWCIKPct
+			double fWCIKPct = project.getXMLProperty("FWCIKPct");
+			buf.append(Double.toString(fWCIKPct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWQuarters").append(delimiter).append("").append(delimiter);
+			// get the FWQuarters
+			long fWQuarters = (long) ((project.getXMLProperty("FWEndDate")
+					- project.getXMLProperty("FWBeginDate") + project
+					.getXMLProperty("ONE_DAY_IN_MILLISECONDS")) / project
+					.getXMLProperty("ONE_QUARTER_IN_MILLISECONDS"));
+			buf.append(Long.toString(fWQuarters));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWCMPsPerQuarter").append(delimiter).append("").append(delimiter);
+			// get the FWCMPsPerQuarter
+			long fWCMPsPerQuarter = (long) (project
+					.getXMLProperty("FWCMPScaling")
+					* project.getXMLProperty("SF") / project
+					.getXMLProperty("FWQuarters"));
+			buf.append(Long.toString(fWCMPsPerQuarter));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("FWSECsPerQuarter").append(delimiter).append("").append(delimiter);
+			// get the FWSECsPerQuarter
+			long fWSECsPerQuarter = (long) (project
+					.getXMLProperty("FWSECScaling")
+					* project.getXMLProperty("SF") / (project
+					.getXMLProperty("FWQuarters") - 1L));
+			buf.append(Long.toString(fWSECsPerQuarter));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("THistScaling").append(delimiter).append("").append(delimiter);
+			// get the THistScaling
+			double tHistScaling = project.getXMLProperty("THistScaling");
+			buf.append(Double.toString(tHistScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TIncScaling").append(delimiter).append("").append(delimiter);
+			// get the TIncScaling
+			double tIncScaling = project.getXMLProperty("TIncScaling");
+			buf.append(Double.toString(tIncScaling));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TLBRatio").append(delimiter).append("").append(delimiter);
+			// get the TLBRatio
+			double tLBRatio = project.getXMLProperty("TLBRatio");
+			buf.append(Double.toString(tLBRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TLSRatio").append(delimiter).append("").append(delimiter);
+			// get the TLSRatio
+			double tLSRatio = project.getXMLProperty("TLSRatio");
+			buf.append(Double.toString(tLSRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMBRatio").append(delimiter).append("").append(delimiter);
+			// get the TMBRatio
+			double tMBRatio = project.getXMLProperty("TMBRatio");
+			buf.append(Double.toString(tMBRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMSRatio").append(delimiter).append("").append(delimiter);
+			// get the TMSRatio
+			double tMSRatio = project.getXMLProperty("TMSRatio");
+			buf.append(Double.toString(tMSRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TPNDGRatio").append(delimiter).append("").append(delimiter);
+			// get the TPNDGRatio
+			double tPNDGRatio = project.getXMLProperty("TPNDGRatio");
+			buf.append(Double.toString(tPNDGRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TSMBDRatio").append(delimiter).append("").append(delimiter);
+			// get the TSMBDRatio
+			double tSMBDRatio = project.getXMLProperty("TSMBDRatio");
+			buf.append(Double.toString(tSMBDRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TCMPLRatio").append(delimiter).append("").append(delimiter);
+			// get the TCMPLRatio
+			double tCMPLRatio = project.getXMLProperty("TCMPLRatio");
+			buf.append(Double.toString(tCMPLRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TSETLRatio").append(delimiter).append("").append(delimiter);
+			// get the TSETLRatio
+			double tSETLRatio = project.getXMLProperty("TSETLRatio");
+			buf.append(Double.toString(tSETLRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TLBCNCLRatio").append(delimiter).append("").append(delimiter);
+			// get the TLBCNCLRatio
+			double tLBCNCLRatio = project.getXMLProperty("TLBCNCLRatio");
+			buf.append(Double.toString(tLBCNCLRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TCommInvalidRatio").append(delimiter).append("").append(delimiter);
+			// get the TCommInvalidRatio
+			double tCommInvalidRatio = project
+					.getXMLProperty("TCommInvalidRatio");
+			// buf.append(Double.toString(tCommInvalidRatio));
+			java.text.DecimalFormat def = new java.text.DecimalFormat("0.0000");
+			buf.append(def.format(tCommInvalidRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TChargeInvalidRatio").append(delimiter).append("").append(delimiter);
+			// get the TChargeInvalidRatio
+			double tChargeInvalidRatio = project
+					.getXMLProperty("TChargeInvalidRatio");
+			java.text.DecimalFormat def2 = new java.text.DecimalFormat("0.0000");
+			buf.append(def2.format(tChargeInvalidRatio));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMaxSubmitTime").append(delimiter).append("").append(delimiter);
+			// get the TMaxSubmitTime
+			double tMaxSubmitTime = project.getXMLProperty("TMaxSubmitTime");
+			buf.append(Double.toString(tMaxSubmitTime));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMaxCompleteTime").append(delimiter).append("").append(delimiter);
+			// get the TMaxCompleteTime
+			double tMaxCompleteTime = project
+					.getXMLProperty("TMaxCompleteTime");
+			buf.append(Double.toString(tMaxCompleteTime));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMaxCashedTime").append(delimiter).append("").append(delimiter);
+			// get the TMaxCashedTime
+			double tMaxCashedTime = project.getXMLProperty("TMaxCashedTime");
+			buf.append(Double.toString(tMaxCashedTime));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the THistBeginDate
+			long THistBeginDate = ((long) project
+					.getXMLProperty("FIRST_BATCH_DATE_START"))
+					- 5
+					* ((long) project
+							.getXMLProperty("ONE_YEAR_IN_MILLISECONDS"));
+
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(THistBeginDate)));
+
+			buf.append(delimiter);
+			buf.append("THistBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the THistEndDate
+			long THistEndDate = ((long) project
+					.getXMLProperty("FIRST_BATCH_DATE_START"));
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(THistEndDate)));
+			buf.append(delimiter);
+			buf.append("THistEndDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TLBPerc").append(delimiter).append("").append(delimiter);
+			// get the TLBPerc
+			double tLBPerc = project.getXMLProperty("TLBPerc");
+			buf.append(Double.toString(tLBPerc));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TLSPerc").append(delimiter).append("").append(delimiter);
+			// get the TLSPerc
+			double tLSPerc = project.getXMLProperty("TLSPerc");
+			buf.append(Double.toString(tLSPerc));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			
+			
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMBPerc").append(delimiter).append("").append(delimiter);
+			// get the TMBPerc
+			double tMBPerc = project.getXMLProperty("TMBPerc");
+			buf.append(Double.toString(tMBPerc));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TMSPerc").append(delimiter).append("").append(delimiter);
+			// get the TMSPerc
+			double tMSPerc = (1 * 10 - project.getXMLProperty("TLBPerc") * 10
+					- project.getXMLProperty("TLSPerc") * 10 - project
+					.getXMLProperty("TMBPerc") * 10) / 10;
+			buf.append(Double.toString(tMSPerc));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TSUpdateCount").append(delimiter).append("").append(delimiter);
+			// get the TSUpdateCount
+			// this function is the translation of the "tpc-di-schema.xml", but
+			// the "ONE_DAY_IN_MILLISECONDS" may be incorrect.
+			double tSUpdateCount = (project.getXMLProperty("THistEndDate") - project
+					.getXMLProperty("THistBeginDate"))
+					/ project.getXMLProperty("ONE_DAY_IN_MILLISECONDS") + 1;
+			buf.append(Double.toString(tSUpdateCount));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("TSTradesPerDay").append(delimiter).append("").append(delimiter);
+			// get the TSTradesPerDay
+			double myValue = (project.getXMLProperty("THistScaling")
+					* project.getXMLProperty("SF") / project
+					.getXMLProperty("TSUpdateCount"));
+			long tSTradesPerDay = (long) myValue;
+			// judge whether to carry bit
+			if (myValue > (double) tSTradesPerDay) {
+				tSTradesPerDay += 1;
+			}
+			buf.append(Long.toString(tSTradesPerDay));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the DMBeginDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("THistBeginDate")))));
+			buf.append(delimiter);
+			buf.append("DMBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the DMEndDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("FIRST_BATCH_DATE_START")))));
+			buf.append(delimiter);
+			buf.append("DMEndDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("WHScalingH").append(delimiter).append("").append(delimiter);
+			// get the WHScalingH
+			double wHScalingH = project.getXMLProperty("WHScalingH");
+			buf.append(Double.toString(wHScalingH));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("WHScalingI").append(delimiter).append("").append(delimiter);
+			// get the WHScalingI
+			double wHScalingI = project.getXMLProperty("WHScalingI");
+			buf.append(Double.toString(wHScalingI));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			
+			
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the WHBeginDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("THistBeginDate")))));
+			buf.append(delimiter);
+			buf.append("WHBeginDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter);
+			// get the WHEndDate
+			buf.append(new java.text.SimpleDateFormat(
+					pdgf.util.Constants.DATE_FORMAT_DEFAULT)
+					.format(new java.util.Date(((long) project
+							.getXMLProperty("FIRST_BATCH_DATE_START")))));
+			buf.append(delimiter);
+			buf.append("WHEndDate").append(delimiter).append("").append(delimiter);
+			buf.append("");
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+
+
+			buf.append("Generator").append(delimiter).append("1").append(delimiter).append("").append(delimiter);
+			buf.append("WHActivePct").append(delimiter).append("").append(delimiter);
+			// get the WHActivePct
+			double wHActivePct = project.getXMLProperty("WHActivePct");
+			buf.append(Double.toString(wHActivePct));
+			buf.append(pdgf.util.Constants.DEFAULT_LINESEPARATOR);
+			
+		
+							-->
+						 </formaterTemplate>
+						<counterTemplate><!-- 
+							-->
+						</counterTemplate>
+					</output>
+</Include>					

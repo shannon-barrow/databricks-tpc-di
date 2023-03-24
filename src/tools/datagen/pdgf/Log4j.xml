@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE log4j:configuration SYSTEM "log4j.dtd">
+<log4j:configuration xmlns:log4j='http://jakarta.apache.org/log4j/'>
+
+
+	<appender name="STDOUT" class="org.apache.log4j.ConsoleAppender">
+		<param name="Threshold" value="INFO" />
+		<layout class="org.apache.log4j.PatternLayout">
+			<!-- <param name="ConversionPattern" value="%5p [%t] (%F:%L): %n %m%n" 
+				/> -->
+			<param name="ConversionPattern" value="%m%n" />
+		</layout>
+		<filter class="org.apache.log4j.varia.LevelRangeFilter">
+			<param name="LevelMax" value="WARN" />
+			<param name="LevelMin" value="INFO" />
+			<param name="AcceptOnMatch" value="true" />
+		</filter>
+	</appender>
+	
+	
+	<appender name="StdErr" class="org.apache.log4j.ConsoleAppender">
+	
+        <param name="target" value="System.Err" />
+		<param name="Threshold" value="ERROR" />
+		<layout class="org.apache.log4j.PatternLayout">
+			<!-- <param name="ConversionPattern" value="%5p [%t] (%F:%L): %n %m%n" 
+				/> -->
+			<param name="ConversionPattern" value="%m%n" />
+		</layout>
+		<filter class="org.apache.log4j.varia.LevelRangeFilter">
+			<param name="LevelMax" value="FATAL" />
+			<param name="LevelMin" value="ERROR" />
+			<param name="AcceptOnMatch" value="true" />
+		</filter>
+	</appender>
+	
+	<appender name="STDOUT_DEBUG" class="org.apache.log4j.ConsoleAppender">
+		<layout class="org.apache.log4j.PatternLayout">
+
+			<param name="ConversionPattern" value="%p %t %c - %m%n" />
+			<!-- <param name="ConversionPattern" value="%c %d{ISO8601} %p %m%n" /> -->
+			<!-- <param name="ConversionPattern" value="%m%n" /> -->
+		</layout>
+		<filter class="org.apache.log4j.varia.LevelRangeFilter">
+			<param name="LevelMax" value="ALL" />
+			<param name="LevelMin" value="ALL" />
+			<param name="AcceptOnMatch" value="false" />
+		</filter>
+	</appender>
+	<appender name="STDOUT_TRACE" class="org.apache.log4j.ConsoleAppender">
+		<layout class="org.apache.log4j.PatternLayout">
+			<!-- <param name="ConversionPattern" value="%c %d{ISO8601} %p %m%n" /> -->
+			<param name="ConversionPattern" value="%5p [%t] (%F:%L): %n  %m%n" />
+		</layout>
+		<filter class="org.apache.log4j.varia.LevelRangeFilter">
+			<param name="LevelMax" value="TRACE" />
+			<param name="LevelMin" value="TRACE" />
+			<param name="AcceptOnMatch" value="true" />
+		</filter>
+	</appender>
+
+	<appender name="file" class="org.apache.log4j.RollingFileAppender">
+		<param name="File" value="${pdgf.log.folder}/${pdgf.log.file}" />
+			<param name="Threshold" value="DEBUG" />
+		<param name="Append" value="false" />
+		<param name="MaxFileSize" value="500KB" />
+		<param name="MaxBackupIndex" value="10" />
+		<layout class="org.apache.log4j.PatternLayout">
+			<param name="ConversionPattern" value="%p %t %c - %m%n" />
+		</layout>
+	</appender>
+
+	<appender name="observerableAppender"
+		class="pdgf.util.io.messaging.Log4JObserverableAppender">
+		<param name="Threshold" value="INFO" />
+		<layout class="org.apache.log4j.PatternLayout">
+			<param name="ConversionPattern" value="%5p [%t](%F) - %m%n" />
+		</layout>
+	</appender>
+
+
+	<logger name="kafka">
+	    <level value="WARN"/>
+	</logger>
+	<logger name="org.apache">
+   		 <level value="WARN"/>
+	</logger>
+	<root>
+		<priority value="DEBUG" />
+		<appender-ref ref="STDOUT" />
+		<appender-ref ref="STDOUT_DEBUG" />
+		<appender-ref ref="StdErr" />
+		<appender-ref ref="file" />
+		<appender-ref ref="observerableAppender" />
+	</root>
+
+</log4j:configuration>
+
+
+
+
+
+
+
+
+
+
+
