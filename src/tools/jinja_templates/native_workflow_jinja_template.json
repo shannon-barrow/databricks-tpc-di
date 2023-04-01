@@ -31,9 +31,9 @@
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK",
+                    "availability": "SPOT_WITH_FALLBACK_AZURE",
                     "first_on_demand": 1,
-                    "spot_bid_price_percent": 100
+                    "spot_bid_price_percent": -1
                 },
                 {% endif %}
                 {% if cloud_provider == "AWS" %}
@@ -52,8 +52,8 @@
                     "ResourceClass": "SingleNode"
                 },
                 {% endif %}
-                "driver_node_type_id": "{{ driver_node_type_id }}",
-                "node_type_id": "{{ worker_node_type_id }}",
+                "driver_node_type_id": "{{ driver_node_type }}",
+                "node_type_id": "{{ worker_node_type }}",
                 "num_workers": "{{ worker_node_count }}",
                 "enable_elastic_disk": true,
                 "data_security_mode": "SINGLE_USER",

@@ -32,8 +32,8 @@
                 "spark.sql.shuffle.partitions": {{ shuffle_partitions }},
                 "spark.databricks.photon.allDataSources.enabled": "true"
             },
-            "node_type_id": "{{ worker_node_type_id }}",
-            "driver_node_type_id": "{{ driver_node_type_id }}",
+            "node_type_id": "{{ worker_node_type }}",
+            "driver_node_type_id": "{{ driver_node_type }}",
             {% if worker_node_count == 0 %}
             "custom_tags": {
                 "ResourceClass": "SingleNode"

@@ -11,27 +11,23 @@
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
+                    {% if cust_mgmt_worker_count == 0 %}
                     "spark.master": "local[*, 4]",
                     "spark.databricks.cluster.profile": "singleNode",
                     "spark.databricks.adaptive.localShuffleReader.enabled": "true",
+                    {% endif %}
                     "spark.databricks.delta.schema.autoMerge.enabled": "true",
                     "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
                     "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-                    "spark.databricks.photon.photonRowToColumnar.enabled": "true",
-                    "spark.databricks.photon.allDataSources.enabled": "true",
-                    "spark.databricks.photon.window.experimental.features.enabled": "true",
-                    "spark.databricks.photon.sort.enabled": "true",
                     "spark.databricks.preemption.enabled": "false",
-                    "spark.databricks.photon.window.enabled": "true",
                     "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                    "spark.databricks.photon.scan.enabled": "true",
-                    "spark.sql.shuffle.partitions": {{ shuffle_partitions }}
+                    "spark.sql.shuffle.partitions": {{ cust_mgmt_partitions }}
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK",
+                    "availability": "SPOT_WITH_FALLBACK_AZURE",
                     "first_on_demand": 1,
-                    "spot_bid_price_percent": 100
+                    "spot_bid_price_percent": -1
                 },
                 {% endif %}
                 {% if cloud_provider == "AWS" %}
@@ -45,15 +41,17 @@
                 "spark_env_vars": {
                     "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
                 },
+                {% if cust_mgmt_worker_count == 0 %}
                 "custom_tags": {
                     "ResourceClass": "SingleNode"
                 },
-                "driver_node_type_id": "{{ driver_node_type_id }}",
-                "node_type_id": "{{ worker_node_type_id }}",
-                "num_workers": "0",
+                {% endif %}
+                "driver_node_type_id": "{{ driver_node_type }}",
+                "node_type_id": "{{ worker_node_type }}",
+                "num_workers": "{{ cust_mgmt_worker_count }}",
                 "enable_elastic_disk": true,
                 "data_security_mode": "SINGLE_USER",
-                "runtime_engine": "PHOTON"
+                "runtime_engine": "STANDARD"
             }
         }
     ],

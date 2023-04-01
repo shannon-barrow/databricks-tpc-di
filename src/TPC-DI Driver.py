@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Driver For TPC-DI Implementation in Databricks
 # MAGIC ## Reference the <a href="https://github.com/databricks/tpcdi-sql/blob/main/README.md" target="_blank">READ ME</a> For Details About the Benchmark and This Implementation of It 
-# MAGIC * This notebook is a WRAPPER over the ***workflow_builder*** notebook in the tools DIR. This notebook builds a **DEFAULT** pipeline of your choice with a scale factor = 10. 
+# MAGIC * This notebook is a WRAPPER over the ***workflow_builder*** notebook. This notebook builds a **DEFAULT** pipeline of your choice with a scale factor = 10. 
 # MAGIC * If this is your first time running the TPC-DI, we highly encourage you to run this notebook *out-of-the-box*, which will deploy a default pipeline with all dependenices already satisfied.  
 # MAGIC   * Moving to a higher scale factor will not change the pipeline in any way, but it may require a bigger cluster size to execute - the pipeline and core code will not change.  Therefore, the only motivation for increasing the scale factor would be in benchmarking scenarios.
 # MAGIC * Reference the README file for details about the various parameters that are being passed to the Databricks Jobs API before making changes to the workflow_builder notebook. The defaults should be satisfactory in vast amount of cases, but, if you want to change them, please first reference the docs. 
@@ -25,10 +25,13 @@
 workflow_types = ["Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ"]
 dbutils.widgets.dropdown("workflow_type", "Native Notebooks Workflow", workflow_types, "Workflow Type")
 wf_type = dbutils.widgets.get('workflow_type')
+displayHTML(f"<h1>To protect against unintenional 'RUN ALL' commands, the cell below is an Intentional Notebook Stoppage to confirm your workflow choice of {wf_type.upper()} is correct! If so, run the last cell below to create your workflow.</h1>")
+
+# COMMAND ----------
+
+dbutils.notebook.exit(f"Intentional notebook stoppage command, to confirm your workflow choice of {wf_type.upper()} is correct! If so, run the cell below to create your workflow.")
 
 # COMMAND ----------
 
 # DBTITLE 1,Run This Cell to Build Your Workflow!
-job_id = dbutils.notebook.run("./tools/workflow_builder", 3600, {"workflow_type": wf_type, "debug": 'True'})
-url = f"/#job/{job_id}"
-displayHTML(f"<h1><a href={url}>Your Workflow can be found here!</a></h1>")
+# MAGIC %run ./workflow_builder

@@ -6,7 +6,7 @@ with open("../../tools/traditional_config.json", "r") as json_conf:
 user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
 
 dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi_raw_files/", "Directory where Raw Files are located")
+dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
 

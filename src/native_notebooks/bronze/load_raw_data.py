@@ -23,7 +23,7 @@ all_tables.sort()
 user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
 
 dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi_raw_files/", "Directory where Raw Files are located")
+dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 dbutils.widgets.dropdown("table", all_tables[0], all_tables, "Target Table Name")
 

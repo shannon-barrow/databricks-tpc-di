@@ -26,9 +26,16 @@ The benchmark has been implemented in various ways to demonstrate the versatilit
 3. Databricks Delta Live Tables PRO: introduces easier handling of SCD TYPE 1/2 historical tracking using the new APPLY CHANGES INTO syntax
 4. Databricks Delta Live Tables ADVANCED: introduces Data Quality metrics as well so data engineers can more easily handle bad data quality, analysts can more confidently trust their data, and support teams can more easily monitor the quality of data as it enters the Lakehouse.
 
-# User Journey
-(in progress). 
+# User Journey (in progress). 
+## Pre-Benchmark: Data Generation and Workflow Creation
 
+### The size of cluster will depend on the Scale Factor and Worker Type Selected! 
+* The size of raw data is 1 GB per 10 Scale Factor, meaning a single node could do a default 10 Scale Factor.
+* We have tested several scale factors including 10, 100, 1000, 5000, and 10000 and have converged on the optimal size of the cluster. Based on the worker type's total memory and number of cores the cluster will be sized accordingly.
+* Default settings at various sizes:
+  * SF 100   = 8 shuffle partitions   = 8 Worker Cores
+  * SF 1000  = 86 shuffle partitions  = 58 Worker Cores
+  * SF 10000 = 864 shuffle partitions = 576 Worker Cores
 
 # Footnote Disclaimer
 TO-DO: Find out if we need to keep the following disclaimer. It needs to be present wherever *derived* results are presented. Likely won't be results presented in this repo though...  
