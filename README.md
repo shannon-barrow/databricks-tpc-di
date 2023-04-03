@@ -46,38 +46,52 @@ This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 
 ![Type of Raw Data Generated](/src/tools/readme_images/data_gen.png "Type of Raw Data Generated")  
 
-**IMPORTANT:** The data generation JAR is *NOT* a distributed spark step, or even very multi-threaded for that matter.  Therefore this step may execute in less than a minute for scale_factor=10, or as long as 2 hours on scale_factor=10000.  
-- Therefore, since this all executes on the driver, make sure you have a driver with storage and enough memory to handle this type of data generation step. 
-- This shouldn't be a problem unless running data generation on scale factors over 1000. 
-- If you do wish to execute TPC-DO on a scale factor over 1000, we suggest a **storage-optimized single node cluster** to generate the raw data.
-  - Please be patient with the execution as you may go several minutes without a log entry into the stdout of the cell (specifically tradehistory and watchhistory can take several minutes as they are large files).  Unless the job has failed/aborted, it is very likely the driver is still generating files for you.  It would not be ideal to cancel a job that is running as expected only to have to re-generate all the files all over again.
-
-**NOTE:** this should NOT be an issue unless running large scale factors - which the default settings for this code does not do (the default is scale_factor=10).  
-- The code/steps are the same NO MATTER THE SCALE FACTOR.  
-- The scale factor increase will ONLY affect how much data is generated, how long the job takes to execute, and how many resources it will take to benchmark in the subsequent workflow.  
-- Therefore we do not suggest increasing the scale factor unless you are trying to actually run benchmarks.
-
-**ANOTHER NOTE:** To account for multiple users attempting to generate files repeatedly for a workspace, the data generation step will check to see if data exists in DBFS already for the requested scale factor. If it does (meaning you or someone else has executed the TPC-DI in this workspace already) then this step will be skipped - this removing unnecessary data being stored and also removing the need to generate the data again.
+##### IMPORTANT NOTES
+- The Data Generation JAR was developed by TPC - it is out-of-scope for this effort, though it is required for the benchmark
+- The data generation JAR is **NOT** a distributed spark step, or even very multi-threaded for that matter.  
+  - This step may execute in less than a minute for scale_factor=10, or as long as 2 hours on scale_factor=10000.  
+- Data generation executes on the driver, make sure you have a driver with local storage and enough memory to handle this type of data generation step. 
+  - This shouldn't be a problem unless running data generation on scale factors over 1000. 
+- The default setting for this implementation is to execute on a scale factor of 10 - which generates only 1GB of data in less than 1 minute - since the code/workflow are the same NO MATTER THE SCALE FACTOR.
+- **If generating a large scale factor** (i.e. over 1000), via the workflow_builder:
+  - We suggest a **storage-optimized single node cluster** to generate the raw data.
+  - Please be patient with the execution as you may go several minutes without a log entry into the stdout of the cell when the very large files on large scale factors are being generated
+  - The scale factor increase will ONLY affect how much data is generated, how long the job takes to execute, and how many resources it will take to benchmark in the subsequent workflow.  
+  - Therefore we do not suggest increasing the scale factor unless you are trying to actually run benchmarks.
+- To account for multiple users attempting to generate files repeatedly for a workspace, the data generation step will check to see if data exists in DBFS already for the requested scale factor. 
+  - If it does (meaning you or someone else has executed the TPC-DI in this workspace already) then this step will be skipped - thus removing unnecessary data being stored and also removing the need to generate the data again.
 
 #### Workflow Creation
 The Databricks TPC-DI is developed in a way to make the execution simple and easy.  
-- The wrapper/driver will provide a simple dropdown widget with 4 options - which type of workflow you want to create.  This should be enough for most.  
-- However, if you prefer to create a custom workflow, you can opt for the workflow_builder notebook (also in the src folder with the Driver notebook). This version will offer many more widgets including scale factor, which DBR to use, which worker/driver type to use, where to store/read raw data, what to name the job/warehouse, etc.  We encourage keeping most of these values as default settings.  However, if you want to experiment with different scale factors, DBRs, or node types, this gives you that flexibility.
+- The wrapper/driver will provide a simple dropdown widget with 4 options - which type of workflow you want to create - which should suffice for most situations  
+- However, if you prefer to create a custom workflow, you can opt for the workflow_builder notebook (also in the src folder with the Driver notebook). 
+  - This version will offer many more widgets including scale factor, which DBR to use, which worker/driver type to use, where to store/read raw data, what to name the job/warehouse, etc.  
+  - We encourage keeping most of these values as default settings.  However, if you want to experiment with different scale factors, DBRs, or node types, this gives you that flexibility.
+- Workflow creation should take less than 1 second.  When complete you will be given a link to open your workflow.
 
-**CLUSTER SIZING:** The workflow that is created by running these notebooks will size the cluster according to your scale factor and node type selected.  To reduce complexity in making this "generic" approach to creating a dynamic job, we abstracted away the sizing of the cluster (number of worker nodes). Enough benchmarks have been executed by the Databricks field to know how big the cluster needs to be per scale factor, and this is dynamically adjusted based the worker selected as well - including the number of appropriate shuffle partitions needed.  **IF** you truly want to change these values, we suggest building your workflow using the workflow_builder and then changing the cluster configuration from the ensuing workflow created.
+![Workflow Created!](/src/tools/readme_images/workflow_created.png "Workflow Created!")  
 
-### Step 2) 
+##### CLUSTER SIZING
+- The workflow that is created by running these notebooks will size the cluster according to your scale factor and node type selected.  
+- To reduce complexity in making this "generic" approach to creating a dynamic job, we abstracted away the sizing of the cluster (number of worker nodes). 
+- The correct number of workers and shuffle partition count will automatically be applied, based on prior testing across clouds, worker types, and cluster sizes, according to your selected workflow type, scale factor, and worker type. 
+  - **IF** you truly want to change these values, we suggest building your workflow using the workflow_builder and then changing the cluster configuration from the ensuing workflow created.
+  - The size of raw data is 1 GB per 10 Scale Factor, meaning a single node could do a default 10 Scale Factor.
+  - Default settings at various sizes:
+    | Scale Factor | Shuffle Partitions | Worker Cores |
+    | ------------ | ------------------ | ------------ |
+    | 100          | 8                  | 8            |
+    | 1000         | 86                 | 58           |
+    | 10000        | 864                | 576          |
 
+### Step 2) TPC-DI Workflow Execution
+- After opening the link provided for your workflow, to begin execution click the **Run** button. To watch execution, open the new Job Run.
 
-#### The size of cluster will depend on the Scale Factor and Worker Type Selected! 
-* The size of raw data is 1 GB per 10 Scale Factor, meaning a single node could do a default 10 Scale Factor.
-* We have tested several scale factors including 10, 100, 1000, 5000, and 10000 and have converged on the optimal size of the cluster. Based on the worker type's total memory and number of cores the cluster will be sized accordingly.
-* Default settings at various sizes:
-  * SF 100   = 8 shuffle partitions   = 8 Worker Cores
-  * SF 1000  = 86 shuffle partitions  = 58 Worker Cores
-  * SF 10000 = 864 shuffle partitions = 576 Worker Cores
+![Workflow Page After Completing 1 Run](/src/tools/readme_images/workflow.png "Workflow")  
+
+![Job Run of The Workflow](/src/tools/readme_images/workflow_run.png "Workflow Run")  
+
 
 # Footnote Disclaimer
-TO-DO: Find out if we need to keep the following disclaimer. It needs to be present wherever *derived* results are presented. Likely won't be results presented in this repo though...  
 As the Databricks implementation of the TPC-DI is an unpublished TPC Benchmark, the following is required legalese per TPC Fair Use Policy:  
-*“The Databricks TPC-DI is derived from the TPC-DI and as such is not comparable to published TPC-DI results, as the Databricks TPC-DI results do not comply with the TPC-DI specification."*
+*The Databricks TPC-DI is derived from the TPC-DI and as such is not comparable to published TPC-DI results.  The current scoring metrics for the TPC-DI preclude any official submission for cloud-based execution and therefore The Databricks TPC-DI can not OFFIALLY be submitted under current scoring metrics.  Databricks withholds the ability to submit an official submission to the TPC for this benchmark upon future revision of its scoring metrics. Prior to that, we maintain that this implementation follows all guidelines, rules, and audits required of the official TPC-DI specification.*
