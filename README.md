@@ -29,6 +29,8 @@ The benchmark has been implemented in various ways to demonstrate the versatilit
 ## Components of Execution
 The TPC-DI has an initial "setup" step, followed by the benchmark execution.  
 
+![Execution Journey](/src/tools/readme_images/tpcdi_execution_journey.png "Execution Journey")
+
 ### Step 1) Setup: Data Generation and Workflow Generation  
 This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 1. Create the necessary raw data and store them in DBFS
