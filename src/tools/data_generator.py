@@ -9,29 +9,42 @@ import shlex
 # COMMAND ----------
 
 DRIVER_ROOT = f"/local_disk0"
-total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
-total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
-shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
+try: 
+  total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
+  total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
+  shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
+except NameError: 
+  dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
 # DAG of args to send to Jinja
-dag_args = {"wh_target":wh_target, 
-            "tpcdi_directory":tpcdi_directory, 
-            "scale_factor":scale_factor, 
-            "job_name":job_name, 
-            "repo_src_path":repo_src_path,
-            "cloud_provider":cloud_provider,
-            "worker_node_type":worker_node_type,
-            "driver_node_type":driver_node_type,
-            "worker_node_count":worker_node_count,
-            "dbr":dbr_version_id,
-            "shuffle_partitions":shuffle_partitions
-           }
+dag_args = {
+  "wh_target":wh_target, 
+  "tpcdi_directory":tpcdi_directory, 
+  "scale_factor":scale_factor, 
+  "job_name":job_name, 
+  "repo_src_path":repo_src_path,
+  "cloud_provider":cloud_provider,
+  "worker_node_type":worker_node_type,
+  "driver_node_type":driver_node_type,
+  "worker_node_count":worker_node_count,
+  "dbr":dbr_version_id,
+  "shuffle_partitions":shuffle_partitions
+ }
 
-# To turn on debug mode change widget option to True
-if DEBUG:
-  print(f"workflow_type: {workflow_type}")
-  for k, v in dag_args.items():
-    print(f"{k}: {v}")
+# Print out details of the workflow to user
+print(f"""
+Workflow Name:              {dag_args['job_name']}
+Workflow Type:              {workflow_type}
+Target Warehouse Database:  {wh_target}_wh
+Warehouse Staging Database: {wh_target}_stage
+Raw Files DBFS Path:        {dag_args['tpcdi_directory']}
+Scale Factor:               {dag_args['scale_factor']}
+Driver Type:                {dag_args['driver_node_type']}
+Worker Type:                {dag_args['worker_node_type']}
+Worker Count:               {dag_args['worker_node_count']}
+DBR Version:                {dag_args['dbr']}
+Default Shuffle Partitions: {dag_args['shuffle_partitions']}
+""")
 
 # COMMAND ----------
 

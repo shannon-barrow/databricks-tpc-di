@@ -61,7 +61,7 @@ workflows_dict      = {
 try: 
   default_workflow = wf_type
 except NameError: 
-  wf_type = workflows_dict['NATIVE']
+  default_workflow = workflows_dict['NATIVE']
 workflow_vals       = list(workflows_dict.values())
 default_sf          = '10'
 default_job_name    = f"{string.capwords(user_name.replace('_',' ')).replace(' ','-')}-TPCDI"
