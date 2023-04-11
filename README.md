@@ -17,6 +17,9 @@ This repo is an implementation of the spec only - one that executes only on the 
 
 For additional context of this code base, more information is found in the following deck [TPC-DI Workflow Execution Flow, Notable Features, and Capabilities](https://docs.google.com/presentation/d/1UgVshJHaNYPGIjpQgsUEzyLOFPkfkeUNhwySnbDhrG0/edit?usp=sharing).  
 
+### LIMITATIONS
+The code base is implemented to execute successfully on AZURE OR AWS.  It will NOT execute on GCP today, GCP will be added in near future.  
+
 ### Notes on Scoring/Metrics and Publication
 As of writing, the TPC-DI has not modified its submittal/scoring metrics to accomodate cloud-based platforms and infrastructure. Furthermore, as of writing, there has never been an official submission to this benchmark.  Therefore, no throughput metrics are mentioned or discussed in this code repository.  Databricks is attempting to work with the TPC to amend the rules for submission and modernize the throughput metrics for a future "official submittal" to be published by the TPC.  Until then, this code has been opened for demonstrating how such a Data Integration ETL application could be built upon the Databricks Lakehouse - without any performance metrics being published.
 
