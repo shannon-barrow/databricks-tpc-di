@@ -65,7 +65,16 @@ except NameError:
 workflow_vals       = list(workflows_dict.values())
 default_sf          = '10'
 default_job_name    = f"{string.capwords(user_name.replace('_',' ')).replace(' ','-')}-TPCDI"
-default_worker_type = "m5d.2xlarge" if cloud_provider == 'AWS' else 'Standard_D8ads_v5'
-default_driver_type = "m5d.xlarge" if cloud_provider == 'AWS' else 'Standard_D4as_v5'
+if cloud_provider == 'AWS':
+  default_worker_type = "m5d.2xlarge"
+  default_driver_type = "m5d.xlarge"
+elif cloud_provider == 'GCP':
+  default_worker_type = "n2-standard-8"
+  default_driver_type = "n2-standard-4"
+elif cloud_provider == 'Azure':
+  default_worker_type = "Standard_D8ads_v5" 
+  default_driver_type = "Standard_D4as_v5"
+else:
+  dbutils.notebook.exit('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
 shuffle_part_mult   = 354
 worker_cores_mult   = 0.0576

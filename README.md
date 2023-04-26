@@ -18,7 +18,7 @@ This repo is an implementation of the spec only - one that executes only on the 
 For additional context of this code base, more information is found in the following deck [TPC-DI Workflow Execution Flow, Notable Features, and Capabilities](https://docs.google.com/presentation/d/1UgVshJHaNYPGIjpQgsUEzyLOFPkfkeUNhwySnbDhrG0/edit?usp=sharing).  
 
 ### LIMITATIONS
-* The code base is implemented to execute successfully on **AZURE OR AWS**.  It will **NOT execute on GCP today, GCP will be added in near future**.  
+* The code base is implemented to execute successfully ONLY on the Databricks platoform, on either GCP, AZURE, OR AWS.    
 * This code requires:
   * Databricks E2 Deployment. 
   * Databricks Repos functionality. 
