@@ -1,0 +1,617 @@
+{
+    "name": "{{ job_name }}",
+    "email_notifications": {},
+    "webhook_notifications": {},
+    "timeout_seconds": 0,
+    "max_concurrent_runs": 1,
+    "format": "MULTI_TASK",   
+    "job_clusters": [
+        {
+            "job_cluster_key": "{{ job_name }}",
+            "new_cluster": {
+                "spark_version": "{{ dbr }}",
+                "spark_conf": {
+                    {% if worker_node_count == 0 %}
+                    "spark.master": "local[*, 4]",
+                    "spark.databricks.cluster.profile": "singleNode",
+                    "spark.databricks.adaptive.localShuffleReader.enabled": "true",
+                    {% endif %}
+                    "spark.databricks.delta.schema.autoMerge.enabled": "true",
+                    "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
+                    "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
+                    "spark.databricks.photon.photonRowToColumnar.enabled": "true",
+                    "spark.databricks.photon.allDataSources.enabled": "true",
+                    "spark.databricks.photon.window.experimental.features.enabled": "true",
+                    "spark.databricks.photon.sort.enabled": "true",
+                    "spark.databricks.preemption.enabled": "false",
+                    "spark.databricks.photon.window.enabled": "true",
+                    "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
+                    "spark.databricks.photon.scan.enabled": "true",
+                    "spark.sql.shuffle.partitions": {{ shuffle_partitions }}
+                },
+                {% if cloud_provider == "Azure" %} 
+                "azure_attributes": {
+                    "availability": "SPOT_WITH_FALLBACK_AZURE",
+                    "first_on_demand": 1,
+                    "spot_bid_price_percent": -1
+                },
+                {% endif %}
+                {% if cloud_provider == "AWS" %}
+                "aws_attributes": {
+                    "availability": "SPOT_WITH_FALLBACK",
+                    "first_on_demand": 1,
+                    "zone_id" : "auto",
+                    "spot_bid_price_percent": 100
+                },
+                {% endif %}
+                "spark_env_vars": {
+                    "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+                },
+                {% if worker_node_count == 0 %}
+                "custom_tags": {
+                    "ResourceClass": "SingleNode"
+                },
+                {% endif %}
+                "driver_node_type_id": "{{ driver_node_type }}",
+                "node_type_id": "{{ worker_node_type }}",
+                "num_workers": "{{ worker_node_count }}",
+                "enable_elastic_disk": true,
+                "data_security_mode": "SINGLE_USER",
+                "runtime_engine": "PHOTON"
+            }
+        }
+    ],
+    "tasks": [
+        {
+            "task_key": "dw_init",
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/audit_validation/dw_init",
+                "base_parameters": {
+                    "wh_db": "{{ wh_target }}"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "batch0_validation",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/audit_validation/batch_validation",
+                "base_parameters": {
+                    "batch_id": "0",
+                    "wh_db": "{{ wh_target }}"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "batch0_phase_complete",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/audit_validation/batch_complete",
+                "base_parameters": {
+                    "wh_db": "{{ wh_target }}",
+                    "batch_id": "0"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_Audit",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "Audit"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_AccountIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "AccountIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_BatchDate",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "BatchDate"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_CashTransactionIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "CashTransactionIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_CustomerIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "CustomerIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_DailyMarketIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "DailyMarketIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_DimDate",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "DimDate"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_DimTime",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "DimTime"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_FinWire",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "FinWire"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_HoldingIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "HoldingIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_Industry",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "Industry"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_ProspectIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "ProspectIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_StatusType",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "StatusType"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_TaxRate",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "TaxRate"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_TradeIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "TradeIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_TradeType",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "TradeType"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "autoloader_WatchIncremental",
+            "depends_on": [
+                {
+                    "task_key": "batch0_validation"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
+                "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
+                    "wh_db": "{{ wh_target }}",
+                    "scale_factor": "{{ scale_factor }}",
+                    "table": "WatchIncremental"
+                },
+                "source": "WORKSPACE"
+            },
+            "job_cluster_key": "{{ job_name }}",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+          "task_key": "dbttpcdi",
+          "depends_on": [
+                {
+                    "task_key": "autoloader_Audit"
+                },
+                 {
+                    "task_key": "autoloader_AccountIncremental"
+                },
+                 {
+                    "task_key": "autoloader_BatchDate"
+                },
+                {
+                    "task_key": "autoloader_CashTransactionIncremental"
+                },
+                {
+                    "task_key": "autoloader_CustomerIncremental"
+                },
+                {
+                    "task_key": "autoloader_DailyMarketIncremental"
+                },
+                {
+                    "task_key": "autoloader_DimDate"
+                },
+                {
+                    "task_key": "autoloader_DimTime"
+                },
+                {
+                    "task_key": "autoloader_FinWire"
+                },
+                {
+                    "task_key": "autoloader_HoldingIncremental"
+                },
+                 {
+                    "task_key": "autoloader_Industry"
+                },
+                 {
+                    "task_key": "autoloader_ProspectIncremental"
+                },
+                {
+                    "task_key": "autoloader_StatusType"
+                },
+                {
+                    "task_key": "autoloader_TaxRate"
+                },
+                {
+                    "task_key": "autoloader_TradeIncremental"
+                },
+                {
+                    "task_key": "autoloader_TradeType"
+                },
+                {
+                    "task_key": "autoloader_WatchIncremental"
+                }
+                
+            ],
+          "run_if": "ALL_SUCCESS",
+          "dbt_task":{
+                      "project_directory": "",
+                      "commands":[
+                                   "dbt run"
+                      ],
+                      "schema": "roberto_salcido_TPCDI_wh",
+                      "warehouse_id": "ead10bf07050390f"
+                },
+           "job_cluster_key": "{{ job_name }}",
+            "libraries": [
+                    {
+                        "pypi": {
+                            "package": "dbt-databricks>=1.0.0,<2.0.0"
+                        }
+                    }
+                ],
+            "timeout_seconds": 0,
+            "email_notifications": {}
+
+          }
+        ],
+        "git_source": {
+            "git_url": "https://github.com/rlsalcido24/dbtpcdi",
+            "git_provider": "gitHub",
+            "git_branch": "main"
+             }
+
+      }      
