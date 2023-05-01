@@ -25,7 +25,7 @@
 workflow_types = ["Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ"]
 dbutils.widgets.dropdown("workflow_type", "Native Notebooks Workflow", workflow_types, "Workflow Type")
 wf_type = dbutils.widgets.get('workflow_type')
-displayHTML(f"<h1>To protect against unintenional 'RUN ALL' commands, the cell below is an Intentional Notebook Stoppage to confirm your workflow choice of {wf_type.upper()} is correct! If so, run the last cell below to create your workflow.</h1>")
+displayHTML(f"<h1>To protect against unintentional 'RUN ALL' commands, the cell below is an Intentional Notebook Stoppage to confirm your workflow choice of {wf_type.upper()} is correct! If so, run the last cell below to create your workflow.</h1>")
 
 # COMMAND ----------
 
