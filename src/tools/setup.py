@@ -45,7 +45,7 @@ API_URL = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiU
 TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None)
 if API_URL is None or TOKEN is None: 
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
 cloud_provider = spark.conf.get('spark.databricks.cloudProvider') # "Azure" or "AWS"
 min_dbr_version     = 10.0
 invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
@@ -59,12 +59,13 @@ workflows_dict      = {
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ"
 }
 try: 
-  default_workflow = wf_type
+  default_workflow  = wf_type
 except NameError: 
-  default_workflow = workflows_dict['NATIVE']
+  default_workflow  = workflows_dict['NATIVE']
 workflow_vals       = list(workflows_dict.values())
 default_sf          = '10'
-default_job_name    = f"{string.capwords(user_name.replace('_',' ')).replace(' ','-')}-TPCDI"
+default_job_name    = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
+default_wh          = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 if cloud_provider == 'AWS':
   default_worker_type = "m5d.2xlarge"
   default_driver_type = "m5d.xlarge"

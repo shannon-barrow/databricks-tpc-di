@@ -14,7 +14,7 @@ dbutils.widgets.dropdown("dbr", list(dbrs.values())[0], list(dbrs.values()), "Da
 dbutils.widgets.dropdown("datagen_rewrite", 'False', ['True', 'False'], "Force Re-Generation of Raw Files")
 dbutils.widgets.dropdown("debug", 'True', ['True', 'False'], "Debug Mode")
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
-dbutils.widgets.text("wh_target", f"{user_name}_TPCDI", 'Root name of Target Warehouse')
+dbutils.widgets.text("wh_target", default_wh, 'Root name of Target Warehouse')
 dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
 
