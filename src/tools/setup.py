@@ -32,8 +32,9 @@ def get_dbr_versions():
   dbr_versions_list = json.loads(response.text)['versions']
   dbr_versions_dict = {}
   for dbr in dbr_versions_list:
-    if not any(invalid in dbr['name'] for invalid in invalid_dbr_list) and float(dbr['name'].split()[0]) > min_dbr_version:
-      dbr_versions_dict[dbr['key']] = dbr['name']
+    if not any(invalid in dbr['name'] for invalid in invalid_dbr_list):
+      if int(dbr['key'].split('.')[0]) >= min_dbr_version:
+        dbr_versions_dict[dbr['key']] = dbr['name']
   return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
 
 # COMMAND ----------
@@ -47,7 +48,7 @@ if API_URL is None or TOKEN is None:
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
 user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
 cloud_provider = spark.conf.get('spark.databricks.cloudProvider') # "Azure" or "AWS"
-min_dbr_version     = 10.0
+min_dbr_version     = 10
 invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 node_types          = get_node_types()
 dbrs                = get_dbr_versions()

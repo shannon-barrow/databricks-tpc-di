@@ -12,7 +12,6 @@ dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Work
 dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
 dbutils.widgets.dropdown("dbr", list(dbrs.values())[0], list(dbrs.values()), "Databricks Runtime")
 dbutils.widgets.dropdown("datagen_rewrite", 'False', ['True', 'False'], "Force Re-Generation of Raw Files")
-dbutils.widgets.dropdown("debug", 'True', ['True', 'False'], "Debug Mode")
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Root name of Target Warehouse')
 dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
@@ -25,7 +24,6 @@ wh_target         = dbutils.widgets.get("wh_target")
 tpcdi_directory   = dbutils.widgets.get("tpcdi_directory")
 dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
 FORCE_REWRITE     = eval(dbutils.widgets.get("datagen_rewrite"))
-DEBUG             = eval(dbutils.widgets.get("debug"))
 wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
 job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 worker_node_type  = dbutils.widgets.get("worker_type")
