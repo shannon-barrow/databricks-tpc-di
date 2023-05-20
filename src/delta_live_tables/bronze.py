@@ -26,7 +26,7 @@ def generate_tables(table_nm):
   @dlt.table(name=table_nm)
   def create_table(): 
     if table_nm in spark.conf.get('tables_with_batchid').replace(" ", "").split(","):
-      return build_autoloader_stream(table_nm).selectExpr("*", "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid")
+      return build_autoloader_stream(table_nm).selectExpr("*", "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid")
     else:
       return build_autoloader_stream(table_nm)
 

@@ -79,7 +79,7 @@
             "path": "Batch*",
             "filename": "BatchDate.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "layer": "bronze",
             "db": "wh"
         },
@@ -183,7 +183,7 @@
             "path": "Batch[23]",
             "filename": "Trade.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -195,7 +195,7 @@
             "path": "Batch[23]",
             "filename": "DailyMarket.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -207,7 +207,7 @@
             "path": "Batch[23]",
             "filename": "WatchHistory.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -219,7 +219,7 @@
             "path": "Batch*",
             "filename": "Customer.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze",
             "partition": "PARTITIONED BY (batchid)"
@@ -232,7 +232,7 @@
             "path": "Batch*",
             "filename": "Account.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -244,7 +244,7 @@
             "path": "Batch*",
             "filename": "Prospect.csv",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -256,7 +256,7 @@
             "path": "Batch[23]",
             "filename": "HoldingHistory.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
@@ -268,7 +268,7 @@
             "path": "Batch[23]",
             "filename": "CashTransaction.txt",
             "add_tgt_schema": ", batchid INT COMMENT 'Batch ID when this record was inserted'",
-            "add_tgt_query": "cast(substring(input_file_name() FROM (position('/Batch', input_file_name()) + 6) FOR 1) as int) batchid",
+            "add_tgt_query": "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
             "db": "stage",
             "layer": "bronze"
         },
