@@ -1,0 +1,109 @@
+version: 2
+
+models:
+  - name: DimCustomer
+    columns:
+      - name: tier
+        tests:
+          - not_null:
+              config:
+                store_failures: true
+          - accepted_values:
+              values: [1,2,3]
+              config:
+                store_failures: true
+
+
+    
+  - name: DimAccount
+    columns:
+      - name: sk_customerid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+      - name: sk_brokerid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+
+  
+
+  - name: DimCustomerStg
+    columns:
+      - name: effectivedate
+        tests:
+          - dateval:
+              config:
+                store_failures: true
+
+
+  - name: FactMarketHistory
+    columns:
+      - name: sk_securityid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+      - name: PERatio
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+
+  - name: FactWatches
+    columns:
+      - name: sk_securityid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+      - name: sk_customerid
+        tests:
+           - not_null:
+              config:
+                store_failures: true  
+
+
+  - name: FactHoldings
+    columns:
+      - name: currentprice
+        tests:
+          - not_null:
+              config:
+                store_failures: true
+
+  - name: FactCashBalances
+    columns:
+      - name: sk_accountid
+        tests:
+          - not_null:
+              config:
+                store_failures: true
+
+  - name: DimTrade
+    columns:
+      - name: sk_securityid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+      - name: sk_accountid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+      - name: commission
+        tests:
+           - tradecom:
+              config:
+                store_failures: true 
+                
+      - name: fee
+        tests:
+           - tradefee:
+              config:
+                store_failures: true                                                    
+
+

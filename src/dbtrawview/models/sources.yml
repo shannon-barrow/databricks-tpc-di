@@ -1,0 +1,1389 @@
+version: 2
+
+
+sources:
+  - name: tpcdi
+    catalog: hive_metastore
+    schema: rsstgtest10
+    tables:
+     
+      - name: StatusType
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/StatusType.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: st_id
+            data_type: string
+            description: "StatusCode"
+          - name: st_name
+            data_type: string
+            description: "Status Description"
+  
+
+      - name: TaxRate
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/TaxRate.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: tx_id
+            data_type: string
+            description: "Tax Rate Code"
+          - name: tx_name
+            data_type: string
+            description: "Tax rate description"
+          - name: tx_rate
+            data_type: float
+            description: "tax rate"
+
+      - name: DimTime
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/Time.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: sk_timeid
+            data_type: bigint
+            description: "abc"
+          - name: timevalue
+            data_type: string
+            description: "abc"
+          - name: hourid
+            data_type: int
+            description: "abc"
+          - name: hourdesc
+            data_type: string
+            description: "abc" 
+          - name: minuteid
+            data_type: int
+            description: "abc" 
+          - name: minutedesc
+            data_type: int
+            description: "abc" 
+          - name: secondid
+            data_type: int
+            description: "abc" 
+
+          - name: seconddesc
+            data_type: int
+            description: "string" 
+          - name: markethoursflag
+            data_type: boolean
+            description: "abc" 
+          - name: officehoursflag
+            data_type: boolean
+            description: "abc"
+
+      - name: AccountIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/Account.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: accountid
+            data_type: bigint
+            description: "abc"
+          - name: ca_b_id
+            data_type: bigint
+            description: "abc" 
+          - name: ca_c_id
+            data_type: bigint
+            description: "abc" 
+          - name: accountDesc
+            data_type: string
+            description: "abc"
+          - name: taxstatus
+            data_type: tinyint
+            description: "abc" 
+          - name: ca_st_id
+            data_type: string
+            description: "abc"
+
+      - name: AccountIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/Account.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: accountid
+            data_type: bigint
+            description: "abc"
+          - name: ca_b_id
+            data_type: bigint
+            description: "abc" 
+          - name: ca_c_id
+            data_type: bigint
+            description: "abc" 
+          - name: accountDesc
+            data_type: string
+            description: "abc"
+          - name: taxstatus
+            data_type: tinyint
+            description: "abc" 
+          - name: ca_st_id
+            data_type: string
+            description: "abc"      
+        
+      - name: CashTransactionHistory
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/CashTransaction.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: ct_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: ct_dts
+            data_type: timestamp
+            description: "abc"
+          - name: ct_amt
+            data_type: double
+            description: "abc"
+          - name: ct_name
+            data_type: string
+            description: "abc" 
+
+
+      - name: CashTransactionIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/CashTransaction.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: ct_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: ct_dts
+            data_type: timestamp
+            description: "abc" 
+          - name: ct_amt
+            data_type: double
+            description: "abc" 
+          - name: ct_name
+            data_type: string
+            description: "abc"
+
+      - name: CashTransactionIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/CashTransaction.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: ct_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: ct_dts
+            data_type: timestamp
+            description: "abc" 
+          - name: ct_amt
+            data_type: double
+            description: "abc" 
+          - name: ct_name
+            data_type: string
+            description: "abc"
+
+      - name: customerincrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/Customer.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: customerid
+            data_type: bigint
+            description: "abc"
+          - name: taxid
+            data_type: string
+            description: "abc" 
+          - name: status
+            data_type: string
+            description: "abc" 
+          - name: lastname
+            data_type: string
+            description: "abc"
+          - name: firstname
+            data_type: string
+            description: "abc"
+          - name: middleinitial
+            data_type: string
+            description: "abc"
+          - name: gender
+            data_type: string
+            description: "abc"
+          - name: tier
+            data_type: tinyint
+            description: "abc" 
+          - name: dob
+            data_type: date
+            description: "abc" 
+          - name: addressline1
+            data_type: string
+            description: "abc"
+          - name: addressline2
+            data_type: string
+            description: "abc"
+          - name: postalcode
+            data_type: string
+            description: "abc"
+          - name: city
+            data_type: string
+            description: "abc"
+          - name: stateprov
+            data_type: string
+            description: "abc" 
+          - name: country
+            data_type: string
+            description: "abc" 
+          - name: c_ctry_1
+            data_type: string
+            description: "abc"
+          - name: c_ctry_1
+            data_type: string
+            description: "abc"
+          - name: c_area_1
+            data_type: string
+            description: "abc"
+          - name: c_local_1
+            data_type: string
+            description: "abc"
+          - name: c_ext_1
+            data_type: string
+            description: "abc" 
+          - name: c_ctry_2
+            data_type: string
+            description: "abc" 
+          - name: c_area_2
+            data_type: string
+            description: "abc"
+          - name: c_local_1
+            data_type: string
+            description: "abc"
+          - name: c_ext_1
+            data_type: string
+            description: "abc"
+          - name: c_ctry_2
+            data_type: string
+            description: "abc"
+          - name: c_area_2
+            data_type: string
+            description: "abc" 
+          - name: c_local_2
+            data_type: string
+            description: "abc" 
+          - name: c_ext_2
+            data_type: string
+            description: "abc"
+          - name: c_ctry_3
+            data_type: string
+            description: "abc"
+          - name: c_area_3
+            data_type: string
+            description: "abc"
+          - name: c_local_3
+            data_type: string
+            description: "abc"
+          - name: c_ext_3
+            data_type: string
+            description: "abc" 
+          - name: email1
+            data_type: string
+            description: "abc" 
+          - name: email2
+            data_type: string
+            description: "abc"
+          - name: lcl_tx_id
+            data_type: string
+            description: "abc" 
+          - name: nat_tx_id
+            data_type: string
+            description: "abc"          
+
+
+              
+      - name: customerincrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/Customer.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: customerid
+            data_type: bigint
+            description: "abc"
+          - name: taxid
+            data_type: string
+            description: "abc" 
+          - name: status
+            data_type: string
+            description: "abc" 
+          - name: lastname
+            data_type: string
+            description: "abc"
+          - name: firstname
+            data_type: string
+            description: "abc"
+          - name: middleinitial
+            data_type: string
+            description: "abc"
+          - name: gender
+            data_type: string
+            description: "abc"
+          - name: tier
+            data_type: tinyint
+            description: "abc" 
+          - name: dob
+            data_type: date
+            description: "abc" 
+          - name: addressline1
+            data_type: string
+            description: "abc"
+          - name: addressline2
+            data_type: string
+            description: "abc"
+          - name: postalcode
+            data_type: string
+            description: "abc"
+          - name: city
+            data_type: string
+            description: "abc"
+          - name: stateprov
+            data_type: string
+            description: "abc" 
+          - name: country
+            data_type: string
+            description: "abc" 
+          - name: c_ctry_1
+            data_type: string
+            description: "abc"
+          - name: c_ctry_1
+            data_type: string
+            description: "abc"
+          - name: c_area_1
+            data_type: string
+            description: "abc"
+          - name: c_local_1
+            data_type: string
+            description: "abc"
+          - name: c_ext_1
+            data_type: string
+            description: "abc" 
+          - name: c_ctry_2
+            data_type: string
+            description: "abc" 
+          - name: c_area_2
+            data_type: string
+            description: "abc"
+          - name: c_local_1
+            data_type: string
+            description: "abc"
+          - name: c_ext_1
+            data_type: string
+            description: "abc"
+          - name: c_ctry_2
+            data_type: string
+            description: "abc"
+          - name: c_area_2
+            data_type: string
+            description: "abc" 
+          - name: c_local_2
+            data_type: string
+            description: "abc" 
+          - name: c_ext_2
+            data_type: string
+            description: "abc"
+          - name: c_ctry_3
+            data_type: string
+            description: "abc"
+          - name: c_area_3
+            data_type: string
+            description: "abc"
+          - name: c_local_3
+            data_type: string
+            description: "abc"
+          - name: c_ext_3
+            data_type: string
+            description: "abc" 
+          - name: email1
+            data_type: string
+            description: "abc" 
+          - name: email2
+            data_type: string
+            description: "abc"
+          - name: lcl_tx_id
+            data_type: string
+            description: "abc" 
+          - name: nat_tx_id
+            data_type: string
+            description: "abc"   
+            
+      - name: DailyMarketHistorical
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/DailyMarket.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: dm_date
+            data_type: date
+            description: "abc"
+          - name: dm_s_symb
+            data_type: string
+            description: "abc"
+          - name: dm_close
+            data_type: double
+            description: "abc"
+          - name: dm_high
+            data_type: double
+            description: "abc" 
+          - name: dm_low
+            data_type: double
+            description: "abc" 
+          - name: dm_vol
+            data_type: int
+            description: "abc" 
+            
+      - name: DailyMarketIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/DailyMarket.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: dm_date
+            data_type: date
+            description: "abc"
+          - name: dm_s_symb
+            data_type: string
+            description: "abc" 
+          - name: dm_close
+            data_type: double
+            description: "abc" 
+          - name: dm_high
+            data_type: double
+            description: "abc"
+          - name: dm_low
+            data_type: double
+            description: "abc" 
+          - name: dm_vol
+            data_type: int
+            description: "abc"
+
+      - name: DailyMarketIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/DailyMarket.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: dm_date
+            data_type: date
+            description: "abc"
+          - name: dm_s_symb
+            data_type: string
+            description: "abc" 
+          - name: dm_close
+            data_type: double
+            description: "abc" 
+          - name: dm_high
+            data_type: double
+            description: "abc"
+          - name: dm_low
+            data_type: double
+            description: "abc" 
+          - name: dm_vol
+            data_type: int
+            description: "abc"   
+
+      - name: DimDate
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/Date.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: sk_dateid
+            data_type: bigint
+            description: "abc"
+          - name: datevalue
+            data_type: date
+            description: "abc"
+          - name: datedesc
+            data_type: string
+            description: "abc"
+          - name: calendaryearid
+            data_type: int
+            description: "abc" 
+          - name: calendaryeardesc
+            data_type: string
+            description: "abc" 
+          - name: calendarqtrid
+            data_type: int
+            description: "abc"
+          - name: calendarqtrdesc
+            data_type: string
+            description: "abc"
+          - name: calendarmonthid
+            data_type: int
+            description: "abc"
+            index: c6
+          - name: calendarmonthdesc
+            data_type: string
+            description: "abc"
+            index: c7     
+          - name: calendarweekid
+            data_type: int
+            description: "abc"
+          - name: calendarweekdesc
+            data_type: string
+            description: "abc"
+          - name: dayofweeknum
+            data_type: int
+            description: "abc"
+          - name: dayofweekdesc
+            data_type: string
+            description: "abc"
+          - name: fiscalyearid
+            data_type: int
+            description: "abc" 
+          - name: fiscalyeardesc
+            data_type: string
+            description: "abc" 
+          - name: fiscalqtrid
+            data_type: int
+            description: "abc"
+          - name: fiscalqtrdesc
+            data_type: string
+            description: "abc" 
+          - name: holidayflag
+            data_type: boolean
+            description: "abc"  
+
+      - name: HR
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/HR.csv  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: ','
+            header: 'false'
+
+        columns:
+          - name: employeeid
+            data_type: string
+            description: "abc"
+          - name: managerid
+            data_type: string
+            description: "abc"
+          - name: employeefirstname
+            data_type: string
+            description: "abc"
+          - name: employeelastname
+            data_type: string
+            description: "abc" 
+          - name: employeemi
+            data_type: string
+            description: "abc" 
+          - name: employeejobcode
+            data_type: string
+            description: "abc"
+          - name: employeebranch
+            data_type: string
+            description: "abc" 
+          - name: employeeoffice
+            data_type: string
+            description: "abc"
+          - name: employeephone
+            data_type: string
+            description: "abc"   
+            
+      - name: HoldingHistory
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/HoldingHistory.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: hh_h_t_id
+            data_type: int
+            description: "abc"
+          - name: hh_t_id
+            data_type: int
+            description: "abc"
+          - name: hh_before_qty
+            data_type: int
+            description: "abc"
+          - name: hh_after_qty
+            data_type: int
+            description: "abc" 
+
+            
+      - name: HoldingIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/HoldingHistory.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: hh_h_t_id
+            data_type: int
+            description: "abc"
+          - name: hh_t_id
+            data_type: int
+            description: "abc"  
+          - name: hh_before_qty
+            data_type: int
+            description: "abc" 
+          - name: hh_after_qty
+            data_type: int
+            description: "abc" 
+
+      - name: HoldingIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/HoldingHistory.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: hh_h_t_id
+            data_type: int
+            description: "abc"
+          - name: hh_t_id
+            data_type: int
+            description: "abc"  
+          - name: hh_before_qty
+            data_type: int
+            description: "abc" 
+          - name: hh_after_qty
+            data_type: int
+            description: "abc"
+            
+      - name: BatchDateuno
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/BatchDate.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: batchdate
+            data_type: date
+            description: "abc"
+
+      - name: BatchDatedos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/BatchDate.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: batchdate
+            data_type: date
+            description: "abc"
+          
+      - name: BatchDatetres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/BatchDate.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: batchdate
+            data_type: date
+            description: "abc"    
+            
+      - name: Industry
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/Industry.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: in_id
+            data_type: string
+            description: "abc"
+          - name: in_name
+            data_type: string
+            description: "abc"
+          - name: in_sc_id
+            data_type: string
+            description: "abc"
+
+      - name: TradeHistory
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/Trade.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: t_id
+            data_type: bigint
+            description: "abc"
+          - name: t_dts
+            data_type: timestamp
+            description: "abc"
+          - name: t_st_id
+            data_type: string
+            description: "abc"
+          - name: t_tt_id
+            data_type: string
+            description: "abc"
+          - name: t_is_cash
+            data_type: tinyint
+            description: "abc" 
+          - name: t_s_symb
+            data_type: string
+            description: "abc"
+          - name: t_qty
+            data_type: int
+            description: "abc"
+          - name: t_bid_price
+            data_type: double
+            description: "abc"
+          - name: t_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: t_exec_name
+            data_type: string
+            description: "abc" 
+          - name: t_trade_price
+            data_type: double
+            description: "abc"
+          - name: t_chrg
+            data_type: double
+            description: "abc"
+          - name: t_comm
+            data_type: double
+            description: "abc"
+          - name: t_tax
+            data_type: double
+            description: "abc"
+           
+
+            
+      - name: TradeHistoryRaw
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/TradeHistory.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: th_t_id
+            data_type: bigint
+            description: "abc"
+          - name: th_dts
+            data_type: timestamp
+            description: "abc"
+          - name: th_st_id
+            data_type: string
+            description: "abc"
+          
+
+      - name: TradeIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/Trade.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: t_id
+            data_type: bigint
+            description: "abc"
+          - name: t_dts
+            data_type: timestamp
+            description: "abc"
+          - name: t_st_id
+            data_type: string
+            description: "abc"
+          - name: t_tt_id
+            data_type: string
+            description: "abc"
+          - name: t_is_cash
+            data_type: tinyint
+            description: "abc" 
+          - name: t_s_symb
+            data_type: string
+            description: "abc"
+          - name: t_qty
+            data_type: int
+            description: "abc"
+          - name: t_bid_price
+            data_type: double
+            description: "abc"
+          - name: t_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: t_exec_name
+            data_type: string
+            description: "abc" 
+          - name: t_trade_price
+            data_type: double
+            description: "abc"
+          - name: t_chrg
+            data_type: double
+            description: "abc"
+          - name: t_comm
+            data_type: double
+            description: "abc"
+          - name: t_tax
+            data_type: double
+            description: "abc"
+
+      - name: TradeIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/Trade.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: t_id
+            data_type: bigint
+            description: "abc"
+          - name: t_dts
+            data_type: timestamp
+            description: "abc"
+          - name: t_st_id
+            data_type: string
+            description: "abc"
+          - name: t_tt_id
+            data_type: string
+            description: "abc"
+          - name: t_is_cash
+            data_type: tinyint
+            description: "abc" 
+          - name: t_s_symb
+            data_type: string
+            description: "abc"
+          - name: t_qty
+            data_type: int
+            description: "abc"
+          - name: t_bid_price
+            data_type: double
+            description: "abc"
+          - name: t_ca_id
+            data_type: bigint
+            description: "abc"
+          - name: t_exec_name
+            data_type: string
+            description: "abc" 
+          - name: t_trade_price
+            data_type: double
+            description: "abc"
+          - name: t_chrg
+            data_type: double
+            description: "abc"
+          - name: t_comm
+            data_type: double
+            description: "abc"
+          - name: t_tax
+            data_type: double
+            description: "abc"
+
+      - name: TradeType
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/TradeType.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: tt_id
+            data_type: string
+            description: "abc"
+          - name: tt_name
+            data_type: string
+            description: "abc"
+          - name: tt_is_sell
+            data_type: int
+            description: "abc"
+          - name: tt_is_mrkt
+            data_type: int
+            description: "abc" 
+        
+            
+      - name: WatchIncrementaldos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/WatchHistory.txt   # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: w_c_id
+            data_type: bigint
+            description: "abc"
+          - name: w_s_symb
+            data_type: string
+            description: "abc" 
+          - name: w_dts
+            data_type: timestamp
+            description: "abc" 
+          - name: w_action
+            data_type: string
+            description: "abc" 
+
+      - name: WatchIncrementaltres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/WatchHistory.txt  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                 # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: cdc_flag
+            data_type: string
+            description: "abc"
+          - name: cdc_dsn
+            data_type: bigint
+            description: "abc"
+          - name: w_c_id
+            data_type: bigint
+            description: "abc"
+          - name: w_s_symb
+            data_type: string
+            description: "abc" 
+          - name: w_dts
+            data_type: timestamp
+            description: "abc" 
+          - name: w_action
+            data_type: string
+            description: "abc"
+            
+      - name: WatchHistory
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/WatchHistory.txt # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: '|'
+            header: 'false'
+
+        columns:
+          - name: w_c_id
+            data_type: bigint
+            description: "abc"
+          - name: w_s_symb
+            data_type: string
+            description: "abc" 
+          - name: w_dts
+            data_type: timestamp
+            description: "abc" 
+          - name: w_action
+            data_type: string
+            description: "abc" 
+            
+     
+           
+            
+      - name: ProspectRawuno
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch1/Prospect.csv  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: ','
+            header: 'false'
+
+        columns:
+          - name: agencyid
+            data_type: string
+            description: "abc" 
+          - name: lastname
+            data_type: string
+            description: "abc"
+          - name: firstname
+            data_type: string
+            description: "abc"
+          - name: middleinitial
+            data_type: string
+            description: "abc"
+          - name: gender
+            data_type: string
+            description: "abc" 
+          - name: addressline1
+            data_type: string
+            description: "abc"
+          - name: addressline2
+            data_type: string
+            description: "abc"
+          - name: postalcode
+            data_type: string
+            description: "abc"
+          - name: city
+            data_type: string
+            description: "abc"
+          - name: state
+            data_type: string
+            description: "abc" 
+          - name: country
+            data_type: string
+            description: "abc"
+          - name: phone
+            data_type: string
+            description: "abc"
+          - name: income
+            data_type: string
+            description: "abc"
+          - name: numbercars
+            data_type: int
+            description: "abc" 
+          - name: numberchildren
+            data_type: int
+            description: "abc"
+          - name: maritalstatus
+            data_type: string
+            description: "abc"
+          - name: age
+            data_type: int
+            description: "abc"
+          - name: creditrating
+            data_type: int
+            description: "abc"
+          - name: ownorrentflag
+            data_type: string
+            description: "abc"
+          - name: employer
+            data_type: string
+            description: "abc"
+          - name: numbercreditcards
+            data_type: int
+            description: "abc"
+          - name: networth
+            data_type: int
+            description: "abc"     
+
+      - name: ProspectRawdos
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch2/Prospect.csv  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: ','
+            header: 'false'
+
+        columns:
+          - name: agencyid
+            data_type: string
+            description: "abc" 
+          - name: lastname
+            data_type: string
+            description: "abc"
+          - name: firstname
+            data_type: string
+            description: "abc"
+          - name: middleinitial
+            data_type: string
+            description: "abc"
+          - name: gender
+            data_type: string
+            description: "abc" 
+          - name: addressline1
+            data_type: string
+            description: "abc"
+          - name: addressline2
+            data_type: string
+            description: "abc"
+          - name: postalcode
+            data_type: string
+            description: "abc"
+          - name: city
+            data_type: string
+            description: "abc"
+          - name: state
+            data_type: string
+            description: "abc" 
+          - name: country
+            data_type: string
+            description: "abc"
+          - name: phone
+            data_type: string
+            description: "abc"
+          - name: income
+            data_type: string
+            description: "abc"
+          - name: numbercars
+            data_type: int
+            description: "abc" 
+          - name: numberchildren
+            data_type: int
+            description: "abc"
+          - name: maritalstatus
+            data_type: string
+            description: "abc"
+          - name: age
+            data_type: int
+            description: "abc"
+          - name: creditrating
+            data_type: int
+            description: "abc"
+          - name: ownorrentflag
+            data_type: string
+            description: "abc"
+          - name: employer
+            data_type: string
+            description: "abc"
+          - name: numbercreditcards
+            data_type: int
+            description: "abc"
+          - name: networth
+            data_type: int
+            description: "abc"  
+            
+
+      - name: ProspectRawtres
+        external:
+          location: dbfs:/tmp/tpcdi/sf={{var("benchmark")}}/Batch3/Prospect.csv  # hdfs://, s3://, azure://, dbfs://, ...
+          using: csv
+                                  # file type: csv, json, parquet, delta, ...
+          options:                           # as needed
+            sep: ','
+            header: 'false'
+
+        columns:
+          - name: agencyid
+            data_type: string
+            description: "abc" 
+          - name: lastname
+            data_type: string
+            description: "abc"
+          - name: firstname
+            data_type: string
+            description: "abc"
+          - name: middleinitial
+            data_type: string
+            description: "abc"
+          - name: gender
+            data_type: string
+            description: "abc" 
+          - name: addressline1
+            data_type: string
+            description: "abc"
+          - name: addressline2
+            data_type: string
+            description: "abc"
+          - name: postalcode
+            data_type: string
+            description: "abc"
+          - name: city
+            data_type: string
+            description: "abc"
+          - name: state
+            data_type: string
+            description: "abc" 
+          - name: country
+            data_type: string
+            description: "abc"
+          - name: phone
+            data_type: string
+            description: "abc"
+          - name: income
+            data_type: string
+            description: "abc"
+          - name: numbercars
+            data_type: int
+            description: "abc" 
+          - name: numberchildren
+            data_type: int
+            description: "abc"
+          - name: maritalstatus
+            data_type: string
+            description: "abc"
+          - name: age
+            data_type: int
+            description: "abc"
+          - name: creditrating
+            data_type: int
+            description: "abc"
+          - name: ownorrentflag
+            data_type: string
+            description: "abc"
+          - name: employer
+            data_type: string
+            description: "abc"
+          - name: numbercreditcards
+            data_type: int
+            description: "abc"
+          - name: networth
+            data_type: int
+            description: "abc"                   
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
