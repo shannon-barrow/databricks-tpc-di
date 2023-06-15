@@ -1,0 +1,14 @@
+sql_endpoints:
+  target: dev
+  outputs:
+    # Use this if connecting to a hosted spark (e.g. Databricks)
+    dev:
+      type: databricks
+      method: http
+      catalog: hive_metastore
+      schema: insertschemahere
+      threads: 25
+      host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
+      token: "{{ env_var('DBT_DATABRICKS_TOKEN') }}"
+      http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH') }}
+      
