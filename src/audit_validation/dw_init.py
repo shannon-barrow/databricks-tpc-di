@@ -11,24 +11,16 @@
 
 # COMMAND ----------
 
-spark.conf.set("spark.sql.shuffle.partitions", 'Auto')
-spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", 'true')
-spark.conf.set("spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite", 'true')
-spark.conf.set("spark.databricks.streaming.forEachBatch.optimized.enabled", 'true')
-spark.conf.set("spark.databricks.photon.photonRowToColumnar.enabled", 'true')
-spark.conf.set("spark.databricks.photon.allDataSources.enabled", 'true')
-spark.conf.set("spark.databricks.preemption.enabled", 'true')
-spark.conf.set("spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled", 'true')
-spark.conf.set("spark.databricks.photon.scan.enabled", 'true')
-
-# COMMAND ----------
-
 import json
 import string
 
-spark.sql("set spark.databricks.delta.identityColumn.enabled = true") # Enable Delta Lake Identity Column feature
 with open("../tools/traditional_config.json", "r") as json_conf:
-  table_conf = json.load(json_conf)
+  conf = json.load(json_conf)
+
+for config in conf['spark_conf']:
+  spark.conf.set(f"{config}", f"{conf['spark_conf'][config]}")
+
+table_conf = conf['tables']
 
 # COMMAND ----------
 
@@ -67,11 +59,11 @@ spark.sql(f"USE CATALOG {catalog}")
 # COMMAND ----------
 
 def create_table (table):
-  tgt_db = wh_db if table_conf['tables'][table]['db'] == 'wh' else staging_db
+  tgt_db = wh_db if table_conf[table]['db'] == 'wh' else staging_db
   spark.sql(f"USE {tgt_db}")
-  constraints = '' if catalog == 'hive_metastore' else str(table_conf['tables'][table].get('constraints') or '')
-  schema = table_conf['tables'][table]['raw_schema'] + str(table_conf['tables'][table].get('add_tgt_schema') or '') + constraints
-  part = str(table_conf['tables'][table].get('partition') or '')
+  constraints = '' if catalog == 'hive_metastore' else str(table_conf[table].get('constraints') or '')
+  schema = table_conf[table]['raw_schema'] + str(table_conf[table].get('add_tgt_schema') or '') + constraints
+  part = str(table_conf[table].get('partition') or '')
   spark.sql(f"""
     CREATE OR REPLACE TABLE {table} ({schema}) USING DELTA {part} TBLPROPERTIES (
       delta.tuneFileSizesForRewrites = true, 
@@ -82,5 +74,5 @@ def create_table (table):
 
 # COMMAND ----------
 
-for table_name in table_conf['tables']:
+for table_name in conf['tables']:
   create_table(table_name)

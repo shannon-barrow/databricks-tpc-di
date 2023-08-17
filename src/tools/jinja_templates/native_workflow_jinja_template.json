@@ -4,10 +4,20 @@
     "webhook_notifications": {},
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
-    "format": "MULTI_TASK",   
+    "format": "MULTI_TASK",
+    {% if serverless == "YES" %}
+    "compute": [
+        {
+            "compute_key": "{{ job_name }}_compute",
+            "spec": {
+                "kind": "SERVERLESS_PREVIEW"
+            }
+        }
+    ],
+    {% else %}
     "job_clusters": [
         {
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
@@ -16,18 +26,6 @@
                     "spark.databricks.cluster.profile": "singleNode",
                     "spark.databricks.adaptive.localShuffleReader.enabled": "true",
                     {% endif %}
-                    "spark.databricks.delta.schema.autoMerge.enabled": "true",
-                    "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
-                    "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-                    "spark.databricks.photon.photonRowToColumnar.enabled": "true",
-                    "spark.databricks.photon.allDataSources.enabled": "true",
-                    "spark.databricks.photon.window.experimental.features.enabled": "true",
-                    "spark.databricks.photon.sort.enabled": "true",
-                    "spark.databricks.preemption.enabled": "false",
-                    "spark.databricks.photon.window.enabled": "true",
-                    "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                    "spark.databricks.photon.scan.enabled": "true",
-                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
@@ -61,6 +59,7 @@
             }
         }
     ],
+    {% endif %}
     "tasks": [
         {
             "task_key": "dw_init",
@@ -73,7 +72,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -96,7 +95,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -119,7 +118,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -144,7 +143,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -169,7 +168,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -194,7 +193,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -219,7 +218,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -244,7 +243,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -269,7 +268,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -294,7 +293,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -319,7 +318,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -344,7 +343,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -369,7 +368,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -394,7 +393,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -419,7 +418,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -444,7 +443,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -469,7 +468,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -494,7 +493,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -519,7 +518,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -544,7 +543,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -568,7 +567,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "libraries": [
                 {
                     "maven": {
@@ -599,7 +598,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -627,7 +626,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -649,7 +648,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -671,7 +670,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -694,7 +693,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -726,7 +725,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -752,7 +751,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -778,7 +777,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -815,7 +814,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -840,7 +839,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -865,7 +864,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -887,7 +886,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -916,7 +915,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -947,7 +946,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -975,7 +974,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1028,7 +1027,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1051,7 +1050,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1074,7 +1073,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1097,7 +1096,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1123,7 +1122,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1146,7 +1145,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1172,7 +1171,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1197,7 +1196,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1222,7 +1221,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1247,7 +1246,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1275,7 +1274,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1310,7 +1309,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1333,7 +1332,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1356,7 +1355,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1382,7 +1381,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1405,7 +1404,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1431,7 +1430,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1456,7 +1455,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1481,7 +1480,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1504,7 +1503,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1529,7 +1528,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1557,7 +1556,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1592,7 +1591,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1615,7 +1614,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1637,7 +1636,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false

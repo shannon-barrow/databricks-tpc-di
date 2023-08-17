@@ -7,6 +7,7 @@
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count (cluster size is dynamic and dependent on Scale Factor)
 # If you prefer changing the cluster size, you can do so (with caution) from the Workflow created
 
+dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "USE SERVERLESS COMPUTE")
 dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale factor")
 dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Workflow Type")
 dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
@@ -19,6 +20,7 @@ dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw File
 dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
 
 # PARAMETERS
+serverless        = dbutils.widgets.get("serverless")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
 wh_target         = dbutils.widgets.get("wh_target")

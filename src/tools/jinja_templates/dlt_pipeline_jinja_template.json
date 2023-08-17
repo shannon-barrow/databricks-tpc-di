@@ -5,10 +5,34 @@
     "development": false,
     "continuous": false,
     "channel": "PREVIEW",
-    "edition": "{{ edition }}",
     "photon": true,
     "catalog": "{{ catalog }}",
     "target": "{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}",
+    "libraries": [
+        {
+            "notebook": {
+                "path": "{{ repo_src_path }}/delta_live_tables/bronze"
+            }
+        },
+        {
+            "notebook": {
+                "path": "{{ repo_src_path }}/delta_live_tables/silver"
+            }
+        },
+        {
+            "notebook": {
+                {% if edition == "PRO" %}
+                "path": "{{ repo_src_path }}/delta_live_tables/incremental_apply_changes_into"
+                {% else %}
+                "path": "{{ repo_src_path }}/delta_live_tables/incremental"
+                {% endif %}
+            }
+        }
+    ],
+    {% if serverless == "YES" %}
+    "serverless": true,
+    {% else %}
+    "edition": "{{ edition }}",
     "clusters": [
         {
             "label": "default",
@@ -34,27 +58,7 @@
             "num_workers": {{ worker_node_count }}
         }
     ],
-    "libraries": [
-        {
-            "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/bronze"
-            }
-        },
-        {
-            "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/silver"
-            }
-        },
-        {
-            "notebook": {
-                {% if edition == "PRO" %}
-                "path": "{{ repo_src_path }}/delta_live_tables/incremental_apply_changes_into"
-                {% else %}
-                "path": "{{ repo_src_path }}/delta_live_tables/incremental"
-                {% endif %}
-            }
-        }
-    ],
+    {% endif %}
     "configuration": {
         "files_directory": "{{ tpcdi_directory }}",
         "scale_factor": "{{ scale_factor }}",

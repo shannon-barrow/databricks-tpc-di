@@ -4,7 +4,17 @@
     "webhook_notifications": {},
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
-    "format": "MULTI_TASK",   
+    "format": "MULTI_TASK", 
+    {% if serverless == "YES" %}
+    "compute": [
+        {
+            "compute_key": "{{ job_name }}_compute",
+            "spec": {
+                "kind": "SERVERLESS_PREVIEW"
+            }
+        }
+    ],
+    {% else %}  
     "job_clusters": [
         {
             "job_cluster_key": "{{ job_name }}",
@@ -55,6 +65,7 @@
             }
         }
     ],
+    {% endif %}
     "tasks": [
         {
             "task_key": "Load-CustomerMgmt-XML-File",
@@ -69,7 +80,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "job_cluster_key": "{{ job_name }}",
+            "compute_key": "{{ job_name }}_compute",
             "libraries": [
                 {
                     "maven": {

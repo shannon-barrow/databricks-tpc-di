@@ -30,10 +30,14 @@ As of writing, the TPC-DI has not modified its submittal/scoring metrics to acco
 # Execution Mechanisms
 The benchmark has been implemented in various ways to demonstrate the versatility of the Databricks Lakehouse platform, and so users can reference such implementations side-by-side to better enable them to build other similar data engineering pipelines:
 
-1. Traditional Notebooks Workflow
+1. Traditional Native Notebooks Workflow
 2. Databricks Delta Live Tables CORE
 3. Databricks Delta Live Tables PRO: introduces easier handling of SCD TYPE 1/2 historical tracking using the new APPLY CHANGES INTO syntax
 4. Databricks Delta Live Tables ADVANCED: introduces Data Quality metrics as well so data engineers can more easily handle bad data quality, analysts can more confidently trust their data, and support teams can more easily monitor the quality of data as it enters the Lakehouse.
+
+There are 2 additional options that a user can toggle for **EACH** of the above deployment choices and they include:
+1. **Serverless**: choose faster performance and startup time with the Databricks SERVERLESS Workflows or SERVERLESS Delta Live Tables (which includes Enzyme as a standard feature)
+2. **Unity Catalog**: leverage the latest in Databricks governance with Unity Catalog. With defined Primary and Foreign keys included in the DDL you can track lineage through the pipeline, define permissions, monitor, share, and search with this native, best-in-class, free governance tool. To leverage Unity Catalog, just define a different name for the Catalog than the native hive_metastore. If Unity Catalog is not available for the cluster defining the workflow then the hive_metastore will be chosen as default.
 
 ## Components of Execution
 The TPC-DI has an initial "setup" step, followed by the benchmark execution.  
@@ -81,12 +85,13 @@ The Databricks TPC-DI is developed in a way to make the execution simple and eas
 ![Workflow Created!](/src/tools/readme_images/workflow_created.png "Workflow Created!")  
 
 ##### CLUSTER SIZING
+*The following applies only when **not choosing SERVERLESS** as the compute choice. Serverless will automatically scale to meet the demands of the job*
 - The workflow that is created by running these notebooks will size the cluster according to your scale factor and node type selected.  
 - To reduce complexity in making this "generic" approach to creating a dynamic job, we abstracted away the sizing of the cluster (number of worker nodes). 
 - The correct number of workers and shuffle partition count will automatically be applied, based on prior testing across clouds, worker types, and cluster sizes, according to your selected workflow type, scale factor, and worker type. 
   - **IF** you truly want to change these values, we suggest building your workflow using the workflow_builder and then changing the cluster configuration from the ensuing workflow created.
   - The size of raw data is 1 GB per 10 Scale Factor, meaning a single node could do a default 10 Scale Factor.
-  - Default settings at various sizes:
+  - Suggested settings at various sizes (though the shuffle partitions are set to AUTO at job start):
     | Scale Factor | Shuffle Partitions | Worker Cores |
     | ------------ | ------------------ | ------------ |
     | 100          | 8                  | 8            |

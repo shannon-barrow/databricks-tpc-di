@@ -1,4 +1,20 @@
 {
+    "spark_conf":
+    {
+        "spark.databricks.delta.schema.autoMerge.enabled": "true",
+        "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
+        "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
+        "spark.databricks.photon.photonRowToColumnar.enabled": "true",
+        "spark.databricks.photon.allDataSources.enabled": "true",
+        "spark.databricks.photon.window.experimental.features.enabled": "true",
+        "spark.databricks.photon.sort.enabled": "true",
+        "spark.databricks.preemption.enabled": "false",
+        "spark.databricks.photon.window.enabled": "true",
+        "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
+        "spark.databricks.photon.scan.enabled": "true",
+        "spark.sql.shuffle.partitions": "auto",
+        "spark.databricks.delta.identityColumn.enabled": "true"
+    },
     "tables": 
     {
         "Audit":

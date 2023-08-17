@@ -12,7 +12,7 @@ try:
   # total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
   # total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
   # shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
-  shuffle_partitions='AUTO'
+  shuffle_partitions='auto'
   DRIVER_ROOT = f"/local_disk0"
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
@@ -27,6 +27,7 @@ if worker_node_count == 0:
 
 # DAG of args to send to Jinja
 dag_args = {
+  'serverless':serverless,
   "catalog":catalog, 
   "wh_target":wh_target, 
   "tpcdi_directory":tpcdi_directory, 
@@ -43,6 +44,7 @@ dag_args = {
 
 # Print out details of the workflow to user
 print(f"""
+SERVERLESS COMPUTE:         {serverless}
 Workflow Name:              {dag_args['job_name']}
 Workflow Type:              {workflow_type}
 Target TPCDI Catalog:       {catalog}
