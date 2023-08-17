@@ -13,10 +13,11 @@ def api_call(json_payload=None, request_type=None, api_endpoint=None):
   elif request_type == "GET":
     response = requests.get(f"{API_URL}{api_endpoint}", json=json_payload, headers=headers)
   else:
-    print(f"Invalid request type: {request_type}")
+    dbutils.notebook.exit(f"Invalid request type: {request_type}")
     return
-  status_cd = response.status_code
-  return response
+  if response.status_code == 200: return response
+  else: dbutils.notebook.exit(f"API call failed with status code {response.status_code}: {response.text}")
+  
 
 def get_node_types():
   response = api_call(json_payload=None, request_type="GET", api_endpoint="/api/2.0/clusters/list-node-types")
@@ -36,6 +37,14 @@ def get_dbr_versions():
       if int(dbr['key'].split('.')[0]) >= min_dbr_version:
         dbr_versions_dict[dbr['key']] = dbr['name']
   return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
+
+# COMMAND ----------
+
+# DBTITLE 1,DBFS may not be accessible unless Cluster Access Mode set to "Single User" or "No Isolation Required"
+UC_enabled = spark.conf.get('spark.databricks.unityCatalog.enabled')
+UC_mode = spark.conf.get("spark.databricks.clusterUsageTags.clusterUnityCatalogMode")
+if UC_enabled == 'true' and UC_mode not in ['SINGLE_USER', 'NONE']:
+  dbutils.notebook.exit("DBFS is used to generate and store the raw geenerated date.  On Unity Catalog enabled clusters, DBFS may not be accessible unless Cluster Access Mode set to 'SINGLE_USER' or 'No Isolation Required'. Please execute on a cluster that will have access to generated files in DBFS using 'SINGLE_USER' or 'NONE' as the data_security_mode")
 
 # COMMAND ----------
 
@@ -64,9 +73,12 @@ try:
 except NameError: 
   default_workflow  = workflows_dict['NATIVE']
 workflow_vals       = list(workflows_dict.values())
+default_serverless  = 'YES'
 default_sf          = '10'
+default_sf_options  = ['10', '100', '1000', '5000', '10000']
 default_job_name    = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
 default_wh          = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+default_catalog     = 'tpcdi' if UC_enabled else 'hive_metastore'
 if cloud_provider == 'AWS':
   default_worker_type = "m5d.2xlarge"
   default_driver_type = "m5d.xlarge"

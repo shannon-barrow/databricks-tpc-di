@@ -6,19 +6,38 @@
 # COMMAND ----------
 
 from pyspark.sql.functions import *
+import string
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("batch_id", "0", "Batch ID (1,2,3)")
 
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 batch_id = dbutils.widgets.get("batch_id")
 
 # COMMAND ----------
 
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+dbutils.widgets.text("catalog", 'hive_metastore', 'Target Catalog')
+dbutils.widgets.text("wh_db", f"{string.capwords(user_name).replace(' ','_')}_TPCDI",'Target Database')
+dbutils.widgets.text("batch_id", "0", "Batch ID (1,2,3)")
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = dbutils.widgets.get('wh_db')
+staging_db = f"{wh_db}_stage"
+batch_id = dbutils.widgets.get("batch_id")
+
+# COMMAND ----------
+
+spark.sql(f"USE CATALOG {catalog}")
 spark.sql(f"""
   insert into {wh_db}.DIMessages (
     select

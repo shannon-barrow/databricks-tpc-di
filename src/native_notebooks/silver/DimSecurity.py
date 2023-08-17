@@ -4,10 +4,19 @@
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+import string
+  
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 
@@ -129,134 +138,3 @@ spark.sql(f"""
 # COMMAND ----------
 
 spark.sql(f"ANALYZE TABLE {wh_db}.DimSecurity COMPUTE STATISTICS FOR ALL COLUMNS")
-
-# COMMAND ----------
-
-# spark.sql(f"""
-#   CREATE OR REPLACE TEMPORARY TABLE FinwireSecView AS
-#   SELECT
-#     fws.Symbol,
-#     issue,
-#     s.ST_NAME as status,
-#     fws.Name,
-#     exchangeid,
-#     sharesoutstanding,
-#     firsttrade,
-#     firsttradeonexchange,
-#     fws.Dividend,
-#     fws.effectivedate,
-#     coalesce(
-#       lead(effectivedate) OVER (
-#         PARTITION BY symbol
-#         ORDER BY effectivedate),
-#       date('9999-12-31')
-#     ) enddate,
-#     conameorcik coname,
-#     cast(conameorcik as bigint) cik
-#   FROM (
-#     SELECT
-#       date(to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss')) AS effectivedate,
-#       trim(substring(value, 19, 15)) AS Symbol,
-#       trim(substring(value, 34, 6)) AS issue,
-#       trim(substring(value, 40, 4)) AS Status,
-#       trim(substring(value, 44, 70)) AS Name,
-#       trim(substring(value, 114, 6)) AS exchangeid,
-#       cast(substring(value, 120, 13) as BIGINT) AS sharesoutstanding,
-#       to_date(substring(value, 133, 8), 'yyyyMMdd') AS firsttrade,
-#       to_date(substring(value, 141, 8), 'yyyyMMdd') AS firsttradeonexchange,
-#       cast(substring(value, 149, 12) AS DOUBLE) AS Dividend,
-#       trim(substring(value, 161, 60)) AS conameorcik
-#     FROM {staging_db}.finwire
-#     WHERE rectype = 'SEC') fws
-#   JOIN {wh_db}.StatusType s 
-#     ON s.ST_ID = fws.status
-# """)
-
-# spark.sql(f"""
-#   CREATE OR REPLACE TEMPORARY VIEW SecurityView AS SELECT
-#     Symbol,
-#     issue,
-#     status,
-#     Name,
-#     exchangeid,
-#     sk_companyid,
-#     sharesoutstanding,
-#     firsttrade,
-#     firsttradeonexchange,
-#     Dividend,
-#     case 
-#       when dc_effectivedate > effectivedate then dc_effectivedate
-#       when dc_enddate < effectivedate then dc_enddate
-#       else effectivedate end as effectivedate,
-#     case 
-#       when dc_enddate < enddate then dc_enddate
-#       else enddate end as enddate
-#   FROM (
-#     SELECT
-#       fws.Symbol,
-#       fws.issue,
-#       fws.status,
-#       fws.Name,
-#       fws.exchangeid,
-#       fws.sharesoutstanding,
-#       fws.firsttrade,
-#       fws.firsttradeonexchange,
-#       fws.Dividend,
-#       fws.effectivedate,
-#       fws.enddate,
-#       nvl(dccik.sk_companyid, dcname.sk_companyid) sk_companyid,
-#       nvl(dccik.EffectiveDate, dcname.EffectiveDate) dc_effectiveDate,
-#       nvl(dccik.EndDate, dcname.EndDate) dc_endDate
-#     FROM FinwireSecView fws
-#     LEFT JOIN {wh_db}.DimCompany dcname 
-#       ON 
-#         isnull(fws.cik) 
-#         AND fws.coname = dcname.name 
-#         AND fws.EffectiveDate < dcname.EndDate
-#         AND fws.EndDate > dcname.EffectiveDate
-#     LEFT JOIN {wh_db}.DimCompany dccik 
-#       ON 
-#         fws.cik IS NOT NULL 
-#         AND fws.cik = dccik.companyid 
-#         AND fws.EffectiveDate < dccik.EndDate
-#         AND fws.EndDate > dccik.EffectiveDate)
-# """)
-
-# spark.sql(f"""
-#   INSERT INTO {wh_db}.DimSecurity (
-#     symbol,
-#     issue,
-#     status,
-#     name,
-#     exchangeid,
-#     sk_companyid,
-#     sharesoutstanding,
-#     firsttrade,
-#     firsttradeonexchange,
-#     dividend,
-#     iscurrent,
-#     batchid,
-#     effectivedate,
-#     enddate)
-#   SELECT
-#     Symbol,
-#     issue,
-#     status,
-#     Name,
-#     exchangeid,
-#     sk_companyid,
-#     sharesoutstanding,
-#     firsttrade,
-#     firsttradeonexchange,
-#     Dividend,
-#     CASE
-#       WHEN lead(effectivedate) OVER (
-#         PARTITION BY Symbol
-#         ORDER BY effectivedate) IS NULL THEN true
-#       ELSE false
-#       END iscurrent,
-#     1 batchid,
-#     effectivedate,
-#     enddate
-#   FROM SecurityView
-# """)

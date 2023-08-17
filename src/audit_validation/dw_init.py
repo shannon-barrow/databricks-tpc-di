@@ -11,7 +11,20 @@
 
 # COMMAND ----------
 
+spark.conf.set("spark.sql.shuffle.partitions", 'Auto')
+spark.conf.set("spark.databricks.delta.schema.autoMerge.enabled", 'true')
+spark.conf.set("spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite", 'true')
+spark.conf.set("spark.databricks.streaming.forEachBatch.optimized.enabled", 'true')
+spark.conf.set("spark.databricks.photon.photonRowToColumnar.enabled", 'true')
+spark.conf.set("spark.databricks.photon.allDataSources.enabled", 'true')
+spark.conf.set("spark.databricks.preemption.enabled", 'true')
+spark.conf.set("spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled", 'true')
+spark.conf.set("spark.databricks.photon.scan.enabled", 'true')
+
+# COMMAND ----------
+
 import json
+import string
 
 spark.sql("set spark.databricks.delta.identityColumn.enabled = true") # Enable Delta Lake Identity Column feature
 with open("../tools/traditional_config.json", "r") as json_conf:
@@ -19,18 +32,31 @@ with open("../tools/traditional_config.json", "r") as json_conf:
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 
 # COMMAND ----------
 
 # DBTITLE 1,DROP and CREATE Databases
-spark.sql(f"""DROP DATABASE IF EXISTS {wh_db} CASCADE""")
-spark.sql(f"""DROP DATABASE IF EXISTS {staging_db} CASCADE""")
-spark.sql(f"""CREATE DATABASE {wh_db} COMMENT 'TPC-DI benchmark Warehouse Database for {user_name}'""")
-spark.sql(f"""CREATE DATABASE {staging_db} COMMENT 'TPC-DI benchmark Staging Database for {user_name}'""")
+catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+
+if catalog != 'hive_metastore' and not catalog_exists:
+  spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+  spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+
+spark.sql(f"""DROP DATABASE IF EXISTS {catalog}.{wh_db} CASCADE""")
+spark.sql(f"""DROP DATABASE IF EXISTS {catalog}.{staging_db} CASCADE""")
+spark.sql(f"""CREATE DATABASE {catalog}.{wh_db} COMMENT 'TPC-DI benchmark Warehouse Database for {user_name}'""")
+spark.sql(f"""CREATE DATABASE {catalog}.{staging_db} COMMENT 'TPC-DI benchmark Staging Database for {user_name}'""")
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 
@@ -42,14 +68,17 @@ spark.sql(f"""CREATE DATABASE {staging_db} COMMENT 'TPC-DI benchmark Staging Dat
 
 def create_table (table):
   tgt_db = wh_db if table_conf['tables'][table]['db'] == 'wh' else staging_db
-  schema = table_conf['tables'][table]['raw_schema'] + str(table_conf['tables'][table].get('add_tgt_schema') or '')
+  spark.sql(f"USE {tgt_db}")
+  constraints = '' if catalog == 'hive_metastore' else str(table_conf['tables'][table].get('constraints') or '')
+  schema = table_conf['tables'][table]['raw_schema'] + str(table_conf['tables'][table].get('add_tgt_schema') or '') + constraints
   part = str(table_conf['tables'][table].get('partition') or '')
   spark.sql(f"""
-    CREATE OR REPLACE TABLE {tgt_db}.{table} ({schema}) USING DELTA {part} TBLPROPERTIES (
+    CREATE OR REPLACE TABLE {table} ({schema}) USING DELTA {part} TBLPROPERTIES (
       delta.tuneFileSizesForRewrites = true, 
-      delta.autoOptimize.optimizeWrite = true
-      --, delta.enableDeletionVectors=true
-      );""")
+      delta.autoOptimize.optimizeWrite = true,
+      delta.enableDeletionVectors=true
+      );
+  """)
 
 # COMMAND ----------
 

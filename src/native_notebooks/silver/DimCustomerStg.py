@@ -7,7 +7,7 @@
 # MAGIC * This includes: 
 # MAGIC   * Prospect (Customer and Prospect need data from the other table and join on name/address - which you cannot get until data is coalesced)
 # MAGIC   * Account table needs each change of Customer record to get the surrogate key of the customer record. This only occurs once a Customer record gets updated
-# MAGIC 
+# MAGIC
 # MAGIC ### Staging Customer table unions the historical to the incremental
 # MAGIC 1) Window results by customerid and order by the update timestamp 
 # MAGIC 2) Then coalesce the current row to the last row and ignore nulls
@@ -19,12 +19,21 @@
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+import string
+  
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
 batch_id = dbutils.widgets.get("batch_id")
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 

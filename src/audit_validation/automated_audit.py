@@ -4,23 +4,24 @@
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI", 'Root name of Target Warehouse')
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+import string
+
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
+staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 
 # COMMAND ----------
 
-spark.sql(f"use {wh_db}")
-
-# COMMAND ----------
-
-# MAGIC %sql
-# MAGIC ANALYZE TABLE DimTrade COMPUTE STATISTICS FOR ALL COLUMNS;
-# MAGIC ANALYZE TABLE DimCustomer COMPUTE STATISTICS FOR ALL COLUMNS;
-# MAGIC ANALYZE TABLE FactHoldings COMPUTE STATISTICS FOR ALL COLUMNS;
-# MAGIC ANALYZE TABLE Financial COMPUTE STATISTICS FOR ALL COLUMNS;
-# MAGIC ANALYZE TABLE Prospect COMPUTE STATISTICS FOR ALL COLUMNS;
-# MAGIC ANALYZE TABLE FactWatches COMPUTE STATISTICS FOR ALL COLUMNS;
+spark.sql(f"USE CATALOG {catalog}")
+spark.sql(f"USE {wh_db}")
+#spark.sql(f"""DROP DATABASE IF EXISTS {staging_db} CASCADE""")
 
 # COMMAND ----------
 
@@ -63,19 +64,19 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from DImessages a
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DImessages batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DImessages) = 4 and
 # MAGIC       (select max(BatchID) from DImessages) = 3
 # MAGIC then 'OK' else 'Not 3 batches plus batch 0' end, 'Must have 3 distinct batches reported in DImessages'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DImessages Phase complete records', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DImessages where MessageType = 'PCR') = 4 and
 # MAGIC       (select max(BatchID) from DImessages where MessageType = 'PCR') = 3
 # MAGIC then 'OK' else 'Not 4 Phase Complete Records' end, 'Must have 4 Phase Complete records'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DImessages sources', NULL, case when 
 # MAGIC       (select count(*) from (
@@ -84,12 +85,12 @@ spark.sql(f"use {wh_db}")
 # MAGIC                    'FactMarketHistory','FactWatches','Financial','Industry','Prospect','StatusType','TaxRate','TradeType')
 # MAGIC       ) a ) = 17
 # MAGIC then 'OK' else 'Mismatch' end, 'Messages must be present for all tables/transforms'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DImessages initial condition', NULL, case when 
 # MAGIC       (select count(*) from DImessages where BatchID = 0 and MessageType = 'Validation' and MessageData <> '0') = 0
 # MAGIC then 'OK' else 'Non-empty table in before Batch1' end, 'All DW tables must be empty before Batch1'
-# MAGIC 
+# MAGIC
 # MAGIC -- Checks against the DimBroker table. 
 # MAGIC union all
 # MAGIC select 'DimBroker row count', NULL, case when 
@@ -102,22 +103,22 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct SK_BrokerID) from DimBroker) = 
 # MAGIC       (select Value from Audit where DataSet = 'DimBroker' and Attribute = 'HR_BROKERS') 
 # MAGIC then 'OK' else 'Not unique' end, 'All SKs are distinct'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimBroker BatchID', 1, case when 
 # MAGIC       (select count(*) from DimBroker where BatchID <> 1) = 0 
 # MAGIC then 'OK' else 'Not batch 1' end, 'All rows report BatchID = 1'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimBroker IsCurrent', NULL, case when 
 # MAGIC       (select count(*) from DimBroker where !IsCurrent) = 0 
 # MAGIC then 'OK' else 'Not current' end, 'All rows have IsCurrent = 1'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimBroker EffectiveDate', NULL, case when 
 # MAGIC       (select count(*) from DimBroker where EffectiveDate <> '1950-01-01') = 0 
 # MAGIC then 'OK' else 'Wrong date' end, 'All rows have Batch1 BatchDate as EffectiveDate'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimBroker EndDate', NULL, case when 
 # MAGIC       (select count(*) from DimBroker where EndDate <> '9999-12-31') = 0 
@@ -138,7 +139,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select Value from Audit where DataSet = 'DimCustomer' and Attribute = 'C_ID_HIST' and BatchID = 1) -
 # MAGIC       (select Value from Audit where DataSet = 'DimAccount' and Attribute = 'CA_ID_HIST' and BatchID = 1)
 # MAGIC then 'OK' else 'Too few rows' end, 'Actual row count matches or exceeds Audit table minimum'
-# MAGIC 
+# MAGIC
 # MAGIC -- had to change to sum(value) instead of just value because of correlated subquery issue
 # MAGIC union all
 # MAGIC select 'DimAccount row count', BatchID, Result, 'Actual row count matches or exceeds Audit table minimum' from (
@@ -154,18 +155,18 @@ spark.sql(f"use {wh_db}")
 # MAGIC       from Audit a
 # MAGIC       where BatchID in (2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount distinct keys', NULL, case when 
 # MAGIC       (select count(distinct SK_AccountID) from DimAccount) = 
 # MAGIC       (select count(*) from DimAccount) 
 # MAGIC then 'OK' else 'Not unique' end, 'All SKs are distinct'
-# MAGIC 
+# MAGIC
 # MAGIC -- Three tests together check for validity of the EffectiveDate and EndDate handling:
 # MAGIC --   'DimAccount EndDate' checks that effective and end dates line up
 # MAGIC --   'DimAccount Overlap' checks that there are not records that overlap in time
 # MAGIC --   'DimAccount End of Time' checks that every company has a final record that goes to 9999-12-31
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount EndDate', NULL, case when
 # MAGIC       (select count(*) from DimAccount) =
@@ -186,7 +187,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct AccountID) from DimAccount) =
 # MAGIC       (select count(*) from DimAccount where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'End of tome not reached' end, 'Every Account has one record with a date range reaching the end of time'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount consolidation', NULL, case when 
 # MAGIC       (select count(*) from DimAccount where EffectiveDate = EndDate) = 0     
@@ -197,7 +198,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct BatchID) from DimAccount) = 3  and
 # MAGIC       (select max(BatchID) from DimAccount) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC --This Code wasn't working with such a nested correlated subquery
 # MAGIC --select 'DimAccount EffectiveDate', BatchID, Result, 'All records from a batch have an EffectiveDate in the batch time window' from (
@@ -230,7 +231,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount IsCurrent', NULL, case when
 # MAGIC   (select count(*) from DimAccount) =
@@ -240,34 +241,34 @@ spark.sql(f"use {wh_db}")
 # MAGIC   else 'Not current' end, 
 # MAGIC   'IsCurrent is 1 if EndDate is the end of time, else Iscurrent is 0'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount Status', NULL, case when
 # MAGIC       (select count(*) from DimAccount where Status not in ('Active', 'Inactive')) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Status values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount TaxStatus', NULL, case when
 # MAGIC       (select count(*) from DimAccount where BatchID = 1 and TaxStatus not in (0, 1, 2)) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All TaxStatus values are valid'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount SK_CustomerID', NULL, case when
 # MAGIC       (select count(*) from DimAccount) = 
 # MAGIC       (select count(*) from DimAccount a
 # MAGIC        join DimCustomer c on a.SK_CustomerID = c.SK_CustomerID and c.EffectiveDate <= a.EffectiveDate and a.EndDate <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CustomerIDs match a DimCustomer record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount SK_BrokerID', NULL, case when
 # MAGIC       (select count(*) from DimAccount) = 
 # MAGIC       (select count(*) from DimAccount a   join DimBroker c on a.SK_BrokerID = c.SK_BrokerID and c.EffectiveDate <= a.EffectiveDate and a.EndDate <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join - spec problem with DimBroker EffectiveDate values' end, 'All SK_BrokerIDs match a broker record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimAccount inactive customers', NULL, case when (
 # MAGIC        select count(*) from 
@@ -275,9 +276,9 @@ spark.sql(f"use {wh_db}")
 # MAGIC           where a.Status = 'Inactive' group by c.SK_CustomerID having count(*) < 1) z
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'If a customer is inactive, the corresponding accounts must also have been inactive'
-# MAGIC 
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the DimCustomer table.
 # MAGIC --  
@@ -293,20 +294,20 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Too few rows' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer distinct keys', NULL, case when 
 # MAGIC       (select count(distinct SK_CustomerID) from DimCustomer) = 
 # MAGIC       (select count(*) from DimCustomer) 
 # MAGIC then 'OK' else 'Not unique' end, 'All SKs are distinct'
 # MAGIC  
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC -- Three tests together check for validity of the EffectiveDate and EndDate handling:
 # MAGIC --   'DimCustomer EndDate' checks that effective and end dates line up
 # MAGIC --   'DimCustomer Overlap' checks that there are not records that overlap in time
 # MAGIC --   'DimCustomer End of Time' checks that every company has a final record that goes to 9999-12-31
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer EndDate', NULL, case when
 # MAGIC       (select count(*) from DimCustomer) =
@@ -314,7 +315,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimCustomer where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'Dates not aligned' end, 'EndDate of one record matches EffectiveDate of another, or the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer Overlap', NULL, case when (
 # MAGIC       select count(*)
@@ -323,27 +324,27 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Dates overlap' end, 'Date ranges do not overlap for a given Customer'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer End of Time', NULL, case when
 # MAGIC       (select count(distinct CustomerID) from DimCustomer) =
 # MAGIC       (select count(*) from DimCustomer where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'End of time not reached' end, 'Every Customer has one record with a date range reaching the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer consolidation', NULL, case when 
 # MAGIC       (select count(*) from DimCustomer where EffectiveDate = EndDate) = 0    
 # MAGIC then 'OK' else 'Not consolidated' end, 'No records become effective and end on the same day'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DimCustomer) = 3 and
 # MAGIC       (select max(BatchID) from DimCustomer) = 3
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer IsCurrent', NULL, case when 
 # MAGIC       (select count(*) from DimCustomer) =
@@ -351,7 +352,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimCustomer where EndDate < '9999-12-31' and !IsCurrent)
 # MAGIC then 'OK' else 'Not current' end, 'IsCurrent is 1 if EndDate is the end of time, else Iscurrent is 0'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC --This Code wasn't working with such a nested correlated subquery and/or was returning more than one record in case statement.  Had to get it grouped together and counted in total
 # MAGIC -- select 'DimCustomer EffectiveDate', BatchID, Result, 'All records from a batch have an EffectiveDate in the batch time window' from (
@@ -381,7 +382,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC             ) = 0 then 'OK' else 'Data out of range' end) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer Status', NULL, case when
 # MAGIC       (select count(*) from DimCustomer where Status not in ('Active', 'Inactive')) = 0
@@ -411,13 +412,13 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Mismatch' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCustomer Gender', NULL, case when
 # MAGIC       (select count(*) from DimCustomer where Gender not in ('M', 'F', 'U')) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Gender values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC --adding sum for value
 # MAGIC select 'DimCustomer age range alerts', BatchID, Result, 'Count of age range alerts matches audit table' from (
@@ -428,7 +429,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Mismatch' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC --adding sum for value
 # MAGIC select 'DimCustomer customer tier alerts', BatchID, Result, 'Count of customer tier alerts matches audit table' from (
@@ -438,13 +439,13 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Mismatch' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all                     
 # MAGIC select 'DimCustomer TaxID', NULL, case when (
 # MAGIC       select count(*) from DimCustomer where TaxID not like '___-__-____'
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'TaxID values are properly formatted'
-# MAGIC 
+# MAGIC
 # MAGIC union all                       
 # MAGIC select 'DimCustomer Phone1', NULL, case when (
 # MAGIC       select count(*) from DimCustomer 
@@ -456,7 +457,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'Phone1 values are properly formatted'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                       
 # MAGIC select 'DimCustomer Phone2', NULL, case when (
 # MAGIC       select count(*) from DimCustomer 
@@ -468,7 +469,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'Phone2 values are properly formatted'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                       
 # MAGIC select 'DimCustomer Phone3', NULL, case when (
 # MAGIC       select count(*) from DimCustomer 
@@ -480,7 +481,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'Phone3 values are properly formatted'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                     
 # MAGIC select 'DimCustomer Email1', NULL, case when (
 # MAGIC       select count(*) from DimCustomer 
@@ -489,7 +490,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'Email1 values are properly formatted'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                    
 # MAGIC select 'DimCustomer Email2', NULL, case when (
 # MAGIC       select count(*) from DimCustomer 
@@ -499,8 +500,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) = 0
 # MAGIC then 'OK' else 'Mismatch' end, 'Email2 values are properly formatted'
 # MAGIC  
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all                    
 # MAGIC select 'DimCustomer LocalTaxRate', NULL, case when 
 # MAGIC       (select count(*) from DimCustomer) = 
@@ -508,7 +509,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct LocalTaxRateDesc) from DimCustomer) > 300
 # MAGIC then 'OK' else 'Mismatch' end, 'LocalTaxRateDesc and LocalTaxRate values are from TaxRate table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                 
 # MAGIC select 'DimCustomer NationalTaxRate', NULL, case when 
 # MAGIC       (select count(*) from DimCustomer) = 
@@ -516,7 +517,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct NationalTaxRateDesc) from DimCustomer) >= 9   -- Including the inequality for now, because the generated data is not sticking to national tax rates
 # MAGIC then 'OK' else 'Mismatch' end, 'NationalTaxRateDesc and NationalTaxRate values are from TaxRate table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                                
 # MAGIC select 'DimCustomer demographic fields', NULL, case when
 # MAGIC       (
@@ -530,11 +531,11 @@ spark.sql(f"use {wh_db}")
 # MAGIC       )
 # MAGIC then 'OK' else 'Mismatch' end, 'For current customer records that match Prospect records, the demographic fields also match'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the DimSecurity table.
 # MAGIC --  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC -- Modified this one since correlated subqueries 1) Have to be an aggregate and 2) Cannot use a non-equijoin
 # MAGIC -- select 'DimSecurity row count', BatchID, Result, 'Actual row count matches or exceeds Audit table minimum' from (
@@ -551,19 +552,19 @@ spark.sql(f"use {wh_db}")
 # MAGIC     then 'OK' else 'Too few rows' end as Result
 # MAGIC   from Audit a where BatchID in (1)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity distinct keys', NULL, case when 
 # MAGIC       (select count(distinct SK_SecurityID) from DimSecurity) = 
 # MAGIC       (select count(*) from DimSecurity) 
 # MAGIC then 'OK' else 'Not unique' end, 'All SKs are distinct'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC -- Three tests together check for validity of the EffectiveDate and EndDate handling:
 # MAGIC --   'DimSecurity EndDate' checks that effective and end dates line up
 # MAGIC --   'DimSecurity Overlap' checks that there are not records that overlap in time
 # MAGIC --   'DimSecurity End of Time' checks that every company has a final record that goes to 9999-12-31
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity EndDate', NULL, case when
 # MAGIC       (select count(*) from DimSecurity) =
@@ -571,7 +572,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimSecurity where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'Dates not aligned' end, 'EndDate of one record matches EffectiveDate of another, or the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity Overlap', NULL, case when (
 # MAGIC       select count(*)
@@ -580,27 +581,27 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Dates overlap' end, 'Date ranges do not overlap for a given company'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity End of Time', NULL, case when
 # MAGIC       (select count(distinct Symbol) from DimSecurity) =
 # MAGIC       (select count(*) from DimSecurity where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'End of tome not reached' end, 'Every company has one record with a date range reaching the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity consolidation', NULL, case when 
 # MAGIC       (select count(*) from DimSecurity where EffectiveDate = EndDate) = 0    
 # MAGIC then 'OK' else 'Not consolidated' end, 'No records become effective and end on the same day'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DimSecurity) = 1 and
 # MAGIC       (select max(BatchID) from DimSecurity) = 1 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity IsCurrent', NULL, case when 
 # MAGIC       (select count(*) from DimSecurity) =
@@ -608,7 +609,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimSecurity where EndDate < '9999-12-31' and !IsCurrent)
 # MAGIC then 'OK' else 'Not current' end, 'IsCurrent is 1 if EndDate is the end of time, else Iscurrent is 0'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC --This Code wasn't working with such a nested correlated subquery and/or was returning more than one record in case statement.  Had to get it grouped together and counted in total
 # MAGIC -- select 'DimSecurity EffectiveDate', BatchID, Result, 'All records from a batch have an EffectiveDate in the batch time window' from (
@@ -639,14 +640,14 @@ spark.sql(f"use {wh_db}")
 # MAGIC             ) = 0 then 'OK' else 'Data out of range' end) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity Status', NULL, case when
 # MAGIC       (select count(*) from DimSecurity where Status not in ('Active', 'Inactive')) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Status values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity SK_CompanyID', NULL, case when
 # MAGIC       (select count(*) from DimSecurity) = 
@@ -654,19 +655,19 @@ spark.sql(f"use {wh_db}")
 # MAGIC        join DimCompany c on a.SK_CompanyID = c.SK_CompanyID and c.EffectiveDate <= a.EffectiveDate and a.EndDate <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CompanyIDs match a DimCompany record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity ExchangeID', NULL, case when
 # MAGIC       (select count(*) from DimSecurity where ExchangeID not in ('NYSE', 'NASDAQ', 'AMEX', 'PCX')) = 0
 # MAGIC then 'OK' else 'Bad value - see ticket #65' end, 'All ExchangeID values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimSecurity Issue', NULL, case when
 # MAGIC       (select count(*) from DimSecurity where Issue not in ('COMMON', 'PREF_A', 'PREF_B', 'PREF_C', 'PREF_D')) = 0
 # MAGIC then 'OK' else 'Bad value - see ticket #65' end, 'All Issue values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the DimCompany table.
 # MAGIC --  
@@ -680,7 +681,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Too few rows' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC  
 # MAGIC union all
 # MAGIC select 'DimCompany distinct keys', NULL, case when 
@@ -688,13 +689,13 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimCompany) 
 # MAGIC then 'OK' else 'Not unique' end, 'All SKs are distinct'
 # MAGIC  
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC -- Three tests together check for validity of the EffectiveDate and EndDate handling:
 # MAGIC --   'DimCompany EndDate' checks that effective and end dates line up
 # MAGIC --   'DimCompany Overlap' checks that there are not records that overlap in time
 # MAGIC --   'DimCompany End of Time' checks that every company has a final record that goes to 9999-12-31
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany EndDate', NULL, case when
 # MAGIC       (select count(*) from DimCompany) =
@@ -702,7 +703,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from DimCompany where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'Dates not aligned' end, 'EndDate of one record matches EffectiveDate of another, or the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany Overlap', NULL, case when (
 # MAGIC       select count(*)
@@ -711,27 +712,27 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Dates overlap' end, 'Date ranges do not overlap for a given company'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany End of Time', NULL, case when
 # MAGIC       (select count(distinct CompanyID) from DimCompany) =
 # MAGIC       (select count(*) from DimCompany where EndDate = '9999-12-31')
 # MAGIC then 'OK' else 'End of tome not reached' end, 'Every company has one record with a date range reaching the end of time'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany consolidation', NULL, case when 
 # MAGIC       (select count(*) from DimCompany where EffectiveDate = EndDate) = 0     
 # MAGIC then 'OK' else 'Not consolidated' end, 'No records become effective and end on the same day'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DimCompany) = 1 and
 # MAGIC       (select max(BatchID) from DimCompany) = 1 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC --This Code wasn't working with such a nested correlated subquery and/or was returning more than one record in case statement.  Had to get it grouped together and counted in total
 # MAGIC -- select 'DimCompany EffectiveDate', BatchID, Result, 'All records from a batch have an EffectiveDate in the batch time window' from (
@@ -762,13 +763,13 @@ spark.sql(f"use {wh_db}")
 # MAGIC             ) = 0 then 'OK' else 'Data out of range' end) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany Status', NULL, case when
 # MAGIC       (select count(*) from DimCompany where Status not in ('Active', 'Inactive')) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Status values are valid'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany distinct names', NULL, case when   (
 # MAGIC       select count(*)
@@ -776,15 +777,15 @@ spark.sql(f"use {wh_db}")
 # MAGIC       join DimCompany b on a.Name = b.Name and a.CompanyID <> b.CompanyID
 # MAGIC ) = 0 
 # MAGIC then 'OK' else 'Mismatch' end, 'Every company has a unique name'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all                     -- Curious, there are duplicate industry names in Industry table.  Should there be?  That's why the distinct stuff...
 # MAGIC select 'DimCompany Industry', NULL, case when
 # MAGIC       (select count(*) from DimCompany) = 
 # MAGIC       (select count(*) from DimCompany where Industry in (select distinct IN_NAME from Industry))
 # MAGIC then 'OK' else 'Bad value' end, 'Industry values are from the Industry table'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimCompany SPrating', NULL, case when (
 # MAGIC       select count(*) from DimCompany 
@@ -792,8 +793,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC         and SPrating is not null
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All SPrating values are valid'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all               -- Right now we have blank (but not null) country names.  Should there be?
 # MAGIC select 'DimCompany Country', NULL, case when (
 # MAGIC       select count(*) from DimCompany 
@@ -801,8 +802,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC         and Country is not null
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Country values are valid'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the Prospect table.
 # MAGIC --  
@@ -810,8 +811,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC select 'Prospect SK_UpdateDateID', NULL, case when 
 # MAGIC       (select count(*) from Prospect where SK_RecordDateID < SK_UpdateDateID) = 0   
 # MAGIC then 'OK' else 'Mismatch' end, 'SK_RecordDateID must be newer or same as SK_UpdateDateID'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Prospect SK_RecordDateID', BatchID, Result, 'All records from batch have SK_RecordDateID in or after the batch time window' from (
 # MAGIC       select distinct BatchID, (
@@ -835,7 +836,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select max(BatchID) from Prospect) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC  union all
 # MAGIC select 'Prospect Country', NULL, case when (
 # MAGIC       select count(*) from Prospect 
@@ -844,7 +845,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Country values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                                                                                             
 # MAGIC select 'Prospect MarketingNameplate', NULL, case when (
 # MAGIC       select sum(case when (COALESCE(NetWorth,0) > 1000000 or COALESCE(Income,0) > 200000) and MarketingNameplate not like '%HighValue%' then 1 else 0 end) +
@@ -870,14 +871,14 @@ spark.sql(f"use {wh_db}")
 # MAGIC       from Prospect
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All MarketingNameplate values match the data'
-# MAGIC 
-# MAGIC 
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
+# MAGIC
+# MAGIC
 # MAGIC --
 # MAGIC -- Checks against the FactWatches table.
 # MAGIC --
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactWatches row count', BatchID, Result, 'Actual row count matches Audit table' from (
 # MAGIC       select distinct BatchID, (
@@ -890,14 +891,14 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactWatches batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from FactWatches) = 3  and
 # MAGIC       (select max(BatchID) from FactWatches) = 3
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC -- HEAVILY modified this one since correlated subqueries 1) Have to be an aggregate and 2) Cannot use a non-equijoin
 # MAGIC -- select 'FactWatches active watches', BatchID, Result, 'Actual total matches Audit table' from (
@@ -936,7 +937,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC         and _d.DateValue <=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID_DatePlaced) <= c.EndDate )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CustomerIDs match a DimCustomer record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactWatches SK_SecurityID', NULL, case when
 # MAGIC       (select count(*) from FactWatches) = 
@@ -947,7 +948,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC         and _d.DateValue <=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID_DatePlaced) <= c.EndDate )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_SecurityIDs match a DimSecurity record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all 
 # MAGIC -- Modified because of 1) too far nested correlated subqueries and 2) ANY correlated subqueries need aggregation (added first())
 # MAGIC -- select 'FactWatches date check', BatchID, Result, 'All SK_DateID_ values are in the correct batch time window' from (
@@ -1004,11 +1005,11 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the DimTrade table.
 # MAGIC --  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC -- HEAVILY modified this one since correlated subqueries 1) Have to be an aggregate and 2) Cannot use a non-equijoin
 # MAGIC -- select 'DimTrade row count', BatchID, Result, 'Actual total matches Audit table' from (
@@ -1033,41 +1034,41 @@ spark.sql(f"use {wh_db}")
 # MAGIC       then 'OK' else 'Mismatch' end as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all 
 # MAGIC select 'DimTrade canceled trades', NULL, case when 
 # MAGIC             (select count(*) from DimTrade where Status = 'Canceled')  =
 # MAGIC             (select sum(Value) from Audit where DataSet = 'DimTrade' and Attribute = 'T_CanceledTrades')
 # MAGIC then 'OK' else 'Mismatch' end, 'Actual row counts matches Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all 
 # MAGIC select 'DimTrade commission alerts', NULL, case when 
 # MAGIC             (select count(*) from DImessages where MessageType = 'Alert' and messageText = 'Invalid trade commission')  =
 # MAGIC             (select sum(Value) from Audit where DataSet = 'DimTrade' and Attribute = 'T_InvalidCommision')
 # MAGIC then 'OK' else 'Mismatch' end, 'Actual row counts matches Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all 
 # MAGIC select 'DimTrade charge alerts', NULL, case when 
 # MAGIC             (select count(*) from DImessages where MessageType = 'Alert' and messageText = 'Invalid trade fee')  =
 # MAGIC             (select sum(Value) from Audit where DataSet = 'DimTrade' and Attribute = 'T_InvalidCharge')
 # MAGIC then 'OK' else 'Mismatch' end, 'Actual row counts matches Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from DimTrade) = 3 and
 # MAGIC       (select max(BatchID) from DimTrade) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade distinct keys', NULL, case when 
 # MAGIC       (select count(distinct TradeID) from DimTrade) = 
 # MAGIC       (select count(*) from DimTrade) 
 # MAGIC then 'OK' else 'Not unique' end, 'All keys are distinct'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade SK_BrokerID', NULL, case when
 # MAGIC       (select count(*) from DimTrade) = 
@@ -1076,7 +1077,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC        join DimBroker c on a.SK_BrokerID = c.SK_BrokerID and c.EffectiveDate <= _d.DateValue and _d.DateValue <=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) and (select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_BrokerIDs match a DimBroker record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade SK_CompanyID', NULL, case when
 # MAGIC       (select count(*) from DimTrade) = 
@@ -1085,7 +1086,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC        join DimCompany c on a.SK_CompanyID = c.SK_CompanyID and c.EffectiveDate <= _d.DateValue and _d.DateValue<=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) and (select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CompanyIDs match a DimCompany record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade SK_SecurityID', NULL, case when
 # MAGIC       (select count(*) from DimTrade) = 
@@ -1094,7 +1095,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC        join DimSecurity c on a.SK_SecurityID = c.SK_SecurityID and c.EffectiveDate <= _d.DateValue and _d.DateValue<=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) and (select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_SecurityIDs match a DimSecurity record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade SK_CustomerID', NULL, case when
 # MAGIC       (select count(*) from DimTrade) = 
@@ -1103,7 +1104,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC        join DimCustomer c on a.SK_CustomerID = c.SK_CustomerID and c.EffectiveDate <= _d.DateValue and _d.DateValue<=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) and (select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CustomerIDs match a DimCustomer record with a valid date range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade SK_AccountID', NULL, case when
 # MAGIC       (select count(*) from DimTrade) = 
@@ -1111,7 +1112,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC     join DimDate _d on _d.SK_DateID=a.SK_CreateDateID
 # MAGIC        join DimAccount c on a.SK_AccountID = c.SK_AccountID and c.EffectiveDate <= _d.DateValue and _d.DateValue<=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) and (select DateValue from DimDate where SK_DateID = a.SK_CreateDateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_AccountIDs match a DimAccount record with a valid date range'
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC -- Modified because of 1) too far nested correlated subqueries and 2) ANY correlated subqueries need aggregation (added first())
 # MAGIC -- select 'DimTrade date check', BatchID, Result, 'All SK_DateID values are in the correct batch time window' from (
@@ -1172,7 +1173,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade Status', NULL, case when (
 # MAGIC       select count(*) from DimTrade 
@@ -1180,7 +1181,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Trade Status values are valid'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'DimTrade Type', NULL, case when (
 # MAGIC       select count(*) from DimTrade 
@@ -1188,26 +1189,26 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad value' end, 'All Trade Type values are valid'
 # MAGIC  
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the Financial table.
 # MAGIC --  
-# MAGIC 
+# MAGIC
 # MAGIC union all 
 # MAGIC select 'Financial row count', NULL, case when 
 # MAGIC             (select MessageData from DImessages where MessageSource = 'Financial' and MessageType = 'Validation' and MessageText = 'Row count' and BatchID = 1)  =
 # MAGIC             (select sum(Value) from Audit where DataSet = 'Financial' and Attribute = 'FW_FIN')
 # MAGIC then 'OK' else 'Mismatch' end, 'Actual row count matches Audit table'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Financial SK_CompanyID', NULL, case when
 # MAGIC       (select count(*) from Financial) = 
 # MAGIC       (select count(*) from Financial a join DimCompany c on a.SK_CompanyID = c.SK_CompanyID )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CompanyIDs match a DimCompany record'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Financial FI_YEAR', NULL, case when (
 # MAGIC       (select count(*) from Financial where FI_YEAR < year((select Date from Audit where DataSet = 'Batch' and BatchID = 1 and Attribute = 'FirstDay'))) + 
@@ -1215,14 +1216,14 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad Year' end, 'All Years are within Batch1 range'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Financial FI_QTR', NULL, case when (
 # MAGIC       select count(*) from Financial where FI_QTR not in ( 1, 2, 3, 4 )
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad Qtr' end, 'All quarters are in ( 1, 2, 3, 4 )'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Financial FI_QTR_START_DATE', NULL, case when (
 # MAGIC       select count(*) from Financial
@@ -1232,7 +1233,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad date' end, 'All quarters start on correct date'
 # MAGIC  
-# MAGIC 
+# MAGIC
 # MAGIC union all                                                               
 # MAGIC select 'Financial EPS', NULL, case when (
 # MAGIC       select count(*) from Financial
@@ -1242,12 +1243,12 @@ spark.sql(f"use {wh_db}")
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad EPS' end, 'Earnings calculations are valid'
 # MAGIC  
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the FactMarketHistory table.
 # MAGIC --  
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactMarketHistory row count', BatchID, Result, 'Actual row count matches Audit table' from (
 # MAGIC       select distinct BatchID, (
@@ -1260,28 +1261,28 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactMarketHistory batches', NULL, case when 
 # MAGIC       (select count(distinct BatchID) from FactMarketHistory) = 3 and
 # MAGIC       (select max(BatchID) from FactMarketHistory) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactMarketHistory SK_CompanyID', NULL, case when
 # MAGIC       (select count(*) from FactMarketHistory) = 
 # MAGIC       (select count(*) from FactMarketHistory a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimCompany c on a.SK_CompanyID = c.SK_CompanyID and c.EffectiveDate <= _d.DateValue and _d.DateValue <=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID) and (select DateValue from DimDate where SK_DateID = a.SK_DateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CompanyIDs match a DimCompany record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactMarketHistory SK_SecurityID', NULL, case when
 # MAGIC       (select count(*) from FactMarketHistory) = 
 # MAGIC       (select count(*) from FactMarketHistory a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimSecurity c on a.SK_SecurityID = c.SK_SecurityID and c.EffectiveDate <= _d.DateValue and _d.DateValue <= c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID) and (select DateValue from DimDate where SK_DateID = a.SK_DateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_SecurityIDs match a DimSecurity record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC -- Modified because of 1) too far nested correlated subqueries and 2) ANY correlated subqueries need aggregation (added first())
 # MAGIC -- select 'FactMarketHistory SK_DateID', BatchID, Result, 'All dates are within batch date range' from (
@@ -1304,7 +1305,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactMarketHistory relative dates', NULL, case when (
 # MAGIC       select count(*) from FactMarketHistory
@@ -1314,8 +1315,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC          or DayHigh > FiftyTwoWeekHigh
 # MAGIC ) = 0
 # MAGIC then 'OK' else 'Bad Date' end, '52-week-low <= day_low <= close_price <= day_high <= 52-week-high'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the FactHoldings table.
 # MAGIC --  
@@ -1337,8 +1338,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct BatchID) from FactHoldings) = 3 and
 # MAGIC       (select max(BatchID) from FactHoldings) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC /* It is possible that the dimension record has changed between orgination of the trade and the completion of the trade. *
 # MAGIC  * So, we can check that the Effective Date of the dimension record is older than the the completion date, but the end date could be earlier or later than the completion date
@@ -1348,8 +1349,8 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(*) from FactHoldings a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimCustomer c on a.SK_CustomerID = c.SK_CustomerID and c.EffectiveDate <= _d.DateValue --(select DateValue from DimDate where SK_DateID = a.SK_DateID) 
 # MAGIC        )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CustomerIDs match a DimCustomer record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactHoldings SK_AccountID', NULL, case when
 # MAGIC       (select count(*) from FactHoldings) = 
@@ -1357,30 +1358,30 @@ spark.sql(f"use {wh_db}")
 # MAGIC        )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_AccountIDs match a DimAccount record with a valid date range'
 # MAGIC --good till here
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactHoldings SK_CompanyID', NULL, case when
 # MAGIC       (select count(*) from FactHoldings) = 
 # MAGIC       (select count(*) from FactHoldings a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimCompany c on a.SK_CompanyID = c.SK_CompanyID and c.EffectiveDate <= _d.DateValue--(select DateValue from DimDate where SK_DateID = a.SK_DateID) 
 # MAGIC        )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CompanyIDs match a DimCompany record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactHoldings SK_SecurityID', NULL, case when
 # MAGIC       (select count(*) from FactHoldings) = 
 # MAGIC       (select count(*) from FactHoldings a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimSecurity c on a.SK_SecurityID = c.SK_SecurityID and c.EffectiveDate <= _d.DateValue--(select DateValue from DimDate where SK_DateID = a.SK_DateID) 
 # MAGIC        )
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_SecurityIDs match a DimSecurity record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactHoldings CurrentTradeID', NULL, case when
 # MAGIC       (select count(*) from FactHoldings) = 
 # MAGIC       (select count(*) from FactHoldings a join DimTrade t on a.CurrentTradeID = t.TradeID and a.SK_DateID = t.SK_CloseDateID and a.SK_TimeID = t.SK_CloseTimeID) 
 # MAGIC then 'OK' else 'Failed' end, 'CurrentTradeID matches a DimTrade record with and Close Date and Time are values are used as the holdings date and time'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC -- Modified because of 1) too far nested correlated subqueries and 2) ANY correlated subqueries need aggregation (added first())
 # MAGIC -- select 'FactHoldings SK_DateID', BatchID, Result, 'All dates are within batch date range' from (
@@ -1403,7 +1404,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       ) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC --  
 # MAGIC -- Checks against the FactCashBalances table.
 # MAGIC --  
@@ -1412,22 +1413,22 @@ spark.sql(f"use {wh_db}")
 # MAGIC       (select count(distinct BatchID) from FactCashBalances) = 3 and
 # MAGIC       (select max(BatchID) from FactCashBalances) = 3 
 # MAGIC then 'OK' else 'Mismatch' end, 'BatchID values must match Audit table'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactCashBalances SK_CustomerID', NULL, case when
 # MAGIC       (select count(*) from FactCashBalances) = 
 # MAGIC       (select count(*) from FactCashBalances a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimCustomer c on a.SK_CustomerID = c.SK_CustomerID and c.EffectiveDate <= _d.DateValue and _d.DateValue <=c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID) and (select DateValue from DimDate where SK_DateID = a.SK_DateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_CustomerIDs match a DimCustomer record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC select 'FactCashBalances SK_AccountID', NULL, case when
 # MAGIC       (select count(*) from FactCashBalances) = 
 # MAGIC       (select count(*) from FactCashBalances a join DimDate _d on _d.SK_DateID=a.SK_DateID join DimAccount c on a.SK_AccountID = c.SK_AccountID and c.EffectiveDate <= _d.DateValue and _d.DateValue <= c.EndDate)--(select DateValue from DimDate where SK_DateID = a.SK_DateID) and (select DateValue from DimDate where SK_DateID = a.SK_DateID) <= c.EndDate)
 # MAGIC then 'OK' else 'Bad join' end, 'All SK_AccountIDs match a DimAccount record with a valid date range'
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC union all
 # MAGIC -- Modified because of 1) too far nested correlated subqueries and 2) ANY correlated subqueries need aggregation (added first())
 # MAGIC -- select 'FactCashBalances SK_DateID', BatchID, Result, 'All dates are within batch date range' from (
@@ -1457,11 +1458,11 @@ spark.sql(f"use {wh_db}")
 # MAGIC                   ) = 0 then 'OK' else 'Bad Date' end) as Result
 # MAGIC       from Audit a where BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC /*
 # MAGIC  *  Checks against the Batch Validation Query row counts
 # MAGIC  */
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Batch row count: ' || MessageSource, BatchID,
 # MAGIC       case when RowsLastBatch > RowsThisBatch then 'Row count decreased' else 'OK' end,
@@ -1474,7 +1475,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       join DImessages m2 on m2.BatchID = a.BatchID-1 and m2.MessageSource = m.MessageSource and m2.MessageText = 'Row count' and m2.MessageType = 'Validation'
 # MAGIC       where a.BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Batch joined row count: ' || MessageSource, BatchID,
 # MAGIC       case when RowsJoined = RowsUnjoined then 'OK' else 'No match' end,
@@ -1487,12 +1488,12 @@ spark.sql(f"use {wh_db}")
 # MAGIC       join DImessages m2 on m2.BatchID = a.BatchID and m2.MessageSource = m.MessageSource and m2.MessageText = 'Row count joined' and m2.MessageType = 'Validation'
 # MAGIC       where a.BatchID in (1, 2, 3)
 # MAGIC ) o
-# MAGIC 
-# MAGIC 
+# MAGIC
+# MAGIC
 # MAGIC /*
 # MAGIC  *  Checks against the Data Visibility Query row counts
 # MAGIC  */
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Data visibility row counts: ' || MessageSource , NULL as BatchID,
 # MAGIC       case when regressions = 0 then 'OK' else 'Row count decreased' end,
@@ -1508,7 +1509,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       where m1.MessageType IN ('Visibility_1', 'Visibility_2') and m1.MessageText = 'Row count'
 # MAGIC       group by m1.MessageSource
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC union all
 # MAGIC select 'Data visibility joined row counts: ' || MessageSource , NULL as BatchID,
 # MAGIC       case when regressions = 0 then 'OK' else 'No match' end,
@@ -1529,7 +1530,7 @@ spark.sql(f"use {wh_db}")
 # MAGIC       where m1.MessageType = 'Visibility_1' and m1.MessageText = 'Row count'
 # MAGIC       group by m1.MessageSource
 # MAGIC ) o
-# MAGIC 
+# MAGIC
 # MAGIC /* close the outer query */
 # MAGIC ) q
 # MAGIC order by Test, Batch;

@@ -10,24 +10,31 @@
 # COMMAND ----------
 
 import json
+import string
 
 with open("../../tools/traditional_config.json", "r") as json_conf:
   table_conf = json.load(json_conf)['views']
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
+  
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
 
 batch_id = dbutils.widgets.get("batch_id")
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 scale_factor = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 files_directory = f"{tpcdi_directory}sf={scale_factor}"
 hist_views = ["TradeHistory", "TradeHistoryRaw"]
 tgt_cols = "tradeid, sk_brokerid, sk_createdateid, sk_createtimeid, sk_closedateid, sk_closetimeid, status, type, cashflag, sk_securityid, sk_companyid, quantity, bidprice, sk_customerid, sk_accountid, executedby, tradeprice, fee, commission, tax, batchid"
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 
@@ -237,159 +244,4 @@ else: spark.sql(merge_query)
 
 # COMMAND ----------
 
-# DBTITLE 1,Old version of code - keep temporarily
-# spark.sql(f"""
-#   CREATE OR REPLACE TEMPORARY VIEW TradeHistoryView AS
-#   SELECT 
-#     th.*,
-#     sk_timeid,
-#     sk_dateid
-#   FROM v_TradeHistory th
-#   JOIN {wh_db}.DimDate dd
-#     ON to_date(th.th_dts) = dd.datevalue
-#   JOIN {wh_db}.DimTime dt
-#     ON date_format(th.th_dts, 'HH:mm:ss') = dt.timevalue
-# """)
-
-# spark.sql(f"""
-#   CREATE OR REPLACE TEMPORARY VIEW JoinedTradesView AS
-#   SELECT 
-#     t_id tradeid,
-#     th_dts,
-#     CASE 
-#       WHEN 
-#         (th_st_id == "SBMT" 
-#           AND t_tt_id IN ("TMB", "TMS"))
-#         OR th_st_id = "PNDG" THEN sk_dateid 
-#       ELSE cast(NULL AS BIGINT) 
-#       END AS sk_createdateid,
-#     CASE 
-#       WHEN 
-#         (th_st_id == "SBMT" 
-#           AND t_tt_id IN ("TMB", "TMS"))
-#         OR th_st_id = "PNDG" THEN sk_timeid 
-#       ELSE cast(NULL AS BIGINT) 
-#       END AS sk_createtimeid,
-#     CASE 
-#       WHEN 
-#         th_st_id IN ("CMPT", "CNCL") THEN sk_dateid 
-#       ELSE cast(NULL AS BIGINT) 
-#       END AS sk_closedateid,
-#     CASE 
-#       WHEN 
-#         th_st_id IN ("CMPT", "CNCL") THEN sk_timeid 
-#       ELSE cast(NULL AS BIGINT) 
-#       END AS sk_closetimeid,
-#     CASE 
-#       WHEN t_is_cash = 1 then TRUE
-#       WHEN t_is_cash = 0 then FALSE
-#       ELSE cast(null as BOOLEAN) 
-#       END AS cashflag,
-#     t_qty AS quantity,
-#     t_bid_price AS bidprice,
-#     t_exec_name AS executedby,
-#     t_trade_price AS tradeprice,
-#     t_chrg AS fee,
-#     t_comm AS commission,
-#     t_tax AS tax,
-#     t_st_id,
-#     t_tt_id,
-#     t_s_symb,
-#     t_ca_id
-#   FROM TradeHistoryView th
-#   JOIN TradeView t
-#     ON th_t_id = t_id
-# """)
-
-# spark.sql(f"""
-#   CREATE OR REPLACE TEMPORARY VIEW DimTradeView AS
-#   SELECT * 
-#   FROM (
-#     SELECT
-#       tradeid,
-#       th_dts,
-#       min(th_dts) OVER (PARTITION BY tradeid) first_trade_ts,
-#       coalesce(
-#         sk_createdateid,
-#         last_value(sk_createdateid) IGNORE NULLS OVER (
-#           PARTITION BY tradeid
-#           ORDER BY th_dts
-#         )
-#       ) sk_createdateid,
-#       coalesce(
-#         sk_createtimeid,
-#         last_value(sk_createtimeid) IGNORE NULLS OVER (
-#           PARTITION BY tradeid
-#           ORDER BY th_dts
-#         )
-#       ) sk_createtimeid,
-#       coalesce(
-#         sk_closedateid,
-#         last_value(sk_closedateid) IGNORE NULLS OVER (
-#           PARTITION BY tradeid
-#           ORDER BY th_dts
-#         )
-#       ) sk_closedateid,
-#       coalesce(
-#         sk_closetimeid,
-#         last_value(sk_closetimeid) IGNORE NULLS OVER (
-#           PARTITION BY tradeid
-#           ORDER BY th_dts
-#         )
-#       ) sk_closetimeid,
-#       cashflag,
-#       quantity,
-#       bidprice,
-#       executedby,
-#       tradeprice,
-#       fee,
-#       commission,
-#       tax,
-#       t_st_id,
-#       t_tt_id,
-#       t_s_symb,
-#       t_ca_id
-#     FROM JoinedTradesView)
-#   QUALIFY ROW_NUMBER() OVER (PARTITION BY tradeid ORDER BY th_dts desc) = 1
-# """)
-
-# spark.sql(f"""
-#   INSERT INTO {wh_db}.DimTrade
-#   SELECT
-#     tradeid,
-#     sk_brokerid,
-#     sk_createdateid,
-#     sk_createtimeid,
-#     sk_closedateid,
-#     sk_closetimeid,
-#     st_name AS status,
-#     tt_name AS type,
-#     cashflag,
-#     sk_securityid,
-#     sk_companyid,
-#     quantity,
-#     bidprice,
-#     sk_customerid,
-#     sk_accountid,
-#     executedby,
-#     tradeprice,
-#     fee,
-#     commission,
-#     tax,
-#     {batch_id} AS batchid
-#   FROM DimTradeView trade
-#   JOIN {wh_db}.StatusType status
-#     ON status.st_id = trade.t_st_id
-#   JOIN {wh_db}.TradeType tt
-#     ON tt.tt_id == trade.t_tt_id
-#   JOIN {wh_db}.DimSecurity ds
-#     ON 
-#       ds.symbol = trade.t_s_symb
-#       AND to_date(trade.first_trade_ts) >= ds.effectivedate 
-#       AND to_date(trade.first_trade_ts) < ds.enddate
-#   JOIN {wh_db}.DimAccount da
-#     ON 
-#       trade.t_ca_id = da.accountid 
-#       AND to_date(trade.first_trade_ts) >= da.effectivedate 
-#       AND to_date(trade.first_trade_ts) < da.enddate
-# """)
+spark.sql(f"ANALYZE TABLE {wh_db}.DimTrade COMPUTE STATISTICS FOR ALL COLUMNS")

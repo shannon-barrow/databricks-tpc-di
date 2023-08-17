@@ -6,7 +6,7 @@
 
 # MAGIC %md
 # MAGIC When populating fields of the FactMarketHistory table:
-# MAGIC 
+# MAGIC
 # MAGIC * SK_SecurityID is obtained from DimSecurity by matching the associated security’s current record DM_S_SYMB with Symbol, for the date indicated by DM_DATE, to return the SK_SecurityID. The match is guaranteed to succeed due to the referential integrity of the OLTP database. The dependency of FactMarketHistory on DimSecurity requires that any update to a company’s DimSecurity records must be completed before updates to the FactMarketHistory records.
 # MAGIC * SK_CompanyID is obtained from DimSecurity by matching DM_S_SYMB with Symbol, for the date indicated by DM_DATE, to return the SK_CompanyID. The match is guaranteed to succeed due to the referential integrity of the OLTP database. The dependency of FactMarketHistory on DimSecurity requires that any update to a company’s DimSecurity records must be completed before updates to the FactMarketHistory records.
 # MAGIC * PERatio is calculated by dividing DM_CLOSE (the closing price for a security on a given day) by the sum of the company’s quarterly earnings per share (“eps”) over the previous 4 quarters prior to DM_DATE. Company quarterly earnings per share data is provided by the FINWIRE data source in the EPS field of the ‘FIN’ record type. If there are no earnings for this company, NULL is assigned to PERatio and an alert condition is raised as described below.  Over the course of the previous 4 quarters, attributes of securities and companies may have changed. As a result, there may be more than one surrogate key value used for a security and/or company in the target data warehouse tables during that time period.
@@ -19,14 +19,21 @@
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
+import string
 
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
 
-batch_id = dbutils.widgets.get("batch_id")
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
+batch_id = dbutils.widgets.get("batch_id")
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 

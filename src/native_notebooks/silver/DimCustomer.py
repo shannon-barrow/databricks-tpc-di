@@ -10,12 +10,21 @@
 
 # COMMAND ----------
 
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+import string
+
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
+
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
 batch_id = dbutils.widgets.get("batch_id")
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 
@@ -67,3 +76,7 @@ spark.sql(f"""
     and upper(nvl(p.addressline2, '')) = upper(nvl(c.addressline2, ''))
     and upper(p.postalcode) = upper(c.postalcode);
 """)
+
+# COMMAND ----------
+
+spark.sql(f"ANALYZE TABLE {wh_db}.DimCustomer COMPUTE STATISTICS FOR ALL COLUMNS")

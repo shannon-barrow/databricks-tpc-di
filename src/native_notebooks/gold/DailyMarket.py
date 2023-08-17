@@ -5,23 +5,23 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC * As of February 2023, Photon does NOT support the UNBOUNDED PRECEDING WINDOW statement needed for the business logic of this table (previous year high/low amount and date for each stock symbol)
-# MAGIC * Therefore, expect this table to take the longest execution when run in Photon runtime as it comes out of Photon - we can revisit when this functionality is added to Photon AFTER DBR 13.1
+# MAGIC * Photon support of BOUNDED PRECEDING WINDOW statement was added in DBR 13.1.  This function is needed for the business logic of this table (previous year high/low amount and date for each stock symbol)
+# MAGIC * Therefore, unless running in 13.1 or higher, expect the execution of this table to exit from Photon and execute in the JVM
 # MAGIC * Additionally, the logic looks funky as there is not fast native way to retrieve the amount AND date for the previous year low/high values. The fastest execution I have found is the one below (tried a few others but they were slower - even if the code was more concise)  
-# MAGIC 
+# MAGIC
 # MAGIC **Steps**
 # MAGIC 1) Union the historical and incremental DailyMarket tables
 # MAGIC 2) Find out the previous year min/max for each symbol. Store in temp staging table since this needs multiple self-joins (calculate it once)
 # MAGIC 3) Join table to itself to find each of the min and the max - each time making sure the amount is within the 1 year before the date of the stock symbol
 # MAGIC 4) Use WINDOW function to only select the FIRST time the amount occurred in the year before (this satisfies the case when the amount happens multiple times over previous year)  
-# MAGIC 
+# MAGIC
 # MAGIC **Business Logic: When populating fields of the DailyMarketStg table:**  
-# MAGIC 
+# MAGIC
 # MAGIC * ClosePrice, DayHigh, DayLow, and Volume are copied from DM_CLOSE, DM_HIGH, DM_LOW, and DM_VOL respectively.
 # MAGIC * SK_DateID is obtained from DimDate by matching DM_DATE with DateValue to return the SK_DateID. The match is guaranteed to succeed because DimDate has been populated with date information for all dates relevant to the benchmark.
 # MAGIC * FiftyTwoWeekHigh and SK_FiftyTwoWeekHighDate are determined by finding the highest price over the last year (approximately 52 weeks) for a given security. The FactMarketHistory table itself can be used for this comparison. FiftyTwoWeekHigh is set to the highest DM_HIGH value for any date in the range from DM_DATE back to but not including the same date one year earlier. SK_FiftyTwoWeekHighDate is assigned the earliest date in the date range upon which this DM_HIGH value occurred.  Over the course of the year, the surrogate key value for a security may have changed. It is not sufficient to simply compare records that share the same SK_SecurityID value.
 # MAGIC * FiftyTwoWeekLow and SK_FiftyTwoWeekLowDate are determined by finding the lowest price over the last year (approximately 52 weeks) for a given security. The FactMarketHistory table itself can be used for this comparison. FiftyTwoWeekLow is set to the lowest DM_LOW value for any date in the range from DM_DATE back to but not including the same date one year earlier. SK_FiftyTwoWeekLowDate is assigned the earliest date in the date range upon which this DM_LOW value occurred.  Over the course of the year, the surrogate key value for a security may have changed. It is not sufficient to simply compare records that share the same SK_SecurityID value.  
-# MAGIC 
+# MAGIC
 # MAGIC Note: The terms “52 week high” and “52 week low” are common in financial reporting, and in general practice seem to mean “over the last year”. This benchmark follows the one-year interpretation. Therefore in a summary generated on July 4, 2014, the date range to use is 2013-07-05 to 2014-07-04.  This is why the 364 days window is used below instead of 365 or 1 YEAR since the SQL code is INCLUSIVE
 
 # COMMAND ----------
@@ -31,21 +31,28 @@
 
 # COMMAND ----------
 
+import string
 import json
 
 with open("../../tools/traditional_config.json", "r") as json_conf:
   table_conf = json.load(json_conf)['views']['DailyMarketHistorical']
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
 
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 scale_factor = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 files_directory = f"{tpcdi_directory}sf={scale_factor}"
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 

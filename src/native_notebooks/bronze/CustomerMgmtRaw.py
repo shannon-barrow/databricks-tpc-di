@@ -12,20 +12,35 @@
 # COMMAND ----------
 
 import json
+import string
 
 with open("../../tools/traditional_config.json", "r") as json_conf:
   table_conf = json.load(json_conf)['views']['CustomerMgmt']
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
+  
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 scale_factor = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 files_directory = f"{tpcdi_directory}sf={scale_factor}"
+
+# COMMAND ----------
+
+catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+
+if catalog != 'hive_metastore' and not catalog_exists:
+  spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+  spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{staging_db}")
 
 # COMMAND ----------
 
@@ -37,16 +52,9 @@ spark.read.format('xml') \
 
 # COMMAND ----------
 
-spark.sql(f"CREATE DATABASE IF NOT EXISTS {staging_db}")
-
-# COMMAND ----------
-
 # DBTITLE 1,Now insert into CustomerMgmt table with nested values parsed and data types applied
 spark.sql(f"""
-  CREATE TABLE IF NOT EXISTS {staging_db}.CustomerMgmt PARTITIONED BY (ActionType) TBLPROPERTIES (
-    --delta.tuneFileSizesForRewrites = true, 
-    delta.autoOptimize.optimizeWrite = false
-  ) AS SELECT 
+  CREATE TABLE IF NOT EXISTS {catalog}.{staging_db}.CustomerMgmt PARTITIONED BY (ActionType) AS SELECT 
     cast(Customer._C_ID as BIGINT) customerid, 
     cast(Customer.Account._CA_ID as BIGINT) accountid,
     cast(Customer.Account.CA_B_ID as BIGINT) brokerid, 
@@ -107,4 +115,4 @@ spark.sql(f"""
 
 # COMMAND ----------
 
-spark.sql(f"ANALYZE TABLE {staging_db}.CustomerMgmt COMPUTE STATISTICS FOR ALL COLUMNS")
+spark.sql(f"ANALYZE TABLE {catalog}.{staging_db}.CustomerMgmt COMPUTE STATISTICS FOR ALL COLUMNS")

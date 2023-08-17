@@ -21,7 +21,7 @@
                     "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
                     "spark.databricks.preemption.enabled": "false",
                     "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                    "spark.sql.shuffle.partitions": {{ cust_mgmt_partitions }}
+                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
@@ -50,7 +50,7 @@
                 "node_type_id": "{{ worker_node_type }}",
                 "num_workers": "{{ cust_mgmt_worker_count }}",
                 "enable_elastic_disk": true,
-                "data_security_mode": "LEGACY_SINGLE_USER_STANDARD",
+                "data_security_mode": "SINGLE_USER",
                 "runtime_engine": "STANDARD"
             }
         }
@@ -62,6 +62,7 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
                 "base_parameters": {
+                    "catalog": "{{ catalog }}",
                     "wh_db": "{{ wh_target }}_DLT_{{ scale_factor }}",
                     "tpcdi_directory": "{{ tpcdi_directory }}",
                     "scale_factor": "{{ scale_factor }}"
@@ -72,7 +73,7 @@
             "libraries": [
                 {
                     "maven": {
-                        "coordinates": "com.databricks:spark-xml_2.12:0.14.0"
+                        "coordinates": "com.databricks:spark-xml_2.12:0.16.0"
                     }
                 }
             ],

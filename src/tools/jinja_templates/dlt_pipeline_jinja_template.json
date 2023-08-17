@@ -1,21 +1,18 @@
 {
     "name": "{{ job_name }}",
+    "pipeline_type": "WORKSPACE",
     "allow_duplicate_names": "true",
     "development": false,
     "continuous": false,
     "channel": "PREVIEW",
     "edition": "{{ edition }}",
     "photon": true,
-    "target": "{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}_wh",
+    "catalog": "{{ catalog }}",
+    "target": "{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}",
     "clusters": [
         {
             "label": "default",
             "spark_conf": {
-                {% if worker_node_count == 0 %}
-                "spark.master": "local[*, 4]",
-                "spark.databricks.cluster.profile": "singleNode",
-                "spark.databricks.adaptive.localShuffleReader.enabled": "true",
-                {% endif %}
                 "pipelines.applyChangesPreviewEnabled": "true",
                 "spark.databricks.photon.scan.enabled": "true",
                 "spark.databricks.photon.photonRowToColumnar.enabled": "true",
@@ -29,16 +26,11 @@
                 "spark.databricks.delta.schema.autoMerge.enabled": "true",
                 "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
                 "spark.databricks.photon.window.enabled": "true",
-                "spark.sql.shuffle.partitions": {{ shuffle_partitions }},
+                "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}",
                 "spark.databricks.photon.allDataSources.enabled": "true"
             },
             "node_type_id": "{{ worker_node_type }}",
             "driver_node_type_id": "{{ driver_node_type }}",
-            {% if worker_node_count == 0 %}
-            "custom_tags": {
-                "ResourceClass": "SingleNode"
-            },
-            {% endif %}
             "num_workers": {{ worker_node_count }}
         }
     ],
@@ -66,7 +58,7 @@
     "configuration": {
         "files_directory": "{{ tpcdi_directory }}",
         "scale_factor": "{{ scale_factor }}",
-        "staging_db": "{{ wh_target }}_DLT_{{ scale_factor }}_stage",
+        "staging_db": "{{ catalog }}.{{ wh_target }}_DLT_{{ scale_factor }}_stage",
         "raw_tables": "HR, DimDate, Industry, StatusType, TaxRate, TradeType, DimTime, TradeHistory, TradeIncremental, BatchDate, WatchHistory, CustomerIncremental, ProspectRaw, AccountIncremental, DailyMarketIncremental, TradeHistoryRaw, HoldingHistory, HoldingIncremental, CashTransactionHistory, CashTransactionIncremental, WatchIncremental",
         "tables_with_batchid": "BatchDate, CustomerIncremental, ProspectRaw, AccountIncremental, DailyMarketIncremental, HoldingIncremental, TradeIncremental, CashTransactionIncremental, WatchIncremental",
         "Audit.schema": "dataset STRING COMMENT 'Component the data is associated with', batchid INT COMMENT 'BatchID the data is associated with', date DATE COMMENT 'Date value corresponding to the Attribute', attribute STRING COMMENT 'Attribute this row of data corresponds to', value BIGINT COMMENT 'Integer value corresponding to the Attribute', dvalue DECIMAL(15,5) COMMENT 'Decimal value corresponding to the Attribute'",

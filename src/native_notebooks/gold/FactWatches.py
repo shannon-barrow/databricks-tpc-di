@@ -1,22 +1,29 @@
 # Databricks notebook source
+import string
 import json
 
 with open("../../tools/traditional_config.json", "r") as json_conf:
   table_conf = json.load(json_conf)['views']['WatchHistory']
-user_name = spark.sql("select current_user()").collect()[0][0].split("@")[0].replace(".","_")
 
-dbutils.widgets.text("wh_db", f"{user_name}_TPCDI",'Root name of Target Warehouse')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
-dbutils.widgets.text("scale_factor", "10", "Scale factor")
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
+default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+
+dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.text("wh_db", default_wh,'Target Database')
 dbutils.widgets.text("batch_id", "1", "Batch ID (1,2,3)")
+dbutils.widgets.text("scale_factor", "10", "Scale factor")
+dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
 
-batch_id = dbutils.widgets.get("batch_id")
-wh_db = f"{dbutils.widgets.get('wh_db')}_wh"
+catalog = dbutils.widgets.get("catalog")
+wh_db = f"{dbutils.widgets.get('wh_db')}"
 staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
+batch_id = dbutils.widgets.get("batch_id")
 scale_factor = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 files_directory = f"{tpcdi_directory}sf={scale_factor}"
 tgt_cols = "sk_customerid, sk_securityid, sk_dateid_dateplaced, sk_dateid_dateremoved, batchid"
+spark.sql(f"USE CATALOG {catalog}")
 
 # COMMAND ----------
 
