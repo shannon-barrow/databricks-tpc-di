@@ -24,6 +24,7 @@ if worker_node_count == 0:
     worker_node_count = 1
   if sku[0] == 'NATIVE':
     driver_node_type  = worker_node_type
+compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
 
 # DAG of args to send to Jinja
 dag_args = {
@@ -39,7 +40,8 @@ dag_args = {
   "driver_node_type":driver_node_type,
   "worker_node_count":worker_node_count,
   "dbr":dbr_version_id,
-  "shuffle_partitions":shuffle_partitions
+  "shuffle_partitions":shuffle_partitions,
+  "compute_key":compute_key
  }
 
 # Print out details of the workflow to user
