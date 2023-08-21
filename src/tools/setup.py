@@ -72,8 +72,15 @@ try:
   default_workflow  = wf_type
 except NameError: 
   default_workflow  = workflows_dict['NATIVE']
+if default_workflow == '':
+  raise Exception("Missing valid workflow type") #dbutils.notebook.exit(f"Please select a Workflow Type from the widget above and rerun")
+
+try: 
+  default_serverless  = comp_type
+except NameError: 
+  default_serverless  = 'NO'
+
 workflow_vals       = list(workflows_dict.values())
-default_serverless  = 'YES'
 default_sf          = '10'
 default_sf_options  = ['10', '100', '1000', '5000', '10000']
 default_job_name    = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
