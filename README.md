@@ -1,9 +1,9 @@
 # Databricks TPC-DI
 
 Databricks TPC-DI (Data Integration) is an implementation of specifications derived from the [TPC-DI](http://tpc.org/tpcdi/default5.asp) Benchmark.  
-This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **10.4 LTS** or higher. 
+This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **12.1 LTS** or higher. 
 
-[![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-10.4%20LTS-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
+[![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-12.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
 
 ## Summary
@@ -18,11 +18,13 @@ This repo is an implementation of the spec only - one that executes only on the 
 For additional context of this code base, more information is found in the following deck [TPC-DI Workflow Execution Flow, Notable Features, and Capabilities](https://docs.google.com/presentation/d/1UgVshJHaNYPGIjpQgsUEzyLOFPkfkeUNhwySnbDhrG0/edit?usp=sharing).  
 
 ### LIMITATIONS
-* The code base is implemented to execute successfully ONLY on the Databricks platoform, on either GCP, AZURE, OR AWS.    
+* The code base is implemented to execute successfully ONLY on the Databricks platform (GCP, AZURE, OR AWS).    
 * This code requires:
   * Databricks E2 Deployment. 
   * Databricks Repos functionality. 
   * Access to GitHub via public internet access. 
+* Serverless has been introduced as an optional execution mechanism but requires access to serverless compute
+* Unity Catalog will be required to use a catalog outside of hive_metastore. Additionally, UC is a prerequisite for lineage and primary/foreign key constraints
 
 ### Notes on Scoring/Metrics and Publication
 As of writing, the TPC-DI has not modified its submittal/scoring metrics to accomodate cloud-based platforms and infrastructure. Furthermore, as of writing, there has never been an official submission to this benchmark.  Therefore, no throughput metrics are mentioned or discussed in this code repository.  Databricks is attempting to work with the TPC to amend the rules for submission and modernize the throughput metrics for a future "official submittal" to be published by the TPC.  Until then, this code has been opened for demonstrating how such a Data Integration ETL application could be built upon the Databricks Lakehouse - without any performance metrics being published.
