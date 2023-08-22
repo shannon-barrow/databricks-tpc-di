@@ -66,8 +66,10 @@ workflows_dict      = {
   "NATIVE": "Native Notebooks Workflow", 
   "DLT-CORE": "CORE Delta Live Tables Pipeline", 
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
-  "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ"
+  "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
+  "DBT": "dbt Core on DB SQL Warehouse"
 }
+
 try: 
   default_workflow  = wf_type
 except NameError: 

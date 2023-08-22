@@ -3,11 +3,87 @@ import math
 
 # COMMAND ----------
 
-DLT_PIPELINE_TEMPLATE = "dlt_pipeline_jinja_template.json"
-WORKFLOW_TEMPLATE     = "_workflow_jinja_template.json"
-CUST_MGMT_PART_RATIO  = 0.047
-workflow_api_endpoint = "/api/2.1/jobs/create"
-pipeline_api_endpoint = "/api/2.0/pipelines"
+workflow_api_endpoint  = "/api/2.1/jobs/create"
+pipeline_api_endpoint  = "/api/2.0/pipelines"
+wh_api_endpoint        = "/api/2.0/sql/warehouses"
+wh_config_api_endpoint = "/api/2.0/sql/config/warehouses"
+DLT_PIPELINE_TEMPLATE  = "dlt_pipeline_jinja_template.json"
+WORKFLOW_TEMPLATE      = "_workflow_jinja_template.json"
+WAREHOUSE_TEMPLATE     = "warehouse_jinja_template.json"
+CUST_MGMT_PART_RATIO   = 0.047
+shuffle_partitions     = 'auto' 
+wh_scale_factor_map    = {
+  "10": "2X-Small", 
+  "100": "2X-Small", 
+  "1000": "Medium", 
+  "5000": "X-Large",
+  "10000": "2X-Large"
+}
+
+# COMMAND ----------
+
+try: 
+  # total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
+  # total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
+  # shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
+  sku = wf_key.split('-')
+  worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores'])
+  json_templates_path = f"{workspace_src_path}/tools/jinja_templates/"
+  if worker_node_count == 0:
+    if sku[0] == 'DLT':
+      worker_node_count = 1
+    if sku[0] == 'NATIVE':
+      driver_node_type  = worker_node_type
+  if sku[0] == 'DBT':
+    catalog = 'hive_metastore'
+  compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
+  cust_mgmt_worker_count = round(CUST_MGMT_PART_RATIO * scale_factor / node_types[worker_node_type]['num_cores'])
+  wh_size = wh_scale_factor_map[f"{scale_factor}"]
+  wh_name = f"TPCDI_{wh_size}"
+except NameError: 
+  dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
+
+# DAG of args to send to Jinja
+dag_args = {
+  "serverless":serverless,
+  "catalog":catalog, 
+  "wh_target":wh_target, 
+  "tpcdi_directory":tpcdi_directory, 
+  "scale_factor":scale_factor, 
+  "job_name":job_name, 
+  "repo_src_path":repo_src_path,
+  "cloud_provider":cloud_provider,
+  "worker_node_type":worker_node_type,
+  "driver_node_type":driver_node_type,
+  "worker_node_count":worker_node_count,
+  "dbr":dbr_version_id,
+  "shuffle_partitions":shuffle_partitions,
+  "compute_key":compute_key,
+  "cust_mgmt_worker_count":cust_mgmt_worker_count,
+  "wh_name":wh_name,
+  "wh_size":wh_size
+ }
+
+if serverless:
+  compute = f"""Warehouse Name:             {wh_name}
+Warehouse Size:             {wh_size}"""
+else:
+  compute = f"""Driver Type:                {driver_node_type}
+Worker Type:                {worker_node_type}
+Worker Count:               {worker_node_count}
+DBR Version:                {dbr_version_id}"""
+# Print out details of the workflow to user
+print(f"""
+Workflow Name:              {job_name}
+Workflow Type:              {workflow_type}
+SERVERLESS COMPUTE:         {serverless}
+{compute}
+Target TPCDI Catalog:       {catalog}
+Target TPCDI Database:      {wh_target}
+TPCDI Staging Database:     {wh_target}_stage
+Raw Files DBFS Path:        {tpcdi_directory}
+Scale Factor:               {scale_factor}
+""")
 
 # COMMAND ----------
 
@@ -26,19 +102,39 @@ def submit_dag(dag_dict, api_endpoint, dag_type):
     return response_id
   else: dbutils.notebook.exit(f"API call for {dag_type} Submission failed with status code {response.status_code}: {response.text}")
 
+def get_warehouse_id():
+  # response = api_call(request_type="GET", api_endpoint=wh_config_api_endpoint)
+  # workspace_sql_config = json.loads(response.text)
+  # workspace_sql_config
+  warehouse_id = -1
+  response = api_call(request_type="GET", api_endpoint=wh_api_endpoint)
+  warehouses_list = json.loads(response.text)['warehouses']
+  for wh in warehouses_list:
+    if wh['name'] == wh_name:
+      warehouse_id = wh['id']
+      print(f"DB SQL Warehouse {wh_name} exists! Warehouse ID: {warehouse_id}")
+      break
+  if warehouse_id == -1:
+    print(f"Warehouse does not exist yet, creating new warehouse")
+    rendered_wh_dag = generate_dag(f"{json_templates_path}{WAREHOUSE_TEMPLATE}", dag_args)
+    response = api_call(rendered_wh_dag, "POST", wh_api_endpoint)
+    warehouse_id = json.loads(response.text)['id']
+    print(f"DB SQL Warehouse {wh_name} Created! Warehouse ID: {warehouse_id}")
+  return warehouse_id
+
 
 # COMMAND ----------
 
 def generate_workflow():
-  json_templates_path = f"{workspace_src_path}/tools/jinja_templates/"
   if sku[0] == 'DLT':
     jinja_template_path = f"{json_templates_path}{DLT_PIPELINE_TEMPLATE}"
     dag_args['edition'] = sku[1]
-    dag_args['cust_mgmt_worker_count'] = round(CUST_MGMT_PART_RATIO * dag_args['scale_factor'] / node_types[worker_node_type]['num_cores'])
     print(f"Rendering DLT Pipeline JSON via jinja template located at {jinja_template_path}")
     rendered_pipeline_dag = generate_dag(jinja_template_path, dag_args)
     print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")
     dag_args['pipeline_id'] = submit_dag(rendered_pipeline_dag, pipeline_api_endpoint, 'pipeline')
+  if sku[0] == 'DBT':
+    dag_args['wh_id'] = get_warehouse_id()
   jinja_template_path = f"{json_templates_path}{sku[0].lower()}{WORKFLOW_TEMPLATE}"
   print(f"Rendering New Workflow JSON via jinja template located at {jinja_template_path}")
   rendered_workflow_dag = generate_dag(jinja_template_path, dag_args)  

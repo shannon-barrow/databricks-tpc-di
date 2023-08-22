@@ -25,7 +25,7 @@
 
 # COMMAND ----------
 
-workflow_types = ["", "Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ"]
+workflow_types = ["", "Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ", "dbt Core on DB SQL Warehouse"]
 dbutils.widgets.dropdown("workflow_type", "", workflow_types, "Workflow Type")
 dbutils.widgets.dropdown("serverless", 'NO', ['YES', 'NO'], "USE SERVERLESS COMPUTE")
 
