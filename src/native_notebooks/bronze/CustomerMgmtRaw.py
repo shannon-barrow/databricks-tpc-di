@@ -35,11 +35,11 @@ files_directory = f"{tpcdi_directory}sf={scale_factor}"
 
 # COMMAND ----------
 
-catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
-
-if catalog != 'hive_metastore' and not catalog_exists:
-  spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
-  spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+if catalog != 'hive_metastore':
+  catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+  if not catalog_exists:
+    spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+    spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{staging_db}")
 
 # COMMAND ----------

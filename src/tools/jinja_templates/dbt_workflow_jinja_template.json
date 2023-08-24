@@ -120,7 +120,7 @@
           "libraries": [
               {
                   "pypi": {
-                      "package": "dbt-databricks>=1.0.0,<2.0.0"
+                      "package": "dbt-databricks"
                   }
               }
           ],
