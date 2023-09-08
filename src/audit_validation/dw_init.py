@@ -38,11 +38,11 @@ staging_db = f"{dbutils.widgets.get('wh_db')}_stage"
 # COMMAND ----------
 
 # DBTITLE 1,DROP and CREATE Databases
-catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
-
-if catalog != 'hive_metastore' and not catalog_exists:
-  spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
-  spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+if catalog != 'hive_metastore':
+  catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+  if not catalog_exists:
+    spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+    spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
 
 spark.sql(f"""DROP DATABASE IF EXISTS {catalog}.{wh_db} CASCADE""")
 spark.sql(f"""DROP DATABASE IF EXISTS {catalog}.{staging_db} CASCADE""")

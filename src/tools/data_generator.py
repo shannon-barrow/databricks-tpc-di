@@ -9,7 +9,7 @@ import shlex
 # COMMAND ----------
 
 def move_file(source_location, target_location):
-  dbutils.fs.cp(source_location, target_location) 
+  shutil.copyfile(source_location, target_location)
   return f"Finished moving {source_location} to {target_location}"
 
 def copy_directory(source_dir, target_dir, overwrite):
@@ -27,30 +27,44 @@ def copy_directory(source_dir, target_dir, overwrite):
     print(f"The folder you're trying to copy doesn't exist: {source_dir}")
     
 def generate_data():
-  DRIVER_ROOT = f"/local_disk0"
-  datagen_path     = f"{tpcdi_directory}datagen/"
-  driver_tmp_path  = f"{DRIVER_ROOT}{datagen_path}"
-  datagen_out_path = f"{tpcdi_directory}sf={scale_factor}"
-  driver_out_path  = f"{DRIVER_ROOT}{datagen_out_path}"
-  dbfs_out_path    = f"/dbfs{datagen_out_path}"
+  DRIVER_ROOT      = "/local_disk0"
+  tpcdi_tmp_path   = "/tmp/tpcdi/"
+  driver_tmp_path  = f"{DRIVER_ROOT}{tpcdi_tmp_path}datagen/"
+  driver_out_path  = f"{DRIVER_ROOT}{tpcdi_tmp_path}sf={scale_factor}"
+  blob_out_path    = f"{tpcdi_directory}sf={scale_factor}"
+  if UC_enabled: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
+    os_blob_out_path = blob_out_path
+  else:
+    blob_out_path = f"dbfs:{blob_out_path}" 
+    os_blob_out_path = f"/dbfs{blob_out_path}"
 
-  if os.path.exists(dbfs_out_path) and not FORCE_REWRITE:
+  if os.path.exists(os_blob_out_path) and not FORCE_REWRITE:
     print("Data generation skipped since raw data/directory already exists for this scale factor. If you want to force a rewrite, change the FORCE_REWRITE Flag")
   else:
     if FORCE_REWRITE:
-      print(f"Raw Data Directory {dbfs_out_path} Exists but overwriting generated data with new generated data per FORCE_REWRITE flag")
+      print(f"Raw Data Directory {blob_out_path} Exists but overwriting generated data with new generated data per FORCE_REWRITE flag")
     else: 
-      print(f"Raw Data Directory {dbfs_out_path} does not exist yet.  Proceeding to generate data for scale factor={scale_factor} into this directory")
+      print(f"Raw Data Directory {blob_out_path} does not exist yet.  Proceeding to generate data for scale factor={scale_factor} into this directory")
     copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
     print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
     DIGen(driver_tmp_path, scale_factor, driver_out_path)
     print(f"Data generation for scale factor={scale_factor} has completed in directory: {driver_out_path}")
-    print(f"Moving generated files from Driver directory {driver_out_path} to DBFS directory {dbfs_out_path}")
-    filenames = [os.path.join(root, name) for root, dirs, files in os.walk(top=driver_out_path , topdown=False) for name in files]
+    print(f"Moving generated files from Driver directory {driver_out_path} to Storage directory {blob_out_path}")
+    if catalog != 'hive_metastore':
+      catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+      if not catalog_exists:
+        spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+        spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+      spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data COMMENT 'Schema for TPC-DI Raw Files Volume'")
+      spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume COMMENT 'TPC-DI Raw Files'")
+    filenames = [os.path.join(root, name) for root, dirs, files in os.walk(top=driver_out_path , topdown=True) for name in files]
+    dbutils.fs.mkdirs(blob_out_path)
+    for dir in next(os.walk(driver_out_path))[1]:
+      dbutils.fs.mkdirs(f"{blob_out_path}/{dir}")
     with concurrent.futures.ThreadPoolExecutor(max_workers=sc.defaultParallelism) as executor:
       futures = []
       for filename in filenames:
-        futures.append(executor.submit(move_file, source_location=f"file:{filename}", target_location=f"dbfs:{filename.replace(DRIVER_ROOT, '')}"))
+        futures.append(executor.submit(move_file, source_location=filename, target_location=filename.replace(driver_out_path, blob_out_path)))
       for future in concurrent.futures.as_completed(futures):
         try: print(future.result())
         except requests.ConnectTimeout: print("ConnectTimeout.")

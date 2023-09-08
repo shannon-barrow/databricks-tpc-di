@@ -43,7 +43,7 @@ default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 
 dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
 dbutils.widgets.text("wh_db", default_wh,'Target Database')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
+dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 
 catalog = dbutils.widgets.get("catalog")

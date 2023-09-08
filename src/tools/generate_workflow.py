@@ -26,16 +26,19 @@ try:
   # total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
   # total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
   # shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
-  sku = wf_key.split('-')
-  worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores'])
   json_templates_path = f"{workspace_src_path}/tools/jinja_templates/"
+  sku = wf_key.split('-')
+  worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores']) if sku[0] in ['DLT', 'NATIVE'] else 0
   if worker_node_count == 0:
     if sku[0] == 'DLT':
       worker_node_count = 1
-    if sku[0] == 'NATIVE':
+    else:
       driver_node_type  = worker_node_type
   if sku[0] == 'DBT':
+    # TEMPORARILY removing the following as options for dbt until they work as expected: Unity Catalog, volumes, and DBR 13.0 
     catalog = 'hive_metastore'
+    UC_enabled = False
+    dbr_version_id = '13.0.x-scala2.12'
   compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
   cust_mgmt_worker_count = round(CUST_MGMT_PART_RATIO * scale_factor / node_types[worker_node_type]['num_cores'])
   wh_size = wh_scale_factor_map[f"{scale_factor}"]
@@ -103,9 +106,6 @@ def submit_dag(dag_dict, api_endpoint, dag_type):
   else: dbutils.notebook.exit(f"API call for {dag_type} Submission failed with status code {response.status_code}: {response.text}")
 
 def get_warehouse_id():
-  # response = api_call(request_type="GET", api_endpoint=wh_config_api_endpoint)
-  # workspace_sql_config = json.loads(response.text)
-  # workspace_sql_config
   warehouse_id = -1
   response = api_call(request_type="GET", api_endpoint=wh_api_endpoint)
   warehouses_list = json.loads(response.text)['warehouses']
@@ -133,8 +133,10 @@ def generate_workflow():
     rendered_pipeline_dag = generate_dag(jinja_template_path, dag_args)
     print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")
     dag_args['pipeline_id'] = submit_dag(rendered_pipeline_dag, pipeline_api_endpoint, 'pipeline')
-  if sku[0] == 'DBT':
+  if sku[0] in ['DBT', 'STMV']:
     dag_args['wh_id'] = get_warehouse_id()
+    dag_args['table_or_st'] = "STREAMING TABLE"
+    dag_args['table_or_mv'] = "MATERIALIZED VIEW"
   jinja_template_path = f"{json_templates_path}{sku[0].lower()}{WORKFLOW_TEMPLATE}"
   print(f"Rendering New Workflow JSON via jinja template located at {jinja_template_path}")
   rendered_workflow_dag = generate_dag(jinja_template_path, dag_args)  

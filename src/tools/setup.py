@@ -41,10 +41,11 @@ def get_dbr_versions():
 # COMMAND ----------
 
 # DBTITLE 1,DBFS may not be accessible unless Cluster Access Mode set to "Single User" or "No Isolation Required"
-UC_enabled = spark.conf.get('spark.databricks.unityCatalog.enabled')
+UC_enabled = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
+tpcdi_directory = '/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/' if UC_enabled else "/tmp/tpcdi/"
 UC_mode = spark.conf.get("spark.databricks.clusterUsageTags.clusterUnityCatalogMode")
-if UC_enabled == 'true' and UC_mode not in ['SINGLE_USER', 'NONE']:
-  dbutils.notebook.exit("DBFS is used to generate and store the raw geenerated date.  On Unity Catalog enabled clusters, DBFS may not be accessible unless Cluster Access Mode set to 'SINGLE_USER' or 'No Isolation Required'. Please execute on a cluster that will have access to generated files in DBFS using 'SINGLE_USER' or 'NONE' as the data_security_mode")
+# if UC_enabled and UC_mode not in ['SINGLE_USER', 'NONE']:
+#   dbutils.notebook.exit("DBFS is used to generate and store the raw geenerated date.  On Unity Catalog enabled clusters, DBFS may not be accessible unless Cluster Access Mode set to 'SINGLE_USER' or 'No Isolation Required'. Please execute on a cluster that will have access to generated files in DBFS using 'SINGLE_USER' or 'NONE' as the data_security_mode")
 
 # COMMAND ----------
 
@@ -67,7 +68,8 @@ workflows_dict      = {
   "DLT-CORE": "CORE Delta Live Tables Pipeline", 
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
-  "DBT": "dbt Core on DB SQL Warehouse"
+  "DBT": "dbt Core on DB SQL Warehouse",
+  "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
 
 try: 
@@ -75,7 +77,7 @@ try:
 except NameError: 
   default_workflow  = workflows_dict['NATIVE']
 if default_workflow == '':
-  raise Exception("Missing valid workflow type") #dbutils.notebook.exit(f"Please select a Workflow Type from the widget above and rerun")
+  raise Exception("Missing valid workflow type")
 
 try: 
   default_serverless  = comp_type
@@ -98,6 +100,7 @@ elif cloud_provider == 'Azure':
   default_worker_type = "Standard_D8ads_v5" 
   default_driver_type = "Standard_D4as_v5"
 else:
+  raise Exception('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
   dbutils.notebook.exit('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
 shuffle_part_mult   = 354
 worker_cores_mult   = 0.0576

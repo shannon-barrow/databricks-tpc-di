@@ -11,7 +11,7 @@
 -- MAGIC * This includes: 
 -- MAGIC   * Prospect (Customer and Prospect need data from the other table and join on name/address - which you cannot get until data is coalesced)
 -- MAGIC   * Account table needs each change of Customer record to get the surrogate key of the customer record. This only occurs once a Customer record gets updated
--- MAGIC 
+-- MAGIC
 -- MAGIC ### Staging Customer table unions the historical to the incremental
 -- MAGIC 1) Window results by customerid and order by the update timestamp 
 -- MAGIC 2) Then coalesce the current row to the last row and ignore nulls
@@ -206,9 +206,9 @@ CREATE OR REFRESH LIVE TABLE DimCustomer (${DimCustomer.schema} ${DimCustomer.co
   c.effectivedate,
   c.enddate
 FROM LIVE.DimCustomerStg c
-LEFT JOIN LIVE.TaxRate r_lcl 
+JOIN LIVE.TaxRate r_lcl 
   ON c.LCL_TX_ID = r_lcl.TX_ID
-LEFT JOIN LIVE.TaxRate r_nat 
+JOIN LIVE.TaxRate r_nat 
   ON c.NAT_TX_ID = r_nat.TX_ID
 LEFT JOIN LIVE.Prospect p 
   on upper(p.lastname) = upper(c.lastname)
@@ -230,7 +230,7 @@ LEFT JOIN LIVE.Prospect p
 -- MAGIC 2) Then take min/max batchid for the batchid/recordbatchid respectively
 -- MAGIC 3) Then do a window to take the latest record per agencyid (QUALIFY WINDOW where ROW=1)
 -- MAGIC 4) From here its just business logic for marketingnameplate and other joins
--- MAGIC 
+-- MAGIC
 -- MAGIC This is made slightly more complicated since we need to join to DimCustomer to find out if the prospect is also a customer - which necessitates the DimCustomer staging table
 
 -- COMMAND ----------
@@ -458,7 +458,7 @@ FROM (
       AND c.enddate > a.effectivedate
       AND c.effectivedate < a.enddate
 ) a
-LEFT JOIN LIVE.DimBroker b 
+JOIN LIVE.DimBroker b 
   ON a.brokerid = b.brokerid;
 
 -- COMMAND ----------
@@ -472,7 +472,7 @@ LEFT JOIN LIVE.DimBroker b
 -- MAGIC * As of February 2023, Photon does NOT support the UNBOUNDED PRECEDING WINDOW statement needed for the business logic of this table (previous year high/low amount and date for each stock symbol)
 -- MAGIC * Therefore, expect this table to take the longest execution when run in Photon runtime as it comes out of Photon - we can revisit when this functionality is added to Photon AFTER DBR 13+
 -- MAGIC * Additionally, the logic looks funky as there is not fast native way to retrieve the amount AND date for the previous year low/high values. The fastest execution I have found is the one below (tried a few others but they were slower - even if the code was more concise)  
--- MAGIC 
+-- MAGIC
 -- MAGIC **Steps**
 -- MAGIC 1) Union the historical and incremental DailyMarket tables
 -- MAGIC 2) Find out the previous year min/max for each symbol. Store in temp staging table since this needs multiple self-joins (calculate it once)

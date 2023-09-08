@@ -138,7 +138,7 @@ incr_acct_query = f"""
       FROM {staging_db}.DimCustomerStg
       WHERE iscurrent) dc
       ON dc.customerid = a.ca_c_id
-    LEFT JOIN {wh_db}.DimBroker b 
+    JOIN {wh_db}.DimBroker b 
       ON a.ca_b_id = b.brokerid
     WHERE a.batchid = cast({batch_id} as int)
   ) a

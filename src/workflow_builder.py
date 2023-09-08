@@ -13,11 +13,10 @@ dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Work
 dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
 dbutils.widgets.dropdown("dbr", list(dbrs.values())[0], list(dbrs.values()), "Databricks Runtime")
 dbutils.widgets.dropdown("datagen_rewrite", 'False', ['True', 'False'], "Force Re-Generation of Raw Files")
+dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Target Database')
 dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
-dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
 
 # PARAMETERS
 serverless        = dbutils.widgets.get("serverless")
@@ -25,13 +24,12 @@ scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
 wh_target         = dbutils.widgets.get("wh_target")
 catalog           = dbutils.widgets.get("catalog")
-tpcdi_directory   = dbutils.widgets.get("tpcdi_directory")
-dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
+worker_node_type  = dbutils.widgets.get("worker_type")
+driver_node_type  = dbutils.widgets.get("driver_type")
 FORCE_REWRITE     = eval(dbutils.widgets.get("datagen_rewrite"))
 wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
 job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
-worker_node_type  = dbutils.widgets.get("worker_type")
-driver_node_type  = dbutils.widgets.get("driver_type")
+dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
 
 # COMMAND ----------
 

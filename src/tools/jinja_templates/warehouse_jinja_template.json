@@ -2,8 +2,11 @@
   "name": "{{wh_name}}",
   "cluster_size": "{{wh_size}}",
   "min_num_clusters": 1,
-  "max_num_clusters": 10,
+  "max_num_clusters": 1,
   "auto_stop_mins": 1,
   "enable_serverless_compute": true,
-  "warehouse_type": "PRO"
+  "warehouse_type": "PRO",
+  "channel": {
+    "name": "CHANNEL_NAME_PREVIEW"
+  }
 }

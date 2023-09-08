@@ -5,6 +5,24 @@
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
     "format": "MULTI_TASK", 
+    "parameters": [
+      {
+        "name": "catalog",
+        "default": "{{ catalog }}"
+      },
+      {
+        "name": "scale_factor",
+        "default": "{{ scale_factor }}"
+      },
+      {
+        "name": "wh_db",
+        "default": "{{ wh_target }}_DLT_{{ scale_factor }}"
+      },
+      {
+        "name": "tpcdi_directory",
+        "default": "{{ tpcdi_directory }}"
+      }
+    ]
     {% if serverless == "YES" %}
     "compute": [
         {
@@ -73,10 +91,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_DLT_{{ scale_factor }}",
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },

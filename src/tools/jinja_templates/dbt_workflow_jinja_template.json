@@ -5,6 +5,32 @@
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
     "format": "MULTI_TASK",
+    "parameters": [
+      {
+        "name": "warehouse_id",
+        "default": "{{ wh_id }}"
+      },
+      {
+        "name": "catalog",
+        "default": "{{ catalog }}"
+      },
+      {
+        "name": "scale_factor",
+        "default": "{{ scale_factor }}"
+      },
+      {
+        "name": "wh_db",
+        "default": "{{ wh_target }}_dbt_{{ scale_factor }}"
+      },
+      {
+        "name": "schema",
+        "default": "{{ wh_target }}_dbt_{{ scale_factor }}"
+      },
+      {
+        "name": "tpcdi_directory",
+        "default": "{{ tpcdi_directory }}"
+      }
+    ],
     "git_source": {
         "git_url": "https://github.com/rlsalcido24/dbtpcdi",
         "git_provider": "gitHub",
@@ -26,16 +52,9 @@
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
-                    {% if cust_mgmt_worker_count == 0 %}
                     "spark.master": "local[*, 4]",
                     "spark.databricks.cluster.profile": "singleNode",
                     "spark.databricks.adaptive.localShuffleReader.enabled": "true",
-                    {% endif %}
-                    "spark.databricks.delta.schema.autoMerge.enabled": "true",
-                    "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
-                    "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-                    "spark.databricks.preemption.enabled": "false",
-                    "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
                     "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
                 },
                 {% if cloud_provider == "Azure" %} 
@@ -56,14 +75,12 @@
                 "spark_env_vars": {
                     "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
                 },
-                {% if cust_mgmt_worker_count == 0 %}
                 "custom_tags": {
                     "ResourceClass": "SingleNode"
                 },
-                {% endif %}
                 "driver_node_type_id": "{{ driver_node_type }}",
                 "node_type_id": "{{ worker_node_type }}",
-                "num_workers": "{{ cust_mgmt_worker_count }}",
+                "num_workers": "0",
                 "enable_elastic_disk": true,
                 "data_security_mode": "SINGLE_USER",
                 "runtime_engine": "STANDARD"
@@ -78,10 +95,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_dbt_{{ scale_factor }}",
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -112,9 +129,9 @@
                   "dbt run-operation stage_external_sources --vars '{scalefactor: {{scale_factor}}, stagingschema: {{ wh_target }}_dbt_{{ scale_factor }}_stage}'",
                   "dbt run --vars '{scalefactor: {{scale_factor}}, stagingschema: {{ wh_target }}_dbt_{{ scale_factor }}_stage}'"
               ],
-              "schema": "{{ wh_target }}_dbt_{{ scale_factor }}",
-              "warehouse_id": "{{wh_id}}",
-              "catalog": "{{ catalog }}"
+              "schema": {% raw %}"{{job.parameters.schema}}"{% endraw %},
+              "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+              "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %}
           },
           "{{compute_key}}": "{{ job_name }}_compute",
           "libraries": [

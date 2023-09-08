@@ -1,0 +1,314 @@
+{
+  "tables":{
+    "DimDate":{
+      "raw_schema":"sk_dateid BIGINT NOT NULL COMMENT 'Surrogate key for the date', datevalue DATE NOT NULL COMMENT 'The date stored appropriately for doing comparisons in the Data Warehouse', datedesc STRING NOT NULL COMMENT 'The date in full written form e.g. July 7 2004', calendaryearid INT NOT NULL COMMENT 'Year number as a number', calendaryeardesc STRING NOT NULL COMMENT 'Year number as text', calendarqtrid INT NOT NULL COMMENT 'Quarter as a number e.g. 20042', calendarqtrdesc STRING NOT NULL COMMENT 'Quarter as text e.g. 2004 Q2', calendarmonthid INT NOT NULL COMMENT 'Month as a number e.g. 20047', calendarmonthdesc STRING NOT NULL COMMENT 'Month as text e.g. 2004 July', calendarweekid INT NOT NULL COMMENT 'Week as a number e.g. 200428', calendarweekdesc STRING NOT NULL COMMENT 'Week as text e.g. 2004-W28', dayofweeknum INT NOT NULL COMMENT 'Day of week as a number e.g. 3', dayofweekdesc STRING NOT NULL COMMENT 'Day of week as text e.g. Wednesday', fiscalyearid INT NOT NULL COMMENT 'Fiscal year as a number e.g. 2005', fiscalyeardesc STRING NOT NULL COMMENT 'Fiscal year as text e.g. 2005', fiscalqtrid INT NOT NULL COMMENT 'Fiscal quarter as a number e.g. 20051', fiscalqtrdesc STRING NOT NULL COMMENT 'Fiscal quarter as text e.g. 2005 Q1', holidayflag BOOLEAN COMMENT 'Indicates holidays'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"Date.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT dimdate_pk PRIMARY KEY(sk_dateid)"
+    },
+    "Industry":{
+      "raw_schema":"in_id STRING NOT NULL COMMENT 'Industry code', in_name STRING NOT NULL COMMENT 'Industry description', in_sc_id STRING NOT NULL COMMENT 'Sector identifier'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"Industry.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT industry_pk PRIMARY KEY(in_name)"
+    },
+    "StatusType":{
+      "raw_schema":"st_id STRING NOT NULL COMMENT 'Status code', st_name STRING NOT NULL COMMENT 'Status description'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"StatusType.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT statustype_pk PRIMARY KEY(st_name)"
+    },
+    "TaxRate":{
+      "raw_schema":"tx_id STRING NOT NULL COMMENT 'Tax rate code', tx_name STRING NOT NULL COMMENT 'Tax rate description', tx_rate FLOAT NOT NULL COMMENT 'Tax rate'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"TaxRate.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT taxrate_pk PRIMARY KEY(tx_id)"
+    },
+    "TradeType":{
+      "raw_schema":"tt_id STRING NOT NULL COMMENT 'Trade type code', tt_name STRING NOT NULL COMMENT 'Trade type description', tt_is_sell INT NOT NULL COMMENT 'Flag indicating a sale', tt_is_mrkt INT NOT NULL COMMENT 'Flag indicating a market order'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"TradeType.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT tradetype_pk PRIMARY KEY(tt_id)"
+    },
+    "DimTime":{
+      "raw_schema":"sk_timeid BIGINT NOT NULL COMMENT 'Surrogate key for the time', timevalue STRING NOT NULL COMMENT 'The time stored appropriately for doing', hourid INT NOT NULL COMMENT 'Hour number as a number e.g. 01', hourdesc STRING NOT NULL COMMENT 'Hour number as text e.g. 01', minuteid INT NOT NULL COMMENT 'Minute as a number e.g. 23', minutedesc STRING NOT NULL COMMENT 'Minute as text e.g. 01:23', secondid INT NOT NULL COMMENT 'Second as a number e.g. 45', seconddesc STRING NOT NULL COMMENT 'Second as text e.g. 01:23:45', markethoursflag BOOLEAN COMMENT 'Indicates a time during market hours', officehoursflag BOOLEAN COMMENT 'Indicates a time during office hours'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"Time.txt",
+      "db":"wh",
+      "constraints":", CONSTRAINT dimtime_pk PRIMARY KEY(sk_timeid)"
+    },
+    "TradeHistory":{
+      "raw_schema":"t_id BIGINT COMMENT 'Trade identifier', t_dts TIMESTAMP COMMENT 'Date and time of trade', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT COMMENT 'Is this trade a cash (‘1’) or margin (‘0’) trade?', t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded', t_bid_price DOUBLE COMMENT 'The requested unit price', t_ca_id BIGINT COMMENT 'Customer account identifier', t_exec_name STRING COMMENT 'Name of the person executing the trade', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"Trade.txt",
+      "db":"stage"
+    },
+    "TradeIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', t_id BIGINT COMMENT 'Trade identifier', t_dts TIMESTAMP COMMENT 'Date and time of trade', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT COMMENT 'Is this trade a cash (‘1’) or margin (‘0’) trade?', t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded', t_bid_price DOUBLE COMMENT 'The requested unit price', t_ca_id BIGINT COMMENT 'Customer account identifier', t_exec_name STRING COMMENT 'Name of the person executing the trade', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"Trade.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "BatchDate":{
+      "raw_schema":"batchdate DATE NOT NULL COMMENT 'Batch date'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"BatchDate.txt",      
+      "db":"wh",
+      "add_batchid":"True",
+      "constraints":", CONSTRAINT batchdate_pk PRIMARY KEY(batchdate)"
+    },
+    "WatchHistory":{
+      "raw_schema":"w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "db":"stage",
+      "filename":"WatchHistory.txt"
+    },
+    "CustomerIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer’s tax identifier', status STRING COMMENT 'Customer status type identifier', lastname STRING COMMENT 'Primary Customers last name', firstname STRING COMMENT 'Primary Customers first name', middleinitial STRING COMMENT 'Primary Customers middle initial', gender STRING COMMENT 'Gender of the primary customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer’s date of birth as YYYY-MM-DD', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or province', country STRING COMMENT 'Country', c_ctry_1 STRING COMMENT 'Country code for Customers phone 1', c_area_1 STRING COMMENT 'Area code for customer’s phone 1', c_local_1 STRING COMMENT 'Local number for customer’s phone 1', c_ext_1 STRING COMMENT 'Extension number for Customer’s phone 1', c_ctry_2 STRING COMMENT 'Country code for Customers phone 2', c_area_2 STRING COMMENT 'Area code for Customer’s phone 2', c_local_2 STRING COMMENT 'Local number for Customer’s phone 2', c_ext_2 STRING COMMENT 'Extension number for Customer’s phone 2', c_ctry_3 STRING COMMENT 'Country code for Customers phone 3', c_area_3 STRING COMMENT 'Area code for Customer’s phone 3', c_local_3 STRING COMMENT 'Local number for Customer’s phone 3', c_ext_3 STRING COMMENT 'Extension number for Customer’s phone 3', email1 STRING COMMENT 'Customers e-mail address 1', email2 STRING COMMENT 'Customers e-mail address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Customer.txt",
+      "add_batchid":"True",
+      "db":"stage",
+      "partition":"PARTITIONED BY (batchid)"
+    },
+    "ProspectIncremental":{
+      "raw_schema":"agencyid STRING COMMENT 'Unique identifier from agency', lastname STRING COMMENT 'Last name', firstname STRING COMMENT 'First name', middleinitial STRING COMMENT 'Middle initial', gender STRING COMMENT '‘M’ or ‘F’ or ‘U’', addressline1 STRING COMMENT 'Postal address', addressline2 STRING COMMENT 'Postal address', postalcode STRING COMMENT 'Postal code', city STRING COMMENT 'City', state STRING COMMENT 'State or province', country STRING COMMENT 'Postal country', phone STRING COMMENT 'Telephone number', income STRING COMMENT 'Annual income', numbercars INT COMMENT 'Cars owned', numberchildren INT COMMENT 'Dependent children', maritalstatus STRING COMMENT '‘S’ or ‘M’ or ‘D’ or ‘W’ or ‘U’', age INT COMMENT 'Current age', creditrating INT COMMENT 'Numeric rating', ownorrentflag STRING COMMENT '‘O’ or ‘R’ or ‘U’', employer STRING COMMENT 'Name of employer', numbercreditcards INT COMMENT 'Credit cards', networth INT COMMENT 'Estimated total net worth'",
+      "sep":",",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Prospect.csv",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "AccountIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', accountid BIGINT COMMENT 'Customer account identifier', ca_b_id BIGINT COMMENT 'Identifier of the managing broker', ca_c_id BIGINT COMMENT 'Owning customer identifier', accountDesc STRING COMMENT 'Name of customer account', TaxStatus TINYINT COMMENT 'Tax status of this account', ca_st_id STRING COMMENT 'Customer status type identifier'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Account.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "DailyMarketIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', dm_date DATE COMMENT 'Date of last completed trading day', dm_s_symb STRING COMMENT 'Security symbol of the security', dm_close DOUBLE COMMENT 'Closing price of the security on this day', dm_high DOUBLE COMMENT 'Highest price for the security on this day', dm_low DOUBLE COMMENT 'Lowest price for the security on this day', dm_vol INT COMMENT 'Volume of the security on this day'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"DailyMarket.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "TradeHistoryRaw":{
+      "raw_schema":"th_t_id BIGINT COMMENT 'Trade identifier. Corresponds to T_ID in the Trade.txt file', th_dts TIMESTAMP COMMENT 'When the trade history was updated', th_st_id STRING COMMENT 'Status type identifier'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "db":"stage",
+      "filename":"TradeHistory.txt"
+    },
+    "HoldingHistory":{
+      "raw_schema":"hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "db":"stage",
+      "filename":"HoldingHistory.txt"
+    },
+    "HoldingIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"HoldingHistory.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "CashTransactionHistory":{
+      "raw_schema":"ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction', ct_name STRING COMMENT 'Transaction name or description: e.g. Cash from sale of DuPont stock'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "db":"stage",
+      "filename":"CashTransaction.txt"
+    },
+    "CashTransactionIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction', ct_name STRING COMMENT 'Transaction name or description: e.g. Cash from sale of DuPont stock'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"CashTransaction.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "WatchIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"WatchHistory.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "FinWire":{
+      "raw_schema":"value STRING COMMENT 'Pre-parsed String Values of all FinWire files'",
+      "filename":"FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]",
+      "path":"Batch1",
+      "partition":"PARTITIONED BY (rectype)",
+      "file_format":"text",
+      "db":"stage",
+      "add_tgt_schema":", rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC'",
+      "add_tgt_query":"substring(value, 16, 3) rectype"
+    }
+  },
+  "views":{
+    "HRHistory":{
+      "raw_schema":"employeeid STRING COMMENT 'ID of employee', managerid STRING COMMENT 'ID of employee’s manager', employeefirstname STRING COMMENT 'First name', employeelastname STRING COMMENT 'Last name', employeemi STRING COMMENT 'Middle initial', employeejobcode STRING COMMENT 'Numeric job code', employeebranch STRING COMMENT 'Facility in which employee has office', employeeoffice STRING COMMENT 'Office number or description', employeephone STRING COMMENT 'Employee phone number'",
+      "sep":",",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"HR.csv"
+    },
+    "TradeHistory":{
+      "raw_schema":"t_id BIGINT COMMENT 'Trade identifier', t_dts TIMESTAMP COMMENT 'Date and time of trade', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT COMMENT 'Is this trade a cash (‘1’) or margin (‘0’) trade?', t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded', t_bid_price DOUBLE COMMENT 'The requested unit price', t_ca_id BIGINT COMMENT 'Customer account identifier', t_exec_name STRING COMMENT 'Name of the person executing the trade', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"Trade.txt"
+    },
+    "TradeHistoryRaw":{
+      "raw_schema":"th_t_id BIGINT COMMENT 'Trade identifier. Corresponds to T_ID in the Trade.txt file', th_dts TIMESTAMP COMMENT 'When the trade history was updated', th_st_id STRING COMMENT 'Status type identifier'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"TradeHistory.txt"
+    },
+    "DailyMarketHistorical":{
+      "raw_schema":"dm_date DATE COMMENT 'Date of last completed trading day', dm_s_symb STRING COMMENT 'Security symbol of the security', dm_close DOUBLE COMMENT 'Closing price of the security on this day', dm_high DOUBLE COMMENT 'Highest price for the security on this day', dm_low DOUBLE COMMENT 'Lowest price for the security on this day', dm_vol INT COMMENT 'Volume of the security on this day'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"DailyMarket.txt"
+    },
+    "WatchHistory":{
+      "raw_schema":"w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"WatchHistory.txt"
+    },
+    "HoldingHistory":{
+      "raw_schema":"hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"HoldingHistory.txt"
+    },
+    "TradeIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', t_id BIGINT COMMENT 'Trade identifier', t_dts TIMESTAMP COMMENT 'Date and time of trade', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT COMMENT 'Is this trade a cash (‘1’) or margin (‘0’) trade?', t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded', t_bid_price DOUBLE COMMENT 'The requested unit price', t_ca_id BIGINT COMMENT 'Customer account identifier', t_exec_name STRING COMMENT 'Name of the person executing the trade', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"Trade.txt",
+      "add_batchid":"True"
+    },
+    "CustomerIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer’s tax identifier', status STRING COMMENT 'Customer status type identifier', lastname STRING COMMENT 'Primary Customers last name', firstname STRING COMMENT 'Primary Customers first name', middleinitial STRING COMMENT 'Primary Customers middle initial', gender STRING COMMENT 'Gender of the primary customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer’s date of birth', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or province', country STRING COMMENT 'Country', c_ctry_1 STRING COMMENT 'Country code for Customers phone 1', c_area_1 STRING COMMENT 'Area code for customer’s phone 1', c_local_1 STRING COMMENT 'Local number for customer’s phone 1', c_ext_1 STRING COMMENT 'Extension number for Customer’s phone 1', c_ctry_2 STRING COMMENT 'Country code for Customers phone 2', c_area_2 STRING COMMENT 'Area code for Customer’s phone 2', c_local_2 STRING COMMENT 'Local number for Customer’s phone 2', c_ext_2 STRING COMMENT 'Extension number for Customer’s phone 2', c_ctry_3 STRING COMMENT 'Country code for Customers phone 3', c_area_3 STRING COMMENT 'Area code for Customer’s phone 3', c_local_3 STRING COMMENT 'Local number for Customer’s phone 3', c_ext_3 STRING COMMENT 'Extension number for Customer’s phone 3', email1 STRING COMMENT 'Customers e-mail address 1', email2 STRING COMMENT 'Customers e-mail address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Customer.txt",
+      "add_batchid":"True",
+      "db":"stage",
+      "partition":"PARTITIONED BY (batchid)"
+    },
+    "ProspectIncremental":{
+      "raw_schema":"agencyid STRING COMMENT 'Unique identifier from agency', lastname STRING COMMENT 'Last name', firstname STRING COMMENT 'First name', middleinitial STRING COMMENT 'Middle initial', gender STRING COMMENT '‘M’ or ‘F’ or ‘U’', addressline1 STRING COMMENT 'Postal address', addressline2 STRING COMMENT 'Postal address', postalcode STRING COMMENT 'Postal code', city STRING COMMENT 'City', state STRING COMMENT 'State or province', country STRING COMMENT 'Postal country', phone STRING COMMENT 'Telephone number', income STRING COMMENT 'Annual income', numbercars INT COMMENT 'Cars owned', numberchildren INT COMMENT 'Dependent children', maritalstatus STRING COMMENT '‘S’ or ‘M’ or ‘D’ or ‘W’ or ‘U’', age INT COMMENT 'Current age', creditrating INT COMMENT 'Numeric rating', ownorrentflag STRING COMMENT '‘O’ or ‘R’ or ‘U’', employer STRING COMMENT 'Name of employer', numbercreditcards INT COMMENT 'Credit cards', networth INT COMMENT 'Estimated total net worth'",
+      "sep":",",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Prospect.csv",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "AccountIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', accountid BIGINT COMMENT 'Customer account identifier', ca_b_id BIGINT COMMENT 'Identifier of the managing broker', ca_c_id BIGINT COMMENT 'Owning customer identifier', accountDesc STRING COMMENT 'Name of customer account', TaxStatus TINYINT COMMENT 'Tax status of this account', ca_st_id STRING COMMENT 'Customer status type identifier'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch*",
+      "filename":"Account.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "DailyMarketIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', dm_date DATE COMMENT 'Date of last completed trading day', dm_s_symb STRING COMMENT 'Security symbol of the security', dm_close DOUBLE COMMENT 'Closing price of the security on this day', dm_high DOUBLE COMMENT 'Highest price for the security on this day', dm_low DOUBLE COMMENT 'Lowest price for the security on this day', dm_vol INT COMMENT 'Volume of the security on this day'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"DailyMarket.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "HoldingIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"HoldingHistory.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "CashTransactionIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction', ct_name STRING COMMENT 'Transaction name or description: e.g. Cash from sale of DuPont stock'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"CashTransaction.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "WatchIncremental":{
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch[23]",
+      "filename":"WatchHistory.txt",
+      "add_batchid":"True",
+      "db":"stage"
+    },
+    "CashTransactionHistory":{
+      "raw_schema":"ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction', ct_name STRING COMMENT 'Transaction name or description: e.g. Cash from sale of DuPont stock'",
+      "sep":"|",
+      "header":"False",
+      "path":"Batch1",
+      "filename":"CashTransaction.txt"
+    }
+  }
+}

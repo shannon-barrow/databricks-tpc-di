@@ -1,0 +1,737 @@
+{
+    "name": "{{ job_name }}",
+    "email_notifications": {},
+    "webhook_notifications": {},
+    "timeout_seconds": 0,
+    "max_concurrent_runs": 1,
+    "format": "MULTI_TASK",
+    "parameters": [
+      {
+        "name": "warehouse_id",
+        "default": "{{ wh_id }}"
+      },
+      {
+        "name": "catalog",
+        "default": "{{ catalog }}"
+      },
+      {
+        "name": "scale_factor",
+        "default": "{{ scale_factor }}"
+      },
+      {
+        "name": "wh_db",
+        "default": "{{ wh_target }}_STMV_{{ scale_factor }}"
+      },
+      {
+        "name": "tpcdi_directory",
+        "default": "{{ tpcdi_directory }}"
+      },
+      {
+        "name": "table_or_st",
+        "default": "{{ table_or_st }}"
+      },
+      {
+        "name": "table_or_mv",
+        "default": "{{ table_or_mv }}"
+      }
+    ],
+    {% if serverless == "YES" %}
+    "compute": [
+        {
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "spec": {
+                "kind": "SERVERLESS_PREVIEW"
+            }
+        }
+    ],
+    {% else %}
+    "job_clusters": [
+        {
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "new_cluster": {
+                "spark_version": "{{ dbr }}",
+                "spark_conf": {
+                    "spark.master": "local[*, 4]",
+                    "spark.databricks.cluster.profile": "singleNode",
+                    "spark.databricks.adaptive.localShuffleReader.enabled": "true"
+                },
+                {% if cloud_provider == "Azure" %} 
+                "azure_attributes": {
+                    "availability": "SPOT_WITH_FALLBACK_AZURE",
+                    "first_on_demand": 1,
+                    "spot_bid_price_percent": -1
+                },
+                {% endif %}
+                {% if cloud_provider == "AWS" %}
+                "aws_attributes": {
+                    "availability": "SPOT_WITH_FALLBACK",
+                    "first_on_demand": 1,
+                    "zone_id" : "auto",
+                    "spot_bid_price_percent": 100
+                },
+                {% endif %}
+                "spark_env_vars": {
+                    "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+                },
+                "custom_tags": {
+                    "ResourceClass": "SingleNode"
+                },
+                "driver_node_type_id": "{{ driver_node_type }}",
+                "node_type_id": "{{ worker_node_type }}",
+                "num_workers": "0",
+                "enable_elastic_disk": true,
+                "data_security_mode": "SINGLE_USER",
+                "runtime_engine": "STANDARD"
+            }
+        }
+    ],
+    {% endif %}
+    "tasks": [
+        {
+            "task_key": "dw_init",
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/dw_init",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "libraries": [
+                {
+                    "maven": {
+                        "coordinates": "com.databricks:spark-xml_2.12:0.16.0"
+                    }
+                }
+            ],
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_BatchDate",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "BatchDate",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_DimDate",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "DimDate",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_DimTime",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "DimTime",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_FinWire",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "FinWire",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_Industry",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "Industry",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_StatusType",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "StatusType",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_TaxRate",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "TaxRate",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "Stream_TradeType",
+            "run_if": "ALL_SUCCESS",
+            "depends_on": [
+                {
+                    "task_key": "dw_init"
+                }
+            ],
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
+                "base_parameters": {
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table": "TradeType",
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimBroker",
+            "depends_on": [
+                {
+                    "task_key": "Stream_DimDate"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimBrokerST",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimCompany",
+            "depends_on": [
+                {
+                    "task_key": "Stream_FinWire"
+                },
+                {
+                    "task_key": "Stream_StatusType"
+                },
+                {
+                    "task_key": "Stream_Industry"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCompanyMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimSecurity",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimCompany"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimSecurityMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_Financial",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimCompany"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FinancialMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimCustomerStg",
+            "depends_on": [
+                {
+                    "task_key": "Stream_BatchDate"
+                },
+                {
+                    "task_key": "Stream_StatusType"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCustomerStgMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_Prospect",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimCustomerStg"
+                },
+                {
+                    "task_key": "Stream_DimDate"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/ProspectMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimCustomer",
+            "depends_on": [
+                {
+                    "task_key": "MV_Prospect"
+                },
+                {
+                    "task_key": "Stream_TaxRate"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCustomerMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimAccount",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimBroker"
+                },
+                {
+                    "task_key": "MV_DimCustomerStg"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimAccountMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DimTrade",
+            "depends_on": [
+                {
+                    "task_key": "Stream_DimDate"
+                },
+                {
+                    "task_key": "Stream_DimTime"
+                },
+                {
+                    "task_key": "MV_DimSecurity"
+                },
+                {
+                    "task_key": "MV_DimAccount"
+                },
+                {
+                    "task_key": "Stream_TradeType"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimTradeMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_FactHoldings",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimTrade"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactHoldingsMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_DailyMarket",
+            "depends_on": [
+                {
+                    "task_key": "Stream_DimDate"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DailyMarketStgMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_QtrEpsStg",
+            "depends_on": [
+                {
+                    "task_key": "MV_Financial"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/QtrEpsStgMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_FactMarketHistory",
+            "depends_on": [
+                {
+                    "task_key": "MV_QtrEpsStg"
+                },
+                {
+                    "task_key": "MV_DailyMarket"
+                },
+                {
+                    "task_key": "MV_DimSecurity"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactMarketHistoryMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_FactCashBalances",
+            "depends_on": [
+                {
+                    "task_key": "Stream_DimDate"
+                },
+                {
+                    "task_key": "MV_DimAccount"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactCashBalancesMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        },
+        {
+            "task_key": "MV_FactWatches",
+            "depends_on": [
+                {
+                    "task_key": "MV_DimSecurity"
+                },
+                {
+                    "task_key": "MV_DimCustomerStg"
+                }
+            ],
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactWatchesMV",
+                "base_parameters": {
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
+                },
+                "source": "WORKSPACE"
+            },
+            "{{compute_key}}": "{{ job_name }}_compute",
+            "timeout_seconds": 0,
+            "email_notifications": {
+                "no_alert_for_skipped_runs": false
+            }
+        }
+    ]
+}
