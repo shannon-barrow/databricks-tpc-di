@@ -25,6 +25,7 @@ tpcdi_directory = dbutils.widgets.get('tpcdi_directory')
 files_directory = f"{tpcdi_directory}sf={scale_factor}"
 warehouse_id = dbutils.widgets.get("warehouse_id")
 serverless_client = ServerlessClient(warehouse_id=warehouse_id)
+mv_list = "'dailymarketstg'" + ", 'dimcustomerstg'" + ", 'tempsumfibasiceps'"
 
 # COMMAND ----------
 
@@ -33,6 +34,19 @@ if catalog != 'hive_metastore':
   if not catalog_exists:
     spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
     spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+  mvs = spark.sql(f"""
+    select table_name, if(table_type='MANAGED', 'TABLE', 'MATERIALIZED VIEW') table_type
+    FROM {catalog}.information_schema.tables 
+    WHERE table_schema = lower('{staging_db}')
+    AND table_name in ({mv_list})
+  """).toPandas()
+
+  for index, row in mvs.iterrows():
+    serverless_client.sql(sql_statement = f"DROP {row['table_type']} IF EXISTS {catalog}.{staging_db}.{row['table_name']}")
+else:
+  for mv in mv_list:
+    serverless_client.sql(sql_statement = f"DROP TABLE IF EXISTS {catalog}.{staging_db}.{mv}")
+
 spark.sql(f"USE CATALOG {catalog}")
 spark.sql(f"DROP DATABASE IF EXISTS {wh_db} cascade")
 spark.sql(f"CREATE DATABASE {wh_db}")
@@ -44,16 +58,6 @@ if spark.sql('show tables').filter(col("tableName") == 'customermgmt').count() =
   dbutils.notebook.run("../native_notebooks/bronze/CustomerMgmtRaw", 600, {"catalog": catalog, "wh_db": wh_db, "tpcdi_directory": tpcdi_directory, "scale_factor": scale_factor})
 
 # COMMAND ----------
-
-table_type = spark.sql(f"""
-  select if(table_type='VIEW', "VIEW", "TABLE") table_type
-  FROM {catalog}.information_schema.tables 
-  WHERE table_schema = lower('{staging_db}')
-  AND table_name = "dimcustomerstg"
-""").first()[0]
-
-for mv in ["dailymarketstg", "dimcustomerstg", "tempsumfibasiceps"]: 
-  serverless_client.sql(sql_statement = f"DROP {table_type} IF EXISTS {catalog}.{staging_db}.{mv}")
 
 for view in views_conf:
   conf = views_conf[view]
