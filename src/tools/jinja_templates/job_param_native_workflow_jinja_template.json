@@ -85,8 +85,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/dw_init",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -108,8 +108,8 @@
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_validation",
                 "base_parameters": {
                     "batch_id": "0",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -130,8 +130,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_complete",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "0"
                 },
                 "source": "WORKSPACE"
@@ -153,10 +153,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "Audit"
                 },
                 "source": "WORKSPACE"
@@ -178,10 +178,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "AccountIncremental"
                 },
                 "source": "WORKSPACE"
@@ -203,10 +203,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "BatchDate"
                 },
                 "source": "WORKSPACE"
@@ -228,10 +228,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "CashTransactionIncremental"
                 },
                 "source": "WORKSPACE"
@@ -253,10 +253,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "CustomerIncremental"
                 },
                 "source": "WORKSPACE"
@@ -278,10 +278,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "DailyMarketIncremental"
                 },
                 "source": "WORKSPACE"
@@ -303,10 +303,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "DimDate"
                 },
                 "source": "WORKSPACE"
@@ -328,10 +328,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "DimTime"
                 },
                 "source": "WORKSPACE"
@@ -353,10 +353,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "FinWire"
                 },
                 "source": "WORKSPACE"
@@ -378,10 +378,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "HoldingIncremental"
                 },
                 "source": "WORKSPACE"
@@ -403,10 +403,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "Industry"
                 },
                 "source": "WORKSPACE"
@@ -428,10 +428,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "ProspectIncremental"
                 },
                 "source": "WORKSPACE"
@@ -453,10 +453,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "StatusType"
                 },
                 "source": "WORKSPACE"
@@ -478,10 +478,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "TaxRate"
                 },
                 "source": "WORKSPACE"
@@ -503,10 +503,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "TradeIncremental"
                 },
                 "source": "WORKSPACE"
@@ -528,10 +528,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "TradeType"
                 },
                 "source": "WORKSPACE"
@@ -553,10 +553,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/load_raw_data",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "WatchIncremental"
                 },
                 "source": "WORKSPACE"
@@ -578,10 +578,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -609,10 +609,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimBroker",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -639,8 +639,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCompany",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -661,8 +661,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimSecurity",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -683,8 +683,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/Financial",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -705,8 +705,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomerStg",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -737,8 +737,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/Prospect",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -763,8 +763,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomer",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -789,8 +789,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimAccount",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -824,10 +824,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimTrade",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -849,10 +849,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/FactHoldings",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -875,10 +875,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/DailyMarket",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -899,8 +899,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/CompanyFinancialsStg",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -927,8 +927,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactMarketHistory",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -956,10 +956,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactCashBalances",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -984,10 +984,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactWatches",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -1039,8 +1039,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_complete",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "1"
                 },
                 "source": "WORKSPACE"
@@ -1063,8 +1063,8 @@
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_validation",
                 "base_parameters": {
                     "batch_id": "1",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -1085,8 +1085,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomerStg",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1108,8 +1108,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactMarketHistory",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1134,8 +1134,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/Prospect",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1157,8 +1157,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomer",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1183,8 +1183,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimAccount",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1206,10 +1206,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimTrade",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1231,10 +1231,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/FactHoldings",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1256,10 +1256,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactCashBalances",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1284,10 +1284,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactWatches",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1321,8 +1321,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_complete",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "2"
                 },
                 "source": "WORKSPACE"
@@ -1345,8 +1345,8 @@
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_validation",
                 "base_parameters": {
                     "batch_id": "2",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -1367,8 +1367,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomerStg",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1393,8 +1393,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/Prospect",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1416,8 +1416,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimCustomer",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1442,8 +1442,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimAccount",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1465,10 +1465,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/DimTrade",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1490,10 +1490,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/silver/FactHoldings",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1515,8 +1515,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactMarketHistory",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1538,10 +1538,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactCashBalances",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1566,10 +1566,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/native_notebooks/gold/FactWatches",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1604,8 +1604,8 @@
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_validation",
                 "base_parameters": {
                     "batch_id": "3",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -1626,8 +1626,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/batch_complete",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}",
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
                     "batch_id": "3"
                 },
                 "source": "WORKSPACE"
@@ -1649,8 +1649,8 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/audit_validation/automated_audit",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },

@@ -93,11 +93,11 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/dw_init",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}"
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -125,13 +125,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "BatchDate",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -152,13 +152,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "DimDate",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -179,13 +179,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "DimTime",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -206,13 +206,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "FinWire",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -233,13 +233,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "Industry",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -260,13 +260,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "StatusType",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -287,13 +287,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "TaxRate",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -314,13 +314,13 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/Streaming_Tables",
                 "base_parameters": {
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "scale_factor": "{{ scale_factor }}",
+                    "tpcdi_directory": {% raw %}"{{job.parameters.tpcdi_directory}}"{% endraw %},
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
                     "table": "TradeType",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -341,11 +341,11 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimBrokerST",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "scale_factor": "{{ scale_factor }}",
-                    "table_or_st": "{{ table_or_st }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "scale_factor": {% raw %}"{{job.parameters.scale_factor}}"{% endraw %},
+                    "table_or_st": {% raw %}"{{job.parameters.table_or_st}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -372,10 +372,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCompanyMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -396,10 +396,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimSecurityMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -420,10 +420,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FinancialMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -447,10 +447,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCustomerStgMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -474,10 +474,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/ProspectMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -501,10 +501,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimCustomerMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -528,10 +528,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimAccountMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -564,10 +564,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimTradeMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -588,10 +588,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactHoldingsMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -612,10 +612,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DailyMarketStgMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -636,10 +636,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/QtrEpsStgMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -666,10 +666,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactMarketHistoryMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -693,10 +693,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactCashBalancesMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
@@ -720,10 +720,10 @@
             "notebook_task": {
                 "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/FactWatchesMV",
                 "base_parameters": {
-                    "catalog": "{{ catalog }}",
-                    "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",
-                    "warehouse_id": "{{ wh_id }}",
-                    "table_or_mv": "{{ table_or_mv }}"
+                    "catalog": {% raw %}"{{job.parameters.catalog}}"{% endraw %},
+                    "wh_db": {% raw %}"{{job.parameters.wh_db}}"{% endraw %},
+                    "warehouse_id": {% raw %}"{{job.parameters.warehouse_id}}"{% endraw %},
+                    "table_or_mv": {% raw %}"{{job.parameters.table_or_mv}}"{% endraw %}
                 },
                 "source": "WORKSPACE"
             },
