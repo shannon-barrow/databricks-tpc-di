@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{wh_db}.DimAccount AS SELECT
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.DimAccount AS SELECT
   bigint(concat(a.accountid,date_format(a.effectivedate, 'DDDyyyy'))) sk_accountid,
   a.accountid,
   b.sk_brokerid,

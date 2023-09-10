@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{wh_db}.FactCashBalances AS SELECT
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.FactCashBalances AS SELECT
   a.sk_customerid, 
   a.sk_accountid, 
   d.sk_dateid, 

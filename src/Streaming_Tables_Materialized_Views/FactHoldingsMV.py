@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{wh_db}.FactHoldings AS 
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.FactHoldings AS 
 SELECT 
   hh_h_t_id tradeid,
   hh_t_id currenttradeid,

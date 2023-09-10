@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{staging_db}.DimCustomerStg PARTITIONED BY (iscurrent) AS SELECT 
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{staging_db}.DimCustomerStg PARTITIONED BY (iscurrent) AS SELECT 
   bigint(concat(customerid,date_format(effectivedate, 'DDDyyyy'))) sk_customerid,
   *
  FROM (

@@ -98,8 +98,5 @@ def get_ingest_table_query(table):
 
 # COMMAND ----------
 
-display(serverless_client.sql(sql_statement = get_ingest_table_query(tgt_table)))
-
-# COMMAND ----------
-
-# display(serverless_client.sql(sql_statement = get_streaming_table_query(tgt_table)))
+query = get_ingest_table_query(tgt_table) if table_or_st == 'TABLE' else get_streaming_table_query(tgt_table)
+display(serverless_client.sql(sql_statement = query))

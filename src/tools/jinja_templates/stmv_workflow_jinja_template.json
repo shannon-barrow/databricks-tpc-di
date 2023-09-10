@@ -339,7 +339,7 @@
             ],
             "run_if": "ALL_SUCCESS",
             "notebook_task": {
-                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimBrokerST",
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/DimBrokerMV",
                 "base_parameters": {
                     "catalog": "{{ catalog }}",
                     "wh_db": "{{ wh_target }}_STMV_{{ scale_factor }}",

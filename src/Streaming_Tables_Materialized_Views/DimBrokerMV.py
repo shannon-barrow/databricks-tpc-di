@@ -17,8 +17,8 @@ dbutils.widgets.text("warehouse_id", '', "Warehouse ID")
 dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/", "Directory where Raw Files are located")
 
 catalog = dbutils.widgets.get("catalog")
-dbutils.widgets.dropdown("table_or_st", "STREAMING TABLE", ['TABLE', 'STREAMING TABLE'], "Table Type")
-table_or_st = "OR REFRESH STREAMING" if dbutils.widgets.get("table_or_st") == "STREAMING TABLE" else 'OR REPLACE'
+dbutils.widgets.dropdown("table_or_mv", "MATERIALIZED VIEW", ['TABLE', 'MATERIALIZED VIEW'], "Table Type")
+table_or_mv = dbutils.widgets.get("table_or_mv")
 wh_db = dbutils.widgets.get('wh_db')
 staging_db = f"{wh_db}_stage"
 warehouse_id = dbutils.widgets.get("warehouse_id")
@@ -29,25 +29,25 @@ db_schema = "sk_brokerid BIGINT COMMENT 'Surrogate key for broker', brokerid BIG
 # COMMAND ----------
 
 query = f"""
-    CREATE {table_or_st} TABLE {catalog}.{wh_db}.DimBroker AS SELECT
-      *, bigint(concat(brokerid,date_format(effectivedate, 'DDDyyyy'))) sk_brokerid
-    FROM (
-      SELECT
-        cast(employeeid as BIGINT) brokerid,
-        cast(managerid as BIGINT) managerid,
-        employeefirstname firstname,
-        employeelastname lastname,
-        employeemi middleinitial,
-        employeebranch branch,
-        employeeoffice office,
-        employeephone phone,
-        true iscurrent,
-        1 batchid,
-        (SELECT min(to_date(datevalue)) as effectivedate FROM {catalog}.{wh_db}.DimDate) effectivedate,
-        date('9999-12-31') enddate
-      FROM {catalog}.{staging_db}.HRHistory
-      WHERE employeejobcode = 314
-    )"""
+  CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.DimBroker AS SELECT
+    *, bigint(concat(brokerid,date_format(effectivedate, 'DDDyyyy'))) sk_brokerid
+  FROM (
+    SELECT
+      cast(employeeid as BIGINT) brokerid,
+      cast(managerid as BIGINT) managerid,
+      employeefirstname firstname,
+      employeelastname lastname,
+      employeemi middleinitial,
+      employeebranch branch,
+      employeeoffice office,
+      employeephone phone,
+      true iscurrent,
+      1 batchid,
+      (SELECT min(to_date(datevalue)) as effectivedate FROM {catalog}.{wh_db}.DimDate) effectivedate,
+      date('9999-12-31') enddate
+    FROM {catalog}.{staging_db}.HRHistory
+    WHERE employeejobcode = 314
+  )"""
 
 # COMMAND ----------
 

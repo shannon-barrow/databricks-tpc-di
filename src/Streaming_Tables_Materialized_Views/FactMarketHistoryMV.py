@@ -29,7 +29,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{wh_db}.FactMarketHistory AS 
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.FactMarketHistory AS 
 with dm as (
   SELECT * FROM (
     SELECT 

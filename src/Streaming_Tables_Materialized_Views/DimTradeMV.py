@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{wh_db}.DimTrade AS SELECT
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.DimTrade AS SELECT
   trade.tradeid,
   sk_brokerid,
   trade.sk_createdateid,

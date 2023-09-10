@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{staging_db}.tempSumFiBasicEps AS SELECT
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{staging_db}.tempSumFiBasicEps AS SELECT
   sk_companyid,
   fi_qtr_start_date,
   sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) - fi_basic_eps sum_fi_basic_eps

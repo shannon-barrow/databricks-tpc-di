@@ -25,7 +25,7 @@ serverless_client = ServerlessClient(warehouse_id=warehouse_id)
 
 # COMMAND ----------
 
-query = f"""CREATE OR REPLACE {table_or_mv} {catalog}.{staging_db}.DailyMarketStg AS SELECT
+query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{staging_db}.DailyMarketStg AS SELECT
   dm.*,
   sk_dateid,
   min(dm_low) OVER (
