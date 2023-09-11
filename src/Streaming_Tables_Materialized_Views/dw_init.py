@@ -52,7 +52,7 @@ spark.sql(f"DROP DATABASE IF EXISTS {wh_db} cascade")
 spark.sql(f"CREATE DATABASE {wh_db}")
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {staging_db}")
 spark.sql(f"USE {staging_db}")
-spark.sql(f"DROP TABLE IF EXISTS finwire")
+serverless_client.sql(sql_statement = f"DROP TABLE IF EXISTS finwire")
 
 if spark.sql('show tables').filter(col("tableName") == 'customermgmt').count() == 0:
   dbutils.notebook.run("../native_notebooks/bronze/CustomerMgmtRaw", 600, {"catalog": catalog, "wh_db": wh_db, "tpcdi_directory": tpcdi_directory, "scale_factor": scale_factor})
