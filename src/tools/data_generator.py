@@ -35,7 +35,7 @@ def generate_data():
   if UC_enabled: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
     os_blob_out_path = blob_out_path
   else:
-    blob_out_path = f"dbfs:{blob_out_path}" 
+    blob_out_path = f"/dbfs{blob_out_path}" 
     os_blob_out_path = f"/dbfs{blob_out_path}"
 
   if os.path.exists(os_blob_out_path) and not FORCE_REWRITE:
