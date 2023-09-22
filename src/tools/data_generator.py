@@ -8,10 +8,14 @@ import shlex
 
 # COMMAND ----------
 
-if wf_key == 'DBT':
+if wf_key == 'DBT' and catalog != 'hive_metastore':
     catalog = 'hive_metastore'
-    if UC_enabled:
-        dbutils.notebook.exit(f"DBT execution chosen and must be run via hive_metastore and DBFS. UC-enabled cluster cannot access DBFS. Please launch a cluster without Unity Catalog enabled to execute dbt workflow creation")
+    print("dbt jobs are not implemented to leverage Unity Catalog as of today, and as a result cannot utilize UC Volumes. Therefore, dbt jobs can only operate with hive_metastore catalog and must read raw files from DBFS. If you are executing this notebook on a UC-enabled cluster with the dbt workflow type selected, it is likely you will receive an error and will need to relaunch on a non-UC-enabled cluster ('No Isolation Shared' access mode) as UC-enabled clusters cannot access DBFS to check/generate the raw files needed for the benchmark.")
+
+# COMMAND ----------
+
+if wf_key == 'DBT' and UC_enabled:
+  dbutils.notebook.exit(f"DBT execution chosen and must be run via hive_metastore and DBFS. UC-enabled cluster cannot access DBFS. Please launch a cluster without Unity Catalog enabled to execute dbt workflow creation")
 
 # COMMAND ----------
 
@@ -39,9 +43,9 @@ def generate_data():
   driver_tmp_path  = f"{DRIVER_ROOT}{tpcdi_tmp_path}datagen/"
   driver_out_path  = f"{DRIVER_ROOT}{tpcdi_tmp_path}sf={scale_factor}"
   blob_out_path    = f"{tpcdi_directory}sf={scale_factor}"
-  if UC_enabled: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
+  if UC_enabled:  # Unity Catalog enabled so use VOLUMES to store raw files
     os_blob_out_path = blob_out_path
-  else:
+  else: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
     os_blob_out_path = f"/dbfs{blob_out_path}"
     blob_out_path = f"dbfs:{blob_out_path}" 
 

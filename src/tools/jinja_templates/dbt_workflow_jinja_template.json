@@ -82,7 +82,7 @@
                 "node_type_id": "{{ worker_node_type }}",
                 "num_workers": "0",
                 "enable_elastic_disk": true,
-                "data_security_mode": "SINGLE_USER",
+                "data_security_mode": "NONE",
                 "runtime_engine": "STANDARD"
             }
         }
