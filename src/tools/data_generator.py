@@ -8,6 +8,13 @@ import shlex
 
 # COMMAND ----------
 
+if wf_key == 'DBT':
+    catalog = 'hive_metastore'
+    if UC_enabled:
+        dbutils.notebook.exit(f"DBT execution chosen and must be run via hive_metastore and DBFS. UC-enabled cluster cannot access DBFS. Please launch a cluster without Unity Catalog enabled to execute dbt workflow creation")
+
+# COMMAND ----------
+
 def move_file(source_location, target_location):
   shutil.copyfile(source_location, target_location)
   return f"Finished moving {source_location} to {target_location}"
@@ -35,8 +42,8 @@ def generate_data():
   if UC_enabled: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
     os_blob_out_path = blob_out_path
   else:
-    blob_out_path = f"/dbfs{blob_out_path}" 
     os_blob_out_path = f"/dbfs{blob_out_path}"
+    blob_out_path = f"dbfs:{blob_out_path}" 
 
   if os.path.exists(os_blob_out_path) and not FORCE_REWRITE:
     print("Data generation skipped since raw data/directory already exists for this scale factor. If you want to force a rewrite, change the FORCE_REWRITE Flag")
@@ -64,7 +71,7 @@ def generate_data():
     with concurrent.futures.ThreadPoolExecutor(max_workers=sc.defaultParallelism) as executor:
       futures = []
       for filename in filenames:
-        futures.append(executor.submit(move_file, source_location=filename, target_location=filename.replace(driver_out_path, blob_out_path)))
+        futures.append(executor.submit(move_file, source_location=filename, target_location=filename.replace(driver_out_path, os_blob_out_path)))
       for future in concurrent.futures.as_completed(futures):
         try: print(future.result())
         except requests.ConnectTimeout: print("ConnectTimeout.")
