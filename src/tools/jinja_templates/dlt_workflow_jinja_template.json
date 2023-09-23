@@ -5,85 +5,6 @@
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
     "format": "MULTI_TASK", 
-    "parameters": [
-      {
-        "name": "catalog",
-        "default": "{{ catalog }}"
-      },
-      {
-        "name": "scale_factor",
-        "default": "{{ scale_factor }}"
-      },
-      {
-        "name": "wh_db",
-        "default": "{{ wh_target }}_DLT_{{ scale_factor }}"
-      },
-      {
-        "name": "tpcdi_directory",
-        "default": "{{ tpcdi_directory }}"
-      }
-    ],
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}  
-    "job_clusters": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "new_cluster": {
-                "spark_version": "{{ dbr }}",
-                "spark_conf": {
-                    {% if cust_mgmt_worker_count == 0 %}
-                    "spark.master": "local[*, 4]",
-                    "spark.databricks.cluster.profile": "singleNode",
-                    "spark.databricks.adaptive.localShuffleReader.enabled": "true",
-                    {% endif %}
-                    "spark.databricks.delta.schema.autoMerge.enabled": "true",
-                    "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
-                    "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-                    "spark.databricks.preemption.enabled": "false",
-                    "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
-                },
-                {% if cloud_provider == "Azure" %} 
-                "azure_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK_AZURE",
-                    "first_on_demand": 1,
-                    "spot_bid_price_percent": -1
-                },
-                {% endif %}
-                {% if cloud_provider == "AWS" %}
-                "aws_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK",
-                    "first_on_demand": 1,
-                    "zone_id" : "auto",
-                    "spot_bid_price_percent": 100
-                },
-                {% endif %}
-                "spark_env_vars": {
-                    "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
-                },
-                {% if cust_mgmt_worker_count == 0 %}
-                "custom_tags": {
-                    "ResourceClass": "SingleNode"
-                },
-                {% endif %}
-                "driver_node_type_id": "{{ driver_node_type }}",
-                "node_type_id": "{{ worker_node_type }}",
-                "num_workers": "{{ cust_mgmt_worker_count }}",
-                "enable_elastic_disk": true,
-                "data_security_mode": "SINGLE_USER",
-                "runtime_engine": "STANDARD"
-            }
-        }
-    ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "Load-CustomerMgmt-XML-File",
@@ -98,7 +19,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "libraries": [
                 {
                     "maven": {

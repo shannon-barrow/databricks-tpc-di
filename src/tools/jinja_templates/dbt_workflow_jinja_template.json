@@ -5,89 +5,11 @@
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
     "format": "MULTI_TASK",
-    "parameters": [
-      {
-        "name": "warehouse_id",
-        "default": "{{ wh_id }}"
-      },
-      {
-        "name": "catalog",
-        "default": "{{ catalog }}"
-      },
-      {
-        "name": "scale_factor",
-        "default": "{{ scale_factor }}"
-      },
-      {
-        "name": "wh_db",
-        "default": "{{ wh_target }}_dbt_{{ scale_factor }}"
-      },
-      {
-        "name": "schema",
-        "default": "{{ wh_target }}_dbt_{{ scale_factor }}"
-      },
-      {
-        "name": "tpcdi_directory",
-        "default": "{{ tpcdi_directory }}"
-      }
-    ],
     "git_source": {
         "git_url": "https://github.com/rlsalcido24/dbtpcdi",
         "git_provider": "gitHub",
         "git_branch": "main"
     }, 
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}  
-    "job_clusters": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "new_cluster": {
-                "spark_version": "{{ dbr }}",
-                "spark_conf": {
-                    "spark.master": "local[*, 4]",
-                    "spark.databricks.cluster.profile": "singleNode",
-                    "spark.databricks.adaptive.localShuffleReader.enabled": "true",
-                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
-                },
-                {% if cloud_provider == "Azure" %} 
-                "azure_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK_AZURE",
-                    "first_on_demand": 1,
-                    "spot_bid_price_percent": -1
-                },
-                {% endif %}
-                {% if cloud_provider == "AWS" %}
-                "aws_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK",
-                    "first_on_demand": 1,
-                    "zone_id" : "auto",
-                    "spot_bid_price_percent": 100
-                },
-                {% endif %}
-                "spark_env_vars": {
-                    "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
-                },
-                "custom_tags": {
-                    "ResourceClass": "SingleNode"
-                },
-                "driver_node_type_id": "{{ driver_node_type }}",
-                "node_type_id": "{{ worker_node_type }}",
-                "num_workers": "0",
-                "enable_elastic_disk": true,
-                "data_security_mode": "NONE",
-                "runtime_engine": "STANDARD"
-            }
-        }
-    ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "Load-CustomerMgmt-XML-File",
@@ -102,7 +24,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "libraries": [
                 {
                     "maven": {
@@ -133,7 +55,7 @@
               "warehouse_id": "{{ wh_id }}",
               "catalog": "{{ catalog }}"
           },
-          "{{compute_key}}": "{{ job_name }}_compute",
+          "{{compute_key}}": "{{ existing_cluster_id }}",
           "libraries": [
               {
                   "pypi": {
