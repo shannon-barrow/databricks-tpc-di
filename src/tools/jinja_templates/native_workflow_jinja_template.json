@@ -23,61 +23,6 @@
         "default": "{{ tpcdi_directory }}"
       }
     ],
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}
-    "job_clusters": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "new_cluster": {
-                "spark_version": "{{ dbr }}",
-                "spark_conf": {
-                    {% if worker_node_count == 0 %}
-                    "spark.master": "local[*, 4]",
-                    "spark.databricks.cluster.profile": "singleNode",
-                    "spark.databricks.adaptive.localShuffleReader.enabled": "true"
-                    {% endif %}
-                },
-                {% if cloud_provider == "Azure" %} 
-                "azure_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK_AZURE",
-                    "first_on_demand": 1,
-                    "spot_bid_price_percent": -1
-                },
-                {% endif %}
-                {% if cloud_provider == "AWS" %}
-                "aws_attributes": {
-                    "availability": "SPOT_WITH_FALLBACK",
-                    "first_on_demand": 1,
-                    "zone_id" : "auto",
-                    "spot_bid_price_percent": 100
-                },
-                {% endif %}
-                "spark_env_vars": {
-                    "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
-                },
-                {% if worker_node_count == 0 %}
-                "custom_tags": {
-                    "ResourceClass": "SingleNode"
-                },
-                {% endif %}
-                "driver_node_type_id": "{{ driver_node_type }}",
-                "node_type_id": "{{ worker_node_type }}",
-                "num_workers": "{{ worker_node_count }}",
-                "enable_elastic_disk": true,
-                "data_security_mode": "SINGLE_USER",
-                "runtime_engine": "PHOTON"
-            }
-        }
-    ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "dw_init",
@@ -90,7 +35,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -113,7 +58,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -136,7 +81,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -161,7 +106,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -186,7 +131,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -211,7 +156,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -236,7 +181,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -261,7 +206,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -286,7 +231,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -311,7 +256,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -336,7 +281,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -361,7 +306,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -386,7 +331,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -411,7 +356,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -436,7 +381,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -461,7 +406,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -486,7 +431,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -511,7 +456,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -536,7 +481,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -561,7 +506,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -585,7 +530,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "libraries": [
                 {
                     "maven": {
@@ -616,7 +561,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -644,7 +589,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -666,7 +611,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -688,7 +633,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -711,7 +656,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -743,7 +688,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -769,7 +714,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -795,7 +740,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -832,7 +777,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -857,7 +802,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -882,7 +827,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -904,7 +849,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -933,7 +878,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -964,7 +909,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -992,7 +937,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1045,7 +990,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1068,7 +1013,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1091,7 +1036,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1114,7 +1059,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1140,7 +1085,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1163,7 +1108,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1189,7 +1134,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1214,7 +1159,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1239,7 +1184,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1264,7 +1209,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1292,7 +1237,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1327,7 +1272,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1350,7 +1295,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1373,7 +1318,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1399,7 +1344,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1422,7 +1367,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1448,7 +1393,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1473,7 +1418,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1498,7 +1443,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1521,7 +1466,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1546,7 +1491,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1574,7 +1519,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1609,7 +1554,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1632,7 +1577,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
@@ -1654,7 +1599,7 @@
                 },
                 "source": "WORKSPACE"
             },
-            "{{compute_key}}": "{{ job_name }}_compute",
+            "{{compute_key}}": "{{ existing_cluster_id }}",
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false

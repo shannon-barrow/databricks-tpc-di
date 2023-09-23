@@ -39,10 +39,14 @@ try:
     catalog = 'hive_metastore'
     UC_enabled = False
     dbr_version_id = '13.0.x-scala2.12'
-  compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
+  # For tech summit only run on EXISTING INTERACTIVE CLUSTER
+  #compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
+  compute_key = "existing_cluster_id"
   cust_mgmt_worker_count = round(CUST_MGMT_PART_RATIO * scale_factor / node_types[worker_node_type]['num_cores'])
   wh_size = wh_scale_factor_map[f"{scale_factor}"]
-  wh_name = f"TPCDI_{wh_size}"
+  #wh_name = f"TPCDI_{wh_size}"
+  wh_name = "DBAcademy Warehouse"
+  existing_cluster_id = spark.conf.get("spark.databricks.clusterUsageTags.clusterId")
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
@@ -64,22 +68,19 @@ dag_args = {
   "compute_key":compute_key,
   "cust_mgmt_worker_count":cust_mgmt_worker_count,
   "wh_name":wh_name,
-  "wh_size":wh_size
+  "wh_size":wh_size,
+  "existing_cluster_id":existing_cluster_id
  }
 
-if serverless:
+if sku[0] in ['DBT', 'STMV']:
   compute = f"""Warehouse Name:             {wh_name}
 Warehouse Size:             {wh_size}"""
 else:
-  compute = f"""Driver Type:                {driver_node_type}
-Worker Type:                {worker_node_type}
-Worker Count:               {worker_node_count}
-DBR Version:                {dbr_version_id}"""
+  compute = f"""Existing Cluster ID:                {existing_cluster_id}"""
 # Print out details of the workflow to user
 print(f"""
 Workflow Name:              {job_name}
 Workflow Type:              {workflow_type}
-SERVERLESS COMPUTE:         {serverless}
 {compute}
 Target TPCDI Catalog:       {catalog}
 Target TPCDI Database:      {wh_target}
@@ -121,7 +122,6 @@ def get_warehouse_id():
     warehouse_id = json.loads(response.text)['id']
     print(f"DB SQL Warehouse {wh_name} Created! Warehouse ID: {warehouse_id}")
   return warehouse_id
-
 
 # COMMAND ----------
 
