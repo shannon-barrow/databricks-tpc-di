@@ -47,6 +47,15 @@ try:
   #wh_name = f"TPCDI_{wh_size}"
   wh_name = "DBAcademy Warehouse"
   existing_cluster_id = spark.conf.get("spark.databricks.clusterUsageTags.clusterId")
+  dlt_policy_id = -1
+  if sku[0] == 'DLT':
+    response = api_call(json_payload=None, request_type="GET", api_endpoint="/api/2.0/policies/clusters/list")
+    policy_list = json.loads(response.text)['policies']
+    for policy in policy_list:
+        if policy['name'] == 'DBAcademy DLT':
+          dlt_policy_id = policy['policy_id']
+          print(f"DBAcademy DLT policy ID found: {dlt_policy_id}")
+          break
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
@@ -129,6 +138,7 @@ def generate_workflow():
   if sku[0] == 'DLT':
     jinja_template_path = f"{json_templates_path}{DLT_PIPELINE_TEMPLATE}"
     dag_args['edition'] = sku[1]
+    dag_args['dlt_policy_id'] = dlt_policy_id
     print(f"Rendering DLT Pipeline JSON via jinja template located at {jinja_template_path}")
     rendered_pipeline_dag = generate_dag(jinja_template_path, dag_args)
     print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")

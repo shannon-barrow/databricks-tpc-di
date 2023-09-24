@@ -55,6 +55,9 @@
             },
             "node_type_id": "{{ worker_node_type }}",
             "driver_node_type_id": "{{ driver_node_type }}",
+            {% if dlt_policy_id != -1 %}
+            "policy_id": "{{ dlt_policy_id }}",
+            {% endif %}
             "num_workers": {{ worker_node_count }}
         }
     ],
