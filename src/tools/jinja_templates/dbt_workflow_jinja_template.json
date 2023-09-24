@@ -12,15 +12,16 @@
     }, 
     "tasks": [
         {
-            "task_key": "Load-CustomerMgmt-XML-File",
+            "task_key": "dw_init",
             "run_if": "ALL_SUCCESS",
             "notebook_task": {
-                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
+                "notebook_path": "{{ repo_src_path }}/Streaming_Tables_Materialized_Views/dw_init",
                 "base_parameters": {
+                    "tpcdi_directory": "{{ tpcdi_directory }}",
                     "catalog": "{{ catalog }}",
                     "wh_db": "{{ wh_target }}_dbt_{{ scale_factor }}",
-                    "tpcdi_directory": "{{ tpcdi_directory }}",
-                    "scale_factor": "{{ scale_factor }}"
+                    "scale_factor": "{{ scale_factor }}",
+                    "warehouse_id": "{{ wh_id }}"
                 },
                 "source": "WORKSPACE"
             },
@@ -41,15 +42,14 @@
           "task_key": "dbt-tpcdi",
           "depends_on": [
               {
-                  "task_key": "Load-CustomerMgmt-XML-File"
+                  "task_key": "dw_init"
               }
           ],
           "run_if": "ALL_SUCCESS",
           "dbt_task": {
               "project_directory": "",
               "commands": [
-                  "dbt run-operation stage_external_sources --vars '{scalefactor: {{scale_factor}}, stagingschema: {{ wh_target }}_dbt_{{ scale_factor }}_stage}'",
-                  "dbt run --vars '{scalefactor: {{scale_factor}}, stagingschema: {{ wh_target }}_dbt_{{ scale_factor }}_stage}'"
+                  "dbt run --vars '{scalefactor: {{scale_factor}}, catalog: tpcdi, prodschema: {{ wh_target }}_dbt_{{ scale_factor }}, stagingschema: {{ wh_target }}_dbt_{{ scale_factor }}_stage}'"
               ],
               "schema": "{{ wh_target }}_dbt_{{ scale_factor }}",
               "warehouse_id": "{{ wh_id }}",

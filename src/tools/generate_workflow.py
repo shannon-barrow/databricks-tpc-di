@@ -36,8 +36,8 @@ try:
       driver_node_type  = worker_node_type
   if sku[0] == 'DBT':
     # TEMPORARILY removing the following as options for dbt until they work as expected: Unity Catalog, volumes, and DBR 13.0 
-    catalog = 'hive_metastore'
-    UC_enabled = False
+    # catalog = 'hive_metastore'
+    # UC_enabled = False
     dbr_version_id = '13.0.x-scala2.12'
   # For tech summit only run on EXISTING INTERACTIVE CLUSTER
   #compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
