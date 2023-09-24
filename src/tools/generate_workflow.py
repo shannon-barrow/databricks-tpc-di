@@ -85,7 +85,7 @@ if sku[0] in ['DBT', 'STMV']:
   compute = f"""Warehouse Name:             {wh_name}
 Warehouse Size:             {wh_size}"""
 else:
-  compute = f"""Existing Cluster ID:                {existing_cluster_id}"""
+  compute = f"""Existing Cluster ID:        {existing_cluster_id}"""
 # Print out details of the workflow to user
 print(f"""
 Workflow Name:              {job_name}
