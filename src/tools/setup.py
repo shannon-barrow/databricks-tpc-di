@@ -58,7 +58,7 @@ if API_URL is None or TOKEN is None:
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
 user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
 cloud_provider = spark.conf.get('spark.databricks.cloudProvider') # "Azure" or "AWS"
-min_dbr_version     = 10
+min_dbr_version     = 13
 invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 node_types          = get_node_types()
 dbrs                = get_dbr_versions()
