@@ -24,18 +24,13 @@
 # MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * The <a href="https://github.com/rlsalcido24/dbtpcdi" target="_blank">dbt TPC-DI repo</a> exists externally but is called by the Workflow created here with all dependencies met
 # MAGIC 6. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>  
 # MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
-# MAGIC
-# MAGIC ## Additionally, choose whether to leverage serverless compute or not.  
-# MAGIC * NOTE: If serverless compute is unavailable for your workspace, this notebook will fail. If it fails, please change the widget to NO for serverless and continue.
 
 # COMMAND ----------
 
 workflow_types = ["", "Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ", "dbt Core on DB SQL Warehouse", "Streaming Tables and Materialized Views on DBSQL/DLT"]
 dbutils.widgets.dropdown("workflow_type", "", workflow_types, "Workflow Type")
-dbutils.widgets.dropdown("serverless", 'NO', ['YES', 'NO'], "USE SERVERLESS COMPUTE")
 
 wf_type = dbutils.widgets.get('workflow_type')
-comp_type = dbutils.widgets.get('serverless')
 if wf_type == '':
   displayHTML(f"<h1>Please select a Workflow Type from the widget above and rerun</h1>")
   raise Exception("Missing valid workflow type. Please select a Workflow Type from the widget above and rerun")

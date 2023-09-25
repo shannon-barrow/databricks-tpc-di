@@ -12,6 +12,7 @@
 # dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
 # dbutils.widgets.dropdown("datagen_rewrite", 'False', ['True', 'False'], "Force Re-Generation of Raw Files")
 # dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+# dbutils.widgets.dropdown("dbr", list(dbrs.values())[0], list(dbrs.values()), "Databricks Runtime")
 
 # Hard-coded Tech Summit Options
 serverless        = 'NO'
@@ -20,10 +21,10 @@ driver_node_type  = 'i3.xlarge'
 worker_node_type  = 'i3.xlarge'
 FORCE_REWRITE     = False
 catalog           = 'tpcdi'
+dbr_version_id = list(dbrs.keys())[list(dbrs.values()).index(list(dbrs.values())[0])]
 
 # Dynamic variables through Widgets
 dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Workflow Type")
-dbutils.widgets.dropdown("dbr", list(dbrs.values())[0], list(dbrs.values()), "Databricks Runtime")
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Target Database')
 
@@ -32,7 +33,6 @@ workflow_type  = dbutils.widgets.get('workflow_type')
 wh_target      = dbutils.widgets.get("wh_target")
 wf_key         = list(workflows_dict)[workflow_vals.index(workflow_type)]
 job_name       = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
-dbr_version_id = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
 
 # COMMAND ----------
 
