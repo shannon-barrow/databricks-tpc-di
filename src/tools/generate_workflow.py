@@ -34,11 +34,6 @@ try:
       worker_node_count = 1
     else:
       driver_node_type  = worker_node_type
-  if sku[0] == 'DBT':
-    # TEMPORARILY removing the following as options for dbt until they work as expected: Unity Catalog, volumes, and DBR 13.0 
-    catalog = 'hive_metastore'
-    UC_enabled = False
-    dbr_version_id = '13.0.x-scala2.12'
   compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
   cust_mgmt_worker_count = round(CUST_MGMT_PART_RATIO * scale_factor / node_types[worker_node_type]['num_cores'])
   wh_size = wh_scale_factor_map[f"{scale_factor}"]
@@ -67,19 +62,24 @@ dag_args = {
   "wh_size":wh_size
  }
 
-if serverless:
-  compute = f"""Warehouse Name:             {wh_name}
-Warehouse Size:             {wh_size}"""
+if serverless == 'YES':
+  compute = f"""Serverless Workflow Cluster/Pipeline Selected"""
+  serv_type = "DLT Pipeline" if sku[0] == 'DLT' else "Workflow Cluster"
+  print(f"Serverless {serv_type} selected, which is in PREVIEW.  If your workspace does not have access to this preview the workflow creation will potentially fail. Please select 'NO' for the Serverless widget if so.")
 else:
   compute = f"""Driver Type:                {driver_node_type}
 Worker Type:                {worker_node_type}
 Worker Count:               {worker_node_count}
 DBR Version:                {dbr_version_id}"""
+if sku[0] in ['DBT', 'STMV']:
+  print(f"Your workflow type requires Databricks SQL. Serverless Warehouses are created by default.  If you do not have serverless SQL WHs available, please CREATE a non-serverless {wh_size} WH with the name '{wh_name}' and run this code again.")
+  compute = compute + f"""
+DB SQL Warehouse Name:      {wh_name}
+DB SQL Warehouse Size:      {wh_size}"""
 # Print out details of the workflow to user
 print(f"""
 Workflow Name:              {job_name}
 Workflow Type:              {workflow_type}
-SERVERLESS COMPUTE:         {serverless}
 {compute}
 Target TPCDI Catalog:       {catalog}
 Target TPCDI Database:      {wh_target}
