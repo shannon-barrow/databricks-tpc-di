@@ -14,6 +14,8 @@
 import json
 import string
 
+spark.conf.set("spark.databricks.sql.nativeXmlDataSourcePreview.enabled", "true")
+
 with open("../../tools/traditional_config.json", "r") as json_conf:
   table_conf = json.load(json_conf)['views']['CustomerMgmt']
   
@@ -46,7 +48,8 @@ spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{staging_db}")
 
 # DBTITLE 1,Read the XML file and create a temp view on the raw data as all string values
 spark.read.format('xml') \
-  .options(rowTag=table_conf['rowTag'], inferSchema=False) \
+  .option('rowTag', table_conf['rowTag']) \
+  .option('inferSchema', 'false') \
   .load(f"""{files_directory}/{table_conf['path']}/{table_conf['filename']}""") \
   .createOrReplaceTempView("v_CustomerMgmt")
 
