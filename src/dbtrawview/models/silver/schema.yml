@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: DimSecurity
+    columns:
+      - name: sk_companyid
+        tests:
+          - not_null:
+              config:
+                store_failures: true
+
+
+    
+  - name: Financial
+    columns:
+      - name: sk_companyid
+        tests:
+           - not_null:
+              config:
+                store_failures: true
+
+  
+
+  - name: DimCompany
+    columns:
+      - name: effectivedate
+        tests:
+          - dateval:
+              config:
+                store_failures: true
+     
+
+
+
+
+
