@@ -25,7 +25,7 @@ default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 
 dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
 dbutils.widgets.text("wh_db", default_wh,'Target Database')
-dbutils.widgets.text("tpcdi_directory", "/tmp/tpcdi/", "Directory where Raw Files are located")
+dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/", "Directory where Raw Files are located")
 dbutils.widgets.text("scale_factor", "10", "Scale factor")
 
 catalog = dbutils.widgets.get("catalog")
@@ -47,7 +47,8 @@ spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{staging_db}")
 # COMMAND ----------
 
 # DBTITLE 1,Read the XML file and create a temp view on the raw data as all string values
-spark.read.format('xml') \
+xml_lib = 'com.databricks.spark.xml' if int(scale_factor) > 100 else 'xml'
+spark.read.format(xml_lib) \
   .option('rowTag', table_conf['rowTag']) \
   .option('inferSchema', 'false') \
   .load(f"""{files_directory}/{table_conf['path']}/{table_conf['filename']}""") \
