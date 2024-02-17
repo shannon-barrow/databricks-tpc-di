@@ -28,13 +28,13 @@ def get_node_types():
     node_types_dict[node_type_id] = node
   return collections.OrderedDict(sorted(node_types_dict.items()))
 
-def get_dbr_versions():
+def get_dbr_versions(min_version=14.1):
   response = api_call(json_payload=None, request_type="GET", api_endpoint="/api/2.0/clusters/spark-versions")
   dbr_versions_list = json.loads(response.text)['versions']
   dbr_versions_dict = {}
   for dbr in dbr_versions_list:
     if not any(invalid in dbr['name'] for invalid in invalid_dbr_list):
-      if int(dbr['key'].split('.')[0]) >= min_dbr_version:
+      if float(dbr['name'].split(' ')[0]) >=  min_version:
         dbr_versions_dict[dbr['key']] = dbr['name']
   return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
 
@@ -58,10 +58,10 @@ if API_URL is None or TOKEN is None:
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
 user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
 cloud_provider = spark.conf.get('spark.databricks.cloudProvider') # "Azure" or "AWS"
-min_dbr_version     = 13
+min_dbr_version     = 14.1
 invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 node_types          = get_node_types()
-dbrs                = get_dbr_versions()
+dbrs                = get_dbr_versions(min_dbr_version)
 
 workflows_dict      = {
   "NATIVE": "Native Notebooks Workflow", 

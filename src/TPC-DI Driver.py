@@ -12,30 +12,29 @@
 # MAGIC %md
 # MAGIC ## The Following Cell Will Populate 2 Widgets At The Top Of The Page To Determine Which Variations Of The Job To Build:
 # MAGIC 1. Native Workflow with Structured Streaming Notebooks  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * This version would be used for an "official" benchmark. Full audit checks and validation at the end of the run
+# MAGIC         * This version would be used for an "official" benchmark. Full audit checks and validation at the end of the run
 # MAGIC 2. Delta Live Tables Pipeline: CORE Sku  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Best TCO Option
+# MAGIC         * Best TCO Option
 # MAGIC 3. Delta Live Tables Pipeline: PRO Sku  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD
+# MAGIC         * Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD
 # MAGIC 4. Delta Live Tables Pipeline: ADVANCED Sku  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!
+# MAGIC         * Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!
 # MAGIC 5. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * The <a href="https://github.com/rlsalcido24/dbtpcdi" target="_blank">dbt TPC-DI repo</a> exists externally but is called by the Workflow created here with all dependencies met
+# MAGIC         * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
+# MAGIC         * The <a href="https://github.com/rlsalcido24/dbtpcdi" target="_blank">dbt TPC-DI repo</a> exists externally but is called by the Workflow created here with all dependencies met
 # MAGIC 6. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>  
-# MAGIC &nbsp;&nbsp;&nbsp;&nbsp;  * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
-# MAGIC
-# MAGIC ## Additionally, choose whether to leverage serverless compute or not.  
-# MAGIC * NOTE: If serverless compute is unavailable for your workspace, this notebook will fail. If it fails, please change the widget to NO for serverless and continue.
+# MAGIC         * Leverage the latest in SQL-based streaming tables and materialized views. Built using DBSQL, executed as a DLT Pipeline!
+
+# COMMAND ----------
+
+import ipywidgets as widgets
 
 # COMMAND ----------
 
 workflow_types = ["", "Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ", "dbt Core on DB SQL Warehouse", "Streaming Tables and Materialized Views on DBSQL/DLT"]
 dbutils.widgets.dropdown("workflow_type", "", workflow_types, "Workflow Type")
-dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "SERVERLESS Workflow/DLT Pipeline")
 
 wf_type = dbutils.widgets.get('workflow_type')
-comp_type = dbutils.widgets.get('serverless')
 if wf_type == '':
   displayHTML(f"<h1>Please select a Workflow Type from the widget above and rerun</h1>")
   raise Exception("Missing valid workflow type. Please select a Workflow Type from the widget above and rerun")

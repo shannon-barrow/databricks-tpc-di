@@ -23,22 +23,26 @@
         "default": "{{ tpcdi_directory }}"
       }
     ],
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}
     "job_clusters": [
         {
             "{{compute_key}}": "{{ job_name }}_compute",
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
+                    "spark.databricks.preemption.enabled": "false",
+                    "spark.databricks.delta.schema.autoMerge.enabled": "true",
+                    "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
+                    "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
+                    "spark.databricks.photon.photonRowToColumnar.enabled": "true",
+                    "spark.databricks.photon.allDataSources.enabled": "true",
+                    "spark.databricks.photon.window.experimental.features.enabled": "true",
+                    "spark.databricks.photon.sort.enabled": "true",
+                    "spark.databricks.preemption.enabled": "false",
+                    "spark.databricks.photon.window.enabled": "true",
+                    "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
+                    "spark.databricks.photon.scan.enabled": "true",
+                    "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true",
+                    "spark.databricks.delta.identityColumn.enabled": "true",
                     {% if worker_node_count == 0 %}
                     "spark.master": "local[*, 4]",
                     "spark.databricks.cluster.profile": "singleNode",
@@ -77,7 +81,6 @@
             }
         }
     ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "dw_init",
@@ -586,6 +589,7 @@
                 "source": "WORKSPACE"
             },
             "{{compute_key}}": "{{ job_name }}_compute",
+            {% if scale_factor > 100 %}
             "libraries": [
                 {
                     "maven": {
@@ -593,6 +597,7 @@
                     }
                 }
             ],
+            {% endif %}
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false

@@ -23,6 +23,7 @@ wh_scale_factor_map    = {
 # COMMAND ----------
 
 try: 
+  # Trying AUTO for shuffle_partitions to determine if the below specific shuffle_partitions count is really needed
   # total_avail_memory = node_types[worker_node_type]['memory_mb'] if worker_node_count == 0 else node_types[worker_node_type]['memory_mb']*worker_node_count
   # total_cores = node_types[worker_node_type]['num_cores'] if worker_node_count == 0 else node_types[worker_node_type]['num_cores']*worker_node_count
   # shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
@@ -34,16 +35,17 @@ try:
       worker_node_count = 1
     else:
       driver_node_type  = worker_node_type
-  compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key'
+  # compute_key = 'compute_key' if serverless == 'YES' else 'job_cluster_key' # Removing Serverless Options Until Ungated Public Preview At Minumum
+  compute_key = 'job_cluster_key'
   cust_mgmt_worker_count = round(CUST_MGMT_PART_RATIO * scale_factor / node_types[worker_node_type]['num_cores'])
   wh_size = wh_scale_factor_map[f"{scale_factor}"]
   wh_name = f"TPCDI_{wh_size}"
+  xml_lib = 'com.databricks.spark.xml' if int(scale_factor) > 100 else 'xml'
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
 # DAG of args to send to Jinja
 dag_args = {
-  "serverless":serverless,
   "catalog":catalog, 
   "wh_target":wh_target, 
   "tpcdi_directory":tpcdi_directory, 
@@ -62,15 +64,20 @@ dag_args = {
   "wh_size":wh_size
  }
 
-if serverless == 'YES':
-  compute = f"""Serverless Workflow Cluster/Pipeline Selected"""
-  serv_type = "DLT Pipeline" if sku[0] == 'DLT' else "Workflow Cluster"
-  print(f"Serverless {serv_type} selected, which is in PREVIEW.  If your workspace does not have access to this preview the workflow creation will potentially fail. Please select 'NO' for the Serverless widget if so.")
+# Removing Serverless Options Until Ungated Public Preview At Minumum
+# if serverless == 'YES':
+#   compute = f"""Serverless Workflow Cluster/Pipeline Selected"""
+#   serv_type = "DLT Pipeline" if sku[0] == 'DLT' else "Workflow Cluster"
+#   print(f"Serverless {serv_type} selected, which is in PREVIEW.  If your workspace does not have access to this preview the workflow creation will potentially fail. Please select 'NO' for the Serverless widget if so.")
+if sku[0] in ['DBT', 'STMV']:
+  compute = f"""Warehouse Name:             {wh_name}
+Warehouse Size:             {wh_size}"""
 else:
   compute = f"""Driver Type:                {driver_node_type}
 Worker Type:                {worker_node_type}
 Worker Count:               {worker_node_count}
 DBR Version:                {dbr_version_id}"""
+
 if sku[0] in ['DBT', 'STMV']:
   print(f"Your workflow type requires Databricks SQL. Serverless Warehouses are created by default.  If you do not have serverless SQL WHs available, please CREATE a non-serverless {wh_size} WH with the name '{wh_name}' and run this code again.")
   compute = compute + f"""

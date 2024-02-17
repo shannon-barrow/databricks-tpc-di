@@ -35,22 +35,13 @@
         "default": "{{ table_or_mv }}"
       }
     ],
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}
     "job_clusters": [
         {
             "{{compute_key}}": "{{ job_name }}_compute",
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
+                    "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true",
                     "spark.master": "local[*, 4]",
                     "spark.databricks.cluster.profile": "singleNode",
                     "spark.databricks.adaptive.localShuffleReader.enabled": "true"
@@ -85,7 +76,6 @@
             }
         }
     ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "dw_init",
@@ -102,6 +92,7 @@
                 "source": "WORKSPACE"
             },
             "{{compute_key}}": "{{ job_name }}_compute",
+            {% if scale_factor > 100 %}
             "libraries": [
                 {
                     "maven": {
@@ -109,6 +100,7 @@
                     }
                 }
             ],
+            {% endif %}
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false

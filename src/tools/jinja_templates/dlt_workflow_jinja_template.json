@@ -23,16 +23,6 @@
         "default": "{{ tpcdi_directory }}"
       }
     ],
-    {% if serverless == "YES" %}
-    "compute": [
-        {
-            "{{compute_key}}": "{{ job_name }}_compute",
-            "spec": {
-                "kind": "SERVERLESS_PREVIEW"
-            }
-        }
-    ],
-    {% else %}  
     "job_clusters": [
         {
             "{{compute_key}}": "{{ job_name }}_compute",
@@ -49,7 +39,8 @@
                     "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
                     "spark.databricks.preemption.enabled": "false",
                     "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}"
+                    "spark.sql.shuffle.partitions": "{{ shuffle_partitions }}",
+                    "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true"
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
@@ -83,7 +74,6 @@
             }
         }
     ],
-    {% endif %}
     "tasks": [
         {
             "task_key": "Load-CustomerMgmt-XML-File",
@@ -99,6 +89,7 @@
                 "source": "WORKSPACE"
             },
             "{{compute_key}}": "{{ job_name }}_compute",
+            {% if scale_factor > 100 %}
             "libraries": [
                 {
                     "maven": {
@@ -106,6 +97,7 @@
                     }
                 }
             ],
+            {% endif %}
             "timeout_seconds": 0,
             "email_notifications": {
                 "no_alert_for_skipped_runs": false
