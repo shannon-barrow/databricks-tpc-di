@@ -54,7 +54,7 @@ spark.sql(f"CREATE DATABASE IF NOT EXISTS {staging_db}")
 spark.sql(f"USE {staging_db}")
 serverless_client.sql(sql_statement = f"DROP TABLE IF EXISTS {catalog}.{wh_db}.finwire")
 
-notebook_run_timeout = scale_factor/4   # dbutils.notebook.run requires a timeout period. Adjust to the data size
+notebook_run_timeout = max(600, int(int(scale_factor)/4))   # dbutils.notebook.run requires a timeout period. Adjust to the data size
 if spark.sql('show tables').filter(col("tableName") == 'customermgmt').count() == 0:
   dbutils.notebook.run("../native_notebooks/bronze/CustomerMgmtRaw", notebook_run_timeout, {"catalog": catalog, "wh_db": wh_db, "tpcdi_directory": tpcdi_directory, "scale_factor": scale_factor})
 
