@@ -1,44 +1,9 @@
-# Databricks notebook source
-from dbsqlclient import ServerlessClient
-import json
-import re
-import string
-
-# COMMAND ----------
-
-user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
-default_catalog = 'tpcdi' if spark.conf.get('spark.databricks.unityCatalog.enabled') == 'true' else 'hive_metastore'
-dbutils.widgets.text("scale_factor", "10", "Scale factor")
-dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
-scale_factor = dbutils.widgets.get("scale_factor")
-default_wh = f"{string.capwords(user_name).replace(' ','_')}_TPCDI_STMV_{scale_factor}"
-dbutils.widgets.text("wh_db", default_wh,'Target Database')
-dbutils.widgets.text("warehouse_id", '', "Warehouse ID")
-
-catalog = dbutils.widgets.get("catalog")
-dbutils.widgets.dropdown("table_or_mv", "MATERIALIZED VIEW", ['TABLE', 'MATERIALIZED VIEW'], "Table Type")
-table_or_mv = dbutils.widgets.get("table_or_mv")
-wh_db = dbutils.widgets.get('wh_db')
-staging_db = f"{wh_db}_stage"
-warehouse_id = dbutils.widgets.get("warehouse_id")
-
-serverless_client = ServerlessClient(warehouse_id=warehouse_id)
-
-# COMMAND ----------
-
-query = f"""CREATE {table_or_mv} IF NOT EXISTS {catalog}.{wh_db}.Prospect AS 
-WITH sk_BatchDate AS (
-  SELECT 
-    sk_dateid,
-    batchid
-  FROM {catalog}.{wh_db}.BatchDate b 
-  JOIN {catalog}.{wh_db}.DimDate d 
-    ON b.batchdate = d.datevalue
-)
+-- Databricks notebook source
+INSERT INTO ${catalog}.${wh_db}.Prospect
 SELECT 
   agencyid,
-  recdate.sk_dateid sk_recorddateid,
-  origdate.sk_dateid sk_updatedateid,
+  bigint(date_format(recdate.batchdate, 'yyyyMMdd')) sk_recorddateid,
+  bigint(date_format(origdate.batchdate, 'yyyyMMdd')) sk_updatedateid,
   p.batchid,
   nvl2(c.customerid, True, False) iscustomer, 
   p.lastname,
@@ -114,7 +79,7 @@ FROM (
       numbercreditcards,
       networth,
       min(batchid) batchid
-    FROM {catalog}.{staging_db}.ProspectIncremental p
+    FROM ${catalog}.${wh_db}_stage.v_Prospect p
     GROUP BY
       agencyid,
       lastname,
@@ -139,9 +104,9 @@ FROM (
       numbercreditcards,
       networth)
   QUALIFY ROW_NUMBER() OVER (PARTITION BY agencyid ORDER BY batchid DESC) = 1) p
-JOIN sk_BatchDate recdate
+JOIN ${catalog}.${wh_db}.BatchDate recdate
   ON p.recordbatchid = recdate.batchid
-JOIN sk_BatchDate origdate
+JOIN ${catalog}.${wh_db}.BatchDate origdate
   ON p.batchid = origdate.batchid
 LEFT JOIN (
   SELECT 
@@ -151,15 +116,11 @@ LEFT JOIN (
     addressline1,
     addressline2,
     postalcode
-  FROM {catalog}.{staging_db}.DimCustomerStg
+  FROM ${catalog}.${wh_db}_stage.DimCustomerStg
   WHERE iscurrent) c
   ON 
     upper(p.LastName) = upper(c.lastname)
     and upper(p.FirstName) = upper(c.firstname)
     and upper(p.AddressLine1) = upper(c.addressline1)
     and upper(nvl(p.addressline2, '')) = upper(nvl(c.addressline2, ''))
-    and upper(p.PostalCode) = upper(c.postalcode)"""
-
-# COMMAND ----------
-
-display(serverless_client.sql(sql_statement = query))
+    and upper(p.PostalCode) = upper(c.postalcode)

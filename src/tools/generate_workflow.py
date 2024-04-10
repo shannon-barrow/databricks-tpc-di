@@ -29,7 +29,8 @@ try:
   # shuffle_partitions = int(total_cores * max(1, shuffle_part_mult * scale_factor / total_avail_memory))
   json_templates_path = f"{workspace_src_path}/tools/jinja_templates/"
   sku = wf_key.split('-')
-  worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores']) if sku[0] in ['DLT', 'NATIVE'] else 0
+  exec_type = sku[0]
+  worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores']) if exec_type in ['DLT', 'NATIVE'] else 0
   if worker_node_count == 0:
     if sku[0] == 'DLT':
       worker_node_count = 1
@@ -41,6 +42,7 @@ try:
   wh_size = wh_scale_factor_map[f"{scale_factor}"]
   wh_name = f"TPCDI_{wh_size}"
   xml_lib = 'com.databricks.spark.xml' if int(scale_factor) > 100 else 'xml'
+  template_type = "dbsql_wh" if exec_type in ['ST_MVs', 'SQL_WH'] else exec_type
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
@@ -61,7 +63,8 @@ dag_args = {
   "compute_key":compute_key,
   "cust_mgmt_worker_count":cust_mgmt_worker_count,
   "wh_name":wh_name,
-  "wh_size":wh_size
+  "wh_size":wh_size,
+  "exec_type":exec_type
  }
 
 # Removing Serverless Options Until Ungated Public Preview At Minumum
@@ -69,7 +72,8 @@ dag_args = {
 #   compute = f"""Serverless Workflow Cluster/Pipeline Selected"""
 #   serv_type = "DLT Pipeline" if sku[0] == 'DLT' else "Workflow Cluster"
 #   print(f"Serverless {serv_type} selected, which is in PREVIEW.  If your workspace does not have access to this preview the workflow creation will potentially fail. Please select 'NO' for the Serverless widget if so.")
-if sku[0] in ['DBT', 'STMV']:
+if exec_type in ['DBT', 'ST_MVs', 'SQL_WH']:
+  print(f"Your workflow type requires Databricks SQL. Serverless Warehouses are created by default.  If you do not have serverless SQL WHs available, please CREATE a non-serverless {wh_size} WH with the name '{wh_name}' and run this code again.")
   compute = f"""Warehouse Name:             {wh_name}
 Warehouse Size:             {wh_size}"""
 else:
@@ -78,11 +82,6 @@ Worker Type:                {worker_node_type}
 Worker Count:               {worker_node_count}
 DBR Version:                {dbr_version_id}"""
 
-if sku[0] in ['DBT', 'STMV']:
-  print(f"Your workflow type requires Databricks SQL. Serverless Warehouses are created by default.  If you do not have serverless SQL WHs available, please CREATE a non-serverless {wh_size} WH with the name '{wh_name}' and run this code again.")
-  compute = compute + f"""
-DB SQL Warehouse Name:      {wh_name}
-DB SQL Warehouse Size:      {wh_size}"""
 # Print out details of the workflow to user
 print(f"""
 Workflow Name:              {job_name}
@@ -133,18 +132,16 @@ def get_warehouse_id():
 # COMMAND ----------
 
 def generate_workflow():
-  if sku[0] == 'DLT':
+  if exec_type == 'DLT':
     jinja_template_path = f"{json_templates_path}{DLT_PIPELINE_TEMPLATE}"
     dag_args['edition'] = sku[1]
     print(f"Rendering DLT Pipeline JSON via jinja template located at {jinja_template_path}")
     rendered_pipeline_dag = generate_dag(jinja_template_path, dag_args)
     print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")
     dag_args['pipeline_id'] = submit_dag(rendered_pipeline_dag, pipeline_api_endpoint, 'pipeline')
-  if sku[0] in ['DBT', 'STMV']:
+  if exec_type in ['DBT', 'ST_MVs', 'SQL_WH']:
     dag_args['wh_id'] = get_warehouse_id()
-    dag_args['table_or_st'] = "STREAMING TABLE"
-    dag_args['table_or_mv'] = "MATERIALIZED VIEW"
-  jinja_template_path = f"{json_templates_path}{sku[0].lower()}{WORKFLOW_TEMPLATE}"
+  jinja_template_path = f"{json_templates_path}{template_type.lower()}{WORKFLOW_TEMPLATE}"
   print(f"Rendering New Workflow JSON via jinja template located at {jinja_template_path}")
   rendered_workflow_dag = generate_dag(jinja_template_path, dag_args)  
   print("Submitting rendered Workflow JSON to Databricks Jobs API")

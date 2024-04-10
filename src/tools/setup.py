@@ -65,11 +65,12 @@ dbrs                = get_dbr_versions(min_dbr_version)
 
 workflows_dict      = {
   "NATIVE": "Native Notebooks Workflow", 
+  "SQL_WH": "DBSQL Warehouse Workflow",
   "DLT-CORE": "CORE Delta Live Tables Pipeline", 
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
   "DBT": "dbt Core on DB SQL Warehouse",
-  "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
+  "ST_MVs": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
 
 try: 
