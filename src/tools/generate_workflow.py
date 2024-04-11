@@ -1,4 +1,8 @@
 # Databricks notebook source
+pip install jinja2
+
+# COMMAND ----------
+
 import math
 
 # COMMAND ----------
