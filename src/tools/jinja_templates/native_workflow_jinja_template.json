@@ -29,7 +29,11 @@
             "new_cluster": {
                 "spark_version": "{{ dbr }}",
                 "spark_conf": {
-                    "spark.databricks.preemption.enabled": "false",
+                    {% if worker_node_count == 0 %}
+                    "spark.master": "local[*, 4]",
+                    "spark.databricks.cluster.profile": "singleNode",
+                    "spark.databricks.adaptive.localShuffleReader.enabled": "true",
+                    {% endif %}
                     "spark.databricks.delta.schema.autoMerge.enabled": "true",
                     "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
                     "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
@@ -42,12 +46,7 @@
                     "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
                     "spark.databricks.photon.scan.enabled": "true",
                     "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true",
-                    "spark.databricks.delta.identityColumn.enabled": "true",
-                    {% if worker_node_count == 0 %}
-                    "spark.master": "local[*, 4]",
-                    "spark.databricks.cluster.profile": "singleNode",
-                    "spark.databricks.adaptive.localShuffleReader.enabled": "true"
-                    {% endif %}
+                    "spark.databricks.delta.identityColumn.enabled": "true"
                 },
                 {% if cloud_provider == "Azure" %} 
                 "azure_attributes": {
@@ -60,7 +59,7 @@
                 "aws_attributes": {
                     "availability": "SPOT_WITH_FALLBACK",
                     "first_on_demand": 1,
-                    "zone_id" : "auto",
+                    "zone_id": "auto",
                     "spot_bid_price_percent": 100
                 },
                 {% endif %}
