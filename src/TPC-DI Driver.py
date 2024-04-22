@@ -27,14 +27,21 @@
 
 # COMMAND ----------
 
-import ipywidgets as widgets
-
-# COMMAND ----------
-
-workflow_types = ["", "Native Notebooks Workflow", "CORE Delta Live Tables Pipeline", "PRO Delta Live Tables Pipeline with SCD Type 1/2", "ADVANCED Delta Live Tables Pipeline with DQ", "dbt Core on DB SQL Warehouse", "Streaming Tables and Materialized Views on DBSQL/DLT"]
+workflow_types = [
+  "",
+  "Native Notebooks Workflow",
+  "DBSQL Warehouse Workflow",
+  "CORE Delta Live Tables Pipeline",
+  "PRO Delta Live Tables Pipeline with SCD Type 1/2",
+  "ADVANCED Delta Live Tables Pipeline with DQ",
+  "dbt Core on DB SQL Warehouse",
+  "Streaming Tables and Materialized Views on DBSQL/DLT"
+  ]
 dbutils.widgets.dropdown("workflow_type", "", workflow_types, "Workflow Type")
+dbutils.widgets.dropdown("serverless", 'NO', ['YES', 'NO'], "Enable Serverless")
 
-wf_type = dbutils.widgets.get('workflow_type')
+comp_type  = dbutils.widgets.get('serverless')
+wf_type    = dbutils.widgets.get('workflow_type')
 if wf_type == '':
   displayHTML(f"<h1>Please select a Workflow Type from the widget above and rerun</h1>")
   raise Exception("Missing valid workflow type. Please select a Workflow Type from the widget above and rerun")

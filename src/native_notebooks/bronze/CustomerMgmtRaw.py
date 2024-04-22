@@ -120,7 +120,3 @@ spark.sql(f"""
 # COMMAND ----------
 
 spark.sql(f"ANALYZE TABLE {catalog}.{staging_db}.CustomerMgmt COMPUTE STATISTICS FOR ALL COLUMNS")
-
-# COMMAND ----------
-
-spark.sql(f"OPTIMIZE {catalog}.{staging_db}.CustomerMgmt")

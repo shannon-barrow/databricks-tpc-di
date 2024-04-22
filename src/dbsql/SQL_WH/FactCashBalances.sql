@@ -1,6 +1,6 @@
 -- Databricks notebook source
 INSERT INTO ${catalog}.${wh_db}.FactCashBalances
-with CashTransactons as (
+with CashTransactions as (
   SELECT * FROM ${catalog}.${wh_db}_stage.v_CashTransactionHistory
   UNION ALL
   SELECT * FROM ${catalog}.${wh_db}_stage.v_CashTransactionIncremental
@@ -11,7 +11,7 @@ CashTransactionsAgg as (
     to_date(ct_dts) datevalue,
     sum(ct_amt) account_daily_total,
     batchid
-  FROM CashTransactons
+  FROM CashTransactions
   GROUP BY
     accountid,
     datevalue,

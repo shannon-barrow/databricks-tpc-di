@@ -37,23 +37,9 @@
         "spark_version": "{{ dbr }}",
         "spark_conf": {
           "spark.master": "local[*, 4]",
-          "spark.databricks.cluster.profile": "singleNode"
+          "spark.databricks.cluster.profile": "singleNode",
+          "spark.sql.shuffle.partitions": "auto"
         },
-        {% if cloud_provider == "Azure" %} 
-        "azure_attributes": {
-            "availability": "SPOT_WITH_FALLBACK_AZURE",
-            "first_on_demand": 1,
-            "spot_bid_price_percent": -1
-        },
-        {% endif %}
-        {% if cloud_provider == "AWS" %}
-        "aws_attributes": {
-            "availability": "SPOT_WITH_FALLBACK",
-            "first_on_demand": 1,
-            "zone_id" : "auto",
-            "spot_bid_price_percent": 100
-        },
-        {% endif %}
         "driver_node_type_id": "{{ driver_node_type }}",
         "node_type_id": "{{ worker_node_type }}",
         "custom_tags": {

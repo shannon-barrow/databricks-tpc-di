@@ -1,6 +1,18 @@
 # Databricks notebook source
 import dlt
+import json
 from pyspark.sql import functions as F
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Declare table schema variables for the streams
+
+# COMMAND ----------
+
+tpcdi_directory = spark.conf.get('files_directory')
+scale_factor = spark.conf.get('scale_factor')
+bronze_tables = json.loads(spark.conf.get('bronze_tables'))
 
 # COMMAND ----------
 
@@ -11,65 +23,42 @@ from pyspark.sql import functions as F
 
 # COMMAND ----------
 
-def build_autoloader_stream(table):
-  src_dir = spark.conf.get(f'{table}.path')
-  return spark.readStream.format('cloudFiles') \
-      .option('cloudFiles.format', 'csv') \
-      .schema(spark.conf.get(f'{table}.schema')) \
-      .option("inferSchema", False) \
-      .option("delimiter", spark.conf.get(f'{table}.sep')) \
-      .option("header", spark.conf.get(f'{table}.header')) \
-      .option("pathGlobfilter", spark.conf.get(f'{table}.filename')) \
-      .load(f"{spark.conf.get('files_directory')}/sf={spark.conf.get('scale_factor')}/{src_dir}")
+def build_autoloader_stream(tbl):
+  path = f"{tpcdi_directory}sf={scale_factor}/" + (tbl.get('path') or "Batch1")
+  tgt_query = tbl.get('tgt_query') or "*"
+  return spark.sql(f"""
+    SELECT {tgt_query}
+    FROM read_files(
+      "{path}",
+      format => "csv",
+      inferSchema => False, 
+      header => False,
+      sep => "|",
+      fileNamePattern => "{tbl.get('filename')}", 
+      schema => "{tbl.get('raw_schema')}"
+    )"""
+  )
 
-def generate_tables(table_nm):
-  @dlt.table(name=table_nm)
-  def create_table(): 
-    if table_nm in spark.conf.get('tables_with_batchid').replace(" ", "").split(","):
-      return build_autoloader_stream(table_nm).selectExpr("*", "cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid")
-    else:
-      return build_autoloader_stream(table_nm)
+def generate_tables(tbl):
+  tbl_name = tbl.get("table") if tbl.get("stage") is None else f"stage.{tbl.get('table')}"
+  if tbl.get("part") is not None:
+    @dlt.table(
+      name=tbl_name,
+      partition_cols=[tbl.get("part")]
+    )
+    def create_table(): 
+      return build_autoloader_stream(tbl)
+  else:
+    @dlt.table(name=tbl_name)
+    def create_table(): 
+      return build_autoloader_stream(tbl)
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Programatically Create Tables using Metadata and looping through required tables
-# MAGIC * Most tables use common signature - leverage metadata driven pipeline then to follow the pattern and simplify code
+# MAGIC # Loop through each bronze table to create the DLT streaming table
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate All Raw Table Ingestion
-for table in spark.conf.get('raw_tables').replace(" ", "").split(","):
+for table in bronze_tables:
   generate_tables(table)
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## FinWire is the Only Fixed Length Text File to ingest so no need for programmatic loop
-
-# COMMAND ----------
-
-@dlt.table(partition_cols=["rectype"])
-def FinWire():
-  return spark.readStream.format('cloudFiles') \
-    .option('cloudFiles.format', 'text') \
-    .option("inferSchema", False) \
-    .option("pathGlobfilter", spark.conf.get('FinWire.filename')) \
-    .load(f"{spark.conf.get('files_directory')}/sf={spark.conf.get('scale_factor')}/{spark.conf.get('FinWire.path')}") \
-    .withColumn('rectype', F.substring(F.col('value'), 16, 3))
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ## Separating out DailyMarketHistorical since the historical table is very large and it is faster to just define as view and not write twice
-# MAGIC * In this case, the view doesn't cause an issue with collectmetrics forcing execution out of photon and into JVM since the subsequent bounded window cannot be performed in Photon as of DBR 11.3
-
-# COMMAND ----------
-
-@dlt.view
-def DailyMarketHistorical():
-  return spark.read.csv(f"{spark.conf.get('files_directory')}/sf={spark.conf.get('scale_factor')}/Batch1/{spark.conf.get('DailyMarketHistorical.filename')}", 
-                        schema=spark.conf.get('DailyMarketHistorical.schema'), 
-                        sep=spark.conf.get('DailyMarketHistorical.sep'), 
-                        header=spark.conf.get('DailyMarketHistorical.header'), 
-                        inferSchema=False).withColumn('batchid', F.lit(1))

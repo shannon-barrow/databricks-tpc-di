@@ -85,23 +85,25 @@ try:
 except NameError: 
   default_serverless  = 'NO'
 
-workflow_vals       = list(workflows_dict.values())
-default_sf          = '10'
-default_sf_options  = ['10', '100', '1000', '5000', '10000']
-default_job_name    = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
-default_wh          = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
-default_catalog     = 'tpcdi' if UC_enabled else 'hive_metastore'
+worker_cores_mult     = 0.0576
+workflow_vals         = list(workflows_dict.values())
+default_sf            = '10'
+default_sf_options    = ['10', '100', '1000', '5000', '10000']
+default_job_name      = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
+default_wh            = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
 if cloud_provider == 'AWS':
-  default_worker_type = "m5d.2xlarge"
-  default_driver_type = "m5d.xlarge"
+  default_worker_type = "m6gd.2xlarge"
+  default_driver_type = "m6g.xlarge"
+  cust_mgmt_type      = "m6gd.16xlarge"
 elif cloud_provider == 'GCP':
   default_worker_type = "n2-standard-8"
   default_driver_type = "n2-standard-4"
+  cust_mgmt_type      = "n2-standard-64"
 elif cloud_provider == 'Azure':
   default_worker_type = "Standard_D8ads_v5" 
   default_driver_type = "Standard_D4as_v5"
+  cust_mgmt_type      = "Standard_D64ads_v5" 
 else:
   raise Exception('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
   dbutils.notebook.exit('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
-shuffle_part_mult   = 354
-worker_cores_mult   = 0.0576

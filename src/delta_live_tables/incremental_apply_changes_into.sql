@@ -11,7 +11,7 @@
 -- MAGIC * This includes: 
 -- MAGIC   * Prospect (Customer and Prospect need data from the other table and join on name/address - which you cannot get until data is coalesced)
 -- MAGIC   * Account table needs each change of Customer record to get the surrogate key of the customer record. This only occurs once a Customer record gets updated
--- MAGIC 
+-- MAGIC
 -- MAGIC ### Staging Customer table unions the historical to the incremental
 -- MAGIC ~~1) Window results by customerid and order by the update timestamp~~  
 -- MAGIC ~~2) Then coalesce the current row to the last row and ignore nulls~~  
@@ -19,91 +19,118 @@
 
 -- COMMAND ----------
 
-CREATE OR REFRESH STREAMING LIVE TABLE DimCustomerStg (${DimCustomerStg.schema}) PARTITIONED BY (iscurrent);
-APPLY CHANGES INTO LIVE.DimCustomerStg
-FROM (
-  SELECT
-    customerid,
-    taxid,
-    status,
-    lastname,
-    firstname,
-    middleinitial,
-    gender,
-    tier,
-    dob,
-    addressline1,
-    addressline2,
-    postalcode,
-    city,
-    stateprov,
-    country,
-    phone1,
-    phone2,
-    phone3,
-    email1,
-    email2,
-    lcl_tx_id,
-    nat_tx_id,
-    1 batchid,
-    update_ts
-  FROM STREAM(${staging_db}.CustomerMgmt) c
-  WHERE ActionType in ('NEW', 'INACT', 'UPDCUST')
-  UNION ALL
-  SELECT
-    c.customerid,
-    nullif(c.taxid, '') taxid,
-    nullif(s.st_name, '') as status,
-    nullif(c.lastname, '') lastname,
-    nullif(c.firstname, '') firstname,
-    nullif(c.middleinitial, '') middleinitial,
-    gender,
-    c.tier,
-    c.dob,
-    nullif(c.addressline1, '') addressline1,
-    nullif(c.addressline2, '') addressline2,
-    nullif(c.postalcode, '') postalcode,
-    nullif(c.city, '') city,
-    nullif(c.stateprov, '') stateprov,
-    nullif(c.country, '') country,
-    CASE
-      WHEN isnull(c_local_1) then c_local_1
-      ELSE concat(
-        nvl2(c_ctry_1, '+' || c_ctry_1 || ' ', ''),
-        nvl2(c_area_1, '(' || c_area_1 || ') ', ''),
-        c_local_1,
-        nvl(c_ext_1, '')) END as phone1,
-    CASE
-      WHEN isnull(c_local_2) then c_local_2
-      ELSE concat(
-        nvl2(c_ctry_2, '+' || c_ctry_2 || ' ', ''),
-        nvl2(c_area_2, '(' || c_area_2 || ') ', ''),
-        c_local_2,
-        nvl(c_ext_2, '')) END as phone2,
-    CASE
-      WHEN isnull(c_local_3) then c_local_3
-      ELSE concat(
-        nvl2(c_ctry_3, '+' || c_ctry_3 || ' ', ''),
-        nvl2(c_area_3, '(' || c_area_3 || ') ', ''),
-        c_local_3,
-        nvl(c_ext_3, '')) END as phone3,
-    nullif(c.email1, '') email1,
-    nullif(c.email2, '') email2,
-    c.LCL_TX_ID, 
-    c.NAT_TX_ID,
-    c.batchid,
-    timestamp(bd.batchdate) update_ts
-  FROM STREAM(LIVE.CustomerIncremental) c
-  JOIN LIVE.BatchDate bd
-    ON c.batchid = bd.batchid
-  JOIN LIVE.StatusType s 
-    ON c.status = s.st_id
-)
-KEYS (customerid)
-IGNORE NULL UPDATES
-SEQUENCE BY update_ts
-COLUMNS * EXCEPT (update_ts)
-STORED AS SCD TYPE 2;
+-- CREATE OR REFRESH STREAMING LIVE TABLE DimCustomerStg (${DimCustomerStg.schema}) PARTITIONED BY (iscurrent);
+-- APPLY CHANGES INTO LIVE.DimCustomerStg
+-- FROM (
+--   WITH CustomerHistory as (
+--     SELECT
+--       customerid,
+--       taxid,
+--       status,
+--       lastname,
+--       firstname,
+--       middleinitial,
+--       gender,
+--       tier,
+--       dob,
+--       addressline1,
+--       addressline2,
+--       postalcode,
+--       city,
+--       stateprov,
+--       country,
+--       phone1,
+--       phone2,
+--       phone3,
+--       email1,
+--       email2,
+--       lcl_tx_id,
+--       nat_tx_id,
+--       1 batchid,
+--       update_ts
+--     FROM
+--       STREAM(${cust_mgmt_schema}.CustomerMgmt) c
+--     WHERE
+--       ActionType in ('NEW', 'INACT', 'UPDCUST')
+--   ),
+--   CustomerIncrementalRaw AS (
+--     SELECT
+--       * except(cdc_flag, cdc_dsn),
+--       cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+--     FROM STREAM(read_files(
+--       "${files_directory}sf=${scale_factor}/Batch[23]",
+--       format => "csv",
+--       inferSchema => False,
+--       header => False,
+--       sep => "|",
+--       fileNamePattern => "Customer.txt",
+--       schema => "${CustomerIncremental.schema}"
+--     ))
+--   ),
+--   CustomerIncremental as (
+--     SELECT
+--       c.customerid,
+--       nullif(c.taxid, '') taxid,
+--       nullif(s.st_name, '') as status,
+--       nullif(c.lastname, '') lastname,
+--       nullif(c.firstname, '') firstname,
+--       nullif(c.middleinitial, '') middleinitial,
+--       gender,
+--       c.tier,
+--       c.dob,
+--       nullif(c.addressline1, '') addressline1,
+--       nullif(c.addressline2, '') addressline2,
+--       nullif(c.postalcode, '') postalcode,
+--       nullif(c.city, '') city,
+--       nullif(c.stateprov, '') stateprov,
+--       nullif(c.country, '') country,
+--       CASE
+--         WHEN isnull(c_local_1) then c_local_1
+--         ELSE concat(
+--           nvl2(c_ctry_1, '+' || c_ctry_1 || ' ', ''),
+--           nvl2(c_area_1, '(' || c_area_1 || ') ', ''),
+--           c_local_1,
+--           nvl(c_ext_1, '')
+--         )
+--       END as phone1,
+--       CASE
+--         WHEN isnull(c_local_2) then c_local_2
+--         ELSE concat(
+--           nvl2(c_ctry_2, '+' || c_ctry_2 || ' ', ''),
+--           nvl2(c_area_2, '(' || c_area_2 || ') ', ''),
+--           c_local_2,
+--           nvl(c_ext_2, '')
+--         )
+--       END as phone2,
+--       CASE
+--         WHEN isnull(c_local_3) then c_local_3
+--         ELSE concat(
+--           nvl2(c_ctry_3, '+' || c_ctry_3 || ' ', ''),
+--           nvl2(c_area_3, '(' || c_area_3 || ') ', ''),
+--           c_local_3,
+--           nvl(c_ext_3, '')
+--         )
+--       END as phone3,
+--       nullif(c.email1, '') email1,
+--       nullif(c.email2, '') email2,
+--       c.LCL_TX_ID,
+--       c.NAT_TX_ID,
+--       c.batchid,
+--       timestamp(bd.batchdate) update_ts
+--     FROM
+--       CustomerIncrementalRaw c
+--       JOIN LIVE.BatchDate bd ON c.batchid = bd.batchid
+--       JOIN LIVE.StatusType s ON c.status = s.st_id
+--   )
+--   SELECT * FROM CustomerHistory
+--   UNION ALL
+--   SELECT * FROM CustomerIncremental
+-- )
+-- KEYS (customerid)
+-- IGNORE NULL UPDATES
+-- SEQUENCE BY update_ts
+-- COLUMNS * EXCEPT (update_ts)
+-- STORED AS SCD TYPE 2;
 
 -- COMMAND ----------
 
@@ -152,7 +179,7 @@ LEFT JOIN LIVE.Prospect p
   and upper(p.addressline1) = upper(c.addressline1)
   and upper(nvl(p.addressline2, '')) = upper(nvl(c.addressline2, ''))
   and upper(p.postalcode) = upper(c.postalcode)
-WHERE effectivedate < enddate
+WHERE effectivedate < enddate;
 
 -- COMMAND ----------
 
@@ -167,15 +194,31 @@ WHERE effectivedate < enddate
 -- MAGIC 2) Then take min/max batchid for the batchid/recordbatchid respectively
 -- MAGIC 3) Then do a window to take the latest record per agencyid (QUALIFY WINDOW where ROW=1)
 -- MAGIC 4) From here its just business logic for marketingnameplate and other joins
--- MAGIC 
+-- MAGIC
 -- MAGIC This is made slightly more complicated since we need to join to DimCustomer to find out if the prospect is also a customer - which necessitates the DimCustomer staging table
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE Prospect (${Prospect.schema}) AS SELECT 
+CREATE OR REFRESH LIVE TABLE Prospect (${Prospect.schema}) AS 
+with prospect_raw as (
+  SELECT
+    *,
+    cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+  FROM
+    read_files(
+      "${files_directory}sf=${scale_factor}/Batch*",
+      format => "csv",
+      inferSchema => False,
+      header => False,
+      sep => ",",
+      fileNamePattern => "Prospect.csv",
+      schema => "${ProspectRaw.schema}"
+    )
+)
+SELECT 
   agencyid,
-  recdate.sk_dateid sk_recorddateid,
-  origdate.sk_dateid sk_updatedateid,
+  bigint(date_format(recdate.batchdate, 'yyyyMMdd')) sk_recorddateid,
+  bigint(date_format(origdate.batchdate, 'yyyyMMdd')) sk_updatedateid,
   p.batchid,
   nvl2(c.customerid, True, False) iscustomer, 
   p.lastname,
@@ -251,7 +294,7 @@ FROM (
       numbercreditcards,
       networth,
       min(batchid) batchid
-    FROM LIVE.ProspectRaw p
+    FROM prospect_raw p
     GROUP BY
       agencyid,
       lastname,
@@ -276,21 +319,9 @@ FROM (
       numbercreditcards,
       networth)
   QUALIFY ROW_NUMBER() OVER (PARTITION BY agencyid ORDER BY batchid DESC) = 1) p
-JOIN (
-  SELECT 
-    sk_dateid,
-    batchid
-  FROM LIVE.BatchDate b 
-  JOIN LIVE.DimDate d 
-    ON b.batchdate = d.datevalue) recdate
+JOIN LIVE.BatchDate recdate
   ON p.recordbatchid = recdate.batchid
-JOIN (
-  SELECT 
-    sk_dateid,
-    batchid
-  FROM LIVE.BatchDate b 
-  JOIN LIVE.DimDate d 
-    ON b.batchdate = d.datevalue) origdate
+JOIN LIVE.BatchDate origdate
   ON p.batchid = origdate.batchid
 LEFT JOIN (
   SELECT 
@@ -300,16 +331,14 @@ LEFT JOIN (
     addressline1,
     addressline2,
     postalcode
-  FROM 
-    LIVE.DimCustomerStg
-  WHERE 
-    iscurrent) c
+  FROM LIVE.DimCustomerStg
+  WHERE iscurrent) c
   ON 
     upper(p.LastName) = upper(c.lastname)
     and upper(p.FirstName) = upper(c.firstname)
     and upper(p.AddressLine1) = upper(c.addressline1)
     and upper(nvl(p.addressline2, '')) = upper(nvl(c.addressline2, ''))
-    and upper(p.PostalCode) = upper(c.postalcode)
+    and upper(p.PostalCode) = upper(c.postalcode);
 
 -- COMMAND ----------
 
@@ -327,45 +356,61 @@ LEFT JOIN (
 
 -- COMMAND ----------
 
-CREATE OR REFRESH STREAMING LIVE TABLE DimAccountStg (${DimAccountStg.schema});
-APPLY CHANGES INTO LIVE.DimAccountStg
-FROM (
-  SELECT
-    accountid,
-    customerid,
-    accountdesc,
-    taxstatus,
-    brokerid,
-    status,
-    update_ts,
-    1 batchid
-  FROM STREAM(${staging_db}.CustomerMgmt) c
-  WHERE ActionType NOT IN ('UPDCUST', 'INACT')
-  UNION ALL
-  SELECT
-    accountid,
-    a.ca_c_id customerid,
-    accountDesc,
-    TaxStatus,
-    a.ca_b_id brokerid,
-    st_name as status,
-    TIMESTAMP(bd.batchdate) update_ts,
-    a.batchid
-  FROM STREAM(LIVE.AccountIncremental) a
-  JOIN LIVE.BatchDate bd
-    ON a.batchid = bd.batchid
-  JOIN LIVE.StatusType st 
-    ON a.CA_ST_ID = st.st_id
-)
-KEYS (accountid)
-IGNORE NULL UPDATES
-SEQUENCE BY update_ts
-COLUMNS * EXCEPT (update_ts)
-STORED AS SCD TYPE 2;
+-- CREATE OR REFRESH STREAMING LIVE TABLE DimAccountStg (${DimAccountStg.schema});
+-- APPLY CHANGES INTO LIVE.DimAccountStg
+-- FROM (
+--   WITH AccountIncremental AS (
+--     SELECT
+--       * except(cdc_flag, cdc_dsn),
+--       cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+--     FROM STREAM(read_files(
+--       "${files_directory}sf=${scale_factor}/Batch[23]",
+--       format => "csv",
+--       inferSchema => False,
+--       header => False,
+--       sep => "|",
+--       fileNamePattern => "Account.txt",
+--       schema => "${AccountIncremental.schema}"
+--     ))
+--   )
+--   SELECT
+--     accountid,
+--     customerid,
+--     accountdesc,
+--     taxstatus,
+--     brokerid,
+--     status,
+--     update_ts,
+--     1 batchid
+--   FROM
+--     STREAM(${cust_mgmt_schema}.CustomerMgmt) c
+--   WHERE
+--     ActionType NOT IN ('UPDCUST', 'INACT')
+--   UNION ALL
+--   SELECT
+--     accountid,
+--     a.ca_c_id customerid,
+--     accountDesc,
+--     TaxStatus,
+--     a.ca_b_id brokerid,
+--     st_name as status,
+--     TIMESTAMP(bd.batchdate) update_ts,
+--     a.batchid
+--   FROM
+--     AccountIncremental a
+--     JOIN LIVE.BatchDate bd ON a.batchid = bd.batchid
+--     JOIN LIVE.StatusType st ON a.CA_ST_ID = st.st_id
+-- )
+-- KEYS (accountid)
+-- IGNORE NULL UPDATES
+-- SEQUENCE BY update_ts
+-- COLUMNS * EXCEPT (update_ts)
+-- STORED AS SCD TYPE 2;
 
 -- COMMAND ----------
 
 CREATE OR REFRESH LIVE TABLE DimAccount (${DimAccount.schema}) AS SELECT
+  bigint(concat(date_format(a.effectivedate, 'yyyyMMdd'), a.accountid)) sk_accountid,
   a.accountid,
   b.sk_brokerid,
   a.sk_customerid,
@@ -396,7 +441,7 @@ FROM (
       AND c.enddate > a.effectivedate
       AND c.effectivedate < a.enddate
 ) a
-LEFT JOIN LIVE.DimBroker b 
+JOIN LIVE.DimBroker b 
   ON a.brokerid = b.brokerid;
 
 -- COMMAND ----------
@@ -406,92 +451,84 @@ LEFT JOIN LIVE.DimBroker b
 
 -- COMMAND ----------
 
--- MAGIC %md
--- MAGIC * As of February 2023, Photon does NOT support the UNBOUNDED PRECEDING WINDOW statement needed for the business logic of this table (previous year high/low amount and date for each stock symbol)
--- MAGIC * Therefore, expect this table to take the longest execution when run in Photon runtime as it comes out of Photon - we can revisit when this functionality is added to Photon AFTER DBR 13+
--- MAGIC * Additionally, the logic looks funky as there is not fast native way to retrieve the amount AND date for the previous year low/high values. The fastest execution I have found is the one below (tried a few others but they were slower - even if the code was more concise)  
--- MAGIC 
--- MAGIC **Steps**
--- MAGIC 1) Union the historical and incremental DailyMarket tables
--- MAGIC 2) Find out the previous year min/max for each symbol. Store in temp staging table since this needs multiple self-joins (calculate it once)
--- MAGIC 3) Join table to itself to find each of the min and the max - each time making sure the amount is within the 1 year before the date of the stock symbol
--- MAGIC 4) Use WINDOW function to only select the FIRST time the amount occurred in the year before (this satisfies the case when the amount happens multiple times over previous year)
--- MAGIC 5) Then join to additional DIM tables and handle other business logic
-
--- COMMAND ----------
-
-CREATE OR REFRESH TEMPORARY LIVE TABLE tempDailyMarketHistorical AS SELECT
-  dmh.*,
-  sk_dateid,
-  min(dm_low) OVER (
-    PARTITION BY dm_s_symb
-    ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-  ) fiftytwoweeklow,
-  max(dm_high) OVER (
-    PARTITION by dm_s_symb
-    ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-  ) fiftytwoweekhigh
-FROM (
-  SELECT * FROM LIVE.DailyMarketHistorical
-  UNION ALL
-  SELECT * except(cdc_flag, cdc_dsn) FROM LIVE.DailyMarketIncremental) dmh
-JOIN LIVE.DimDate d 
-  ON d.datevalue = dm_date;
-
--- COMMAND ----------
-
-CREATE OR REFRESH TEMPORARY LIVE TABLE tempSumFiBasicEps AS SELECT
-  sk_companyid,
-  fi_qtr_start_date,
-  sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) - fi_basic_eps sum_fi_basic_eps
-FROM LIVE.Financial
-JOIN LIVE.DimCompany
-  USING (sk_companyid);
-
--- COMMAND ----------
-
-CREATE OR REFRESH LIVE TABLE FactMarketHistory (${FactMarketHistory.schema}) AS SELECT 
+CREATE OR REFRESH LIVE TABLE FactMarketHistory (${FactMarketHistory.schema}) AS
+WITH dailymarkethistorical AS (
+  SELECT
+    *,
+    1 batchid
+  FROM read_files(
+    "${files_directory}sf=${scale_factor}/Batch1",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "DailyMarket.txt",
+    schema => "${DailyMarketHistorical.schema}"
+  )
+),
+DailyMarketIncremental AS (
+  SELECT
+    * except(cdc_flag, cdc_dsn),
+    cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+  FROM read_files(
+    "${files_directory}sf=${scale_factor}/Batch[23]",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "DailyMarket.txt",
+    schema => "${DailyMarketIncremental.schema}"
+  )
+),
+DailyMarket as (
+  SELECT
+    dm.*,
+    min_by(struct(dm_low, dm_date), dm_low) OVER (
+      PARTITION BY dm_s_symb
+      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+    ) fiftytwoweeklow,
+    max_by(struct(dm_high, dm_date), dm_high) OVER (
+      PARTITION by dm_s_symb
+      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+    ) fiftytwoweekhigh
+  FROM
+    (
+      SELECT * FROM dailymarkethistorical
+      UNION ALL
+      SELECT * FROM DailyMarketIncremental
+    ) dm
+),
+CompanyFinancialsStg as (
+  SELECT
+    sk_companyid,
+    fi_qtr_start_date,
+    sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) - fi_basic_eps sum_fi_basic_eps
+  FROM LIVE.Financial
+  JOIN LIVE.DimCompany
+    USING (sk_companyid)
+)
+SELECT 
   s.sk_securityid,
   s.sk_companyid,
-  sk_dateid,
+  bigint(date_format(dm_date, 'yyyyMMdd')) sk_dateid,
   fmh.dm_close / sum_fi_basic_eps AS peratio,
   (s.dividend / fmh.dm_close) / 100 yield,
-  fiftytwoweekhigh,
-  sk_fiftytwoweekhighdate,
-  fiftytwoweeklow,
-  sk_fiftytwoweeklowdate,
+  fiftytwoweekhigh.dm_high fiftytwoweekhigh,
+  bigint(date_format(fiftytwoweekhigh.dm_date, 'yyyyMMdd')) sk_fiftytwoweekhighdate,
+  fiftytwoweeklow.dm_low fiftytwoweeklow,
+  bigint(date_format(fiftytwoweeklow.dm_date, 'yyyyMMdd')) sk_fiftytwoweeklowdate,
   dm_close closeprice,
   dm_high dayhigh,
   dm_low daylow,
   dm_vol volume,
   fmh.batchid
-FROM (
-  SELECT * FROM (
-    SELECT 
-      a.*,
-      b.sk_dateid AS sk_fiftytwoweeklowdate,
-      c.sk_dateid AS sk_fiftytwoweekhighdate
-    FROM
-      LIVE.tempDailyMarketHistorical a
-    JOIN LIVE.tempDailyMarketHistorical b 
-      ON
-        a.dm_s_symb = b.dm_s_symb
-        AND a.fiftytwoweeklow = b.dm_low
-        AND b.dm_date between add_months(a.dm_date, -12) AND a.dm_date
-    JOIN LIVE.tempDailyMarketHistorical c 
-      ON 
-        a.dm_s_symb = c.dm_s_symb
-        AND a.fiftytwoweekhigh = c.dm_high
-        AND c.dm_date between add_months(a.dm_date, -12) AND a.dm_date) dmh
-  QUALIFY ROW_NUMBER() OVER (
-    PARTITION BY dm_s_symb, dm_date 
-    ORDER BY sk_fiftytwoweeklowdate, sk_fiftytwoweekhighdate) = 1) fmh
+FROM DailyMarket fmh
 JOIN LIVE.DimSecurity s 
   ON 
     s.symbol = fmh.dm_s_symb
     AND fmh.dm_date >= s.effectivedate 
     AND fmh.dm_date < s.enddate
-LEFT JOIN LIVE.tempSumFiBasicEps f 
+LEFT JOIN CompanyFinancialsStg f 
   ON 
     f.sk_companyid = s.sk_companyid
     AND quarter(fmh.dm_date) = quarter(fi_qtr_start_date)
@@ -504,89 +541,123 @@ LEFT JOIN LIVE.tempSumFiBasicEps f
 
 -- COMMAND ----------
 
-CREATE OR REFRESH STREAMING LIVE TABLE TradeStg;
-APPLY CHANGES INTO LIVE.TradeStg
-FROM (
-  SELECT
-    * except(create_flg),
-    if(create_flg, date(t.t_dts), cast(NULL AS DATE)) createdate,
-    if(create_flg, sk_dateid, cast(NULL AS BIGINT)) sk_createdateid,
-    if(create_flg, sk_timeid, cast(NULL AS BIGINT)) sk_createtimeid,
-    if(!create_flg, sk_dateid, cast(NULL AS BIGINT)) sk_closedateid,
-    if(!create_flg, sk_timeid, cast(NULL AS BIGINT)) sk_closetimeid
-  FROM (
-    SELECT
-      t_id tradeid,
-      th_dts t_dts,
-      t_st_id,
-      t_tt_id,
-      t_is_cash,
-      t_s_symb,
-      t_qty AS quantity,
-      t_bid_price AS bidprice,
-      t_ca_id,
-      t_exec_name AS executedby,
-      t_trade_price AS tradeprice,
-      t_chrg AS fee,
-      t_comm AS commission,
-      t_tax AS tax,
-      1 batchid,
-      CASE 
-        WHEN (th_st_id == "SBMT" AND t_tt_id IN ("TMB", "TMS")) OR th_st_id = "PNDG" THEN TRUE 
-        WHEN th_st_id IN ("CMPT", "CNCL") THEN FALSE 
-        ELSE cast(null as boolean) END AS create_flg
-    FROM STREAM(LIVE.TradeHistory) t
-    JOIN LIVE.TradeHistoryRaw th
-      ON th_t_id = t_id
-    UNION ALL
-    SELECT
-      t_id tradeid,
-      t_dts,
-      t_st_id,
-      t_tt_id,
-      t_is_cash,
-      t_s_symb,
-      t_qty AS quantity,
-      t_bid_price AS bidprice,
-      t_ca_id,
-      t_exec_name AS executedby,
-      t_trade_price AS tradeprice,
-      t_chrg AS fee,
-      t_comm AS commission,
-      t_tax AS tax,
-      t.batchid,
-      CASE 
-        WHEN cdc_flag = 'I' THEN TRUE 
-        WHEN t_st_id IN ("CMPT", "CNCL") THEN FALSE 
-        ELSE cast(null as boolean) END AS create_flg
-    FROM STREAM(LIVE.TradeIncremental) t
-  ) t
-  JOIN LIVE.DimDate dd
-    ON date(t.t_dts) = dd.datevalue
-  JOIN LIVE.DimTime dt
-    ON date_format(t.t_dts, 'HH:mm:ss') = dt.timevalue
-)
-KEYS (tradeid)
-IGNORE NULL UPDATES
-SEQUENCE BY t_dts
-COLUMNS * EXCEPT (t_dts)
-STORED AS SCD TYPE 1;
+-- CREATE OR REFRESH STREAMING LIVE TABLE TradeStg;
+-- APPLY CHANGES INTO LIVE.TradeStg
+-- FROM (
+--   WITH trade as (
+--     SELECT
+--       *,
+--       1 batchid
+--     FROM 
+--       STREAM(read_files(
+--         "${files_directory}sf=${scale_factor}/Batch1",
+--         format => "csv",
+--         inferSchema => False,
+--         header => False,
+--         sep => "|",
+--         fileNamePattern => "Trade.txt",
+--         schema => "${TradeHistory.schema}"
+--     ))
+--   ),
+--   TradeHistoryRaw AS (
+--     SELECT
+--       *
+--     FROM 
+--       read_files(
+--         "${files_directory}sf=${scale_factor}/Batch1",
+--         format => "csv",
+--         inferSchema => False,
+--         header => False,
+--         sep => "|",
+--         fileNamePattern => "TradeHistory.txt",
+--         schema => "${TradeHistoryRaw.schema}"
+--     )
+--   ),
+--   TradeIncremental AS (
+--     SELECT
+--       t_id tradeid,
+--       t_dts,
+--       t_st_id,
+--       t_tt_id,
+--       t_is_cash,
+--       t_s_symb,
+--       t_qty AS quantity,
+--       t_bid_price AS bidprice,
+--       t_ca_id,
+--       t_exec_name AS executedby,
+--       t_trade_price AS tradeprice,
+--       t_chrg AS fee,
+--       t_comm AS commission,
+--       t_tax AS tax,
+--       cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid,
+--       CASE 
+--         WHEN cdc_flag = 'I' THEN TRUE 
+--         WHEN t_st_id IN ("CMPT", "CNCL") THEN FALSE 
+--         ELSE cast(null as boolean) END AS create_flg
+--     FROM STREAM(read_files(
+--       "${files_directory}sf=${scale_factor}/Batch[23]",
+--       format => "csv",
+--       inferSchema => False,
+--       header => False,
+--       sep => "|",
+--       fileNamePattern => "Trade.txt",
+--       schema => "${TradeIncremental.schema}"
+--     ))
+--   ),
+--   TradeHistory as (
+--     SELECT
+--       t_id tradeid,
+--       th_dts t_dts,
+--       t_st_id,
+--       t_tt_id,
+--       t_is_cash,
+--       t_s_symb,
+--       t_qty AS quantity,
+--       t_bid_price AS bidprice,
+--       t_ca_id,
+--       t_exec_name AS executedby,
+--       t_trade_price AS tradeprice,
+--       t_chrg AS fee,
+--       t_comm AS commission,
+--       t_tax AS tax,
+--       1 batchid,
+--       CASE 
+--         WHEN (th_st_id == "SBMT" AND t_tt_id IN ("TMB", "TMS")) OR th_st_id = "PNDG" THEN TRUE 
+--         WHEN th_st_id IN ("CMPT", "CNCL") THEN FALSE 
+--         ELSE cast(null as boolean) END AS create_flg
+--     FROM trade t
+--     JOIN TradeHistoryRaw th
+--       ON th_t_id = t_id
+--   )
+--   SELECT
+--     * except(create_flg, t_is_cash),
+--     if(t_is_cash = 1, TRUE, FALSE) cashflag,
+--     if(create_flg, t_dts, cast(NULL AS TIMESTAMP)) create_ts,
+--     if(!create_flg, t_dts, cast(NULL AS TIMESTAMP)) close_ts
+--   FROM (
+--     SELECT * FROM TradeHistory
+--     UNION ALL
+--     SELECT * FROM TradeIncremental
+--   )
+-- )
+-- KEYS (tradeid)
+-- IGNORE NULL UPDATES
+-- SEQUENCE BY t_dts
+-- COLUMNS * EXCEPT (t_dts)
+-- STORED AS SCD TYPE 1;
 
 -- COMMAND ----------
 
 CREATE OR REFRESH LIVE TABLE DimTrade (${DimTrade.schema}) AS SELECT
   trade.tradeid,
   sk_brokerid,
-  trade.sk_createdateid,
-  trade.sk_createtimeid,
-  trade.sk_closedateid,
-  trade.sk_closetimeid,
+  bigint(date_format(create_ts, 'yyyyMMdd')) sk_createdateid,
+  bigint(date_format(create_ts, 'HHmmss')) sk_createtimeid,
+  bigint(date_format(close_ts, 'yyyyMMdd')) sk_closedateid,
+  bigint(date_format(close_ts, 'HHmmss')) sk_closetimeid,
   st_name status,
   tt_name type,
-  CASE 
-    WHEN t_is_cash = 1 then TRUE
-    WHEN t_is_cash = 0 then FALSE
-    ELSE cast(null as BOOLEAN) END AS cashflag,
+  cashflag,
   sk_securityid,
   sk_companyid,
   trade.quantity,
@@ -601,20 +672,19 @@ CREATE OR REFRESH LIVE TABLE DimTrade (${DimTrade.schema}) AS SELECT
   trade.batchid
 FROM LIVE.TradeStg trade
 JOIN LIVE.StatusType status
-  ON status.st_id = trade.t_st_id
+  ON status.st_id = trade.status
 JOIN LIVE.TradeType tt
   ON tt.tt_id == trade.t_tt_id
--- Even without the DQ keep following two queries as LEFT JOINS until the Data Generator is fixed! Downstream table needs all trades to flow into it otherwise fails audit checks and some trades are missing DIM table versions of the symbol or account
 JOIN LIVE.DimSecurity ds
   ON 
     ds.symbol = trade.t_s_symb
-    AND trade.createdate >= ds.effectivedate 
-    AND trade.createdate < ds.enddate
+    AND to_date(trade.create_ts) >= ds.effectivedate 
+    AND to_date(trade.create_ts) < ds.enddate
 JOIN LIVE.DimAccount da
   ON 
     trade.t_ca_id = da.accountid 
-    AND trade.createdate >= da.effectivedate 
-    AND trade.createdate < da.enddate
+    AND to_date(trade.create_ts) >= da.effectivedate 
+    AND to_date(trade.create_ts) < da.enddate
 
 -- COMMAND ----------
 
@@ -623,7 +693,35 @@ JOIN LIVE.DimAccount da
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE FactHoldings (${FactHoldings.schema}) AS SELECT 
+CREATE OR REFRESH LIVE TABLE FactHoldings (${FactHoldings.schema}) AS 
+WITH Holdings as (
+  SELECT 
+    *,
+    1 batchid
+  FROM read_files(
+    "${files_directory}sf=${scale_factor}/Batch1",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "HoldingHistory.txt",
+    schema => "${HoldingHistory.schema}"
+  )
+  UNION ALL
+  SELECT
+    * except(cdc_flag, cdc_dsn),
+    cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid 
+  FROM read_files(
+    "${files_directory}sf=${scale_factor}/Batch[23]",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "HoldingHistory.txt",
+    schema => "${HoldingIncremental.schema}"
+  )
+)
+SELECT
   hh_h_t_id tradeid,
   hh_t_id currenttradeid,
   sk_customerid,
@@ -634,17 +732,10 @@ CREATE OR REFRESH LIVE TABLE FactHoldings (${FactHoldings.schema}) AS SELECT
   sk_closetimeid sk_timeid,
   tradeprice currentprice,
   hh_after_qty currentholding,
-  hh.batchid
-FROM (
-  SELECT 
-    * ,
-    1 batchid
-  FROM LIVE.HoldingHistory
-  UNION ALL
-  SELECT * except(cdc_flag, cdc_dsn)
-  FROM LIVE.HoldingIncremental) hh
-JOIN LIVE.DimTrade dt
-  ON tradeid = hh_t_id
+  h.batchid
+FROM Holdings h
+  JOIN LIVE.DimTrade dt 
+    ON tradeid = hh_t_id;
 
 -- COMMAND ----------
 
@@ -653,36 +744,60 @@ JOIN LIVE.DimTrade dt
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE FactCashBalances (${FactCashBalances.schema}) AS SELECT
-  a.sk_customerid, 
-  a.sk_accountid, 
-  d.sk_dateid, 
-  sum(account_daily_total) OVER (partition by c.accountid order by c.datevalue) cash,
-  c.batchid
-FROM (
+CREATE OR REFRESH LIVE TABLE FactCashBalances (${FactCashBalances.schema}) AS 
+with CashTransactions as (
+  SELECT
+    *,
+    1 batchid
+  FROM 
+    read_files(
+      "${files_directory}sf=${scale_factor}/Batch1",
+      format => "csv",
+      inferSchema => False,
+      header => False,
+      sep => "|",
+      fileNamePattern => "CashTransaction.txt",
+      schema => "${CashTransactionHistory.schema}"
+    )
+  UNION ALL
+  SELECT
+    * except(cdc_flag, cdc_dsn),
+    cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+  FROM
+    read_files(
+      "${files_directory}sf=${scale_factor}/Batch[23]",
+      format => "csv",
+      inferSchema => False,
+      header => False,
+      sep => "|",
+      fileNamePattern => "CashTransaction.txt",
+      schema => "${CashTransactionIncremental.schema}"
+    )
+),
+CashTransactionsAgg as (
   SELECT 
     ct_ca_id accountid,
     to_date(ct_dts) datevalue,
     sum(ct_amt) account_daily_total,
     batchid
-  FROM (
-    SELECT * , 1 batchid
-    FROM LIVE.CashTransactionHistory
-    UNION ALL
-    SELECT * except(cdc_flag, cdc_dsn)
-    FROM LIVE.CashTransactionIncremental
-  )
+  FROM CashTransactions
   GROUP BY
     accountid,
     datevalue,
-    batchid) c 
-JOIN LIVE.DimDate d 
-  ON c.datevalue = d.datevalue
+    batchid
+)
+SELECT
+  a.sk_customerid, 
+  a.sk_accountid, 
+  bigint(date_format(datevalue, 'yyyyMMdd')) sk_dateid,
+  sum(account_daily_total) OVER (partition by c.accountid order by c.datevalue) cash,
+  c.batchid
+FROM CashTransactionsAgg c 
 JOIN LIVE.DimAccount a 
   ON 
     c.accountid = a.accountid
     AND c.datevalue >= a.effectivedate 
-    AND c.datevalue < a.enddate 
+    AND c.datevalue < a.enddate;
 
 -- COMMAND ----------
 
@@ -691,37 +806,60 @@ JOIN LIVE.DimAccount a
 
 -- COMMAND ----------
 
-CREATE OR REFRESH STREAMING LIVE TABLE FactWatchesStg;
-APPLY CHANGES INTO LIVE.FactWatchesStg
-FROM ( 
-  SELECT 
-    wh.w_c_id customerid,
-    wh.w_s_symb symbol,
-    if(w_action = 'ACTV', d.sk_dateid, null) sk_dateid_dateplaced,
-    if(w_action = 'CNCL', d.sk_dateid, null) sk_dateid_dateremoved,
-    if(w_action = 'ACTV', d.datevalue, null) dateplaced,
-    wh.w_dts,
-    batchid 
-  FROM (
-    SELECT *, 1 batchid FROM STREAM(LIVE.WatchHistory)
-    UNION ALL
-    SELECT * except(cdc_flag, cdc_dsn) FROM STREAM(LIVE.WatchIncremental)
-  ) wh
-  JOIN LIVE.DimDate d
-    ON d.datevalue = date(wh.w_dts))
-KEYS (customerid, symbol)
-IGNORE NULL UPDATES
-SEQUENCE BY w_dts
-COLUMNS * EXCEPT (w_dts)
-STORED AS SCD TYPE 1;
+-- CREATE OR REFRESH STREAMING LIVE TABLE FactWatchesStg;
+-- APPLY CHANGES INTO LIVE.FactWatchesStg
+-- FROM ( 
+--   WITH all_watches as (
+--     SELECT
+--       *,
+--       1 batchid
+--     FROM 
+--       STREAM(read_files(
+--         "${files_directory}sf=${scale_factor}/Batch1",
+--         format => "csv",
+--         inferSchema => False,
+--         header => False,
+--         sep => "|",
+--         fileNamePattern => "WatchHistory.txt",
+--         schema => "${WatchHistory.schema}"
+--       ))
+--     UNION ALL
+--     SELECT
+--       * except(cdc_flag, cdc_dsn),
+--       cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid
+--     FROM
+--       STREAM(read_files(
+--         "${files_directory}sf=${scale_factor}/Batch[23]",
+--         format => "csv",
+--         inferSchema => False,
+--         header => False,
+--         sep => "|",
+--         fileNamePattern => "WatchHistory.txt",
+--         schema => "${WatchIncremental.schema}"
+--       ))
+--   )
+--   SELECT 
+--     wh.w_c_id customerid,
+--     wh.w_s_symb symbol,
+--     if(w_action = 'ACTV', to_date(w_dts), null) dateplaced,
+--     if(w_action = 'CNCL', to_date(w_dts), null) dateremoved,
+--     w_dts,
+--     batchid 
+--   FROM all_watches wh
+-- )
+-- KEYS (customerid, symbol)
+-- IGNORE NULL UPDATES
+-- SEQUENCE BY w_dts
+-- COLUMNS * except(w_dts)
+-- STORED AS SCD TYPE 1;
 
 -- COMMAND ----------
 
 CREATE OR REFRESH LIVE TABLE FactWatches (${FactWatches.schema}) AS SELECT
   c.sk_customerid sk_customerid,
   s.sk_securityid sk_securityid,
-  sk_dateid_dateplaced,
-  sk_dateid_dateremoved,
+  bigint(date_format(dateplaced, 'yyyyMMdd')) sk_dateid_dateplaced,
+  bigint(date_format(dateremoved, 'yyyyMMdd')) sk_dateid_dateremoved,
   wh.batchid
 FROM LIVE.FactWatchesStg wh
 JOIN LIVE.DimSecurity s 
