@@ -13,35 +13,35 @@
         {% if scale_factor < 1000 %}
         {
             "notebook": {
-                "path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/delta_live_tables/CustomerMgmtRaw"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/CustomerMgmtRaw"
             }
         },
         {% endif %}
         {
             "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/bronze"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/bronze"
             }
         },
         {
             "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/non-incremental"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/non-incremental"
             }
         },
         {% if edition == "PRO" %}
         {
             "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/incremental_apply_changes_into"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/incremental_apply_changes_into"
             }
         },
         {
             "notebook": {
-                "path": "{{ repo_src_path }}/delta_live_tables/Apply Changes ONCE Flow"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/Apply Changes ONCE Flow"
             }
         }
         {% else %}
         {
             "notebook": {                
-                "path": "{{ repo_src_path }}/delta_live_tables/incremental"
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/incremental"
             }
         }
         {% endif %}

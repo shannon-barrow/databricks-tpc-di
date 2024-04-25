@@ -93,7 +93,7 @@
             ],
             "run_if": "ALL_SUCCESS",
             "notebook_task": {
-                "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
+                "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw",
                 "source": "WORKSPACE"
             },
             "job_cluster_key": "{{ job_name }}_compute",

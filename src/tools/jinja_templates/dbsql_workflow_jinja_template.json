@@ -60,7 +60,7 @@
       "task_key": "dw_init",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/dw_init",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/dw_init",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -131,7 +131,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/native_notebooks/bronze/CustomerMgmtRaw",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw",
         "source": "WORKSPACE"
       },
       "job_cluster_key": "{{ job_name }}_cluster",
@@ -161,7 +161,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/SQL_WH/CustomerMgmtRaw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/CustomerMgmtRaw",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -190,7 +190,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch*",
           "tgt_query": "*, cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
@@ -232,7 +232,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -274,7 +274,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -316,7 +316,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*, substring(value, 16, 3) rectype",
@@ -358,7 +358,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -400,7 +400,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -442,7 +442,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -484,7 +484,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Ingest_Raw",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Raw",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "*",
@@ -519,7 +519,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimBroker",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimBroker",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -547,7 +547,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimCustomerStg",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCustomerStg",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -575,7 +575,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimAccount",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimAccount",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -600,7 +600,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/FactCashBalances",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactCashBalances",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -625,7 +625,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Prospect",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Prospect",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -653,7 +653,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimCustomer",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCustomer",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -684,7 +684,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimCompany",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCompany",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -709,7 +709,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimSecurity",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimSecurity",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -737,7 +737,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/FactWatches",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactWatches",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -768,7 +768,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/DimTrade",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimTrade",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -790,7 +790,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/FactHoldings",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactHoldings",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -812,7 +812,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/Financial",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Financial",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -837,7 +837,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/dbsql/{{ exec_type }}/FactMarketHistory",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactMarketHistory",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },

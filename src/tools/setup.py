@@ -1,4 +1,8 @@
 # Databricks notebook source
+pip install jinja2
+
+# COMMAND ----------
+
 import requests
 import string
 import json
@@ -40,16 +44,9 @@ def get_dbr_versions(min_version=14.1):
 
 # COMMAND ----------
 
-# DBTITLE 1,DBFS may not be accessible unless Cluster Access Mode set to "Single User" or "No Isolation Required"
+# ENV-Specific API calls and variables
 UC_enabled = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
 tpcdi_directory = '/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/' if UC_enabled else "/tmp/tpcdi/"
-UC_mode = spark.conf.get("spark.databricks.clusterUsageTags.clusterUnityCatalogMode")
-# if UC_enabled and UC_mode not in ['SINGLE_USER', 'NONE']:
-#   dbutils.notebook.exit("DBFS is used to generate and store the raw geenerated date.  On Unity Catalog enabled clusters, DBFS may not be accessible unless Cluster Access Mode set to 'SINGLE_USER' or 'No Isolation Required'. Please execute on a cluster that will have access to generated files in DBFS using 'SINGLE_USER' or 'NONE' as the data_security_mode")
-
-# COMMAND ----------
-
-# ENV-Specific API calls and variables
 repo_src_path      = f"{dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().split('/src')[0]}/src"
 workspace_src_path = f"/Workspace{repo_src_path}"
 API_URL = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
@@ -62,21 +59,23 @@ min_dbr_version     = 14.1
 invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 node_types          = get_node_types()
 dbrs                = get_dbr_versions(min_dbr_version)
+default_dbr_version = list(dbrs.keys())[0]
+default_dbr         = list(dbrs.values())[0]
 
 workflows_dict      = {
-  "NATIVE": "Native Notebooks Workflow", 
-  "SQL_WH": "DBSQL Warehouse Workflow",
+  "CLUSTER": "Workspace Cluster Workflow", 
+  "DBSQL": "DBSQL Warehouse Workflow",
   "DLT-CORE": "CORE Delta Live Tables Pipeline", 
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
   "DBT": "dbt Core on DB SQL Warehouse",
-  "ST_MVs": "Streaming Tables and Materialized Views on DBSQL/DLT"
+  "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
 
 try: 
   default_workflow  = wf_type
 except NameError: 
-  default_workflow  = workflows_dict['NATIVE']
+  default_workflow  = workflows_dict['CLUSTER']
 if default_workflow == '':
   raise Exception("Missing valid workflow type")
 
