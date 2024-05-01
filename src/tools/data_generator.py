@@ -82,11 +82,9 @@ def generate_data():
 
   if os.path.exists(blob_out_path) and not FORCE_REWRITE:
     print("Data generation skipped since raw data/directory already exists for this scale factor. If you want to force a rewrite, change the FORCE_REWRITE Flag")
+
   else:
-    if FORCE_REWRITE:
-      print(f"Raw Data Directory {blob_out_path} Exists but overwriting generated data with new generated data per FORCE_REWRITE flag")
-    else: 
-      print(f"Raw Data Directory {blob_out_path} does not exist yet.  Proceeding to generate data for scale factor={scale_factor} into this directory")
+    print(f"Raw Data Directory {blob_out_path} does not exist yet.  Proceeding to generate data for scale factor={scale_factor} into this directory")
     copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
     print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
     DIGen(driver_tmp_path, scale_factor, blob_out_path)  # Modified: Provide the output path directly to DIGen
