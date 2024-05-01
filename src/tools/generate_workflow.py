@@ -12,7 +12,7 @@ try:
   wh_api_endpoint        = "/api/2.0/sql/warehouses"
   wh_config_api_endpoint = "/api/2.0/sql/config/warehouses"
   DLT_PIPELINE_TEMPLATE  = "dlt_pipeline_jinja_template.json" 
-  if batch_folder == "incremental_batches":
+  if incremental:
     WORKFLOW_TEMPLATE    = "_incremental_workflow_jinja_template.json"
     print("Each of the 3 TPC-DI batches will be executed incrementally with batches 2 and 3 performing merges.")
   else:
@@ -32,8 +32,7 @@ try:
     "repo_src_path":repo_src_path,
     "cloud_provider":cloud_provider,
     "exec_type":sku[0],
-    "serverless":serverless,
-    "batch_folder":batch_folder
+    "serverless":serverless
   }
 
   if sku[0] == 'CLUSTER' and serverless != 'YES':

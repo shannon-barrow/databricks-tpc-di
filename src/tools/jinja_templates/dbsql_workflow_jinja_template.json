@@ -38,7 +38,8 @@
         "spark_conf": {
           "spark.master": "local[*, 4]",
           "spark.databricks.cluster.profile": "singleNode",
-          "spark.sql.shuffle.partitions": "auto"
+          "spark.sql.shuffle.partitions": "auto",
+          "spark.databricks.adaptive.localShuffleReader.enabled": "true"
         },
         "driver_node_type_id": "{{ driver_node_type }}",
         "node_type_id": "{{ worker_node_type }}",
