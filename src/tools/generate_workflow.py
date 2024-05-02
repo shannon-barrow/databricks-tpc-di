@@ -32,7 +32,8 @@ try:
     "repo_src_path":repo_src_path,
     "cloud_provider":cloud_provider,
     "exec_type":sku[0],
-    "serverless":serverless
+    "serverless":serverless,
+    "pred_opt":pred_opt
   }
 
   if sku[0] == 'CLUSTER' and serverless != 'YES':

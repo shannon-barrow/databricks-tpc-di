@@ -1,6 +1,14 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimBroker (brokerid, managerid, firstname, lastname, middleinitial, branch, office, phone, iscurrent, batchid, effectivedate, enddate)
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimBroker
 SELECT
+  employeeid sk_brokerid,
   employeeid brokerid,
   managerid,
   employeefirstname firstname,

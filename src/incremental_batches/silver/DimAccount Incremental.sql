@@ -83,9 +83,10 @@ all_incr_updates as (
     nvl(a.accountid, b.accountid) accountid,
     nvl(a.sk_brokerid, b.sk_brokerid) sk_brokerid,
     nvl(a.sk_customerid, b.sk_customerid) sk_customerid,
-    nvl(a.status, b.status) status,
     nvl(a.accountdesc, b.accountdesc) accountdesc,
     nvl(a.TaxStatus, b.TaxStatus) TaxStatus,
+    nvl(a.status, b.status) status,
+    true iscurrent,
     cast(${batch_id} as int) batchid,
     nvl(a.effectivedate, b.effectivedate) effectivedate,
     nvl(a.enddate, b.enddate) enddate
@@ -96,12 +97,14 @@ all_incr_updates as (
 matched_accts as (
   SELECT
     s.accountid mergeKey,
+    bigint(concat(date_format(s.effectivedate, 'yyyyMMdd'), s.accountid)) sk_accountid,
     s.accountid,
     nvl(s.sk_brokerid, t.sk_brokerid) sk_brokerid,
     s.sk_customerid,
-    s.status,
     nvl(s.accountdesc, t.accountdesc) accountdesc,
     nvl(s.taxstatus, t.taxstatus) taxstatus,
+    s.status,
+    true iscurrent,
     s.batchid,
     s.effectivedate,
     s.enddate    
@@ -113,6 +116,7 @@ matched_accts as (
 MERGE INTO ${catalog}.${wh_db}_${scale_factor}.DimAccount t USING (
   SELECT
     CAST(NULL AS BIGINT) AS mergeKey,
+    bigint(concat(date_format(effectivedate, 'yyyyMMdd'), accountid)) sk_accountid,
     dav.*
   FROM all_incr_updates dav
   UNION ALL
@@ -122,5 +126,5 @@ MERGE INTO ${catalog}.${wh_db}_${scale_factor}.DimAccount t USING (
 WHEN MATCHED AND t.iscurrent THEN UPDATE SET
   t.iscurrent = false,
   t.enddate = s.effectivedate
-WHEN NOT MATCHED THEN INSERT (accountid, sk_brokerid, sk_customerid, accountdesc, TaxStatus, status, batchid, effectivedate, enddate)
-VALUES (accountid, sk_brokerid, sk_customerid, accountdesc, TaxStatus, status, batchid, effectivedate, enddate);
+WHEN NOT MATCHED THEN INSERT (sk_accountid, accountid, sk_brokerid, sk_customerid, accountdesc, TaxStatus, status, iscurrent, batchid, effectivedate, enddate)
+VALUES (sk_accountid, accountid, sk_brokerid, sk_customerid, accountdesc, TaxStatus, status, iscurrent, batchid, effectivedate, enddate);

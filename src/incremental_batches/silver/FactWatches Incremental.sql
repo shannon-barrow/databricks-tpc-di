@@ -12,7 +12,6 @@
 
 -- COMMAND ----------
 
--- STILL TODO! Below is historical, need to make a merge
 with Watches as (
   SELECT 
     wh.w_c_id customerid,
@@ -55,7 +54,7 @@ Watch_cncl AS (
       sk_customerid,
       sk_securityid
     FROM ${catalog}.${wh_db}_${scale_factor}.FactWatches
-    WHERE !removed 
+    WHERE sk_dateid_dateremoved is null
   ) fw -- existing Active watches
   JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
     ON fw.sk_customerid = c.sk_customerid
@@ -93,7 +92,7 @@ USING (
     sk_securityid IS NOT NULL 
     AND sk_customerid IS NOT NULL) s
 ON 
-  !t.removed
+  t.sk_dateid_dateremoved is null
   AND t.sk_securityid = s.merge_sk_securityid
   AND t.sk_customerid = s.merge_sk_customerid
 WHEN MATCHED THEN UPDATE SET

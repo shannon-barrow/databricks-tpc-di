@@ -1,15 +1,5 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimAccount (
-  accountid,
-  sk_brokerid,
-  sk_customerid,
-  accountdesc,
-  TaxStatus,
-  status,
-  batchid,
-  effectivedate,
-  enddate
-) 
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimAccount
 WITH account AS (
   SELECT
     accountid,
@@ -81,12 +71,14 @@ with_cust_updates AS (
   WHERE a.effectivedate < a.enddate
 )
 SELECT
+  bigint(concat(date_format(a.effectivedate, 'yyyyMMdd'), a.accountid)) sk_accountid,
   a.accountid,
   b.sk_brokerid,
   a.sk_customerid,
   a.accountdesc,
   a.TaxStatus,
   a.status,
+  if(a.enddate = date('9999-12-31'), true, false) iscurrent,
   a.batchid,
   a.effectivedate,
   a.enddate

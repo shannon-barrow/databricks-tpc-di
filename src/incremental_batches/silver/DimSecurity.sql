@@ -1,19 +1,12 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimSecurity (
-  symbol,
-  issue,
-  status,
-  name,
-  exchangeid,
-  sk_companyid,
-  sharesoutstanding,
-  firsttrade,
-  firsttradeonexchange,
-  dividend,
-  batchid,
-  effectivedate,
-  enddate
-)
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
 WITH SEC as (
   SELECT
     date(to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss')) AS effectivedate,
@@ -86,6 +79,7 @@ SEC_final AS (
     AND SEC.EndDate > dc.EffectiveDate
 )
 SELECT 
+  monotonically_increasing_id() sk_securityid,
   Symbol,
   issue,
   status,
@@ -96,6 +90,7 @@ SELECT
   firsttrade,
   firsttradeonexchange,
   Dividend,
+  if(enddate = date('9999-12-31'), true, false) iscurrent,
   1 batchid,
   effectivedate,
   enddate

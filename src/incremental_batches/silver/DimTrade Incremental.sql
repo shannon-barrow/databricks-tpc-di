@@ -70,7 +70,8 @@ TradeIncremental as (
 MERGE INTO ${catalog}.${wh_db}_${scale_factor}.DimTrade t
 USING TradeIncremental s
   ON t.tradeid = s.tradeid
-  AND !t.closed
+  AND t.sk_closedateid is null
+  AND t.sk_closetimeid is null
 WHEN MATCHED THEN UPDATE SET
     sk_closedateid = s.sk_closedateid,
     sk_closetimeid = s.sk_closetimeid,

@@ -1,7 +1,15 @@
 -- Databricks notebook source
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
-  tradeid, sk_brokerid, sk_createdateid, sk_createtimeid, sk_closedateid, sk_closetimeid, status, type, cashflag, sk_securityid, sk_companyid, quantity, bidprice, sk_customerid, sk_accountid, executedby, tradeprice, fee, commission, tax, batchid
-)
+-- CREATE WIDGET DROPDOWN wh_timezone DEFAULT "" CHOICES SELECT * FROM (VALUES (""), ("set timezone = GMT;"));
+
+-- COMMAND ----------
+
+-- ONLY use for DBSQL workflows since default for DBSQL is with localization and can cause issues with DST.
+-- Pass empty string for a cluster - especially serverless workflows since serverless clusters do not accept this set command and will fail
+${wh_timezone} 
+
+-- COMMAND ----------
+
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
 WITH TradeHistory AS (
   SELECT
     tradeid,

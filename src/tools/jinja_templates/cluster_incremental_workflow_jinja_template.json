@@ -27,6 +27,10 @@
     {
       "name": "wh_db",
       "default": "{{ wh_target }}_{{ exec_type }}"
+    },
+    {
+      "name": "predictive_optimization",
+      "default": "{{ pred_opt }}"
     }
   ],
   {% if scale_factor > 100 and serverless == "YES" %}
@@ -122,6 +126,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/dw_init",
+        "base_parameters": {
+          {% raw %}"pred_opt": "{{job.parameters.predictive_optimization}}"{% endraw %}
+        },
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1010,6 +1017,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimTrade Historical",
+        "base_parameters": {
+          "wh_timezone": ""
+        },
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}

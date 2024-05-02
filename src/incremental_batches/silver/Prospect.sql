@@ -58,32 +58,3 @@ LEFT JOIN (
     and upper(p.AddressLine1) = upper(c.addressline1)
     and upper(nvl(p.addressline2, '')) = upper(nvl(c.addressline2, ''))
     and upper(p.PostalCode) = upper(c.postalcode)
-
--- COMMAND ----------
-
-MERGE INTO ${catalog}.${wh_db}_${scale_factor}.DimCustomer t USING (
-  SELECT 
-    lastname,
-    firstname,
-    addressline1,
-    addressline2,
-    postalcode,
-    p.agencyid,
-    p.creditrating,
-    p.networth,
-    p.marketingnameplate
-  FROM ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental p
-  WHERE batchid = cast(${batch_id} as int)
-) s 
-  ON 
-    t.iscurrent
-    and upper(s.lastname) = upper(t.lastname)
-    and upper(s.firstname) = upper(t.firstname)
-    and upper(s.addressline1) = upper(t.addressline1)
-    and upper(nvl(s.addressline2, '')) = upper(nvl(t.addressline2, ''))
-    and upper(s.postalcode) = upper(t.postalcode)
-WHEN MATCHED THEN UPDATE SET
-  t.agencyid = s.agencyid,
-  t.creditrating = s.creditrating,
-  t.networth = s.networth,
-  t.marketingnameplate = s.marketingnameplate

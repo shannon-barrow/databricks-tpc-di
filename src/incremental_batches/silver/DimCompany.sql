@@ -1,24 +1,12 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCompany (
-  companyid, 
-  status, 
-  name, 
-  industry, 
-  sprating, 
-  islowgrade, 
-  ceo, 
-  addressline1, 
-  addressline2, 
-  postalcode, 
-  city, 
-  stateprov, 
-  country, 
-  description, 
-  foundingdate, 
-  batchid, 
-  effectivedate, 
-  enddate
-)
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCompany
 WITH cmp as (
   SELECT
     try_to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss') AS PTS,
@@ -40,7 +28,26 @@ WITH cmp as (
   WHERE rectype = 'CMP'
 )
 SELECT 
-  * 
+  bigint(concat(date_format(effectivedate, 'yyyyMMdd'), companyid)) sk_companyid,
+  companyid, 
+  status, 
+  name, 
+  industry, 
+  sprating, 
+  islowgrade, 
+  ceo, 
+  addressline1, 
+  addressline2, 
+  postalcode, 
+  city, 
+  stateprov, 
+  country, 
+  description, 
+  foundingdate, 
+  if(enddate = date('9999-12-31'), true, false) iscurrent,
+  batchid, 
+  effectivedate, 
+  enddate 
 FROM (
   SELECT
     cast(cik as BIGINT) companyid,
