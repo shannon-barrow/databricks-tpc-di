@@ -32,7 +32,7 @@
   {% if scale_factor > 100 and serverless == "YES" %}
   "job_clusters": [
     {
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       "new_cluster": {
         "cluster_name": "",
         "spark_version": "{{ dbr }}",
@@ -125,7 +125,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -189,7 +189,7 @@
       },
       {% endif %}
       {% if serverless != "YES" or scale_factor > 100 %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -227,7 +227,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -268,7 +268,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -309,7 +309,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -350,7 +350,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -391,7 +391,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -432,7 +432,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -473,7 +473,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -514,7 +514,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -541,7 +541,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -571,7 +571,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -601,7 +601,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -628,7 +628,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -655,7 +655,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -685,7 +685,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -718,7 +718,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -745,7 +745,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -775,7 +775,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "max_retries": 2,
       "min_retry_interval_millis": 10000,
@@ -808,7 +808,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -832,7 +832,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -856,7 +856,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -883,7 +883,7 @@
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_cluster",
+      "job_cluster_key": "{{ job_name }}_compute",
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},

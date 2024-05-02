@@ -93,7 +93,7 @@ default_wh            = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
 if cloud_provider == 'AWS':
   default_worker_type = "m6gd.2xlarge"
-  default_driver_type = "m6g.xlarge"
+  default_driver_type = "m6gd.xlarge"
   cust_mgmt_type      = "m6gd.16xlarge"
 elif cloud_provider == 'GCP':
   default_worker_type = "n2-standard-8"

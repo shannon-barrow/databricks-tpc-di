@@ -1,5 +1,9 @@
 -- Databricks notebook source
 -- CREATE WIDGET DROPDOWN wh_timezone DEFAULT "" CHOICES SELECT * FROM (VALUES (""), ("set timezone = GMT;"));
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
 
 -- COMMAND ----------
 
@@ -9,7 +13,7 @@ ${wh_timezone}
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade (tradeid, sk_brokerid, sk_createdateid, sk_createtimeid, sk_closedateid, sk_closetimeid, status, type, cashflag, sk_securityid, sk_companyid, quantity, bidprice, sk_customerid, sk_accountid, executedby, tradeprice, fee, commission, tax, batchid)
 WITH TradeHistory AS (
   SELECT
     tradeid,

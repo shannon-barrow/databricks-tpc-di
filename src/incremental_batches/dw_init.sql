@@ -48,7 +48,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.WatchIncrement
   w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action',
   w_action STRING COMMENT 'Whether activating or canceling the watch',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -64,7 +64,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.DailyMarketInc
   sk_fiftytwoweekhighdate BIGINT NOT NULL COMMENT 'Earliest date on which the 52 week high price was set',
   fiftytwoweeklow DOUBLE NOT NULL COMMENT 'Security lowest price in last 52 weeks from this day',
   sk_fiftytwoweeklowdate BIGINT NOT NULL COMMENT 'Earliest date on which the 52 week low price was set'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -73,7 +73,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.CashTransactio
   datevalue DATE NOT NULL COMMENT 'Date of the Customer Account Balance',
   cash DOUBLE NOT NULL COMMENT 'Cash balance for the account at end of day',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -83,7 +83,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncreme
   hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade.',
   hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade.',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -105,7 +105,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.TradeIncrement
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -117,7 +117,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.AccountIncreme
   taxstatus TINYINT COMMENT 'Tax status of this account', 
   status STRING COMMENT 'Customer status type identifier',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -145,7 +145,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.CustomerIncrem
   lcl_tx_id STRING COMMENT 'Customers local tax rate',
   nat_tx_id STRING COMMENT 'Customers national tax rate',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -175,7 +175,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncrem
   marketingnameplate STRING COMMENT 'Marketing nameplate',
   recordbatchid INT NOT NULL COMMENT 'Batch ID when this record last inserted',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was initially inserted'
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -266,7 +266,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.TradeType (
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.FinWire (
   value STRING COMMENT 'Pre-parsed String Values of all FinWire files',
   rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC'
-) CLUSTER BY (rectype);
+) PARTITIONED BY (rectype);
 
 -- COMMAND ----------
 
@@ -324,8 +324,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimCustomer (
   effectivedate DATE NOT NULL COMMENT 'Beginning of date range when this record was the current record',
   enddate DATE NOT NULL COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.',
   CONSTRAINT dimcustomer_pk PRIMARY KEY(sk_customerid)
-) --PARTITIONED BY (iscurrent)
-CLUSTER BY (enddate)
+) PARTITIONED BY (iscurrent)
+--CLUSTER BY (enddate)
 TBLPROPERTIES ('delta.dataSkippingNumIndexedCols' = 33);
 
 -- COMMAND ----------
@@ -373,8 +373,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimAccount (
   CONSTRAINT dimaccount_pk PRIMARY KEY(sk_accountid),
   CONSTRAINT dimaccount_customer_fk FOREIGN KEY (sk_customerid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCustomer(sk_customerid),
   CONSTRAINT dimaccount_broker_fk FOREIGN KEY (sk_brokerid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimBroker(sk_brokerid)
-) --PARTITIONED BY (iscurrent)
-CLUSTER BY (enddate);
+) PARTITIONED BY (iscurrent)
+--CLUSTER BY (enddate);
 
 -- COMMAND ----------
 
@@ -397,8 +397,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimSecurity (
   CONSTRAINT dimsecurity_pk PRIMARY KEY(sk_securityid),
   CONSTRAINT dimsecurity_status_fk FOREIGN KEY (status) REFERENCES ${catalog}.${wh_db}_${scale_factor}.StatusType(st_name),
   CONSTRAINT dimsecurity_company_fk FOREIGN KEY (sk_companyid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCompany(sk_companyid)
-) --PARTITIONED BY (iscurrent)
-CLUSTER BY (enddate);
+) PARTITIONED BY (iscurrent)
+--CLUSTER BY (enddate);
 
 -- COMMAND ----------
 
@@ -431,7 +431,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Prospect (
   networth INT COMMENT 'Estimated total net worth',
   marketingnameplate STRING COMMENT 'For marketing purposes',
   CONSTRAINT prospect_pk PRIMARY KEY(agencyid)
-) CLUSTER BY (batchid);
+) PARTITIONED BY (batchid);
 
 -- COMMAND ----------
 
@@ -478,6 +478,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted',
+  closed BOOLEAN GENERATED ALWAYS AS (nvl2(sk_closedateid, true, false)) COMMENT 'True if this trade has been closed',
   CONSTRAINT dimtrade_pk PRIMARY KEY(tradeid),
   CONSTRAINT dimtrade_security_fk FOREIGN KEY (sk_securityid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimSecurity(sk_securityid),
   CONSTRAINT dimtrade_company_fk FOREIGN KEY (sk_companyid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCompany(sk_companyid),
@@ -488,7 +489,9 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
   CONSTRAINT dimtrade_closedate_fk FOREIGN KEY (sk_closedateid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid),
   CONSTRAINT dimtrade_createtime_fk FOREIGN KEY (sk_createtimeid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimTime(sk_timeid),
   CONSTRAINT dimtrade_closetime_fk FOREIGN KEY (sk_closetimeid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimTime(sk_timeid)
-) CLUSTER BY (sk_closedateid) ;
+) 
+--CLUSTER BY (sk_closedateid)
+PARTITIONED BY (closed);
 
 -- COMMAND ----------
 
@@ -560,12 +563,15 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactWatches (
   sk_dateid_dateplaced BIGINT NOT NULL COMMENT 'Date the watch list item was added',
   sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted',
+  removed BOOLEAN GENERATED ALWAYS AS (nvl2(sk_dateid_dateremoved, true, false)) COMMENT 'True if this watch has been removed',
   CONSTRAINT factwatches_pk PRIMARY KEY(sk_customerid, sk_securityid),
   CONSTRAINT factwatches_customer_fk FOREIGN KEY (sk_customerid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCustomer(sk_customerid),
   CONSTRAINT factwatches_security_fk FOREIGN KEY (sk_securityid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimSecurity(sk_securityid),
   CONSTRAINT factwatches_dateplaced_fk FOREIGN KEY (sk_dateid_dateplaced) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid),
   CONSTRAINT factwatches_dateremoved_fk FOREIGN KEY (sk_dateid_dateremoved) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid)
-) CLUSTER BY (sk_dateid_dateremoved);
+) 
+--CLUSTER BY (sk_dateid_dateremoved)
+PARTITIONED BY (removed);
 
 -- COMMAND ----------
 
