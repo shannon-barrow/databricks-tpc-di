@@ -69,6 +69,7 @@
           "spark.databricks.cluster.profile": "singleNode",
           "spark.databricks.adaptive.localShuffleReader.enabled": "true",
           {% endif %}
+          "spark.sql.shuffle.partitions": "auto",
           "spark.databricks.delta.schema.autoMerge.enabled": "true",
           "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
           "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
