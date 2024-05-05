@@ -83,15 +83,16 @@ incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batch
 
 if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')
+  incremental = False
 
 if sku[0] not in ['CLUSTER','DLT'] or serverless == 'YES':
   dbutils.widgets.remove('worker_type')
   dbutils.widgets.remove('driver_type')
   dbutils.widgets.remove('dbr')
 
-if sku[0] in ['DBT', 'STMV']:
-  displayHTML(f"<h1>Please select a different Workflow Type from the widgets above and rerun. The DBT and Streaming Tables/Materialized Views flows are 'UNDER RENOVATION' </h1>")
-  raise Exception("Please select a different Workflow Type from the widgets above and rerun<. The DBT and Streaming Tables/Materialized Views flows are 'UNDER RENOVATION'")
+if sku[0] in ['DBT']:
+  displayHTML(f"<h1>Please select a different Workflow Type from the widgets above and rerun. The dbt flow is 'UNDER RENOVATION' </h1>")
+  raise Exception("Please select a different Workflow Type from the widgets above and rerun<. The dbt flow is 'UNDER RENOVATION'")
 
 # COMMAND ----------
 

@@ -758,3 +758,118 @@ FROM
     fileNamePattern => "Prospect.csv",
     schema => "agencyid STRING COMMENT 'Unique identifier from agency', lastname STRING COMMENT 'Last name', firstname STRING COMMENT 'First name', middleinitial STRING COMMENT 'Middle initial', gender STRING COMMENT '‘M’ or ‘F’ or ‘U’', addressline1 STRING COMMENT 'Postal address', addressline2 STRING COMMENT 'Postal address', postalcode STRING COMMENT 'Postal code', city STRING COMMENT 'City', state STRING COMMENT 'State or province', country STRING COMMENT 'Postal country', phone STRING COMMENT 'Telephone number', income STRING COMMENT 'Annual income', numbercars INT COMMENT 'Cars owned', numberchildren INT COMMENT 'Dependent children', maritalstatus STRING COMMENT '‘S’ or ‘M’ or ‘D’ or ‘W’ or ‘U’', age INT COMMENT 'Current age', creditrating INT COMMENT 'Numeric rating', ownorrentflag STRING COMMENT '‘O’ or ‘R’ or ‘U’', employer STRING COMMENT 'Name of employer', numbercreditcards INT COMMENT 'Credit cards', networth INT COMMENT 'Estimated total net worth'"
   );
+
+-- COMMAND ----------
+
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_BatchDate AS
+-- SELECT
+--   DATE(val [0]) batchdate,
+--   INT(batchid) batchid
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val,
+--       substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+--     FROM
+--       STREAM(text.`${tpcdi_directory}sf=${scale_factor}/Batch*/BatchDate.txt`)
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_DimDate AS
+-- SELECT
+--   BIGINT(val[0]) sk_dateid,
+--   DATE(val[1]) datevalue,
+--   val[2] datedesc,
+--   INT(val[3]) calendaryearid,
+--   val[4] calendaryeardesc,
+--   INT(val[5]) calendarqtrid,
+--   val[6] calendarqtrdesc,
+--   INT(val[7]) calendarmonthid,
+--   val[8] calendarmonthdesc,
+--   INT(val[9]) calendarweekid,
+--   val[10] calendarweekdesc,
+--   INT(val[11]) dayofweeknum,
+--   val[12] dayofweekdesc,
+--   INT(val[13]) fiscalyearid,
+--   val[14] fiscalyeardesc,
+--   INT(val[15]) fiscalqtrid,
+--   val[16] fiscalqtrdesc,
+--   BOOLEAN(val[17]) holidayflag
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Date.txt`
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_DimTime AS
+-- SELECT
+--   BIGINT(val[0]) sk_timeid,
+--   val[1] timevalue,
+--   INT(val[2]) hourid,
+--   val[3] hourdesc,
+--   INT(val[4]) minuteid,
+--   val[5] minutedesc,
+--   INT(val[6]) secondid,
+--   val[7] seconddesc,
+--   BOOLEAN(val[8]) markethoursflag,
+--   BOOLEAN(val[9]) officehoursflag
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Time.txt`
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
+-- SELECT
+--   value,
+--   substring(value, 16, 3) rectype
+-- FROM 
+--   text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`;
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_StatusType AS
+-- SELECT
+--   val[0] st_id,
+--   val[1] st_name
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/StatusType.txt`
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TaxRate AS
+-- SELECT
+--   val[0] tx_id,
+--   val[1] tx_name,
+--   FLOAT(val[2]) tx_rate
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/TaxRate.txt`
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeType AS
+-- SELECT
+--   val[0] tt_id,
+--   val[1] tt_name,
+--   INT(val[2]) tt_is_sell,
+--   INT(val[3]) tt_is_mrkt
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/TradeType.txt`
+--   );
+-- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_industry AS
+-- SELECT
+--   val[0] in_id,
+--   val[1] in_name,
+--   val[2] in_sc_id
+-- FROM
+--   (
+--     SELECT
+--       split(value, "[|]") val
+--     FROM
+--       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Industry.txt`
+--   )

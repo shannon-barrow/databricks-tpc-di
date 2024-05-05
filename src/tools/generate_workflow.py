@@ -46,14 +46,10 @@ try:
     dag_args['dbr'] = dbr_version_id
     compute = f"""Driver Type:              {driver_node_type}\nWorker Type:              {worker_node_type}\nWorker Count:             {worker_node_count}\nDBR Version:              {dbr_version_id}"""
   else:
-    if scale_factor > 100:
-      dag_args['dbr'] = default_dbr_version
-      dag_args['worker_node_type'] = default_worker_type
-      dag_args['driver_node_type'] = default_worker_type
-      dag_args['worker_node_count'] = 0
-      if scale_factor > 1000:
-        dag_args['driver_node_type'] = cust_mgmt_type
-        dag_args['worker_node_type'] = cust_mgmt_type 
+    dag_args['dbr'] = default_dbr_version
+    dag_args['driver_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type
+    dag_args['worker_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type
+    dag_args['worker_node_count'] = 0
   if sku[0] in ['DBT', 'STMV', 'DBSQL']:
     wh_size = wh_scale_factor_map[f"{scale_factor}"]
     wh_name = f"TPCDI_{wh_size}"

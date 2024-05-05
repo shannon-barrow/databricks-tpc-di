@@ -1,4 +1,11 @@
 -- Databricks notebook source
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
 CREATE TABLE IF NOT EXISTS ${catalog}.${wh_db}_stage.CustomerMgmt PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 

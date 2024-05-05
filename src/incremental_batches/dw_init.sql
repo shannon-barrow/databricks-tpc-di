@@ -3,7 +3,7 @@
 -- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
 -- CREATE WIDGET TEXT wh_db DEFAULT '';
 -- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
--- CREATE WIDGET DROPDOWN pred_opt DEFAULT "ENABLE" CHOICES SELECT * FROM (VALUES ("ENABLE"), ("DISABLE")); -- Predictive Optimization
+-- CREATE WIDGET DROPDOWN pred_opt DEFAULT "DISABLE" CHOICES SELECT * FROM (VALUES ("ENABLE"), ("DISABLE")); -- Predictive Optimization
 
 -- COMMAND ----------
 
