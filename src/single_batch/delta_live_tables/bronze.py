@@ -40,7 +40,7 @@ def build_autoloader_stream(tbl):
   )
 
 def generate_tables(tbl):
-  tbl_name = tbl.get("table") if tbl.get("stage") is None else f"stage.{tbl.get('table')}"
+  tbl_name = tbl.get("table")
   if tbl.get("part") is not None:
     @dlt.table(
       name=tbl_name,

@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE OR REFRESH LIVE TABLE stage.customermgmt PARTITIONED BY (ActionType) AS SELECT
+CREATE OR REFRESH LIVE TABLE customermgmt PARTITIONED BY (ActionType) AS SELECT
   cast(Customer._C_ID as BIGINT) customerid, 
   cast(Customer.Account._CA_ID as BIGINT) accountid,
   cast(Customer.Account.CA_B_ID as BIGINT) brokerid, 

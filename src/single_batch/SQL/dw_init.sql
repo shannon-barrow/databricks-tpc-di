@@ -467,25 +467,25 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}.FactWatches (
 
 -- COMMAND ----------
 
--- CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_TradeIncremental AS
--- SELECT
---   *,
---   cast(
---     substring(
---       _metadata.file_path
---       FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
---     ) as int
---   ) batchid
--- FROM
---   read_files(
---     "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
---     format => "csv",
---     inferSchema => False,
---     header => False,
---     sep => "|",
---     fileNamePattern => "Trade.txt",
---     schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', t_id BIGINT COMMENT 'Trade identifier.', t_dts TIMESTAMP COMMENT 'Date and time of trade.', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT, t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded.', t_bid_price DOUBLE COMMENT 'The requested unit price.', t_ca_id BIGINT COMMENT 'Customer account identifier.', t_exec_name STRING COMMENT 'Name of the person executing the trade.', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded.', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request.', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'"
---   )
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_TradeIncremental AS
+SELECT
+  *,
+  cast(
+    substring(
+      _metadata.file_path
+      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
+    ) as int
+  ) batchid
+FROM
+  read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "Trade.txt",
+    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', t_id BIGINT COMMENT 'Trade identifier.', t_dts TIMESTAMP COMMENT 'Date and time of trade.', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT, t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded.', t_bid_price DOUBLE COMMENT 'The requested unit price.', t_ca_id BIGINT COMMENT 'Customer account identifier.', t_exec_name STRING COMMENT 'Name of the person executing the trade.', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded.', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request.', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'"
+  )
 
 -- COMMAND ----------
 

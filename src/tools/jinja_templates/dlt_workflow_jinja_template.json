@@ -25,7 +25,7 @@
       },
       {
         "name": "wh_db",
-        "default": "{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}"
+        "default": "{{ wh_target }}_DLT_{{ edition }}"
       },
       {
         "name": "tpcdi_directory",
@@ -93,14 +93,14 @@
             ],
             "run_if": "ALL_SUCCESS",
             "notebook_task": {
-                "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw",
+                "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw_mavenlib",
                 "source": "WORKSPACE"
             },
             "job_cluster_key": "{{ job_name }}_compute",
             "libraries": [
                 {
                     "maven": {
-                        "coordinates": "com.databricks:spark-xml_2.12:0.16.0"
+                        "coordinates": "com.databricks:spark-xml_2.12:0.18.0"
                     }
                 }
             ],

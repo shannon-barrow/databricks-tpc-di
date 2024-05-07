@@ -18,7 +18,7 @@
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE stage.DimCustomerStg (${DimCustomerStg.schema})   
+CREATE OR REFRESH LIVE TABLE DimCustomerStg (${DimCustomerStg.schema})   
 PARTITIONED BY (iscurrent) AS 
 WITH CustomerHistory as (
   SELECT
