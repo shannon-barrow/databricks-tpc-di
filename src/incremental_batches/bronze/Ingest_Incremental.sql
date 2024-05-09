@@ -5,5 +5,7 @@
 -- TradeIncremental:v_TradeIncremental
 -- CashTransactionIncremental:v_CashTransactionIncremental
 -- DailyMarketIncremental:v_DailyMarketIncremental
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}_stage.${table}
+-- FinWire:v_FinWire
+-- BatchDate:v_BatchDate
+INSERT INTO ${catalog}.${tgt_db}.${table}
 SELECT * FROM ${catalog}.${wh_db}_${scale_factor}_stage.${view}

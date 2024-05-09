@@ -5,6 +5,7 @@ OPTIONS (path "${tpcdi_directory}sf=${scale_factor}/Batch1/CustomerMgmt.xml", ro
 
 -- COMMAND ----------
 
+CREATE SCHEMA IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
 CREATE TABLE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 

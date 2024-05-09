@@ -261,41 +261,6 @@
       }
     },
     {
-      "task_key": "ingest_BatchDate",
-      "depends_on": [
-        {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
-        }
-      ],
-      "run_if": "AT_LEAST_ONE_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch*",
-          "tgt_query": "*, cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
-          "filename": "BatchDate.txt",
-          "raw_schema": "batchdate DATE",
-          "table": "BatchDate"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
       "task_key": "ingest_DimDate",
       "depends_on": [
         {
@@ -311,10 +276,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
           "filename": "Date.txt",
-          "raw_schema": "sk_dateid BIGINT, datevalue DATE, datedesc STRING, calendaryearid INT, calendaryeardesc STRING, calendarqtrid INT, calendarqtrdesc STRING, calendarmonthid INT, calendarmonthdesc STRING, calendarweekid INT, calendarweekdesc STRING, dayofweeknum INT, dayofweekdesc STRING, fiscalyearid INT, fiscalyeardesc STRING, fiscalqtrid INT, fiscalqtrdesc STRING, holidayflag BOOLEAN",
           "table": "DimDate"
         },
         "source": "WORKSPACE"
@@ -346,46 +309,9 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
           "filename": "Time.txt",
-          "raw_schema": "sk_timeid BIGINT, timevalue STRING, hourid INT, hourdesc STRING, minuteid INT, minutedesc STRING, secondid INT, seconddesc STRING, markethoursflag BOOLEAN, officehoursflag BOOLEAN",
           "table": "DimTime"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_FinWire",
-      "depends_on": [
-        {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
-        }
-      ],
-      "run_if": "AT_LEAST_ONE_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*, substring(value, 16, 3) rectype",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %},
-          "filename": "FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]",
-          "raw_schema": "value STRING",
-          "table": "FinWire"
         },
         "source": "WORKSPACE"
       },
@@ -416,10 +342,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "val[0] st_id, val[1] st_name",
           "filename": "StatusType.txt",
-          "raw_schema": "st_id STRING, st_name STRING",
           "table": "StatusType"
         },
         "source": "WORKSPACE"
@@ -451,10 +375,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "val[0] tx_id, val[1] tx_name, FLOAT(val[2]) tx_rate",
           "filename": "TaxRate.txt",
-          "raw_schema": "tx_id STRING, tx_name STRING, tx_rate FLOAT",
           "table": "TaxRate"
         },
         "source": "WORKSPACE"
@@ -486,10 +408,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
           "filename": "TradeType.txt",
-          "raw_schema": "tt_id STRING, tt_name STRING, tt_is_sell INT, tt_is_mrkt INT",
           "table": "TradeType"
         },
         "source": "WORKSPACE"
@@ -521,11 +441,41 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
-          "tgt_query": "*",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %},
+          "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
           "filename": "Industry.txt",
-          "raw_schema": "in_id STRING, in_name STRING, in_sc_id STRING",
-          "table": "industry"
+          "table": "Industry"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_FinWire",
+      "depends_on": [
+        {
+          "task_key": "run_customermgmt_YES_NO",
+          "outcome": "false"
+        },
+        {
+          "task_key": "ingest_customermgmt"
+        }
+      ],
+      "run_if": "AT_LEAST_ONE_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_FinWire",
+          "table": "FinWire",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -556,7 +506,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_Prospect",
-          "table": "ProspectIncremental"
+          "table": "ProspectIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -587,7 +538,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_CashTransactionIncremental",
-          "table": "CashTransactionIncremental"
+          "table": "CashTransactionIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -618,7 +570,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_DailyMarketIncremental",
-          "table": "DailyMarketIncremental"
+          "table": "DailyMarketIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -646,14 +599,43 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %},
-          "filename": "HoldingHistory.txt",
-          "raw_schema": "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT",
-          "table": "HoldingIncremental"
+          "view": "v_HoldingIncremental",
+          "table": "HoldingIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_BatchDate",
+      "depends_on": [
+        {
+          "task_key": "run_customermgmt_YES_NO",
+          "outcome": "false"
+        },
+        {
+          "task_key": "ingest_customermgmt"
+        }
+      ],
+      "run_if": "AT_LEAST_ONE_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_BatchDate",
+          "table": "BatchDate",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -681,14 +663,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %},
-          "filename": "WatchHistory.txt",
-          "raw_schema": "cdc_flag STRING , cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING",
-          "table": "WatchIncremental"
+          "view": "v_WatchIncremental",
+          "table": "WatchIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -716,14 +695,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %},
-          "filename": "Account.txt",
-          "raw_schema": "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountDesc STRING, taxstatus TINYINT, status STRING",
-          "table": "AccountIncremental"
+          "view": "v_AccountIncremental",
+          "table": "AccountIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -754,7 +730,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_CustomerIncremental",
-          "table": "CustomerIncremental"
+          "table": "CustomerIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -785,7 +762,8 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_TradeIncremental",
-          "table": "TradeIncremental"
+          "table": "TradeIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
