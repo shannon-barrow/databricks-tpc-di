@@ -153,14 +153,10 @@ WITH CustomerHistory AS (
       ),
       date('9999-12-31')
     ) enddate
-  FROM (
-    SELECT
-      * except(update_ts),
-      to_timestamp(update_ts) update_ts
-    FROM ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
-    WHERE
-      ActionType in ('NEW', 'INACT', 'UPDCUST')
-  )
+  FROM 
+    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
+  WHERE
+    ActionType in ('NEW', 'INACT', 'UPDCUST')
 )
 SELECT 
   bigint(concat(date_format(c.effectivedate, 'yyyyMMdd'), customerid)) sk_customerid,

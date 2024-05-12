@@ -1,49 +1,38 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}.FactMarketHistory
-WITH DailyMarket as (
-  SELECT
-    dm.*,
-    min_by(struct(dm_low, dm_date), dm_low) OVER (
-      PARTITION BY dm_s_symb
-      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-    ) fiftytwoweeklow,
-    max_by(struct(dm_high, dm_date), dm_high) OVER (
-      PARTITION by dm_s_symb
-      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-    ) fiftytwoweekhigh
-  FROM
-    (
-      SELECT * FROM ${catalog}.${wh_db}_stage.v_dailymarkethistorical
-      UNION ALL
-      SELECT * FROM ${catalog}.${wh_db}_stage.v_DailyMarketIncremental
-    ) dm
-),
-CompanyFinancialsStg as (
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.FactMarketHistory
+with CompanyFinancialsStg as (
   SELECT
     sk_companyid,
     fi_qtr_start_date,
-    sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) - fi_basic_eps sum_fi_basic_eps
-  FROM ${catalog}.${wh_db}.Financial
-  JOIN ${catalog}.${wh_db}.DimCompany
+    sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND 1 PRECEDING) sum_fi_basic_eps
+  FROM ${catalog}.${wh_db}_${scale_factor}.Financial
+  JOIN ${catalog}.${wh_db}_${scale_factor}.DimCompany
     USING (sk_companyid)
 )
 SELECT 
   s.sk_securityid,
   s.sk_companyid,
   bigint(date_format(dm_date, 'yyyyMMdd')) sk_dateid,
-  fmh.dm_close / sum_fi_basic_eps AS peratio,
-  (s.dividend / fmh.dm_close) / 100 yield,
-  fiftytwoweekhigh.dm_high fiftytwoweekhigh,
-  bigint(date_format(fiftytwoweekhigh.dm_date, 'yyyyMMdd')) sk_fiftytwoweekhighdate,
-  fiftytwoweeklow.dm_low fiftytwoweeklow,
-  bigint(date_format(fiftytwoweeklow.dm_date, 'yyyyMMdd')) sk_fiftytwoweeklowdate,
+  try_divide(fmh.dm_close, sum_fi_basic_eps) AS peratio,
+  (try_divide(s.dividend, fmh.dm_close)) / 100 yield,
+  fiftytwoweekhigh,
+  sk_fiftytwoweekhighdate,
+  fiftytwoweeklow,
+  sk_fiftytwoweeklowdate,
   dm_close closeprice,
   dm_high dayhigh,
   dm_low daylow,
   dm_vol volume,
   fmh.batchid
-FROM DailyMarket fmh
-JOIN ${catalog}.${wh_db}.DimSecurity s 
+FROM ${catalog}.${wh_db}_${scale_factor}_stage.v_DailyMarketIncremental fmh
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity s 
   ON 
     s.symbol = fmh.dm_s_symb
     AND fmh.dm_date >= s.effectivedate 

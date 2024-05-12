@@ -1,16 +1,12 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}.DimAccount (
-  accountid,
-  sk_brokerid,
-  sk_customerid,
-  accountdesc,
-  TaxStatus,
-  status,
-  iscurrent,
-  batchid,
-  effectivedate,
-  enddate
-) 
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimAccount
 WITH account AS (
   SELECT
     accountid,
@@ -22,23 +18,28 @@ WITH account AS (
     update_ts,
     1 batchid
   FROM
-    ${catalog}.${wh_db}_stage.CustomerMgmt c
+    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
   WHERE
     ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL
   SELECT
     accountid,
-    a.ca_c_id customerid,
+    customerid,
     accountDesc,
-    TaxStatus,
-    a.ca_b_id brokerid,
-    st_name as status,
+    taxstatus,
+    brokerid,
+    decode(a.status, 
+      'ACTV',	'Active',
+      'CMPT','Completed',
+      'CNCL','Canceled',
+      'PNDG','Pending',
+      'SBMT','Submitted',
+      'INAC','Inactive') status,
     TIMESTAMP(bd.batchdate) update_ts,
     a.batchid
   FROM
-    ${catalog}.${wh_db}_stage.v_accountincremental a
-    JOIN ${catalog}.${wh_db}.BatchDate bd ON a.batchid = bd.batchid
-    JOIN ${catalog}.${wh_db}.StatusType st ON a.CA_ST_ID = st.st_id
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_accountincremental a
+    JOIN ${catalog}.${wh_db}_${scale_factor}.BatchDate bd ON a.batchid = bd.batchid
 ),
 account_final AS (
   SELECT
@@ -94,13 +95,14 @@ account_cust_updates AS (
     ) effectivedate,
     if(a.enddate > c.enddate, c.enddate, a.enddate) enddate
   FROM account_final a
-  FULL OUTER JOIN ${catalog}.${wh_db}_stage.DimCustomerStg c 
+  FULL OUTER JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
     ON a.customerid = c.customerid
     AND c.enddate > a.effectivedate
     AND c.effectivedate < a.enddate
   WHERE a.effectivedate < a.enddate
 )
 SELECT
+  bigint(concat(date_format(a.effectivedate, 'yyyyMMdd'), a.accountid)) sk_accountid,
   a.accountid,
   b.sk_brokerid,
   a.sk_customerid,
@@ -112,5 +114,5 @@ SELECT
   a.effectivedate,
   a.enddate
 FROM account_cust_updates a
-JOIN ${catalog}.${wh_db}.DimBroker b 
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimBroker b 
   ON a.brokerid = b.brokerid

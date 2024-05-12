@@ -21,6 +21,7 @@ try:
   WAREHOUSE_TEMPLATE     = "warehouse_jinja_template.json"
   json_templates_path    = f"{workspace_src_path}/tools/jinja_templates/"
   template_type          = "dbsql" if sku[0] == 'STMV' else sku[0]
+  exec_type              = "SQL" if sku[0] == 'DBSQL' else sku[0]
 
   # DAG of args to send to Jinja
   dag_args = {
@@ -31,7 +32,7 @@ try:
     "job_name":job_name, 
     "repo_src_path":repo_src_path,
     "cloud_provider":cloud_provider,
-    "exec_type":sku[0],
+    "exec_type":exec_type,
     "serverless":serverless,
     "pred_opt":pred_opt
   }

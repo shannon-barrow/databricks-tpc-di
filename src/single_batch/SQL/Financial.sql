@@ -1,5 +1,5 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}.Financial
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.Financial
 WITH FIN as (
   SELECT
     to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss') AS PTS,
@@ -17,7 +17,7 @@ WITH FIN as (
     cast(substring(value, 161, 13) AS BIGINT) AS fi_out_basic,
     cast(substring(value, 174, 13) AS BIGINT) AS fi_out_dilut,
     nvl(string(try_cast(trim(substring(value, 187, 60)) as bigint)), trim(substring(value, 187, 60))) conameorcik
-  FROM ${catalog}.${wh_db}_stage.FinWire
+  FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
   WHERE rectype = 'FIN'
 ),
 dc as (
@@ -26,14 +26,14 @@ dc as (
     name conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}.DimCompany
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
   UNION ALL
   SELECT 
     sk_companyid,
     cast(companyid as string) conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}.DimCompany
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
 )
 SELECT 
   sk_companyid,

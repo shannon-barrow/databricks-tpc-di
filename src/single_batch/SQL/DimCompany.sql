@@ -1,25 +1,12 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}.DimCompany (
-  companyid, 
-  status, 
-  name, 
-  industry, 
-  sprating, 
-  islowgrade, 
-  ceo, 
-  addressline1, 
-  addressline2, 
-  postalcode, 
-  city, 
-  stateprov, 
-  country, 
-  description, 
-  foundingdate, 
-  iscurrent, 
-  batchid, 
-  effectivedate, 
-  enddate
-)
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCompany
 WITH cmp as (
   SELECT
     try_to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss') AS PTS,
@@ -37,15 +24,40 @@ WITH cmp as (
     trim(substring(value, 324, 24)) AS Country,
     trim(substring(value, 348, 46)) AS CEOname,
     trim(substring(value, 394, 150)) AS Description
-  FROM ${catalog}.${wh_db}_stage.FinWire
+  FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
   WHERE rectype = 'CMP'
 )
 SELECT 
-  * 
+  bigint(concat(date_format(effectivedate, 'yyyyMMdd'), companyid)) sk_companyid,
+  companyid, 
+  status, 
+  name, 
+  industry, 
+  sprating, 
+  islowgrade, 
+  ceo, 
+  addressline1, 
+  addressline2, 
+  postalcode, 
+  city, 
+  stateprov, 
+  country, 
+  description, 
+  foundingdate, 
+  if(enddate = date('9999-12-31'), true, false) iscurrent,
+  batchid, 
+  effectivedate, 
+  enddate 
 FROM (
   SELECT
     cast(cik as BIGINT) companyid,
-    st.st_name status,
+    decode(cmp.status, 
+      'ACTV',	'Active',
+      'CMPT','Completed',
+      'CNCL','Canceled',
+      'PNDG','Pending',
+      'SBMT','Submitted',
+      'INAC','Inactive') status,
     companyname name,
     ind.in_name industry,
     if(
@@ -66,14 +78,12 @@ FROM (
     country,
     description,
     foundingdate,
-    nvl2(lead(pts) OVER (PARTITION BY cik ORDER BY pts), true, false) iscurrent,
     1 batchid,
     date(pts) effectivedate,
     coalesce(
       lead(date(pts)) OVER (PARTITION BY cik ORDER BY pts),
       cast('9999-12-31' as date)) enddate
   FROM cmp
-  JOIN ${catalog}.${wh_db}.StatusType st ON cmp.status = st.st_id
-  JOIN ${catalog}.${wh_db}.Industry ind ON cmp.industryid = ind.in_id
+  JOIN ${catalog}.${wh_db}_${scale_factor}.Industry ind ON cmp.industryid = ind.in_id
 )
 where effectivedate < enddate;

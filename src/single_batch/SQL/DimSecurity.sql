@@ -1,20 +1,12 @@
 -- Databricks notebook source
-INSERT INTO ${catalog}.${wh_db}.DimSecurity (
-  symbol,
-  issue,
-  status,
-  name,
-  exchangeid,
-  sk_companyid,
-  sharesoutstanding,
-  firsttrade,
-  firsttradeonexchange,
-  dividend,
-  iscurrent,
-  batchid,
-  effectivedate,
-  enddate
-)
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
 WITH SEC as (
   SELECT
     date(to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss')) AS effectivedate,
@@ -28,7 +20,7 @@ WITH SEC as (
     to_date(substring(value, 141, 8), 'yyyyMMdd') AS firsttradeonexchange,
     cast(substring(value, 149, 12) AS DOUBLE) AS Dividend,
     trim(substring(value, 161, 60)) AS conameorcik
-  FROM ${catalog}.${wh_db}_stage.FinWire
+  FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
   WHERE rectype = 'SEC'
 ),
 dc as (
@@ -37,20 +29,26 @@ dc as (
     name conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}.DimCompany
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
   UNION ALL
   SELECT 
     sk_companyid,
     cast(companyid as string) conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}.DimCompany
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
 ),
 SEC_prep AS (
   SELECT 
     SEC.* except(Status, conameorcik),
     nvl(string(try_cast(conameorcik as bigint)), conameorcik) conameorcik,
-    s.ST_NAME as status,
+    decode(status, 
+      'ACTV',	'Active',
+      'CMPT','Completed',
+      'CNCL','Canceled',
+      'PNDG','Pending',
+      'SBMT','Submitted',
+      'INAC','Inactive') status,
     coalesce(
       lead(effectivedate) OVER (
         PARTITION BY symbol
@@ -58,8 +56,6 @@ SEC_prep AS (
       date('9999-12-31')
     ) enddate
   FROM SEC
-  JOIN ${catalog}.${wh_db}.StatusType s 
-    ON s.ST_ID = SEC.status
 ),
 SEC_final AS (
   SELECT 
@@ -83,6 +79,7 @@ SEC_final AS (
     AND SEC.EndDate > dc.EffectiveDate
 )
 SELECT 
+  monotonically_increasing_id() sk_securityid,
   Symbol,
   issue,
   status,
@@ -93,7 +90,7 @@ SELECT
   firsttrade,
   firsttradeonexchange,
   Dividend,
-  if(enddate = date('9999-12-31'), True, False) iscurrent,
+  if(enddate = date('9999-12-31'), true, false) iscurrent,
   1 batchid,
   effectivedate,
   enddate

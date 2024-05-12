@@ -778,7 +778,7 @@ SELECT
   nullif(postalcode, '') postalcode,
   nullif(city, '') city,
   nullif(stateprov, '') stateprov,
-  nullif(country, '') country,
+  country,
   nvl2(
     nullif(c_local_1, ''),
     concat(

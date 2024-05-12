@@ -1,4 +1,18 @@
 -- Databricks notebook source
+-- CREATE WIDGET DROPDOWN wh_timezone DEFAULT "" CHOICES SELECT * FROM (VALUES (""), ("set timezone = GMT;"));
+-- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+-- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+
+-- COMMAND ----------
+
+-- ONLY use for DBSQL workflows since default for DBSQL is with localization and can cause issues with DST.
+-- Pass empty string for a cluster - especially serverless workflows since serverless clusters do not accept this set command and will fail
+${wh_timezone} 
+
+-- COMMAND ----------
+
 CREATE TABLE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 
@@ -54,7 +68,7 @@ SELECT
   nullif(Customer.ContactInfo.C_ALT_EMAIL, '') email2,
   nullif(Customer.TaxInfo.C_LCL_TX_ID, '') lcl_tx_id, 
   nullif(Customer.TaxInfo.C_NAT_TX_ID, '') nat_tx_id, 
-  _ActionTS update_ts,
+  to_timestamp(_ActionTS) update_ts,
   _ActionType ActionType 
 FROM
   read_files(

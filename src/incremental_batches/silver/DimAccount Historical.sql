@@ -41,15 +41,10 @@ WITH account AS (
       date('9999-12-31')
     ) enddate,
     1 batchid
-  FROM (
-    SELECT
-      * except(update_ts),
-      to_timestamp(update_ts) update_ts
-    FROM ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
-    WHERE
-      ActionType NOT IN ('UPDCUST', 'INACT')
-  )
-  
+  FROM 
+    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
+  WHERE
+    ActionType NOT IN ('UPDCUST', 'INACT')  
 ),
 with_cust_updates AS (
   SELECT
