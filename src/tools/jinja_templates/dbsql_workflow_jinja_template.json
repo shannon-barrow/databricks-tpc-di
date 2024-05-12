@@ -65,7 +65,7 @@
       "task_key": "dw_init",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/dw_init",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/dw_init",
         "base_parameters": {
           {% raw %}"pred_opt": "{{job.parameters.predictive_optimization}}"{% endraw %}
         },
@@ -157,7 +157,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
@@ -191,7 +191,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
@@ -225,7 +225,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "val[0] st_id, val[1] st_name",
@@ -259,7 +259,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "val[0] tx_id, val[1] tx_name, FLOAT(val[2]) tx_rate",
@@ -293,7 +293,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
@@ -327,7 +327,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
         "base_parameters": {
           "path": "Batch1",
           "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
@@ -361,7 +361,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
         "base_parameters": {
           "view": "v_BatchDate",
           "table": "BatchDate",
@@ -394,7 +394,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
         "base_parameters": {
           "view": "v_FinWire",
           "table": "FinWire",
@@ -427,7 +427,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
         "base_parameters": {
           "view": "v_Prospect",
           "table": "ProspectIncremental",
@@ -456,7 +456,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimBroker",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimBroker",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -483,7 +483,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimCustomer",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimCustomer",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -507,7 +507,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimAccount",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimAccount",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -528,7 +528,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/FactCashBalances",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/FactCashBalances",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -549,7 +549,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Prospect",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Prospect",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -573,7 +573,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimCompany",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimCompany",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -594,7 +594,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimSecurity",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimSecurity",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -618,7 +618,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/FactWatches",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/FactWatches",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -642,7 +642,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/DimTrade",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/DimTrade",
         "base_parameters": {
           "wh_timezone": "set timezone = GMT"
         },
@@ -666,7 +666,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/FactHoldings",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/FactHoldings",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -687,7 +687,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/Financial",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Financial",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -711,7 +711,7 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_type }}/FactMarketHistory",
+        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/FactMarketHistory",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
