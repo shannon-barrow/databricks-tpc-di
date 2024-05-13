@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${catalog}.${wh_db}.FactWatches AS
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}.FactWatches AS
 with Watches as (
   SELECT 
     wh.w_c_id customerid,
@@ -8,9 +8,9 @@ with Watches as (
     date(max(if(w_action = 'CNCL', w_dts, null))) dateremoved,
     min(batchid) batchid
   FROM (
-    SELECT * FROM ${catalog}.${wh_db}_stage.v_WatchHistory
+    SELECT * FROM ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchHistory
     UNION ALL
-    SELECT * FROM ${catalog}.${wh_db}_stage.v_WatchIncremental) wh
+    SELECT * FROM ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchIncremental) wh
   GROUP BY 
     w_c_id,
     w_s_symb
@@ -22,12 +22,12 @@ select
   bigint(date_format(dateremoved, 'yyyyMMdd')) sk_dateid_dateremoved,
   wh.batchid 
 from Watches wh
-JOIN ${catalog}.${wh_db}.DimSecurity s 
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity s 
   ON 
     s.symbol = wh.symbol
     AND wh.dateplaced >= s.effectivedate 
     AND wh.dateplaced < s.enddate
-JOIN ${catalog}.${wh_db}_stage.DimCustomerStg c 
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
   ON
     wh.customerid = c.customerid
     AND wh.dateplaced >= c.effectivedate 

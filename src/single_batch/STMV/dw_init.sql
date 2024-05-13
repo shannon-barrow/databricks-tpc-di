@@ -9,302 +9,501 @@
 
 CREATE CATALOG IF NOT EXISTS ${catalog};
 GRANT ALL PRIVILEGES ON CATALOG ${catalog} TO `account users`;
-DROP DATABASE IF EXISTS ${catalog}.${wh_db} cascade;
-CREATE DATABASE ${catalog}.${wh_db};
-CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_stage;
-DROP MATERIALIZED VIEW IF EXISTS ${catalog}.${wh_db}_stage.dimcustomerstg;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_stage.finwire;
+DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
+CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
+CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
+DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental;
+DROP TABLE IF EXISTS ${wh_db}_${scale_factor}_stage.finwire;
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_TradeIncremental AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeIncremental AS
 SELECT
-  *,
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Trade.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', t_id BIGINT COMMENT 'Trade identifier.', t_dts TIMESTAMP COMMENT 'Date and time of trade.', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT, t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded.', t_bid_price DOUBLE COMMENT 'The requested unit price.', t_ca_id BIGINT COMMENT 'Customer account identifier.', t_exec_name STRING COMMENT 'Name of the person executing the trade.', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded.', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request.', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'"
-  )
+  val[0] cdc_flag,
+  try_cast(val[2] as BIGINT) tradeid,
+  try_cast(val[3] as TIMESTAMP) t_dts,
+  val[4] status,
+  val[5] t_tt_id,
+  try_cast(val[6] as TINYINT) cashflag,
+  val[7] t_s_symb,
+  try_cast(val[8] as INT) quantity,
+  try_cast(val[9] as DOUBLE) bidprice,
+  try_cast(val[10] as BIGINT) t_ca_id,
+  val[11] executedby,
+  try_cast(val[12] as DOUBLE) tradeprice,
+  try_cast(val[13] as DOUBLE) fee,
+  try_cast(val[14] as DOUBLE) commission,
+  try_cast(val[15] as DOUBLE) tax,
+  INT(batchid) batchid
+FROM (
+  SELECT 
+    split(value, "[|]") val, 
+    substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+  FROM text.`${tpcdi_directory}/sf=${scale_factor}/Batch[23]/Trade.txt`)
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_Trade AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade AS
 SELECT
-  *,
+  try_cast(val[0] as BIGINT) t_id,
+  try_cast(val[1] as TIMESTAMP) t_dts,
+  val[2] t_st_id,
+  val[3] t_tt_id,
+  try_cast(val[4] as TINYINT) t_is_cash,
+  val[5] t_s_symb,
+  try_cast(val[6] as INT) quantity,
+  try_cast(val[7] as DOUBLE) bidprice,
+  try_cast(val[8] as BIGINT) t_ca_id,
+  val[9] executedby,
+  try_cast(val[10] as DOUBLE) tradeprice,
+  try_cast(val[11] as DOUBLE) fee,
+  try_cast(val[12] as DOUBLE) commission,
+  try_cast(val[13] as DOUBLE) tax,
   1 batchid
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Trade.txt",
-    schema => "t_id BIGINT COMMENT 'Trade identifier.', t_dts TIMESTAMP COMMENT 'Date and time of trade.', t_st_id STRING COMMENT 'Status type identifier', t_tt_id STRING COMMENT 'Trade type identifier', t_is_cash TINYINT , t_s_symb STRING COMMENT 'Security symbol of the security', t_qty INT COMMENT 'Quantity of securities traded.', t_bid_price DOUBLE COMMENT 'The requested unit price.', t_ca_id BIGINT COMMENT 'Customer account identifier.', t_exec_name STRING COMMENT 'Name of the person executing the trade.', t_trade_price DOUBLE COMMENT 'Unit price at which the security was traded.', t_chrg DOUBLE COMMENT 'Fee charged for placing this trade request.', t_comm DOUBLE COMMENT 'Commission earned on this trade', t_tax DOUBLE COMMENT 'Amount of tax due on this trade'"
-);
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_TradeHistory AS
-SELECT
-  *
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "TradeHistory.txt",
-    schema => "th_t_id BIGINT COMMENT 'Trade identifier. Corresponds to T_ID in the Trade.txt file', th_dts TIMESTAMP COMMENT 'When the trade history was updated.', th_st_id STRING COMMENT 'Status type identifier.'"
-);
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_CustomerIncremental AS
-SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
 FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Customer.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer’s tax identifier', status STRING COMMENT 'Customer status type identifier', lastname STRING COMMENT 'Primary Customers last name.', firstname STRING COMMENT 'Primary Customers first name.', middleinitial STRING COMMENT 'Primary Customers middle initial', gender STRING COMMENT 'Gender of the primary customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer’s date of birth, as YYYY-MM-DD.', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or province', country STRING COMMENT 'Country', c_ctry_1 STRING COMMENT 'Country code for Customers phone 1.', c_area_1 STRING COMMENT 'Area code for customer’s phone 1.', c_local_1 STRING COMMENT 'Local number for customer’s phone 1.', c_ext_1 STRING COMMENT 'Extension number for Customer’s phone 1.', c_ctry_2 STRING COMMENT 'Country code for Customers phone 2.', c_area_2 STRING COMMENT 'Area code for Customer’s phone 2.', c_local_2 STRING COMMENT 'Local number for Customer’s phone 2.', c_ext_2 STRING COMMENT 'Extension number for Customer’s phone 2.', c_ctry_3 STRING COMMENT 'Country code for Customers phone 3.', c_area_3 STRING COMMENT 'Area code for Customer’s phone 3.', c_local_3 STRING COMMENT 'Local number for Customer’s phone 3.', c_ext_3 STRING COMMENT 'Extension number for Customer’s phone 3.', email1 STRING COMMENT 'Customers e-mail address 1.', email2 STRING COMMENT 'Customers e-mail address 2.', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate'"
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Trade.txt`
   );
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_HR AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory AS
 SELECT
-  *
-FROM 
-  read_files(
+  try_cast(val[0] as BIGINT) tradeid,
+  try_cast(val[1] as TIMESTAMP) th_dts,
+  val[2] status
+FROM
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/TradeHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_CustomerIncremental AS
+with c as (
+  SELECT
+    try_cast(val[2] as BIGINT) customerid,
+    val[3] taxid,
+    val[4] status,
+    val[5] lastname,
+    val[6] firstname,
+    val[7] middleinitial,
+    val[8] gender,
+    try_cast(val[9] as TINYINT) tier,
+    try_cast(val[10] as DATE) dob,
+    val[11] addressline1,
+    val[12] addressline2,
+    val[13] postalcode,
+    val[14] city,
+    val[15] stateprov,
+    val[16] country,
+    val[17] c_ctry_1,
+    val[18] c_area_1,
+    val[19] c_local_1,
+    val[20] c_ext_1,
+    val[21] c_ctry_2,
+    val[22] c_area_2,
+    val[23] c_local_2,
+    val[24] c_ext_2,
+    val[25] c_ctry_3,
+    val[26] c_area_3,
+    val[27] c_local_3,
+    val[28] c_ext_3,
+    val[29] email1,
+    val[30] email2,
+    val[31] lcl_tx_id,
+    val[32] nat_tx_id,
+    INT(batchid) batchid
+  FROM
+    (
+      SELECT
+        split(value, "[|]") val,
+        substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+      FROM
+        text.`${tpcdi_directory}sf=${scale_factor}/Batch*/Customer.txt`
+    )
+)
+SELECT
+  customerid,
+  nullif(taxid, '') taxid,
+  decode(status, 
+    'ACTV',	'Active',
+    'CMPT','Completed',
+    'CNCL','Canceled',
+    'PNDG','Pending',
+    'SBMT','Submitted',
+    'INAC','Inactive') status,
+  nullif(lastname, '') lastname,
+  nullif(firstname, '') firstname,
+  nullif(middleinitial, '') middleinitial,
+  nullif(gender, '') gender,
+  tier,
+  dob,
+  nullif(addressline1, '') addressline1,
+  nullif(addressline2, '') addressline2,
+  nullif(postalcode, '') postalcode,
+  nullif(city, '') city,
+  nullif(stateprov, '') stateprov,
+  country,
+  nvl2(
+    nullif(c_local_1, ''),
+    concat(
+        nvl2(nullif(c_ctry_1, ''), '+' || c_ctry_1 || ' ', ''),
+        nvl2(nullif(c_area_1, ''), '(' || c_area_1 || ') ', ''),
+        c_local_1,
+        nvl(c_ext_1, '')),
+    try_cast(null as string)) phone1,
+  nvl2(
+    nullif(c_local_2, ''),
+    concat(
+        nvl2(nullif(c_ctry_2, ''), '+' || c_ctry_2 || ' ', ''),
+        nvl2(nullif(c_area_2, ''), '(' || c_area_2 || ') ', ''),
+        c_local_2,
+        nvl(c_ext_2, '')),
+    try_cast(null as string)) phone2,
+  nvl2(
+    nullif(c_local_3, ''),
+    concat(
+        nvl2(nullif(c_ctry_3, ''), '+' || c_ctry_3 || ' ', ''),
+        nvl2(nullif(c_area_3, ''), '(' || c_area_3 || ') ', ''),
+        c_local_3,
+        nvl(c_ext_3, '')),
+    try_cast(null as string)) phone3,
+  nullif(email1, '') email1,
+  nullif(email2, '') email2,
+  nullif(lcl_tx_id, '') lcl_tx_id,
+  nullif(nat_tx_id, '') nat_tx_id,
+  batchid
+FROM c
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HR AS
+SELECT
+  try_cast(val[0] as BIGINT) employeeid,
+  try_cast(val[1] as BIGINT) managerid,
+  val[2] employeefirstname,
+  val[3] employeelastname,
+  val[4] employeemi,
+  try_cast(val[5] as int) employeejobcode,
+  val[6] employeebranch,
+  val[7] employeeoffice,
+  val[8] employeephone
+FROM
+  (
+    SELECT
+      split(value, "[,]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/HR.csv`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_AccountIncremental AS
+SELECT
+  try_cast(val[2] as BIGINT) accountid,
+  try_cast(val[3] as BIGINT) brokerid,
+  try_cast(val[4] as BIGINT) customerid,
+  val[5] accountDesc,
+  try_cast(val[6] as TINYINT) taxstatus,
+  val[7] status,
+  INT(batchid) batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch*/Account.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_CashTransactionIncremental AS
+with CashTransactions as (
+  SELECT
+    try_cast(val[0] as BIGINT) accountid,
+    to_date(val[1]) datevalue,
+    sum(try_cast(val[2] as DOUBLE)) account_daily_total,
+    1 batchid
+  FROM (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/CashTransaction.txt`
+  )
+  GROUP BY
+    accountid,
+    datevalue,
+    batchid
+  UNION ALL
+  SELECT
+    try_cast(val[2] as BIGINT) accountid,
+    to_date(val[3]) datevalue,
+    sum(try_cast(val[4] as DOUBLE)) account_daily_total,
+    INT(batchid) batchid
+  FROM (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/CashTransaction.txt`
+  )
+  GROUP BY
+    accountid,
+    datevalue,
+    batchid
+)
+SELECT 
+  accountid,
+  datevalue,
+  sum(account_daily_total) OVER (partition by accountid order by datevalue) cash,
+  batchid
+FROM CashTransactions;  
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HoldingHistory AS
+SELECT
+  try_cast(val[0] as INT) hh_h_t_id,
+  try_cast(val[1] as INT) hh_t_id,
+  try_cast(val[2] as INT) hh_before_qty,
+  try_cast(val[3] as INT) hh_after_qty,
+  1 batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/HoldingHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HoldingIncremental AS
+SELECT
+  try_cast(val[2] as INT) hh_h_t_id,
+  try_cast(val[3] as INT) hh_t_id,
+  try_cast(val[4] as INT) hh_before_qty,
+  try_cast(val[5] as INT) hh_after_qty,
+  INT(batchid) batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/HoldingHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_DailyMarketIncremental AS
+WITH dailymarkethistorical as (
+  SELECT
+    try_cast(val[0] as DATE) dm_date,
+    val[1] dm_s_symb,
+    try_cast(val[2] as DOUBLE) dm_close,
+    try_cast(val[3] as DOUBLE) dm_high,
+    try_cast(val[4] as DOUBLE) dm_low,
+    try_cast(val[5] as INT) dm_vol,
+    1 batchid
+  FROM
+    (
+      SELECT
+        split(value, "[|]") val
+      FROM
+        text.`${tpcdi_directory}sf=${scale_factor}/Batch1/DailyMarket.txt`
+    )
+),
+dailymarketincremental as (
+  SELECT
+    try_cast(val[2] as DATE) dm_date,
+    val[3] dm_s_symb,
+    try_cast(val[4] as DOUBLE) dm_close,
+    try_cast(val[5] as DOUBLE) dm_high,
+    try_cast(val[6] as DOUBLE) dm_low,
+    try_cast(val[7] as INT) dm_vol,
+    INT(batchid) batchid
+  FROM
+    (
+      SELECT
+        split(value, "[|]") val,
+        substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+      FROM
+        text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/DailyMarket.txt`
+    )
+),
+DailyMarket as (
+  SELECT
+    dm.*,
+    min_by(struct(dm_low, dm_date), dm_low) OVER (
+      PARTITION BY dm_s_symb
+      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+    ) fiftytwoweeklow,
+    max_by(struct(dm_high, dm_date), dm_high) OVER (
+      PARTITION by dm_s_symb
+      ORDER BY dm_date ASC ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
+    ) fiftytwoweekhigh
+  FROM
+    (
+      SELECT * FROM dailymarkethistorical
+      UNION ALL
+      SELECT * FROM dailymarketincremental
+    ) dm
+)
+select
+  dm.* except(fiftytwoweeklow, fiftytwoweekhigh),
+  fiftytwoweekhigh.dm_high fiftytwoweekhigh,
+  bigint(date_format(fiftytwoweekhigh.dm_date, 'yyyyMMdd')) sk_fiftytwoweekhighdate,
+  fiftytwoweeklow.dm_low fiftytwoweeklow,
+  bigint(date_format(fiftytwoweeklow.dm_date, 'yyyyMMdd')) sk_fiftytwoweeklowdate
+from DailyMarket dm
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchHistory AS
+SELECT
+  try_cast(val[0] as BIGINT) w_c_id,
+  val[1] w_s_symb,
+  try_cast(val[2] as TIMESTAMP) w_dts,
+  val[3] w_action,
+  1 batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/WatchHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchIncremental AS
+SELECT
+  try_cast(val[2] as BIGINT) w_c_id,
+  val[3] w_s_symb,
+  try_cast(val[4] as TIMESTAMP) w_dts,
+  val[5] w_action,
+  INT(batchid) batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/WatchHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_Prospect AS
+with p as (
+  select 
+    max_by(array_append(val, batchid), batchid) val,
+    min(batchid) batchid
+  FROM ( 
+    SELECT
+      split(value, "[,]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM read_files(
+      "${tpcdi_directory}sf=${scale_factor}/Batch*",
+      format => "text",
+      inferSchema => False, 
+      header => False,
+      fileNamePattern => "Prospect.csv"
+    )
+  )
+  group by val[0]
+)
+SELECT
+  val[0] agencyid,
+  val[1] lastname,
+  val[2] firstname,
+  val[3] middleinitial,
+  val[4] gender,
+  val[5] addressline1,
+  val[6] addressline2,
+  val[7] postalcode,
+  val[8] city,
+  val[9] state,
+  val[10] country,
+  val[11] phone,
+  try_cast(val[12] as BIGINT) income,
+  try_cast(val[13] as int) numbercars,
+  try_cast(val[14] as int) numberchildren,
+  val[15] maritalstatus,
+  try_cast(val[16] as int) age,
+  try_cast(val[17] as int) creditrating,
+  val[18] ownorrentflag,
+  val[19] employer,
+  try_cast(val[20] as int) numbercreditcards,
+  try_cast(val[21] as int) networth,
+  if(
+    isnotnull(
+      if(networth > 1000000 or income > 200000,"HighValue+","") || 
+      if(numberchildren > 3 or numbercreditcards > 5,"Expenses+","") ||
+      if(age > 45, "Boomer+", "") ||
+      if(income < 50000 or creditrating < 600 or networth < 100000, "MoneyAlert+","") ||
+      if(numbercars > 3 or numbercreditcards > 7, "Spender+","") ||
+      if(age < 25 and networth > 1000000, "Inherited+","")),
+    left(
+      if(networth > 1000000 or income > 200000,"HighValue+","") || 
+      if(numberchildren > 3 or numbercreditcards > 5,"Expenses+","") ||
+      if(age > 45, "Boomer+", "") ||
+      if(income < 50000 or creditrating < 600 or networth < 100000, "MoneyAlert+","") ||
+      if(numbercars > 3 or numbercreditcards > 7, "Spender+","") ||
+      if(age < 25 and networth > 1000000, "Inherited+",""),
+      length(
+        if(networth > 1000000 or income > 200000,"HighValue+","") || 
+        if(numberchildren > 3 or numbercreditcards > 5,"Expenses+","") ||
+        if(age > 45, "Boomer+", "") ||
+        if(income < 50000 or creditrating < 600 or networth < 100000, "MoneyAlert+","") ||
+        if(numbercars > 3 or numbercreditcards > 7, "Spender+","") ||
+        if(age < 25 and networth > 1000000, "Inherited+",""))
+      -1),
+    NULL) marketingnameplate,
+  val[22] recordbatchid,
+  batchid
+FROM p
+where val[22] = 3
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
+SELECT
+  value,
+  substring(value, 16, 3) rectype
+FROM read_files(
   "${tpcdi_directory}sf=${scale_factor}/Batch1",
-  format => "csv",
+  format => "text",
   inferSchema => False, 
   header => False,
-  sep => ",",
-  fileNamePattern => "HR.csv", 
-  schema => "employeeid BIGINT COMMENT 'ID of employee', managerid BIGINT COMMENT 'ID of employee’s manager', employeefirstname STRING COMMENT 'First name', employeelastname STRING COMMENT 'Last name', employeemi STRING COMMENT 'Middle initial', employeejobcode STRING COMMENT 'Numeric job code', employeebranch STRING COMMENT 'Facility in which employee has office', employeeoffice STRING COMMENT 'Office number or description', employeephone STRING COMMENT 'Employee phone number'"
+  fileNamePattern => "FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]"
 )
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_AccountIncremental AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_BatchDate AS
 SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
+  DATE(val [0]) batchdate,
+  INT(batchid) batchid
 FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Account.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', accountid BIGINT COMMENT 'Customer account identifier', ca_b_id BIGINT COMMENT 'Identifier of the managing broker', ca_c_id BIGINT COMMENT 'Owning customer identifier', accountDesc STRING COMMENT 'Name of customer account', TaxStatus TINYINT COMMENT 'Tax status of this account', ca_st_id STRING COMMENT 'Customer status type identifier'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_CashTransactionHistory AS
-SELECT
-  *,
-  1 batchid
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "CashTransaction.txt",
-    schema => "ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction.', ct_name STRING COMMENT 'Transaction name, or description: e.g. Cash from sale of DuPont stock.'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_CashTransactionIncremental AS
-SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "CashTransaction.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', ct_ca_id BIGINT COMMENT 'Customer account identifier', ct_dts TIMESTAMP COMMENT 'Timestamp of when the trade took place', ct_amt DOUBLE COMMENT 'Amount of the cash transaction.', ct_name STRING COMMENT 'Transaction name, or description: e.g. Cash from sale of DuPont stock.'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_HoldingHistory AS
-SELECT
-  *,
-  1 batchid
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "HoldingHistory.txt",
-    schema => "hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row.', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade.', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade.'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_HoldingIncremental AS
-SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "HoldingHistory.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row.', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade.', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade.'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_dailymarkethistorical AS
-SELECT
-  *,
-  1 batchid
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "DailyMarket.txt",
-    schema => "dm_date DATE COMMENT 'Date of last completed trading day', dm_s_symb STRING COMMENT 'Security symbol of the security', dm_close DOUBLE COMMENT 'Closing price of the security on this day', dm_high DOUBLE COMMENT 'Highest price for the security on this day', dm_low DOUBLE COMMENT 'Lowest price for the security on this day', dm_vol INT COMMENT 'Volume of the security on this day'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_DailyMarketIncremental AS
-SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "DailyMarket.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', dm_date DATE COMMENT 'Date of last completed trading day.', dm_s_symb STRING COMMENT 'Security symbol of the security', dm_close DOUBLE COMMENT 'Closing price of the security on this day.', dm_high DOUBLE COMMENT 'Highest price for the security on this day.', dm_low DOUBLE COMMENT 'Lowest price for the security on this day.', dm_vol INT COMMENT 'Volume of the security on this day.'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_WatchHistory AS
-SELECT
-  *,
-  1 batchid
-FROM 
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "WatchHistory.txt",
-    schema => "w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_WatchIncremental AS
-SELECT
-  * except(cdc_flag, cdc_dsn),
-  cast(
-    substring(
-      _metadata.file_path
-      FROM (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "WatchHistory.txt",
-    schema => "cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', w_c_id BIGINT COMMENT 'Customer identifier', w_s_symb STRING COMMENT 'Symbol of the security to watch', w_dts TIMESTAMP COMMENT 'Date and Time Stamp for the action', w_action STRING COMMENT 'Whether activating or canceling the watch'"
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_stage.v_Prospect AS
-SELECT
-  *,
-  cast(
-    substring(
-      _metadata.file_path
-      FROM
-        (position('/Batch', _metadata.file_path) + 6) FOR 1
-    ) as int
-  ) batchid
-FROM
-  read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch*",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => ",",
-    fileNamePattern => "Prospect.csv",
-    schema => "agencyid STRING COMMENT 'Unique identifier from agency', lastname STRING COMMENT 'Last name', firstname STRING COMMENT 'First name', middleinitial STRING COMMENT 'Middle initial', gender STRING COMMENT '‘M’ or ‘F’ or ‘U’', addressline1 STRING COMMENT 'Postal address', addressline2 STRING COMMENT 'Postal address', postalcode STRING COMMENT 'Postal code', city STRING COMMENT 'City', state STRING COMMENT 'State or province', country STRING COMMENT 'Postal country', phone STRING COMMENT 'Telephone number', income STRING COMMENT 'Annual income', numbercars INT COMMENT 'Cars owned', numberchildren INT COMMENT 'Dependent children', maritalstatus STRING COMMENT '‘S’ or ‘M’ or ‘D’ or ‘W’ or ‘U’', age INT COMMENT 'Current age', creditrating INT COMMENT 'Numeric rating', ownorrentflag STRING COMMENT '‘O’ or ‘R’ or ‘U’', employer STRING COMMENT 'Name of employer', numbercreditcards INT COMMENT 'Credit cards', networth INT COMMENT 'Estimated total net worth'"
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM read_files(
+      "${tpcdi_directory}sf=${scale_factor}/Batch*",
+      format => "text",
+      inferSchema => False, 
+      header => False,
+      fileNamePattern => "BatchDate.txt"
+    )
   );

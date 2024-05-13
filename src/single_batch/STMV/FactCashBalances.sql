@@ -1,30 +1,13 @@
 -- Databricks notebook source
-CREATE MATERIALIZED VIEW IF NOT EXISTS ${catalog}.${wh_db}.FactCashBalances AS
-with CashTransactons as (
-  SELECT * FROM ${catalog}.${wh_db}_stage.v_CashTransactionHistory
-  UNION ALL
-  SELECT * FROM ${catalog}.${wh_db}_stage.v_CashTransactionIncremental
-),
-CashTransactionsAgg as (
-  SELECT 
-    ct_ca_id accountid,
-    to_date(ct_dts) datevalue,
-    sum(ct_amt) account_daily_total,
-    batchid
-  FROM CashTransactons
-  GROUP BY
-    accountid,
-    datevalue,
-    batchid
-)
+CREATE MATERIALIZED VIEW IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}.FactCashBalances AS
 SELECT
   a.sk_customerid, 
   a.sk_accountid, 
   bigint(date_format(datevalue, 'yyyyMMdd')) sk_dateid,
-  sum(account_daily_total) OVER (partition by c.accountid order by c.datevalue) cash,
+  cash,
   c.batchid
-FROM CashTransactionsAgg c 
-JOIN ${catalog}.${wh_db}.DimAccount a 
+FROM ${catalog}.${wh_db}_${scale_factor}_stage.v_CashTransactionIncremental c 
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimAccount a 
   ON 
     c.accountid = a.accountid
     AND c.datevalue >= a.effectivedate 
