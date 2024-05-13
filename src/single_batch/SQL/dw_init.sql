@@ -455,71 +455,27 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactWatches (
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeIncremental AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_BatchDate AS
 SELECT
-  val[0] cdc_flag,
-  try_cast(val[2] as BIGINT) tradeid,
-  try_cast(val[3] as TIMESTAMP) t_dts,
-  val[4] status,
-  val[5] t_tt_id,
-  try_cast(val[6] as TINYINT) cashflag,
-  val[7] t_s_symb,
-  try_cast(val[8] as INT) quantity,
-  try_cast(val[9] as DOUBLE) bidprice,
-  try_cast(val[10] as BIGINT) t_ca_id,
-  val[11] executedby,
-  try_cast(val[12] as DOUBLE) tradeprice,
-  try_cast(val[13] as DOUBLE) fee,
-  try_cast(val[14] as DOUBLE) commission,
-  try_cast(val[15] as DOUBLE) tax,
+  DATE(val [0]) batchdate,
   INT(batchid) batchid
-FROM (
-  SELECT 
-    split(value, "[|]") val, 
-    substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
-  FROM text.`${tpcdi_directory}/sf=${scale_factor}/Batch[23]/Trade.txt`)
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade AS
-SELECT
-  try_cast(val[0] as BIGINT) t_id,
-  try_cast(val[1] as TIMESTAMP) t_dts,
-  val[2] t_st_id,
-  val[3] t_tt_id,
-  try_cast(val[4] as TINYINT) t_is_cash,
-  val[5] t_s_symb,
-  try_cast(val[6] as INT) quantity,
-  try_cast(val[7] as DOUBLE) bidprice,
-  try_cast(val[8] as BIGINT) t_ca_id,
-  val[9] executedby,
-  try_cast(val[10] as DOUBLE) tradeprice,
-  try_cast(val[11] as DOUBLE) fee,
-  try_cast(val[12] as DOUBLE) commission,
-  try_cast(val[13] as DOUBLE) tax,
-  1 batchid
 FROM
   (
     SELECT
-      split(value, "[|]") val
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
     FROM
-      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Trade.txt`
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch*/BatchDate.txt`
   );
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory AS
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
 SELECT
-  try_cast(val[0] as BIGINT) tradeid,
-  try_cast(val[1] as TIMESTAMP) th_dts,
-  val[2] status
-FROM
-  (
-    SELECT
-      split(value, "[|]") val
-    FROM
-      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/TradeHistory.txt`
-  );
+  value,
+  substring(value, 16, 3) rectype
+FROM 
+  text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`;
 
 -- COMMAND ----------
 
@@ -622,6 +578,94 @@ FROM c
 
 -- COMMAND ----------
 
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_AccountIncremental AS
+SELECT
+  try_cast(val[2] as BIGINT) accountid,
+  try_cast(val[3] as BIGINT) brokerid,
+  try_cast(val[4] as BIGINT) customerid,
+  val[5] accountDesc,
+  try_cast(val[6] as TINYINT) taxstatus,
+  val[7] status,
+  INT(batchid) batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch*/Account.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeIncremental AS
+SELECT
+  val[0] cdc_flag,
+  try_cast(val[2] as BIGINT) tradeid,
+  try_cast(val[3] as TIMESTAMP) t_dts,
+  val[4] status,
+  val[5] t_tt_id,
+  try_cast(val[6] as TINYINT) cashflag,
+  val[7] t_s_symb,
+  try_cast(val[8] as INT) quantity,
+  try_cast(val[9] as DOUBLE) bidprice,
+  try_cast(val[10] as BIGINT) t_ca_id,
+  val[11] executedby,
+  try_cast(val[12] as DOUBLE) tradeprice,
+  try_cast(val[13] as DOUBLE) fee,
+  try_cast(val[14] as DOUBLE) commission,
+  try_cast(val[15] as DOUBLE) tax,
+  INT(batchid) batchid
+FROM (
+  SELECT 
+    split(value, "[|]") val, 
+    substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+  FROM text.`${tpcdi_directory}/sf=${scale_factor}/Batch[23]/Trade.txt`)
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade AS
+SELECT
+  try_cast(val[0] as BIGINT) t_id,
+  try_cast(val[1] as TIMESTAMP) t_dts,
+  val[2] t_st_id,
+  val[3] t_tt_id,
+  try_cast(val[4] as TINYINT) t_is_cash,
+  val[5] t_s_symb,
+  try_cast(val[6] as INT) quantity,
+  try_cast(val[7] as DOUBLE) bidprice,
+  try_cast(val[8] as BIGINT) t_ca_id,
+  val[9] executedby,
+  try_cast(val[10] as DOUBLE) tradeprice,
+  try_cast(val[11] as DOUBLE) fee,
+  try_cast(val[12] as DOUBLE) commission,
+  try_cast(val[13] as DOUBLE) tax,
+  1 batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/Trade.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory AS
+SELECT
+  try_cast(val[0] as BIGINT) tradeid,
+  try_cast(val[1] as TIMESTAMP) th_dts,
+  val[2] status
+FROM
+  (
+    SELECT
+      split(value, "[|]") val
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch1/TradeHistory.txt`
+  );
+
+-- COMMAND ----------
+
 CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HR AS
 SELECT
   try_cast(val[0] as BIGINT) employeeid,
@@ -639,26 +683,6 @@ FROM
       split(value, "[,]") val
     FROM
       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/HR.csv`
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_AccountIncremental AS
-SELECT
-  try_cast(val[2] as BIGINT) accountid,
-  try_cast(val[3] as BIGINT) brokerid,
-  try_cast(val[4] as BIGINT) customerid,
-  val[5] accountDesc,
-  try_cast(val[6] as TINYINT) taxstatus,
-  val[7] status,
-  INT(batchid) batchid
-FROM
-  (
-    SELECT
-      split(value, "[|]") val,
-      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
-    FROM
-      text.`${tpcdi_directory}sf=${scale_factor}/Batch*/Account.txt`
   );
 
 -- COMMAND ----------
@@ -720,6 +744,24 @@ FROM
       split(value, "[|]") val
     FROM
       text.`${tpcdi_directory}sf=${scale_factor}/Batch1/HoldingHistory.txt`
+  );
+
+-- COMMAND ----------
+
+CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HoldingIncremental AS
+SELECT
+  try_cast(val[2] as INT) hh_h_t_id,
+  try_cast(val[3] as INT) hh_t_id,
+  try_cast(val[4] as INT) hh_before_qty,
+  try_cast(val[5] as INT) hh_after_qty,
+  INT(batchid) batchid
+FROM
+  (
+    SELECT
+      split(value, "[|]") val,
+      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
+    FROM
+      text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/HoldingHistory.txt`
   );
 
 -- COMMAND ----------
@@ -888,45 +930,3 @@ SELECT
   batchid
 FROM p
 where val[22] = 3
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_FinWire AS
-SELECT
-  value,
-  substring(value, 16, 3) rectype
-FROM 
-  text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`;
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_BatchDate AS
-SELECT
-  DATE(val [0]) batchdate,
-  INT(batchid) batchid
-FROM
-  (
-    SELECT
-      split(value, "[|]") val,
-      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
-    FROM
-      STREAM(text.`${tpcdi_directory}sf=${scale_factor}/Batch*/BatchDate.txt`)
-  );
-
--- COMMAND ----------
-
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_HoldingIncremental AS
-SELECT
-  try_cast(val[2] as INT) hh_h_t_id,
-  try_cast(val[3] as INT) hh_t_id,
-  try_cast(val[4] as INT) hh_before_qty,
-  try_cast(val[5] as INT) hh_after_qty,
-  INT(batchid) batchid
-FROM
-  (
-    SELECT
-      split(value, "[|]") val,
-      substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) batchid 
-    FROM
-      text.`${tpcdi_directory}sf=${scale_factor}/Batch[23]/HoldingHistory.txt`
-  );
