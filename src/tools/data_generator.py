@@ -80,11 +80,21 @@ def generate_data():
   driver_out_path  = f"{DRIVER_ROOT}{tpcdi_tmp_path}sf={scale_factor}"
   blob_out_path    = f"{tpcdi_directory}sf={scale_factor}"
 
-  if os.path.exists(blob_out_path) and not FORCE_REWRITE:
+  
+  catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+  if not catalog_exists:
+    spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
+    spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data COMMENT 'Schema for TPC-DI Raw Files Volume'")
+    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume COMMENT 'TPC-DI Raw Files'")
+    
+
+  if os.path.exists(blob_out_path):
     print("Data generation skipped since raw data/directory already exists for this scale factor. If you want to force a rewrite, change the FORCE_REWRITE Flag")
 
   else:
     print(f"Raw Data Directory {blob_out_path} does not exist yet.  Proceeding to generate data for scale factor={scale_factor} into this directory")
+    dbutils.fs.mkdirs(blob_out_path)
     copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
     print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
     DIGen(driver_tmp_path, scale_factor, blob_out_path)  # Modified: Provide the output path directly to DIGen
@@ -117,3 +127,7 @@ def DIGen(digen_path, scale_factor, output_path):
 # COMMAND ----------
 
 generate_data()
+
+# COMMAND ----------
+
+DIGen(driver_tmp_path, scale_factor, 'blob_out_path')
