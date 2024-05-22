@@ -6,7 +6,7 @@
 
 -- COMMAND ----------
 
-CREATE CATALOG IF NOT EXISTS ${catalog};
+-- CREATE CATALOG IF NOT EXISTS ${catalog};
 GRANT ALL PRIVILEGES ON CATALOG ${catalog} TO `account users`;
 USE CATALOG ${catalog};
 DROP DATABASE IF EXISTS ${wh_db}_${scale_factor} cascade;

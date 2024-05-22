@@ -84,10 +84,12 @@ def generate_data():
   catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
   if not catalog_exists:
     spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
-    spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data COMMENT 'Schema for TPC-DI Raw Files Volume'")
-    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume COMMENT 'TPC-DI Raw Files'")
-    
+  
+  spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+  spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data COMMENT 'Schema for TPC-DI Raw Files Volume'")
+  spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume COMMENT 'TPC-DI Raw Files'")
+  
+  print(blob_out_path)
 
   if os.path.exists(blob_out_path):
     print("Data generation skipped since raw data/directory already exists for this scale factor. If you want to force a rewrite, change the FORCE_REWRITE Flag")
@@ -127,7 +129,3 @@ def DIGen(digen_path, scale_factor, output_path):
 # COMMAND ----------
 
 generate_data()
-
-# COMMAND ----------
-
-DIGen(driver_tmp_path, scale_factor, 'blob_out_path')
