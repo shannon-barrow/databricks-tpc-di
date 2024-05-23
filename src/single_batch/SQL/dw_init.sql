@@ -12,13 +12,11 @@
 
 -- COMMAND ----------
 
-CREATE CATALOG IF NOT EXISTS ${catalog};
-GRANT ALL PRIVILEGES ON CATALOG ${catalog} TO `account users`;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
 CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
 DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental;
-DROP TABLE IF EXISTS ${wh_db}_${scale_factor}_stage.finwire;
+DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.finwire;
 
 -- COMMAND ----------
 
@@ -36,7 +34,9 @@ ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMI
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.FinWire (
   value STRING COMMENT 'Pre-parsed String Values of all FinWire files',
   rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC'
-) PARTITIONED BY (rectype);
+) 
+PARTITIONED BY (rectype)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -66,7 +66,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncrem
   marketingnameplate STRING COMMENT 'Marketing nameplate',
   recordbatchid INT NOT NULL COMMENT 'Batch ID when this record last inserted',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was initially inserted'
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -75,7 +76,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.TaxRate (
   tx_name STRING NOT NULL COMMENT 'Tax rate description',
   tx_rate FLOAT NOT NULL COMMENT 'Tax rate',
   CONSTRAINT taxrate_pk PRIMARY KEY(tx_id)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -83,7 +85,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.BatchDate (
   batchdate DATE NOT NULL COMMENT 'Batch date',
   batchid INT NOT NULL COMMENT 'Batch ID when this record was inserted',
   CONSTRAINT batchdate_pk PRIMARY KEY(batchdate)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -107,7 +110,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimDate (
   fiscalqtrdesc STRING NOT NULL COMMENT 'Fiscal quarter as text e.g. 2005 Q1',
   holidayflag BOOLEAN COMMENT 'Indicates holidays',
   CONSTRAINT dimdate_pk PRIMARY KEY(sk_dateid)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -123,7 +127,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTime (
   markethoursflag BOOLEAN COMMENT 'Indicates a time during market hours',
   officehoursflag BOOLEAN COMMENT 'Indicates a time during office hours',
   CONSTRAINT dimtime_pk PRIMARY KEY(sk_timeid)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -131,7 +136,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.StatusType (
   st_id STRING NOT NULL COMMENT 'Status code',
   st_name STRING NOT NULL COMMENT 'Status description',
   CONSTRAINT statustype_pk PRIMARY KEY(st_name)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -140,7 +146,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.industry (
   in_name STRING NOT NULL COMMENT 'Industry description',
   in_sc_id STRING NOT NULL COMMENT 'Sector identifier',
   CONSTRAINT industry_pk PRIMARY KEY(in_name)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -150,7 +157,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.TradeType (
   tt_is_sell INT NOT NULL COMMENT 'Flag indicating a sale',
   tt_is_mrkt INT NOT NULL COMMENT 'Flag indicating a market order',
   CONSTRAINT tradetype_pk PRIMARY KEY(tt_id)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -169,7 +177,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimBroker (
   effectivedate DATE NOT NULL COMMENT 'Beginning of date range when this record was the current record',
   enddate DATE NOT NULL COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.',
   CONSTRAINT dimbroker_pk PRIMARY KEY(sk_brokerid)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -208,7 +217,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimCustomer (
   effectivedate DATE NOT NULL COMMENT 'Beginning of date range when this record was the current record',
   enddate DATE NOT NULL COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.',
   CONSTRAINT dimcustomer_pk PRIMARY KEY(sk_customerid)
-) TBLPROPERTIES ('delta.dataSkippingNumIndexedCols' = 33);
+) 
+TBLPROPERTIES ('delta.dataSkippingNumIndexedCols' = 33, 'delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -236,7 +246,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimCompany (
   CONSTRAINT dimcompany_pk PRIMARY KEY(sk_companyid),
   CONSTRAINT dimcompany_status_fk FOREIGN KEY (status) REFERENCES ${catalog}.${wh_db}_${scale_factor}.StatusType(st_name),
   CONSTRAINT dimcompany_industry_fk FOREIGN KEY (industry) REFERENCES ${catalog}.${wh_db}_${scale_factor}.Industry(in_name)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -256,6 +267,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimAccount (
   CONSTRAINT dimaccount_customer_fk FOREIGN KEY (sk_customerid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCustomer(sk_customerid),
   CONSTRAINT dimaccount_broker_fk FOREIGN KEY (sk_brokerid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimBroker(sk_brokerid)
 ) 
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -279,6 +291,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimSecurity (
   CONSTRAINT dimsecurity_status_fk FOREIGN KEY (status) REFERENCES ${catalog}.${wh_db}_${scale_factor}.StatusType(st_name),
   CONSTRAINT dimsecurity_company_fk FOREIGN KEY (sk_companyid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCompany(sk_companyid)
 ) 
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -312,6 +325,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Prospect (
   marketingnameplate STRING COMMENT 'For marketing purposes',
   CONSTRAINT prospect_pk PRIMARY KEY(agencyid)
 ) 
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -332,7 +346,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Financial (
   fi_out_dilut BIGINT NOT NULL COMMENT 'Average number of shares outstanding (diluted).',
   CONSTRAINT financial_pk PRIMARY KEY(sk_companyid, fi_year, fi_qtr),
   CONSTRAINT financial_company_fk FOREIGN KEY (sk_companyid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCompany(sk_companyid)
-);
+)
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -369,6 +384,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
   CONSTRAINT dimtrade_createtime_fk FOREIGN KEY (sk_createtimeid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimTime(sk_timeid),
   CONSTRAINT dimtrade_closetime_fk FOREIGN KEY (sk_closetimeid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimTime(sk_timeid)
 ) 
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -394,6 +410,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactHoldings (
   CONSTRAINT factholdings_date_fk FOREIGN KEY (sk_dateid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid),
   CONSTRAINT factholdings_time_fk FOREIGN KEY (sk_timeid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimTime(sk_timeid)
 )
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -408,6 +425,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactCashBalances (
   CONSTRAINT cashbalances_account_fk FOREIGN KEY (sk_accountid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimAccount(sk_accountid),
   CONSTRAINT cashbalances_date_fk FOREIGN KEY (sk_dateid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid)
 )
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -431,6 +449,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactMarketHistory (
   CONSTRAINT fmh_company_fk FOREIGN KEY (sk_companyid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimCompany(sk_companyid),
   CONSTRAINT fmh_date_fk FOREIGN KEY (sk_dateid) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid)
 )
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
@@ -446,6 +465,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactWatches (
   CONSTRAINT factwatches_dateplaced_fk FOREIGN KEY (sk_dateid_dateplaced) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid),
   CONSTRAINT factwatches_dateremoved_fk FOREIGN KEY (sk_dateid_dateremoved) REFERENCES ${catalog}.${wh_db}_${scale_factor}.DimDate(sk_dateid)
 ) 
+TBLPROPERTIES ('delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
 
 -- COMMAND ----------
 
