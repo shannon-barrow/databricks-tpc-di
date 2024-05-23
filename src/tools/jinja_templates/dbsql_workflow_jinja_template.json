@@ -33,6 +33,7 @@
       "default": "{{ pred_opt }}"
     }
   ],
+  {% if scale_factor > 100 %}
   "job_clusters": [
     {
       "job_cluster_key": "{{ job_name }}_cluster",
@@ -60,6 +61,7 @@
       }
     }
   ],
+  {% endif %}
   "tasks": [
     {
       "task_key": "dw_init",
