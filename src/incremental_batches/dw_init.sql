@@ -12,8 +12,6 @@
 
 -- COMMAND ----------
 
-CREATE CATALOG IF NOT EXISTS ${catalog};
-GRANT ALL PRIVILEGES ON CATALOG ${catalog} TO `account users`;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
 CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
