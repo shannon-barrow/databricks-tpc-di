@@ -1,0 +1,635 @@
+{
+  "name": "{{ job_name }}",
+  "description": "PLEASE RUN dw_init sepatately before executing! This version runs NO audit checks and does not run dw_init. It is intended for TCO analysis.",
+  "email_notifications": {
+    "no_alert_for_skipped_runs": false
+  },
+  "webhook_notifications": {},
+  "timeout_seconds": 0,
+  "max_concurrent_runs": 1,
+  "parameters": [
+    {
+      "name": "catalog",
+      "default": "{{ catalog }}"
+    },
+    {
+      "name": "scale_factor",
+      "default": "{{ scale_factor }}"
+    },
+    {
+      "name": "tpcdi_directory",
+      "default": "{{ tpcdi_directory }}"
+    },
+    {
+      "name": "wh_db",
+      "default": "{{ wh_target }}_{{ exec_type }}"
+    },
+    {
+      "name": "predictive_optimization",
+      "default": "{{ pred_opt }}"
+    }
+  ],
+  {% if scale_factor > 100 and serverless == "YES" %}
+  "job_clusters": [
+    {
+      "job_cluster_key": "{{ job_name }}_compute",
+      "new_cluster": {
+        "cluster_name": "",
+        "spark_version": "{{ dbr }}",
+        "spark_conf": {
+          "spark.master": "local[*, 4]",
+          "spark.databricks.cluster.profile": "singleNode",
+          "spark.sql.shuffle.partitions": "auto",
+          "spark.databricks.adaptive.localShuffleReader.enabled": "true"
+        },
+        "driver_node_type_id": "{{ driver_node_type }}",
+        "node_type_id": "{{ worker_node_type }}",
+        "custom_tags": {
+          "ResourceClass": "SingleNode"
+        },
+        "spark_env_vars": {
+          "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+        },
+        "enable_elastic_disk": true,
+        "data_security_mode": "SINGLE_USER",
+        "runtime_engine": "STANDARD",
+        "num_workers": 0
+      }
+    }
+  ],
+  {% elif serverless != "YES" %}
+  "job_clusters": [
+    {
+      "job_cluster_key": "{{ job_name }}_compute",
+      "new_cluster": {
+        "spark_version": "{{ dbr }}",
+        "spark_conf": {
+          {% if worker_node_count == 0 %}
+          "spark.master": "local[*, 4]",
+          "spark.databricks.cluster.profile": "singleNode",
+          "spark.databricks.adaptive.localShuffleReader.enabled": "true",
+          {% endif %}
+          "spark.sql.shuffle.partitions": "auto",
+          "spark.databricks.delta.schema.autoMerge.enabled": "true",
+          "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
+          "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
+          "spark.databricks.photon.photonRowToColumnar.enabled": "true",
+          "spark.databricks.photon.allDataSources.enabled": "true",
+          "spark.databricks.photon.window.experimental.features.enabled": "true",
+          "spark.databricks.photon.sort.enabled": "true",
+          "spark.databricks.preemption.enabled": "false",
+          "spark.databricks.photon.window.enabled": "true",
+          "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
+          "spark.databricks.photon.scan.enabled": "true",
+          "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true",
+          "spark.databricks.delta.identityColumn.enabled": "true"
+        },
+        {% if cloud_provider == "Azure" %} 
+        "azure_attributes": {
+          "availability": "SPOT_WITH_FALLBACK_AZURE",
+          "first_on_demand": 1,
+          "spot_bid_price_percent": -1
+        },
+        {% endif %}
+        {% if cloud_provider == "AWS" %}
+        "aws_attributes": {
+          "availability": "SPOT_WITH_FALLBACK",
+          "first_on_demand": 1,
+          "zone_id": "auto",
+          "spot_bid_price_percent": 100
+        },
+        {% endif %}
+        "spark_env_vars": {
+          "PYSPARK_PYTHON": "/databricks/python3/bin/python3"
+        },
+        {% if worker_node_count == 0 %}
+        "custom_tags": {
+          "ResourceClass": "SingleNode"
+        },
+        {% endif %}
+        "driver_node_type_id": "{{ driver_node_type }}",
+        "node_type_id": "{{ worker_node_type }}",
+        "num_workers": {{ worker_node_count }},
+        "enable_elastic_disk": true,
+        "data_security_mode": "SINGLE_USER",
+        "runtime_engine": "PHOTON"
+      }
+    }
+  ],
+  {% endif %}
+  "tasks": [
+    {
+      "task_key": "ingest_DimDate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
+          "filename": "Date.txt",
+          "table": "DimDate"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_DimTime",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
+          "filename": "Time.txt",
+          "table": "DimTime"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_StatusType",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] st_id, val[1] st_name",
+          "filename": "StatusType.txt",
+          "table": "StatusType"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TaxRate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] tx_id, val[1] tx_name, FLOAT(val[2]) tx_rate",
+          "filename": "TaxRate.txt",
+          "table": "TaxRate"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TradeType",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
+          "filename": "TradeType.txt",
+          "table": "TradeType"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_industry",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
+          "filename": "Industry.txt",
+          "table": "Industry"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_BatchDate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_BatchDate",
+          "table": "BatchDate",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_FinWire",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_FinWire",
+          "table": "FinWire",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_ProspectIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_Prospect",
+          "table": "ProspectIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimBroker",
+      "depends_on": [
+        {
+          "task_key": "ingest_DimDate"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimBroker",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimCustomer",
+      "depends_on": [
+        {
+          "task_key": "ingest_ProspectIncremental"
+        },
+        {
+          "task_key": "ingest_TaxRate"
+        },
+        {
+          "task_key": "ingest_BatchDate"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCustomer",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimAccount",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimBroker"
+        },
+        {
+          "task_key": "Silver_DimCustomer"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimAccount",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Gold_FactCashBalances",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimAccount"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactCashBalances",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_Prospect",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimCustomer"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Prospect",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimCompany",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        },
+        {
+          "task_key": "ingest_industry"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCompany",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimSecurity",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimCompany"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimSecurity",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Gold_FactWatches",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimSecurity"
+        },
+        {
+          "task_key": "Silver_DimCustomer"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactWatches",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_DimTrade",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimSecurity"
+        },
+        {
+          "task_key": "Silver_DimAccount"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimTrade",
+        "base_parameters": {
+          "wh_timezone": ""
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_FactHoldings",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimTrade"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactHoldings",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_Financial",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimCompany"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Financial",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Gold_FactMarketHistory",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimSecurity"
+        },
+        {
+          "task_key": "Silver_Financial"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/FactMarketHistory",
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    }
+  ]
+}

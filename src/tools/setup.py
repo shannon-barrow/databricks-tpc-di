@@ -42,67 +42,72 @@ def get_dbr_versions(min_version=14.1):
         dbr_versions_dict[dbr['key']] = dbr['name']
   return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
 
+def is_lighthouse():
+  response = api_call(json_payload=None, request_type="GET", api_endpoint='/api/2.0/settings/types/default_namespace_ws/names/default')
+  if response.status_code == 200:
+    return True if json.loads(response.text)['namespace'].get('value') == 'workspace' else False
+  else: return False
+
 # COMMAND ----------
 
 # ENV-Specific API calls and variables
-UC_enabled = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
-tpcdi_directory = '/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/' if UC_enabled else "/tmp/tpcdi/"
-repo_src_path      = f"{dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().split('/src')[0]}/src"
-workspace_src_path = f"/Workspace{repo_src_path}"
 API_URL = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
 TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None)
 if API_URL is None or TOKEN is None: 
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
+repo_src_path = f"{dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().split('/src')[0]}/src"
+workspace_src_path = f"/Workspace{repo_src_path}"
 user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
-cloud_provider = spark.conf.get('spark.databricks.cloudProvider') # "Azure" or "AWS"
-min_dbr_version     = 14.1
-invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
-node_types          = get_node_types()
-dbrs                = get_dbr_versions(min_dbr_version)
-default_dbr_version = list(dbrs.keys())[0]
-default_dbr         = list(dbrs.values())[0]
-
 workflows_dict      = {
   "CLUSTER": "Workspace Cluster Workflow", 
   "DBSQL": "DBSQL Warehouse Workflow",
   "DLT-CORE": "CORE Delta Live Tables Pipeline", 
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
-  "DBT": "dbt Core on DB SQL Warehouse",
+  # "DBT": "dbt Core on DB SQL Warehouse",
   "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
-
-try: 
-  default_workflow  = wf_type
-except NameError: 
-  default_workflow  = workflows_dict['CLUSTER']
-if default_workflow == '':
-  raise Exception("Missing valid workflow type")
-
-try: 
-  default_serverless  = comp_type
-except NameError: 
-  default_serverless  = 'NO'
-
-worker_cores_mult     = 0.0576
+default_workflow      = workflows_dict['CLUSTER']
 workflow_vals         = list(workflows_dict.values())
 default_sf            = '10'
-default_sf_options    = ['10', '100', '1000', '5000', '10000']
 default_job_name      = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
 default_wh            = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
-default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
-if cloud_provider == 'AWS':
-  default_worker_type = "m7gd.2xlarge"
-  default_driver_type = "m7gd.xlarge"
-  cust_mgmt_type      = "m7gd.16xlarge"
-elif cloud_provider == 'GCP':
-  default_worker_type = "n2-standard-8"
-  default_driver_type = "n2-standard-4"
-  cust_mgmt_type      = "n2-standard-64"
-elif cloud_provider == 'Azure':
-  default_worker_type = "Standard_D8ads_v5" 
-  default_driver_type = "Standard_D4as_v5"
-  cust_mgmt_type      = "Standard_D64ads_v5" 
+min_dbr_version     = 14.1
+invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
+
+lighthouse = is_lighthouse()
+if lighthouse:
+  UC_enabled = True
+  catalog = 'workspace'
+  cloud_provider = 'AWS'
+  default_sf_options    = ['10']
+  scale_factor = 10
+  serverless = 'YES'
 else:
-  raise Exception('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
-  dbutils.notebook.exit('Cloud Provider Unknown! Cannot determine whether AWS, GCP, or Azure')
+  cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
+  default_sf_options    = ['10', '100', '1000', '5000', '10000']
+  default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
+  node_types            = get_node_types()
+  dbrs                  = get_dbr_versions(min_dbr_version)
+  default_dbr_version   = list(dbrs.keys())[0]
+  default_dbr           = list(dbrs.values())[0]
+  default_serverless    = 'NO'
+  worker_cores_mult     = 0.0224
+  if cloud_provider == 'AWS':
+    default_worker_type = "m7gd.2xlarge"
+    default_driver_type = "m7gd.xlarge"
+    cust_mgmt_type      = "m7gd.16xlarge"
+  elif cloud_provider == 'GCP':
+    default_worker_type = "n2-standard-8"
+    default_driver_type = "n2-standard-4"
+    cust_mgmt_type      = "n2-standard-64"
+  elif cloud_provider == 'Azure':
+    default_worker_type = "Standard_D8ads_v5" 
+    default_driver_type = "Standard_D4as_v5"
+    cust_mgmt_type      = "Standard_D64ads_v5" 
+  response = api_call(json_payload=None, request_type="GET", api_endpoint='/api/2.1/unity-catalog/metastore_summary')
+  if response.status_code == 200: 
+    UC_enabled          = True
+  else:
+    UC_enabled          = False
+    tpcdi_directory     = "/tmp/tpcdi/"

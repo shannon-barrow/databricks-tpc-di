@@ -3,9 +3,9 @@ try:
   wh_scale_factor_map    = {
     "10": "2X-Small", 
     "100": "2X-Small", 
-    "1000": "Medium", 
-    "5000": "X-Large",
-    "10000": "2X-Large"
+    "1000": "Small", 
+    "5000": "Large",
+    "10000": "X-Large"
   }
   workflow_api_endpoint  = "/api/2.1/jobs/create"
   pipeline_api_endpoint  = "/api/2.0/pipelines"
@@ -47,7 +47,7 @@ try:
     dag_args['worker_node_count'] = worker_node_count
     dag_args['dbr'] = dbr_version_id
     compute = f"""Driver Type:              {driver_node_type}\nWorker Type:              {worker_node_type}\nWorker Count:             {worker_node_count}\nDBR Version:              {dbr_version_id}"""
-  else:
+  elif not lighthouse:
     dag_args['dbr'] = default_dbr_version
     dag_args['driver_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type
     dag_args['worker_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type

@@ -1,6 +1,6 @@
 {
-  "name": "Shannon-Barrow-TPCDI-SF10000-NOAUDITS_CLUSTER",
-  "description": "The ***run_customermgmt*** paramater accepts either ***YES*** or ***NO***.  If this XML file has already been ingested, the *dw_init* task does **NOT** remove it (since it is kind of a pain). Therefore, if you want to disable this task and just keep the existing historical customermgmt staging table then change to ***NO***.  It is set to ***YES*** by default.",
+  "name": "{{ job_name }}",
+  "description": "PLEASE RUN dw_init sepatately before executing! This version runs NO audit checks and does not run dw_init. It is intended for TCO analysis.",
   "email_notifications": {
     "no_alert_for_skipped_runs": false
   },
@@ -9,15 +9,18 @@
   "max_concurrent_runs": 1,
   "tasks": [
     {
-      "task_key": "batch0_complete",
+      "task_key": "ingest_DimDate",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/audit_validation/batch_complete",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "batch_id": "0"
+          "path": "Batch1",
+          "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
+          "filename": "Date.txt",
+          "table": "DimDate"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -25,24 +28,21 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
-      "task_key": "ingest_AccountIncremental",
+      "task_key": "ingest_DimTime",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage",
-          "filename": "Account.txt",
-          "raw_schema": "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountDesc STRING, taxstatus TINYINT, status STRING",
-          "table": "AccountIncremental"
+          "path": "Batch1",
+          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
+          "filename": "Time.txt",
+          "table": "DimTime"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -50,24 +50,21 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
-      "task_key": "ingest_BatchDate",
+      "task_key": "ingest_StatusType",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "path": "Batch*",
-          "tgt_query": "*, cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "BatchDate.txt",
-          "raw_schema": "batchdate DATE",
-          "table": "BatchDate"
+          "path": "Batch1",
+          "tgt_query": "val[0] st_id, val[1] st_name",
+          "filename": "StatusType.txt",
+          "table": "StatusType"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -75,20 +72,128 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TaxRate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] tx_id, val[1] tx_name, FLOAT(val[2]) tx_rate",
+          "filename": "TaxRate.txt",
+          "table": "TaxRate"
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
       },
-      "webhook_notifications": {}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TradeType",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
+          "filename": "TradeType.txt",
+          "table": "TradeType"
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_industry",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
+        "base_parameters": {
+          "path": "Batch1",
+          "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
+          "filename": "Industry.txt",
+          "table": "Industry"
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_FinWire",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_FinWire",
+          "table": "FinWire",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_ProspectIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_Prospect",
+          "table": "ProspectIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
     },
     {
       "task_key": "ingest_CashTransactionIncremental",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_CashTransactionIncremental",
-          "table": "CashTransactionIncremental"
+          "table": "CashTransactionIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -96,41 +201,20 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_CustomerIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_CustomerIncremental",
-          "table": "CustomerIncremental"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "ingest_DailyMarketIncremental",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
           "view": "v_DailyMarketIncremental",
-          "table": "DailyMarketIncremental"
+          "table": "DailyMarketIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -138,24 +222,20 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
-      "task_key": "ingest_DimDate",
+      "task_key": "ingest_HoldingIncremental",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "Date.txt",
-          "raw_schema": "sk_dateid BIGINT, datevalue DATE, datedesc STRING, calendaryearid INT, calendaryeardesc STRING, calendarqtrid INT, calendarqtrdesc STRING, calendarmonthid INT, calendarmonthdesc STRING, calendarweekid INT, calendarweekdesc STRING, dayofweeknum INT, dayofweekdesc STRING, fiscalyearid INT, fiscalyeardesc STRING, fiscalqtrid INT, fiscalqtrdesc STRING, holidayflag BOOLEAN",
-          "table": "DimDate"
+          "view": "v_HoldingIncremental",
+          "table": "HoldingIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -163,8 +243,112 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_BatchDate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_BatchDate",
+          "table": "BatchDate",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
       },
-      "webhook_notifications": {}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_WatchIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_WatchIncremental",
+          "table": "WatchIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_AccountIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_AccountIncremental",
+          "table": "AccountIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_CustomerIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_CustomerIncremental",
+          "table": "CustomerIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TradeIncremental",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_TradeIncremental",
+          "table": "TradeIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE",
+        "warehouse_id": "{{ wh_id }}"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
     },
     {
       "task_key": "Silver_DimBroker",
@@ -175,9 +359,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimBroker",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimBroker",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -185,154 +369,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_DimTime",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "Time.txt",
-          "raw_schema": "sk_timeid BIGINT, timevalue STRING, hourid INT, hourdesc STRING, minuteid INT, minutedesc STRING, secondid INT, seconddesc STRING, markethoursflag BOOLEAN, officehoursflag BOOLEAN",
-          "table": "DimTime"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_FinWire",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*, substring(value, 16, 3) rectype",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage",
-          "filename": "FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]",
-          "raw_schema": "value STRING",
-          "table": "FinWire"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_HoldingIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage",
-          "filename": "HoldingHistory.txt",
-          "raw_schema": "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT",
-          "table": "HoldingIncremental"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_ProspectIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_Prospect",
-          "table": "ProspectIncremental"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_StatusType",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "StatusType.txt",
-          "raw_schema": "st_id STRING, st_name STRING",
-          "table": "StatusType"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_TaxRate",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "TaxRate.txt",
-          "raw_schema": "tx_id STRING, tx_name STRING, tx_rate FLOAT",
-          "table": "TaxRate"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_DimCustomer",
@@ -346,9 +383,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimCustomer Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimCustomer Historical",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -356,8 +393,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch1_Prospect",
@@ -371,12 +407,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/Prospect",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Prospect",
         "base_parameters": {
           "batch_id": "1"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -384,8 +420,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_DimAccount",
@@ -399,9 +434,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimAccount Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimAccount Historical",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -409,8 +444,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_FactCashBalances",
@@ -424,9 +458,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactCashBalances Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactCashBalances Historical",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -434,104 +468,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_TradeIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_TradeIncremental",
-          "table": "TradeIncremental"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_TradeType",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "TradeType.txt",
-          "raw_schema": "tt_id STRING, tt_name STRING, tt_is_sell INT, tt_is_mrkt INT",
-          "table": "TradeType"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_WatchIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch[23]",
-          "tgt_query": "* except(cdc_flag, cdc_dsn), cast(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1) as int) batchid",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage",
-          "filename": "WatchHistory.txt",
-          "raw_schema": "cdc_flag STRING , cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING",
-          "table": "WatchIncremental"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "ingest_industry",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "*",
-          "tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}",
-          "filename": "Industry.txt",
-          "raw_schema": "in_id STRING, in_name STRING, in_sc_id STRING",
-          "table": "industry"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Silver_DimCompany",
@@ -545,9 +482,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimCompany",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimCompany",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -555,8 +492,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Silver_DimSecurity",
@@ -567,9 +503,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimSecurity",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimSecurity",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -577,8 +513,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_DimTrade",
@@ -592,12 +527,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimTrade Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimTrade Historical",
         "base_parameters": {
-          "wh_timezone": ""
+          "wh_timezone": "set timezone = GMT"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -605,8 +540,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_FactWatches",
@@ -620,9 +554,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/FactWatches Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/FactWatches Historical",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -630,8 +564,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Silver_Financial",
@@ -642,9 +575,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/Financial",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Financial",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -652,8 +585,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Historical_FactMarketHistory",
@@ -670,9 +602,9 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactMarketHistory Historical",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactMarketHistory Historical",
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -680,11 +612,10 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
-      "task_key": "batch1_complete",
+      "task_key": "Batch2_DimCustomer",
       "depends_on": [
         {
           "task_key": "ingest_DimTime"
@@ -702,10 +633,10 @@
           "task_key": "ingest_StatusType"
         },
         {
-          "task_key": "batch0_complete"
+          "task_key": "Historical_DimTrade"
         },
         {
-          "task_key": "Historical_DimTrade"
+          "task_key": "ingest_CustomerIncremental"
         },
         {
           "task_key": "Batch1_Prospect"
@@ -716,40 +647,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/audit_validation/batch_complete",
-        "base_parameters": {
-          "batch_id": "1"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "Batch2_DimCustomer",
-      "depends_on": [
-        {
-          "task_key": "batch1_complete"
-        },
-        {
-          "task_key": "ingest_CustomerIncremental"
-        }
-      ],
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimCustomer Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimCustomer Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -757,8 +660,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_DimAccount",
@@ -772,12 +674,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimAccount Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimAccount Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -785,8 +687,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_DimTrade",
@@ -800,12 +701,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimTrade Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimTrade Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -813,8 +714,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_FactCashBalances",
@@ -825,12 +725,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactCashBalances Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactCashBalances Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -838,8 +738,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_FactWatches",
@@ -853,12 +752,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/FactWatches Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/FactWatches Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -866,8 +765,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_Prospect",
@@ -878,12 +776,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/Prospect",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Prospect",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -891,24 +789,44 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch2_FactMarketHistory",
       "depends_on": [
         {
-          "task_key": "batch1_complete"
+          "task_key": "ingest_DimTime"
+        },
+        {
+          "task_key": "ingest_TradeType"
+        },
+        {
+          "task_key": "Historical_FactWatches"
+        },
+        {
+          "task_key": "Historical_FactCashBalances"
+        },
+        {
+          "task_key": "ingest_StatusType"
+        },
+        {
+          "task_key": "Historical_DimTrade"
+        },
+        {
+          "task_key": "Batch1_Prospect"
+        },
+        {
+          "task_key": "Historical_FactMarketHistory"
         }
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactMarketHistory Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactMarketHistory Incremental",
         "base_parameters": {
           "batch_id": "2"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -916,11 +834,10 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
-      "task_key": "batch2_complete",
+      "task_key": "Batch3_DimCustomer",
       "depends_on": [
         {
           "task_key": "Batch2_FactCashBalances"
@@ -940,37 +857,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/audit_validation/batch_complete",
-        "base_parameters": {
-          "batch_id": "2"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "Batch3_DimCustomer",
-      "depends_on": [
-        {
-          "task_key": "batch2_complete"
-        }
-      ],
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimCustomer Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimCustomer Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -978,8 +870,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_DimAccount",
@@ -990,12 +881,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimAccount Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimAccount Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1003,8 +894,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_DimTrade",
@@ -1015,12 +905,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/DimTrade Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimTrade Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1028,8 +918,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_FactCashBalances",
@@ -1040,12 +929,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactCashBalances Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactCashBalances Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1053,8 +942,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_FactWatches",
@@ -1065,12 +953,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/FactWatches Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/FactWatches Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1078,8 +966,7 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_Prospect",
@@ -1090,12 +977,12 @@
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/silver/Prospect",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Prospect",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1103,24 +990,35 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     },
     {
       "task_key": "Batch3_FactMarketHistory",
       "depends_on": [
         {
-          "task_key": "batch2_complete"
+          "task_key": "Batch2_FactCashBalances"
+        },
+        {
+          "task_key": "Batch2_DimTrade"
+        },
+        {
+          "task_key": "Batch2_FactMarketHistory"
+        },
+        {
+          "task_key": "Batch2_Prospect"
+        },
+        {
+          "task_key": "Batch2_FactWatches"
         }
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/gold/FactMarketHistory Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactMarketHistory Incremental",
         "base_parameters": {
           "batch_id": "3"
         },
         "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
+        "warehouse_id": "{{ wh_id }}"
       },
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -1128,71 +1026,29 @@
         "no_alert_for_skipped_runs": false,
         "no_alert_for_canceled_runs": false,
         "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
-    },
-    {
-      "task_key": "batch3_complete",
-      "depends_on": [
-        {
-          "task_key": "Batch3_FactMarketHistory"
-        },
-        {
-          "task_key": "Batch3_Prospect"
-        },
-        {
-          "task_key": "Batch3_DimTrade"
-        },
-        {
-          "task_key": "Batch3_FactWatches"
-        },
-        {
-          "task_key": "Batch3_FactCashBalances"
-        }
-      ],
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/incremental_batches/audit_validation/batch_complete",
-        "base_parameters": {
-          "batch_id": "3"
-        },
-        "source": "WORKSPACE",
-        "warehouse_id": "478ee23f65c0163d"
-      },
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      },
-      "webhook_notifications": {}
+      }
     }
   ],
   "parameters": [
     {
       "name": "catalog",
-      "default": "tpcdi"
-    },
-    {
-      "name": "predictive_optimization",
-      "default": "DISABLE"
-    },
-    {
-      "name": "run_customermgmt",
-      "default": "NO"
+      "default": "{{ catalog }}"
     },
     {
       "name": "scale_factor",
-      "default": "10000"
+      "default": "{{ scale_factor }}"
     },
     {
       "name": "tpcdi_directory",
-      "default": "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/"
+      "default": "{{ tpcdi_directory }}"
     },
     {
       "name": "wh_db",
-      "default": "Shannon_Barrow_TPCDI_DBSQL"
+      "default": "{{ wh_target }}_{{ exec_type }}"
+    },
+    {
+      "name": "predictive_optimization",
+      "default": "{{ pred_opt }}"
     }
   ],
   "run_as": {

@@ -55,44 +55,42 @@
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale factor")
 dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Workflow Type")
-dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "Enable Serverless")
 dbutils.widgets.dropdown("batched", 'Single Collective Batch', ['Single Collective Batch', 'Incremental Batches'], "Collective batch or incremental batches")
-dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
-dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
-dbutils.widgets.dropdown("dbr", default_dbr, list(dbrs.values()), "Databricks Runtime")
 dbutils.widgets.dropdown("pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Target Database')
-dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
-
-scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
 pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
-catalog           = dbutils.widgets.get("catalog")
 wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
 sku               = wf_key.split('-')
 job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
-serverless        = dbutils.widgets.get('serverless')
-worker_node_type  = dbutils.widgets.get("worker_type")
-driver_node_type  = dbutils.widgets.get("driver_type")
-dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
+
+if not lighthouse:
+  dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale factor")
+  dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "Enable Serverless")
+  dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
+  dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
+  dbutils.widgets.dropdown("dbr", default_dbr, list(dbrs.values()), "Databricks Runtime")
+  dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+  scale_factor      = int(dbutils.widgets.get("scale_factor"))
+  catalog           = dbutils.widgets.get("catalog")
+  serverless        = dbutils.widgets.get('serverless')
+  worker_node_type  = dbutils.widgets.get("worker_type")
+  driver_node_type  = dbutils.widgets.get("driver_type")
+  dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
+
+  if sku[0] not in ['CLUSTER','DLT'] or serverless == 'YES':
+    dbutils.widgets.remove('worker_type')
+    dbutils.widgets.remove('driver_type')
+    dbutils.widgets.remove('dbr')
 
 if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')
   incremental = False
-
-if sku[0] not in ['CLUSTER','DLT'] or serverless == 'YES':
-  dbutils.widgets.remove('worker_type')
-  dbutils.widgets.remove('driver_type')
-  dbutils.widgets.remove('dbr')
-
-if sku[0] in ['DBT']:
-  displayHTML(f"<h1>Please select a different Workflow Type from the widgets above and rerun. The dbt flow is 'UNDER RENOVATION' </h1>")
-  raise Exception("Please select a different Workflow Type from the widgets above and rerun<. The dbt flow is 'UNDER RENOVATION'")
+tpcdi_directory = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
 
 # COMMAND ----------
 
