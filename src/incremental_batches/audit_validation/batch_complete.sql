@@ -1,8 +1,5 @@
 -- Databricks notebook source
-use catalog ${catalog};
-use ${wh_db}_${scale_factor};
-
-INSERT INTO DIMessages
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DIMessages
 SELECT
   CURRENT_TIMESTAMP() as MessageDateAndTime,
   ${batch_id} AS BatchID,

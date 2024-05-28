@@ -5,10 +5,7 @@
 
 -- COMMAND ----------
 
-use catalog ${catalog};
-use ${wh_db}_${scale_factor};
-
-INSERT INTO DIMessages
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DIMessages
 SELECT 
   CURRENT_TIMESTAMP() AS MessageDateAndTime,
   batchid,
@@ -27,7 +24,7 @@ FROM (
       customerid, 
       tier,
       batchid
-    FROM DimCustomer
+    FROM ${catalog}.${wh_db}_${scale_factor}.DimCustomer
     WHERE 
       tier NOT IN (1,2,3)
       OR tier IS NULL
@@ -38,8 +35,8 @@ FROM (
     'DimCustomer' MessageSource,
     'DOB out of range' MessageText,
     concat('C_ID = ', customerid, ', C_DOB = ', dob) MessageData
-  FROM DimCustomer dc
-  JOIN batchdate bd USING (batchid)
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimCustomer dc
+  JOIN ${catalog}.${wh_db}_${scale_factor}.batchdate bd USING (batchid)
   WHERE
     datediff(YEAR, dob, batchdate) >= 100
     OR dob > batchdate
@@ -49,7 +46,7 @@ FROM (
     'DimTrade' MessageSource,
     'Invalid trade commission' MessageText,
     concat('T_ID = ', tradeid, ', T_COMM = ', commission) MessageData
-  FROM DimTrade
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimTrade
   WHERE
     commission IS NOT NULL
     AND commission > tradeprice * quantity
@@ -59,7 +56,7 @@ FROM (
     'DimTrade' MessageSource,
     'Invalid trade fee' MessageText,
     concat('T_ID = ', tradeid, ', T_CHRG = ', fee) MessageData
-  FROM DimTrade
+  FROM ${catalog}.${wh_db}_${scale_factor}.DimTrade
   WHERE
     fee IS NOT NULL
     AND fee > tradeprice * quantity
@@ -69,8 +66,8 @@ FROM (
     'FactMarketHistory' MessageSource,
     'No earnings for company' MessageText,
     concat('DM_S_SYMB = ', symbol) MessageData
-  FROM FactMarketHistory fmh
-  JOIN DimSecurity ds 
+  FROM ${catalog}.${wh_db}_${scale_factor}.FactMarketHistory fmh
+  JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity ds 
     ON 
       ds.sk_securityid = fmh.sk_securityid
   WHERE
@@ -85,7 +82,7 @@ FROM (
     SELECT 
       trim(substring(value, 79, 10)) CIK, 
       trim(substring(value, 95, 4)) sprating 
-    FROM ${wh_db}_${scale_factor}_stage.finwire
+    FROM ${catalog}.${wh_db}_${scale_factor}_stage.finwire
     WHERE rectype = 'CMP')
   WHERE sprating NOT IN ('AAA','AA','A','BBB','BB','B','CCC','CC','C','D','AA+','A+','BBB+','BB+','B+','CCC+','AA-','A-','BBB-','BB-','B-','CCC-')
 )
