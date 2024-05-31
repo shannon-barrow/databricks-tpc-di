@@ -65,7 +65,6 @@ pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
 wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
 sku               = wf_key.split('-')
-job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
 
 if not lighthouse:
@@ -91,6 +90,7 @@ if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')
   incremental = False
 tpcdi_directory = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+job_name        = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 
 # COMMAND ----------
 

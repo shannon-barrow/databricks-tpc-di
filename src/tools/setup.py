@@ -65,7 +65,7 @@ workflows_dict      = {
   "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
   "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
   # "DBT": "dbt Core on DB SQL Warehouse",
-  "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
+  # "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
 default_workflow      = workflows_dict['CLUSTER']
 workflow_vals         = list(workflows_dict.values())
@@ -84,6 +84,7 @@ if lighthouse:
   scale_factor = 10
   serverless = 'YES'
 else:
+  UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
   cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
   default_sf_options    = ['10', '100', '1000', '5000', '10000']
   default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
@@ -105,9 +106,3 @@ else:
     default_worker_type = "Standard_D8ads_v5" 
     default_driver_type = "Standard_D4as_v5"
     cust_mgmt_type      = "Standard_D64ads_v5" 
-  response = api_call(json_payload=None, request_type="GET", api_endpoint='/api/2.1/unity-catalog/metastore_summary')
-  if response.status_code == 200: 
-    UC_enabled          = True
-  else:
-    UC_enabled          = False
-    tpcdi_directory     = "/tmp/tpcdi/"
