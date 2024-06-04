@@ -13,12 +13,12 @@
 # MAGIC         * Same as cluster approached above BUT against a DBSQL Warehouse. Do an incremental (benchmarked) run OR execute all batches in one pass
 # MAGIC 3. Delta Live Tables Pipeline: CORE Sku  
 # MAGIC         * Best TCO Option
-# MAGIC 4. Delta Live Tables Pipeline: PRO Sku  
+# MAGIC 4. Delta Live Tables Pipeline with SCD Type 1/2: PRO Sku  
 # MAGIC         * Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD
-# MAGIC 5. Delta Live Tables Pipeline: ADVANCED Sku  
+# MAGIC 5. Delta Live Tables Pipeline with DQ: ADVANCED Sku  
 # MAGIC         * Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!
 # MAGIC
-# MAGIC ***The following are under modification to update with latest code the above patterns recently receeived, but will be available again soon!***
+# MAGIC ***The following are under modification to update with latest code the above patterns recently received, but will be available again soon!***
 # MAGIC 1. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
 # MAGIC         * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
 # MAGIC         * The <a href="https://github.com/rlsalcido24/dbtpcdi" target="_blank">dbt TPC-DI repo</a> exists externally but is called by the Workflow created here with all dependencies met
@@ -31,11 +31,15 @@
 # MAGIC %md
 # MAGIC ### Other widget options include:
 # MAGIC - **Scale Factor**:  
-# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a liinear change in total rows/data size.  For example, a scale factor of 10 aligns to roughly 1GB of raw data.
+# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a liinear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
 # MAGIC - **Serverless**:  
-# MAGIC         Serverless workflows and DLT are in preview! Ensure your workspace is configured to leverage the serverless preview otherwise this notebook will fail to generate a workflow for you
+# MAGIC         Serverless workflows and DLT are in preview! Ensure your workspace is configured to leverage the serverless preview otherwise this notebook will fail to generate a workflow for you.
 # MAGIC - **Collective Batch or Incremental Batches**:  
 # MAGIC         The "formal" benchmark requires audit checks in between batches.  However, dbt, Delta Live Tables, and Streaming Tables/Materialized Views do NOT support an incremental batch nature in which the job stops to do "official audit checks" since they are more declarative in nature and ingest ALL available files at once.  Therefore the fastest and preferred method to run this for unofficial use is to run all batches in a single batch.  If you prefer to run the auditable version of the code that incrementally processes only 1 batch at a time then you will need to choose the 'Incremental Batches' option and make sure to choose a Workspace Cluster or DBSQL Warehouse execution flow type.  
+# MAGIC - **Predictive Optimization**:  
+# MAGIC         Predictive Optimization removes the need to manually manage maintenance operations for Delta tables on Databricks. You could choose to enable or disable it. With predictive optimization enabled, Databricks automatically identifies tables that would benefit from maintenance operations and runs them for the user. Maintenance operations are only run as necessary, eliminating both unnecessary runs for maintenance operations and the burden associated with tracking and troubleshooting performance.
+# MAGIC - **Job Name & Target Database**:  
+# MAGIC         The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI,  you could change it to the preferred job name and target database name if required.
 # MAGIC - **Various cluster options**:  
 # MAGIC         If you do not choose serverless you can adjust the DBR and worker/driver type.  The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
 
