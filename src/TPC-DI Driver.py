@@ -5,8 +5,7 @@
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## The README doc is outdated but will be updated soon
-# MAGIC Meanwhile please choose from the widgets above, starting with the WORKFLOW TYPE:
+# MAGIC Please choose from the widgets above, starting with the WORKFLOW TYPE:
 # MAGIC 1. CLUSTER-based Workflow with Structured Streaming Notebooks  
 # MAGIC         * Leverage traditional cluster and do an incremental (benchmarked) run OR execute all batches in one pass
 # MAGIC 2. DBSQL WAREHOUSE-based Workflow with Structured Streaming Notebooks  
