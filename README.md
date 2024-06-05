@@ -33,13 +33,19 @@ As of writing, the TPC-DI has not modified its submittal/scoring metrics to acco
 The benchmark has been implemented in various ways to demonstrate the versatility of the Databricks Lakehouse platform, and so users can reference such implementations side-by-side to better enable them to build other similar data engineering pipelines:
 
 1. Traditional Native Notebooks Workflow
+2. Databricks DBSQL Warehouse based Workflow 
 2. Databricks Delta Live Tables CORE
-3. Databricks Delta Live Tables PRO: introduces easier handling of SCD TYPE 1/2 historical tracking using the new APPLY CHANGES INTO syntax
-4. Databricks Delta Live Tables ADVANCED: introduces Data Quality metrics as well so data engineers can more easily handle bad data quality, analysts can more confidently trust their data, and support teams can more easily monitor the quality of data as it enters the Lakehouse.
+3. Databricks Delta Live Tables with SCD Type 1/ PRO: introduces easier handling of SCD TYPE 1/2 historical tracking using the new APPLY CHANGES INTO syntax
+4. Databricks Delta Live Tables with DQ ADVANCED: introduces Data Quality metrics as well so data engineers can more easily handle bad data quality, analysts can more confidently trust their data, and support teams can more easily monitor the quality of data as it enters the Lakehouse.
 
 There are 2 additional options that a user can toggle for **EACH** of the above deployment choices and they include:
-1. **Serverless**: choose faster performance and startup time with the Databricks SERVERLESS Workflows or SERVERLESS Delta Live Tables (which includes Enzyme as a standard feature)
-2. **Unity Catalog**: leverage the latest in Databricks governance with Unity Catalog. With defined Primary and Foreign keys included in the DDL you can track lineage through the pipeline, define permissions, monitor, share, and search with this native, best-in-class, free governance tool. To leverage Unity Catalog, just define a different name for the Catalog than the native hive_metastore. If Unity Catalog is not available for the cluster defining the workflow then the hive_metastore will be chosen as default.
+1. **Scale Factor**: The value chosen correlates to HOW MUCH data will be processed. The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected. What will be adjusted is the amount of data per file. In general the change in scale factor is reflected by a linear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor. 
+2. **Serverless**: choose faster performance and startup time with the Databricks SERVERLESS Workflows or SERVERLESS Delta Live Tables (which includes Enzyme as a standard feature)
+3. **Collective Batch or Incremental Batches**: You could choose to run all batches in a single collective batch, or if you prefer to run the auditable version of the code that incrementally processes only 1 batch at a time then you will need to choose the 'Incremental Batches' option and make sure to choose a Workspace Cluster or DBSQL Warehouse execution flow type.
+4. **Predictive Optimization**: Predictive Optimization removes the need to manually manage maintenance operations for Delta tables on Databricks. You could choose to enable or disable it. While enabled, Databricks automatically identifies tables that would benefit from maintenance operations and runs them for the user. Maintenance operations are only run as necessary, eliminating both unnecessary runs for maintenance operations and the burden associated with tracking and troubleshooting performance.
+5. **Job Name & Target Database**: The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI, you could change it to the preferred job name and target database name if required.
+6. **Various cluster options**: If you do not choose serverless you can adjust the DBR and worker/driver type. The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
+
 
 ## Components of Execution
 The TPC-DI has an initial "setup" step, followed by the benchmark execution.  
