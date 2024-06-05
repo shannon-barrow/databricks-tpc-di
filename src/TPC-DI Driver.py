@@ -1,33 +1,25 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # Welcome to the TPC-DI Spec Implementation on Databricks!
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC Please choose from the widgets above, starting with the WORKFLOW TYPE:
-# MAGIC 1. CLUSTER-based Workflow with Structured Streaming Notebooks  
-# MAGIC         * Leverage traditional cluster and do an incremental (benchmarked) run OR execute all batches in one pass
-# MAGIC 2. DBSQL WAREHOUSE-based Workflow with Structured Streaming Notebooks  
-# MAGIC         * Same as cluster approached above BUT against a DBSQL Warehouse. Do an incremental (benchmarked) run OR execute all batches in one pass
-# MAGIC 3. Delta Live Tables Pipeline: CORE Sku  
-# MAGIC         * Best TCO Option
-# MAGIC 4. Delta Live Tables Pipeline with SCD Type 1/2: PRO Sku  
-# MAGIC         * Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD
-# MAGIC 5. Delta Live Tables Pipeline with DQ: ADVANCED Sku  
-# MAGIC         * Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!
 # MAGIC
-# MAGIC ***The following are under modification to update with latest code the above patterns recently received, but will be available again soon!***
-# MAGIC 1. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
-# MAGIC         * Built using dbt Core, this version allows the code to be run consistently across other DWs for comparing TCO!  
-# MAGIC         * The <a href="https://github.com/rlsalcido24/dbtpcdi" target="_blank">dbt TPC-DI repo</a> exists externally but is called by the Workflow created here with all dependencies met
-# MAGIC 2. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>  
-# MAGIC         * Leverage the latest in SQL-based streaming tables and materialized views. Built using DBSQL, executed as a DLT Pipeline!
+# MAGIC ## Please refer to the README for additional documentation!
 # MAGIC
-
-# COMMAND ----------
-
-# MAGIC %md
+# MAGIC ### To Execute the benchmark please follow these instructions:  
+# MAGIC 1. **FIRST**, execute the first 2 cells after this initial documentation cell (the setup cell below and the widget generation cell).  
+# MAGIC 2. **THEN**, choose from the widgets above, starting with the WORKFLOW TYPE
+# MAGIC
+# MAGIC ### Workflow Types:
+# MAGIC - CLUSTER-based Workflow with Structured Streaming Notebooks  
+# MAGIC   - Leverage traditional cluster and do an incremental (benchmarked) run OR execute all batches in one pass. 
+# MAGIC - DBSQL WAREHOUSE-based Workflow with Structured Streaming Notebooks   
+# MAGIC   - Same as cluster approached above BUT against a DBSQL Warehouse. Do an incremental (benchmarked) run OR execute all batches in one pass. 
+# MAGIC - Delta Live Tables Pipeline: CORE Sku   
+# MAGIC   - Leverage DLT for simplified, cost-effective ETL pipelines 
+# MAGIC - Delta Live Tables Pipeline with SCD Type 1/2: PRO Sku   
+# MAGIC   - Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD. 
+# MAGIC - Delta Live Tables Pipeline with DQ: ADVANCED Sku   
+# MAGIC   - Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!  
+# MAGIC
 # MAGIC ### Other widget options include:
 # MAGIC - **Scale Factor**:  
 # MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a liinear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
@@ -41,19 +33,20 @@
 # MAGIC         The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI,  you could change it to the preferred job name and target database name if required.
 # MAGIC - **Various cluster options**:  
 # MAGIC         If you do not choose serverless you can adjust the DBR and worker/driver type.  The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
+# MAGIC
+# MAGIC ### Many options are configurable from the workflow_builder EXCEPT the cluster or warehouse size.
+# MAGIC - Serverless clusters/DLT pipelines are dynamically autoscaled
+# MAGIC - Clusters and warehouses are sized to achieve the best TCO based on the scale factor chosen
+# MAGIC - If you prefer changing the cluster/WH size for your own testing then it can be manually modified from the Workflow created by this notebook
+# MAGIC
+# MAGIC **NOTE**: The following execution types have been removed, at least temporarily:
+# MAGIC 1. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
+# MAGIC 2. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>
 
 # COMMAND ----------
 
 # DBTITLE 1,Setup: Declare defaults and find basic details about the cloud, DBR versions, and available node types
 # MAGIC %run ./tools/setup
-
-# COMMAND ----------
-
-# MAGIC %md
-# MAGIC ### Many options are configurable from the workflow_builder EXCEPT the cluster or warehouse size.
-# MAGIC - Serverless clusters/DLT pipelines are dynamically autoscaled
-# MAGIC - Clusters and warehouses are sized to achieve the best TCO based on the scale factor chosen
-# MAGIC - If you prefer changing the cluster/WH size for your own testing then it can be manually modified from the Workflow created by this notebook
 
 # COMMAND ----------
 
@@ -97,20 +90,10 @@ job_name        = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 
 # COMMAND ----------
 
-# MAGIC %md 
-# MAGIC ### Data Generation stores data in Unity Catalog Volumes by Default.  If the default tpcdi catalog is not modified via widget above then a scale factor need only be generated once and others running this benchmark on the same workspace/metastore will be able to skip this step
-# MAGIC **Data Generation can take a few minutes on smaller scale factors, or hours on higher scale factors (i.e. 10,000 scale factor). Review README for more details**. 
-
-# COMMAND ----------
-
-# DBTITLE 1,Copy DIGen jar file and dependencies from repo to driver, then use dbutils to copy from driver to DBFS.  
+# DBTITLE 1,Review Data Generation documentation in the README for more information about Data Generation
 # MAGIC %run ./tools/data_generator
 
 # COMMAND ----------
 
 # DBTITLE 1,Generate and submit the Databricks Workflow
 # MAGIC %run ./tools/generate_workflow
-
-# COMMAND ----------
-
-dbutils.notebook.exit(job_id)
