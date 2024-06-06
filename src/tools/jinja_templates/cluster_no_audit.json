@@ -583,7 +583,7 @@
       }
     },
     {
-      "task_key": "Silver_Financial",
+      "task_key": "Silver_Financial_CIK",
       "depends_on": [
         {
           "task_key": "Silver_DimCompany"
@@ -592,6 +592,35 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Financial",
+        "base_parameters": {
+          "conameorcik": "COMPANYID"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "Silver_Financial_CONAME",
+      "depends_on": [
+        {
+          "task_key": "Silver_DimCompany"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Financial",
+        "base_parameters": {
+          "conameorcik": "NAME"
+        },
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -612,7 +641,10 @@
           "task_key": "Silver_DimSecurity"
         },
         {
-          "task_key": "Silver_Financial"
+          "task_key": "Silver_Financial_CIK"
+        },
+        {
+          "task_key": "Silver_Financial_CONAME"
         }
       ],
       "run_if": "ALL_SUCCESS",
