@@ -22,7 +22,3 @@ ON
   and trim(substring(value, 169, 60)) = dc.${conameorcik}
   AND recdate >= dc.effectivedate 
   AND recdate < dc.enddate
-
--- COMMAND ----------
-
-
