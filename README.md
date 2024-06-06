@@ -56,7 +56,8 @@ This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 2. Create a Databricks Workflow (this created workflow is what executes the ingestion and transformations for the benchmark).  
 
 #### Data Generation
-- Data generation is a requisite step by TPC to create the required raw data in the various formats. 
+- Data generation is a requisite step by TPC to create the required raw data in the various formats.  
+- All Raw Data Generation is executed through the provided TPC ***DIGen.JAR*** Java executable file, provided in the repo to simplify the user experience.  To download the original source code from the TPC website, it can be found [here](https://www.tpc.org/TPC_Documents_Current_Versions/download_programs/tools-download-request5.asp?bm_type=TPC-DI&bm_vers=1.1.0&mode=CURRENT-ONLY)
 - The number of files does not change with increasing scale factors - the size of the files increases as the scale factor increases
 - The steps in the data generator are as follows:
   1) Copy the *TPC-provided JAR and dependencies* to the driver from the {repo_root}/src/tools/datagen folder
