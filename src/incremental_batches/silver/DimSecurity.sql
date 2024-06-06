@@ -9,17 +9,17 @@
 INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
 WITH SEC as (
   SELECT
-    date(to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss')) AS effectivedate,
-    trim(substring(value, 19, 15)) AS Symbol,
-    trim(substring(value, 34, 6)) AS issue,
-    trim(substring(value, 40, 4)) AS Status,
-    trim(substring(value, 44, 70)) AS Name,
-    trim(substring(value, 114, 6)) AS exchangeid,
-    cast(substring(value, 120, 13) as BIGINT) AS sharesoutstanding,
-    to_date(substring(value, 133, 8), 'yyyyMMdd') AS firsttrade,
-    to_date(substring(value, 141, 8), 'yyyyMMdd') AS firsttradeonexchange,
-    cast(substring(value, 149, 12) AS DOUBLE) AS Dividend,
-    trim(substring(value, 161, 60)) AS conameorcik
+    recdate AS effectivedate,
+    trim(substring(value, 1, 15)) AS Symbol,
+    trim(substring(value, 16, 6)) AS issue,
+    trim(substring(value, 22, 4)) AS Status,
+    trim(substring(value, 26, 70)) AS Name,
+    trim(substring(value, 96, 6)) AS exchangeid,
+    cast(substring(value, 102, 13) as BIGINT) AS sharesoutstanding,
+    to_date(substring(value, 115, 8), 'yyyyMMdd') AS firsttrade,
+    to_date(substring(value, 123, 8), 'yyyyMMdd') AS firsttradeonexchange,
+    cast(substring(value, 131, 12) AS DOUBLE) AS Dividend,
+    trim(substring(value, 143, 60)) AS conameorcik
   FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
   WHERE rectype = 'SEC'
 ),
@@ -58,7 +58,7 @@ SEC_prep AS (
   FROM SEC
 ),
 SEC_final AS (
-  SELECT 
+  SELECT
     SEC.Symbol,
     SEC.issue,
     SEC.status,
