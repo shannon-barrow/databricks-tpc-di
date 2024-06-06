@@ -32,6 +32,11 @@
     },
     {
       "task_key": "ingest_DimTime",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
@@ -54,6 +59,11 @@
     },
     {
       "task_key": "ingest_StatusType",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
@@ -98,6 +108,11 @@
     },
     {
       "task_key": "ingest_TradeType",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
@@ -226,6 +241,11 @@
     },
     {
       "task_key": "ingest_HoldingIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimTrade"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
@@ -268,6 +288,11 @@
     },
     {
       "task_key": "ingest_WatchIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_FactWatches"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
@@ -289,6 +314,11 @@
     },
     {
       "task_key": "ingest_AccountIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimAccount"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
@@ -310,6 +340,11 @@
     },
     {
       "task_key": "ingest_CustomerIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimCustomer"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
@@ -331,6 +366,11 @@
     },
     {
       "task_key": "ingest_TradeIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimTrade"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
@@ -727,6 +767,9 @@
         },
         {
           "task_key": "ingest_TradeIncremental"
+        },
+        {
+          "task_key": "ingest_HoldingIncremental"
         }
       ],
       "run_if": "ALL_SUCCESS",

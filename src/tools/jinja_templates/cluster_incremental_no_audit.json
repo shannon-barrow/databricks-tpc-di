@@ -119,6 +119,29 @@
   {% endif %}
   "tasks": [
     {
+      "task_key": "ingest_BatchDate",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_BatchDate",
+          "table": "BatchDate",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
       "task_key": "ingest_DimDate",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
@@ -128,54 +151,6 @@
           "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
           "filename": "Date.txt",
           "table": "DimDate"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_DimTime",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
-          "filename": "Time.txt",
-          "table": "DimTime"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_StatusType",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] st_id, val[1] st_name",
-          "filename": "StatusType.txt",
-          "table": "StatusType"
         },
         "source": "WORKSPACE"
       },
@@ -215,30 +190,6 @@
       }
     },
     {
-      "task_key": "ingest_TradeType",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
-        "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
-          "filename": "TradeType.txt",
-          "table": "TradeType"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
       "task_key": "ingest_industry",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
@@ -248,29 +199,6 @@
           "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
           "filename": "Industry.txt",
           "table": "Industry"
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_FinWire",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_FinWire",
-          "table": "FinWire",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -355,13 +283,13 @@
       }
     },
     {
-      "task_key": "ingest_HoldingIncremental",
+      "task_key": "ingest_FinWire",
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "view": "v_HoldingIncremental",
-          "table": "HoldingIncremental",
+          "view": "v_FinWire",
+          "table": "FinWire",
           {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
@@ -378,14 +306,20 @@
       }
     },
     {
-      "task_key": "ingest_BatchDate",
+      "task_key": "ingest_DimTime",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "view": "v_BatchDate",
-          "table": "BatchDate",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
+          "path": "Batch1",
+          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
+          "filename": "Time.txt",
+          "table": "DimTime"
         },
         "source": "WORKSPACE"
       },
@@ -401,14 +335,20 @@
       }
     },
     {
-      "task_key": "ingest_WatchIncremental",
+      "task_key": "ingest_StatusType",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "view": "v_WatchIncremental",
-          "table": "WatchIncremental",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+          "path": "Batch1",
+          "tgt_query": "val[0] st_id, val[1] st_name",
+          "filename": "StatusType.txt",
+          "table": "StatusType"
         },
         "source": "WORKSPACE"
       },
@@ -424,60 +364,20 @@
       }
     },
     {
-      "task_key": "ingest_AccountIncremental",
+      "task_key": "ingest_TradeType",
+      "depends_on": [
+        {
+          "task_key": "ingest_FinWire"
+        }
+      ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Historical",
         "base_parameters": {
-          "view": "v_AccountIncremental",
-          "table": "AccountIncremental",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_CustomerIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_CustomerIncremental",
-          "table": "CustomerIncremental",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
-        },
-        "source": "WORKSPACE"
-      },
-      {% if serverless != "YES" %}
-      "job_cluster_key": "{{ job_name }}_compute",
-      {% endif %}
-      "timeout_seconds": 0,
-      "email_notifications": {},
-      "notification_settings": {
-        "no_alert_for_skipped_runs": false,
-        "no_alert_for_canceled_runs": false,
-        "alert_on_last_attempt": false
-      }
-    },
-    {
-      "task_key": "ingest_TradeIncremental",
-      "run_if": "ALL_SUCCESS",
-      "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_TradeIncremental",
-          "table": "TradeIncremental",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+          "path": "Batch1",
+          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
+          "filename": "TradeType.txt",
+          "table": "TradeType"
         },
         "source": "WORKSPACE"
       },
@@ -542,6 +442,35 @@
       }
     },
     {
+      "task_key": "Batch1_Prospect",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimCustomer"
+        },
+        {
+          "task_key": "ingest_BatchDate"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Prospect",
+        "base_parameters": {
+          "batch_id": "1"
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
       "task_key": "Historical_DimAccount",
       "depends_on": [
         {
@@ -568,20 +497,47 @@
       }
     },
     {
-      "task_key": "Batch1_Prospect",
+      "task_key": "ingest_CustomerIncremental",
       "depends_on": [
         {
           "task_key": "Historical_DimCustomer"
-        },
-        {
-          "task_key": "ingest_BatchDate"
         }
       ],
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/Prospect",
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
         "base_parameters": {
-          "batch_id": "1"
+          "view": "v_CustomerIncremental",
+          "table": "CustomerIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_AccountIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimAccount"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_AccountIncremental",
+          "table": "AccountIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -698,6 +654,34 @@
       }
     },
     {
+      "task_key": "ingest_WatchIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_FactWatches"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_WatchIncremental",
+          "table": "WatchIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
       "task_key": "Historical_DimTrade",
       "depends_on": [
         {
@@ -712,6 +696,62 @@
         "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimTrade Historical",
         "base_parameters": {
           "wh_timezone": ""
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_HoldingIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimTrade"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_HoldingIncremental",
+          "table": "HoldingIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
+        },
+        "source": "WORKSPACE"
+      },
+      {% if serverless != "YES" %}
+      "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    },
+    {
+      "task_key": "ingest_TradeIncremental",
+      "depends_on": [
+        {
+          "task_key": "Historical_DimTrade"
+        }
+      ],
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/Ingest_Incremental",
+        "base_parameters": {
+          "view": "v_TradeIncremental",
+          "table": "TradeIncremental",
+          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
         },
         "source": "WORKSPACE"
       },
@@ -923,6 +963,9 @@
         },
         {
           "task_key": "ingest_TradeIncremental"
+        },
+        {
+          "task_key": "ingest_HoldingIncremental"
         }
       ],
       "run_if": "ALL_SUCCESS",

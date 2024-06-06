@@ -260,11 +260,7 @@
       "task_key": "ingest_DimTime",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "ingest_FinWire"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -325,11 +321,7 @@
       "task_key": "ingest_StatusType",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "ingest_FinWire"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -391,11 +383,7 @@
       "task_key": "ingest_TradeType",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "ingest_FinWire"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -553,11 +541,7 @@
       "task_key": "ingest_HoldingIncremental",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "Historical_DimTrade"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -585,11 +569,7 @@
       "task_key": "ingest_WatchIncremental",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "Historical_FactWatches"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -617,11 +597,7 @@
       "task_key": "ingest_AccountIncremental",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "Historical_DimAccount"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -649,11 +625,7 @@
       "task_key": "ingest_CustomerIncremental",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "Historical_DimCustomer"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -681,11 +653,7 @@
       "task_key": "ingest_TradeIncremental",
       "depends_on": [
         {
-          "task_key": "run_customermgmt_YES_NO",
-          "outcome": "false"
-        },
-        {
-          "task_key": "ingest_customermgmt"
+          "task_key": "Historical_DimTrade"
         }
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
@@ -1158,6 +1126,9 @@
         },
         {
           "task_key": "ingest_TradeIncremental"
+        },
+        {
+          "task_key": "ingest_HoldingIncremental"
         }
       ],
       "run_if": "ALL_SUCCESS",

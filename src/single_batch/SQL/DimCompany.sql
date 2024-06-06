@@ -9,21 +9,21 @@
 INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCompany
 WITH cmp as (
   SELECT
-    try_to_timestamp(substring(value, 1, 15), 'yyyyMMdd-HHmmss') AS PTS,
-    trim(substring(value, 19, 60)) AS CompanyName,
-    trim(substring(value, 79, 10)) AS CIK,
-    trim(substring(value, 89, 4)) AS Status,
-    trim(substring(value, 93, 2)) AS IndustryID,
-    trim(substring(value, 95, 4)) AS SPrating,
-    to_date(try_to_timestamp(substring(value, 99, 8), 'yyyyMMdd')) AS FoundingDate,
-    trim(substring(value, 107, 80)) AS AddrLine1,
-    trim(substring(value, 187, 80)) AS AddrLine2,
-    trim(substring(value, 267, 12)) AS PostalCode,
-    trim(substring(value, 279, 25)) AS City,
-    trim(substring(value, 304, 20)) AS StateProvince,
-    trim(substring(value, 324, 24)) AS Country,
-    trim(substring(value, 348, 46)) AS CEOname,
-    trim(substring(value, 394, 150)) AS Description
+    recdate,
+    trim(substring(value, 1, 60)) AS CompanyName,
+    trim(substring(value, 61, 10)) AS CIK,
+    trim(substring(value, 71, 4)) AS Status,
+    trim(substring(value, 75, 2)) AS IndustryID,
+    trim(substring(value, 77, 4)) AS SPrating,
+    to_date(try_to_timestamp(substring(value, 81, 8), 'yyyyMMdd')) AS FoundingDate,
+    trim(substring(value, 89, 80)) AS AddrLine1,
+    trim(substring(value, 169, 80)) AS AddrLine2,
+    trim(substring(value, 249, 12)) AS PostalCode,
+    trim(substring(value, 261, 25)) AS City,
+    trim(substring(value, 286, 20)) AS StateProvince,
+    trim(substring(value, 306, 24)) AS Country,
+    trim(substring(value, 330, 46)) AS CEOname,
+    trim(substring(value, 376, 150)) AS Description
   FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
   WHERE rectype = 'CMP'
 )
@@ -79,9 +79,9 @@ FROM (
     description,
     foundingdate,
     1 batchid,
-    date(pts) effectivedate,
+    recdate effectivedate,
     coalesce(
-      lead(date(pts)) OVER (PARTITION BY cik ORDER BY pts),
+      lead(date(recdate)) OVER (PARTITION BY cik ORDER BY recdate),
       cast('9999-12-31' as date)) enddate
   FROM cmp
   JOIN ${catalog}.${wh_db}_${scale_factor}.Industry ind ON cmp.industryid = ind.in_id
