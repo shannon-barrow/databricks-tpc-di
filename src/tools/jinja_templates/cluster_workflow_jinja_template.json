@@ -175,7 +175,7 @@
       "run_if": "ALL_SUCCESS",
       {% if scale_factor > 100 %}
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw_mavenlib"
+        "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw_mavenlib",
         "base_parameters": {
           "xml_lib": "com.databricks.spark.xml"
         },
