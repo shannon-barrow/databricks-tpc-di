@@ -29,7 +29,6 @@ DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CompanyFinancials
 -- COMMAND ----------
 
 -- Enable Predictive Optimization for those workspaces that it is available
-ALTER DATABASE ${catalog}.${wh_db}_${scale_factor}_stage ${pred_opt} PREDICTIVE OPTIMIZATION;
 ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMIZATION;
 
 -- COMMAND ----------

@@ -2,7 +2,6 @@
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.Prospect
 with cust as (
   SELECT 
-    customerid,
     lastname,
     firstname,
     addressline1,
@@ -16,7 +15,7 @@ SELECT
   bigint(date_format(recdate.batchdate, 'yyyyMMdd')) sk_recorddateid,
   bigint(date_format(origdate.batchdate, 'yyyyMMdd')) sk_updatedateid,
   p.batchid,
-  nvl2(c.customerid, True, False) iscustomer, 
+  nvl2(c.LastName, True, False) iscustomer, 
   p.lastname,
   p.firstname,
   p.middleinitial,
