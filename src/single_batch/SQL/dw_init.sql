@@ -819,13 +819,15 @@ DailyMarket as (
     min_by(struct(dm_low, dm_date), dm_low) OVER (
       PARTITION BY dm_s_symb
       ORDER BY dm_date ASC 
-      RANGE BETWEEN INTERVAL '1' YEAR PRECEDING --ROWS BETWEEN 364 PRECEDING 
+      --RANGE BETWEEN INTERVAL '1' YEAR PRECEDING 
+      ROWS BETWEEN 364 PRECEDING 
       AND CURRENT ROW
     ) fiftytwoweeklow,
     max_by(struct(dm_high, dm_date), dm_high) OVER (
       PARTITION by dm_s_symb
       ORDER BY dm_date ASC 
-      RANGE BETWEEN INTERVAL '1' YEAR PRECEDING -- ROWS BETWEEN 364 PRECEDING 
+      --RANGE BETWEEN INTERVAL '1' YEAR PRECEDING 
+      ROWS BETWEEN 364 PRECEDING 
       AND CURRENT ROW
     ) fiftytwoweekhigh
   FROM
