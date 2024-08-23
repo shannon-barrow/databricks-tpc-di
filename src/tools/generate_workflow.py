@@ -22,6 +22,7 @@ try:
   json_templates_path    = f"{workspace_src_path}/tools/jinja_templates/"
   template_type          = "dbsql" if sku[0] == 'STMV' else sku[0]
   exec_folder            = "SQL" if sku[0] == 'DBSQL' else sku[0]
+  #WORKFLOW_TEMPLATE      = "_no_audit.json"
   
   # DAG of args to send to Jinja
   dag_args = {

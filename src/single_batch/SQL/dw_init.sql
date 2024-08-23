@@ -613,7 +613,8 @@ CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeIncremen
 SELECT
   val[0] cdc_flag,
   try_cast(val[2] as BIGINT) tradeid,
-  try_cast(val[3] as TIMESTAMP) t_dts,
+  --try_cast(val[3] as TIMESTAMP) t_dts,
+  TIMESTAMP(val[3]) t_dts,
   val[4] status,
   val[5] t_tt_id,
   try_cast(val[6] as TINYINT) cashflag,
@@ -638,7 +639,8 @@ FROM (
 CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade AS
 SELECT
   try_cast(val[0] as BIGINT) t_id,
-  try_cast(val[1] as TIMESTAMP) t_dts,
+  --try_cast(val[1] as TIMESTAMP) t_dts,
+  TIMESTAMP(val[1]) t_dts,
   val[2] t_st_id,
   val[3] t_tt_id,
   try_cast(val[4] as TINYINT) t_is_cash,
@@ -665,7 +667,8 @@ FROM
 CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory AS
 SELECT
   try_cast(val[0] as BIGINT) tradeid,
-  try_cast(val[1] as TIMESTAMP) th_dts,
+  --try_cast(val[1] as TIMESTAMP) th_dts,
+  TIMESTAMP(val[1]) th_dts,
   val[2] status
 FROM
   (
@@ -780,7 +783,7 @@ FROM
 CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_DailyMarketIncremental AS
 WITH dailymarkethistorical as (
   SELECT
-    try_cast(val[0] as DATE) dm_date,
+    DATE(val[0]) dm_date,
     val[1] dm_s_symb,
     try_cast(val[2] as DOUBLE) dm_close,
     try_cast(val[3] as DOUBLE) dm_high,
@@ -797,7 +800,7 @@ WITH dailymarkethistorical as (
 ),
 dailymarketincremental as (
   SELECT
-    try_cast(val[2] as DATE) dm_date,
+    DATE(val[2]) dm_date,
     val[3] dm_s_symb,
     try_cast(val[4] as DOUBLE) dm_close,
     try_cast(val[5] as DOUBLE) dm_high,
@@ -840,9 +843,11 @@ DailyMarket as (
 select
   dm.* except(fiftytwoweeklow, fiftytwoweekhigh),
   fiftytwoweekhigh.dm_high fiftytwoweekhigh,
-  bigint(date_format(fiftytwoweekhigh.dm_date, 'yyyyMMdd')) sk_fiftytwoweekhighdate,
+  fiftytwoweekhigh.dm_date fiftytwoweekhighdate,
+  --bigint(date_format(fiftytwoweekhigh.dm_date, 'yyyyMMdd')) sk_fiftytwoweekhighdate,
   fiftytwoweeklow.dm_low fiftytwoweeklow,
-  bigint(date_format(fiftytwoweeklow.dm_date, 'yyyyMMdd')) sk_fiftytwoweeklowdate
+  fiftytwoweeklow.dm_date fiftytwoweeklowdate
+  --bigint(date_format(fiftytwoweeklow.dm_date, 'yyyyMMdd')) sk_fiftytwoweeklowdate
 from DailyMarket dm
 
 -- COMMAND ----------
@@ -851,7 +856,8 @@ CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchHistory 
 SELECT
   try_cast(val[0] as BIGINT) w_c_id,
   val[1] w_s_symb,
-  try_cast(val[2] as TIMESTAMP) w_dts,
+  --try_cast(val[2] as TIMESTAMP) w_dts,
+  TIMESTAMP(val[2]) w_dts,
   val[3] w_action,
   1 batchid
 FROM
@@ -868,7 +874,8 @@ CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}_stage.v_WatchIncremen
 SELECT
   try_cast(val[2] as BIGINT) w_c_id,
   val[3] w_s_symb,
-  try_cast(val[4] as TIMESTAMP) w_dts,
+  --try_cast(val[4] as TIMESTAMP) w_dts,
+  TIMESTAMP(val[4]) w_dts,
   val[5] w_action,
   INT(batchid) batchid
 FROM
@@ -962,7 +969,8 @@ SELECT
     ), 
     substring(value, 16, 3)
   ) rectype,
-  to_date(substring(value, 1, 8), 'yyyyMMdd') AS recdate,
+  --to_date(substring(value, 1, 8), 'yyyyMMdd') AS recdate,
+  to_date(try_to_timestamp(substring(value, 1, 8), 'yyyyMMdd')) AS recdate,
   substring(value, 19) value
 FROM 
   text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]`

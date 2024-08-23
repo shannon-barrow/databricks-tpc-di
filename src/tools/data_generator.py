@@ -58,8 +58,7 @@ def generate_data():
     dbutils.fs.mkdirs(blob_out_path)
     for dir in next(os.walk(driver_out_path))[1]:
       dbutils.fs.mkdirs(f"{blob_out_path}/{dir}")
-    if lighthouse: threads = 8
-    else: threads = sc.defaultParallelism
+    threads = sc.defaultParallelism
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
       futures = []
       for filename in filenames:
