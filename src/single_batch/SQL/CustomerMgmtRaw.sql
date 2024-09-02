@@ -6,6 +6,7 @@
 
 -- COMMAND ----------
 
+SET timezone = Etc/UTC;
 CREATE TABLE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 
@@ -69,4 +70,4 @@ FROM read_files(
   inferSchema => False, 
   rowTag => "TPCDI:Action",
   fileNamePattern => "CustomerMgmt.xml"
-)
+);

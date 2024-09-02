@@ -1,4 +1,5 @@
 -- Databricks notebook source
+SET timezone = Etc/UTC;
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.Prospect
 with cust as (
   SELECT 

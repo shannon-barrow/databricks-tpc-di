@@ -6,70 +6,9 @@
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
-WITH customerincremental AS (
-  SELECT
-    customerid,
-    nullif(taxid, '') taxid,
-    decode(status, 
-      'ACTV',	'Active',
-      'CMPT','Completed',
-      'CNCL','Canceled',
-      'PNDG','Pending',
-      'SBMT','Submitted',
-      'INAC','Inactive') status,
-    nullif(lastname, '') lastname,
-    nullif(firstname, '') firstname,
-    nullif(middleinitial, '') middleinitial,
-    nullif(gender, '') gender,
-    tier,
-    dob,
-    nullif(addressline1, '') addressline1,
-    nullif(addressline2, '') addressline2,
-    nullif(postalcode, '') postalcode,
-    nullif(city, '') city,
-    nullif(stateprov, '') stateprov,
-    country,
-    nvl2(
-      nullif(c_local_1, ''),
-      concat(
-        nvl2(nullif(c_ctry_1, ''), '+' || c_ctry_1 || ' ', ''),
-        nvl2(nullif(c_area_1, ''), '(' || c_area_1 || ') ', ''),
-        c_local_1,
-        nvl(c_ext_1, '')),
-      try_cast(null as string)) phone1,
-    nvl2(
-      nullif(c_local_2, ''),
-      concat(
-        nvl2(nullif(c_ctry_2, ''), '+' || c_ctry_2 || ' ', ''),
-        nvl2(nullif(c_area_2, ''), '(' || c_area_2 || ') ', ''),
-        c_local_2,
-        nvl(c_ext_2, '')),
-      try_cast(null as string)) phone2,
-    nvl2(
-      nullif(c_local_3, ''),
-      concat(
-        nvl2(nullif(c_ctry_3, ''), '+' || c_ctry_3 || ' ', ''),
-        nvl2(nullif(c_area_3, ''), '(' || c_area_3 || ') ', ''),
-        c_local_3,
-        nvl(c_ext_3, '')),
-      try_cast(null as string)) phone3,
-    nullif(email1, '') email1,
-    nullif(email2, '') email2,
-    nullif(lcl_tx_id, '') lcl_tx_id,
-    nullif(nat_tx_id, '') nat_tx_id,
-    int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
-  FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Customer.txt",
-    schema => "cdc_flag STRING, cdc_dsn BIGINT, customerid BIGINT, taxid STRING, status STRING, lastname STRING, firstname STRING, middleinitial STRING, gender STRING, tier TINYINT, dob DATE, addressline1 STRING, addressline2 STRING, postalcode STRING, city STRING, stateprov STRING, country STRING, c_ctry_1 STRING, c_area_1 STRING, c_local_1 STRING, c_ext_1 STRING, c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, c_ext_2 STRING, c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, c_ext_3 STRING, email1 STRING, email2 STRING, lcl_tx_id STRING, nat_tx_id STRING"
-  )
-),
-Customers as (
+SET timezone = Etc/UTC;
+INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCustomer
+WITH Customers as (
   SELECT
     customerid,
     taxid,
@@ -125,7 +64,8 @@ Customers as (
     c.nat_tx_id,
     c.batchid,
     timestamp(bd.batchdate) update_ts
-  FROM customerincremental c
+  FROM
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_CustomerIncremental c
   JOIN ${catalog}.${wh_db}_${scale_factor}.BatchDate bd 
     ON c.batchid = bd.batchid
 ),

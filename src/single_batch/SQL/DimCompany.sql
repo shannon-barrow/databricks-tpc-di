@@ -6,7 +6,7 @@
 
 -- COMMAND ----------
 
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimCompany
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCompany
 WITH cmp as (
   SELECT
     recdate,

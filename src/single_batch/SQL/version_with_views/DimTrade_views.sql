@@ -6,22 +6,9 @@
 
 -- COMMAND ----------
 
+SET timezone = Etc/UTC;
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
-WITH tradeincremental AS (
-  SELECT
-    *,
-    int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
-  FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Trade.txt",
-    schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
-  )
-),
-finaltrades AS (
+WITH TradeIncremental AS (
   SELECT
     min(cdc_flag) cdc_flag,
     tradeid,
@@ -45,27 +32,26 @@ finaltrades AS (
       t_dts
     ) current_record,
     min(t.batchid) batchid
-  FROM tradeincremental t
-  group by tradeid
+  FROM
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeIncremental t
+  group by
+    tradeid
 ),
 TradeIncrementalHistory AS (
   SELECT
     tradeid,
     current_record.t_dts ts,
     current_record.status
-  FROM finaltrades
+  FROM
+    TradeIncremental
   WHERE cdc_flag = "U"
   UNION ALL
-  SELECT *
-  FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "TradeHistory.txt",
-    schema => "tradeid BIGINT, th_dts TIMESTAMP, status STRING"
-  )
+  SELECT
+    tradeid,
+    th_dts ts,
+    status
+  FROM
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory
 ),
 Current_Trades as (
   SELECT
@@ -96,17 +82,11 @@ Trades_Final (
     commission,
     tax,
     1 batchid
-  FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch1",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Trade.txt",
-    schema => "t_id BIGINT, t_dts TIMESTAMP, t_st_id STRING, t_tt_id STRING, t_is_cash TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
-  ) t
-  JOIN Current_Trades ct
-    ON t.t_id = ct.tradeid
+  FROM 
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade t
+    JOIN 
+      Current_Trades ct
+      ON t.t_id = ct.tradeid
   UNION ALL
   SELECT
     tradeid,
@@ -128,7 +108,8 @@ Trades_Final (
     current_record.commission,
     current_record.tax,
     batchid
-  FROM finaltrades
+  FROM
+    TradeIncremental
   WHERE cdc_flag = "I"
 )
 SELECT

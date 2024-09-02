@@ -9,10 +9,8 @@
 
 -- COMMAND ----------
 
-INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.' || :tbl)
-SELECT 
-  *,
-  int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.${tbl}
+SELECT *
 FROM read_files(
   "${tpcdi_directory}sf=${scale_factor}/Batch*",
   format => "csv",

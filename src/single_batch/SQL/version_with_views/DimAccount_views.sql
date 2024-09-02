@@ -6,22 +6,9 @@
 
 -- COMMAND ----------
 
+SET timezone = Etc/UTC;
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimAccount
-WITH accountincremental AS (
-  SELECT
-    * except(cdc_flag, cdc_dsn),
-    int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
-  FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
-    format => "csv",
-    inferSchema => False,
-    header => False,
-    sep => "|",
-    fileNamePattern => "Account.txt",
-    schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
-  )
-),
-account AS (
+WITH account AS (
   SELECT
     accountid,
     customerid,
@@ -52,7 +39,7 @@ account AS (
     TIMESTAMP(bd.batchdate) update_ts,
     a.batchid
   FROM
-    accountincremental a
+    ${catalog}.${wh_db}_${scale_factor}_stage.v_accountincremental a
     JOIN ${catalog}.${wh_db}_${scale_factor}.BatchDate bd ON a.batchid = bd.batchid
 ),
 account_final AS (

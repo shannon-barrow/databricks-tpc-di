@@ -6,7 +6,8 @@
 
 -- COMMAND ----------
 
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
+SET timezone = Etc/UTC;
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
 WITH SEC as (
   SELECT
     recdate AS effectivedate,
