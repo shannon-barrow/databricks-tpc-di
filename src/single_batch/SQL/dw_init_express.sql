@@ -12,14 +12,14 @@
 
 -- COMMAND ----------
 
--- Enable Predictive Optimization for those workspaces that it is available
-ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMIZATION;
 SET timezone = Etc/UTC;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
 CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
 DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental;
 DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.finwire;
+-- Enable Predictive Optimization for those workspaces that it is available
+ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMIZATION;
 
 -- COMMAND ----------
 
