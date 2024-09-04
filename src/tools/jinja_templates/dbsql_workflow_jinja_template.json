@@ -159,12 +159,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "BIGINT(val[0]) sk_dateid, DATE(val[1]) datevalue, val[2] datedesc, INT(val[3]) calendaryearid, val[4] calendaryeardesc, INT(val[5]) calendarqtrid, val[6] calendarqtrdesc, INT(val[7]) calendarmonthid, val[8] calendarmonthdesc, INT(val[9]) calendarweekid, val[10] calendarweekdesc, INT(val[11]) dayofweeknum, val[12] dayofweekdesc, INT(val[13]) fiscalyearid, val[14] fiscalyeardesc, INT(val[15]) fiscalqtrid, val[16] fiscalqtrdesc, BOOLEAN(val[17]) holidayflag",
+          "raw_schema": "sk_dateid BIGINT, datevalue DATE, datedesc STRING, calendaryearid INT, calendaryeardesc STRING, calendarqtrid INT, calendarqtrdesc STRING, calendarmonthid INT, calendarmonthdesc STRING, calendarweekid INT, calendarweekdesc STRING, dayofweeknum INT, dayofweekdesc STRING, fiscalyearid INT, fiscalyeardesc STRING, fiscalqtrid INT, fiscalqtrdesc STRING, holidayflag BOOLEAN",
           "filename": "Date.txt",
-          "table": "DimDate"
+          "tbl": "DimDate"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -193,12 +192,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "BIGINT(val[0]) sk_timeid, val[1] timevalue, INT(val[2]) hourid, val[3] hourdesc, INT(val[4]) minuteid, val[5] minutedesc, INT(val[6]) secondid, val[7] seconddesc, BOOLEAN(val[8]) markethoursflag, BOOLEAN(val[9]) officehoursflag",
+          "raw_schema": "sk_timeid BIGINT, timevalue STRING, hourid INT, hourdesc STRING, minuteid INT, minutedesc STRING, secondid INT, seconddesc STRING, markethoursflag BOOLEAN, officehoursflag BOOLEAN",
           "filename": "Time.txt",
-          "table": "DimTime"
+          "tbl": "DimTime"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -227,12 +225,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] st_id, val[1] st_name",
+          "raw_schema": "st_id STRING, st_name STRING",
           "filename": "StatusType.txt",
-          "table": "StatusType"
+          "tbl": "StatusType"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -261,12 +258,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] tx_id, val[1] tx_name, FLOAT(val[2]) tx_rate",
+          "raw_schema": "tx_id STRING, tx_name STRING, tx_rate FLOAT",
           "filename": "TaxRate.txt",
-          "table": "TaxRate"
+          "tbl": "TaxRate"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -295,12 +291,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] tt_id, val[1] tt_name, INT(val[2]) tt_is_sell, INT(val[3]) tt_is_mrkt",
+          "raw_schema": "tt_id STRING, tt_name STRING, tt_is_sell INT, tt_is_mrkt INT",
           "filename": "TradeType.txt",
-          "table": "TradeType"
+          "tbl": "TradeType"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -329,12 +324,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Historical",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/raw_ingestion",
         "base_parameters": {
-          "path": "Batch1",
-          "tgt_query": "val[0] in_id, val[1] in_name, val[2] in_sc_id",
+          "raw_schema": "in_id STRING, in_name STRING, in_sc_id STRING",
           "filename": "Industry.txt",
-          "table": "Industry"
+          "tbl": "Industry"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -363,11 +357,11 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/Ingest_Incremental",
         "base_parameters": {
-          "view": "v_BatchDate",
-          "table": "BatchDate",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}"{% endraw %}
+          "filename": "BatchDate.txt",
+          "raw_schema": "batchdate DATE",
+          "tbl": "BatchDate"
         },
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
@@ -396,12 +390,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_FinWire",
-          "table": "FinWire",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
-        },
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/ingest_finwire",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },
@@ -429,12 +418,7 @@
       ],
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
-        "notebook_path": "{{ repo_src_path }}/single_batch/{{ exec_folder }}/Ingest_Incremental",
-        "base_parameters": {
-          "view": "v_Prospect",
-          "table": "ProspectIncremental",
-          {% raw %}"tgt_db": "{{job.parameters.wh_db}}_{{job.parameters.scale_factor}}_stage"{% endraw %}
-        },
+        "notebook_path": "{{ repo_src_path }}/single_batch/SQL/ingest_prospectincremental",
         "source": "WORKSPACE",
         "warehouse_id": "{{ wh_id }}"
       },

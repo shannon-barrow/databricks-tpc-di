@@ -33,6 +33,7 @@
 
 -- COMMAND ----------
 
+SET timezone = Etc/UTC;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
 CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
