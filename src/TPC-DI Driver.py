@@ -22,7 +22,7 @@
 # MAGIC
 # MAGIC ### Other widget options include:
 # MAGIC - **Scale Factor**:  
-# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a liinear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
+# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a linear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
 # MAGIC - **Serverless**:  
 # MAGIC         Serverless workflows and DLT are in preview! Ensure your workspace is configured to leverage the serverless preview otherwise this notebook will fail to generate a workflow for you.
 # MAGIC - **Collective Batch or Incremental Batches**:  
