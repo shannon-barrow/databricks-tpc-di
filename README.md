@@ -1,4 +1,4 @@
-# Databricks TPC-DI
+# Databricks TPC-DI (Cleaned Up)
 
 Databricks TPC-DI (Data Integration) is an implementation of specifications derived from the [TPC-DI](http://tpc.org/tpcdi/default5.asp) Benchmark.  
 This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **14.1** or higher. 
