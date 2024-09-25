@@ -1,4 +1,11 @@
 -- Databricks notebook source
+-- MAGIC %md
+-- MAGIC # This version of dw_init removes all Unity Catalog optimizations and features.  
+-- MAGIC - Best used when comparing performance to other platforms in which they do not have similar features/capabilities. 
+-- MAGIC - For example, optimized writes, additional column stats, and **not null** constraints take some small additional overhead at load time. Therefore, when comparing to platforms and want an even, consistent way to match results, use this notebook
+
+-- COMMAND ----------
+
 -- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
 -- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
 -- CREATE WIDGET TEXT wh_db DEFAULT '';
