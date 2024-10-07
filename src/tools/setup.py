@@ -43,6 +43,12 @@ def get_dbr_versions(min_version=14.1):
         dbr_versions_dict[dbr['key']] = dbr['name']
   return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
 
+def is_lighthouse():
+  ## 
+  # DEFAULT TO RETURN FALSE FOR THE MOMENT UNTIL LIGHTHOUSE IS MORE PREVALENT AND/OR A BETTER WAY TO DETEMINE A NOTEBOOK IS RUNNING IN LIGHTHOUSE IS IDENTIFIED
+  ##
+  return False
+
 # COMMAND ----------
 
 # ENV-Specific API calls and variables
@@ -62,33 +68,45 @@ workflows_dict      = {
   # "DBT": "dbt Core on DB SQL Warehouse",
   # "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
-default_workflow      = workflows_dict['CLUSTER']
-workflow_vals         = list(workflows_dict.values())
-default_sf            = '10'
-default_job_name      = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
-default_wh            = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
-min_dbr_version     = 14.1
-invalid_dbr_list    = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
+default_workflow   = workflows_dict['CLUSTER']
+workflow_vals      = list(workflows_dict.values())
+default_sf         = '10'
+default_job_name   = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
+default_wh         = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
+min_dbr_version    = 14.1
+invalid_dbr_list   = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 
-UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
-cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
-default_sf_options    = ['10', '100', '1000', '5000', '10000']
-default_catalog       = 'tpcdi' if UC_enabled else 'hive_metastore'
-node_types            = get_node_types()
-dbrs                  = get_dbr_versions(min_dbr_version)
-default_dbr_version   = list(dbrs.keys())[0]
-default_dbr           = list(dbrs.values())[0]
-default_serverless    = 'NO'
-worker_cores_mult     = 0.0224
-if cloud_provider == 'AWS':
-  default_worker_type = "m7gd.2xlarge"
-  default_driver_type = "m7gd.xlarge"
-  cust_mgmt_type      = "m7gd.16xlarge"
-elif cloud_provider == 'GCP':
-  default_worker_type = "n2-standard-8"
-  default_driver_type = "n2-standard-4"
-  cust_mgmt_type      = "n2-standard-64"
-elif cloud_provider == 'Azure':
-  default_worker_type = "Standard_D8ads_v5" 
-  default_driver_type = "Standard_D4as_v5"
-  cust_mgmt_type      = "Standard_D64ads_v5" 
+try: 
+  lighthouse  = lh
+except NameError: 
+  lighthouse = is_lighthouse()
+
+if lighthouse:
+  UC_enabled            = True
+  cloud_provider        = 'AWS'
+  serverless            = 'YES'
+  default_catalog       = 'workspace'
+  default_sf_options    = ['10', '100'] # Limited Scale Factor since 8-core driver will struggle to generate and also native XML lib will not be able to scale adequately for CustomerMgmt
+else:
+  default_sf_options    = ['10', '100', '1000', '5000', '10000']
+  UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
+  cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
+  node_types            = get_node_types()
+  dbrs                  = get_dbr_versions(min_dbr_version)
+  default_dbr_version   = list(dbrs.keys())[0]
+  default_dbr           = list(dbrs.values())[0]
+  default_serverless    = 'NO'
+  worker_cores_mult     = 0.0224
+  if cloud_provider == 'AWS':
+    default_worker_type = "m7gd.2xlarge"
+    default_driver_type = "m7gd.xlarge"
+    cust_mgmt_type      = "m7gd.16xlarge"
+  elif cloud_provider == 'GCP':
+    default_worker_type = "n2-standard-8"
+    default_driver_type = "n2-standard-4"
+    cust_mgmt_type      = "n2-standard-64"
+  elif cloud_provider == 'Azure':
+    default_worker_type = "Standard_D8ads_v5" 
+    default_driver_type = "Standard_D4as_v5"
+    cust_mgmt_type      = "Standard_D64ads_v5" 
+  default_catalog = 'tpcdi' if UC_enabled else 'hive_metastore'

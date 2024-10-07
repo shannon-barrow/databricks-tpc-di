@@ -48,7 +48,7 @@ try:
     dag_args['worker_node_count'] = worker_node_count
     dag_args['dbr'] = dbr_version_id
     compute = f"""Driver Type:              {driver_node_type}\nWorker Type:              {worker_node_type}\nWorker Count:             {worker_node_count}\nDBR Version:              {dbr_version_id}"""
-  else:
+  elif not lighthouse:
     dag_args['dbr'] = default_dbr_version
     dag_args['driver_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type
     dag_args['worker_node_type'] = cust_mgmt_type if scale_factor > 1000 else default_worker_type
