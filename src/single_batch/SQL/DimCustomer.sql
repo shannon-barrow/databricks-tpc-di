@@ -6,7 +6,7 @@
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
+-- INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
 WITH customerincremental AS (
   SELECT
     customerid,
@@ -60,7 +60,7 @@ WITH customerincremental AS (
     nullif(nat_tx_id, '') nat_tx_id,
     int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
   FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
+    "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
     format => "csv",
     inferSchema => False,
     header => False,
