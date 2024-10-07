@@ -1,5 +1,4 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN wh_timezone DEFAULT "" CHOICES SELECT * FROM (VALUES (""), ("set timezone = GMT;"));
 -- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
 -- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
 -- CREATE WIDGET TEXT wh_db DEFAULT '';
@@ -7,9 +6,7 @@
 
 -- COMMAND ----------
 
--- ONLY use for DBSQL workflows since default for DBSQL is with localization and can cause issues with DST.
--- Pass empty string for a cluster - especially serverless workflows since serverless clusters do not accept this set command and will fail
-${wh_timezone} 
+SET timezone = Etc/UTC;
 
 -- COMMAND ----------
 
@@ -19,8 +16,15 @@ WITH TradeHistory AS (
     tradeid,
     min(th_dts) create_ts,
     max_by(struct(th_dts, status), th_dts) current_status
-  FROM 
-    ${catalog}.${wh_db}_${scale_factor}_stage.v_TradeHistory
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch1",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "TradeHistory.txt",
+    schema => "tradeid BIGINT, th_dts TIMESTAMP, status STRING"
+  )
   group by tradeid
 ),
 Trades as (
@@ -42,8 +46,15 @@ Trades as (
     fee,
     commission,
     tax
-  FROM 
-    ${catalog}.${wh_db}_${scale_factor}_stage.v_Trade t
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch1",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "Trade.txt",
+    schema => "t_id BIGINT, t_dts TIMESTAMP, t_st_id STRING, t_tt_id STRING, t_is_cash TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
+  ) t
   JOIN TradeHistory ct
     ON t.t_id = ct.tradeid
 )
@@ -108,6 +119,14 @@ SELECT
   tradeprice currentprice,
   hh_after_qty currentholding,
   1 batchid
-FROM ${catalog}.${wh_db}_${scale_factor}_stage.v_HoldingHistory h
-  JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
-    ON tradeid = hh_t_id
+FROM read_files(
+  "${tpcdi_directory}sf=${scale_factor}/Batch1",
+  format => "csv",
+  inferSchema => False,
+  header => False,
+  sep => "|",
+  fileNamePattern => "HoldingHistory.txt",
+  schema => "hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+) h
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
+  ON tradeid = hh_t_id

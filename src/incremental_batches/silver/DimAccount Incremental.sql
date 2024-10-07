@@ -21,25 +21,27 @@ WITH account AS (
       'PNDG','Pending',
       'SBMT','Submitted',
       'INAC','Inactive') status,
-    bd.batchdate effectivedate,
+    (select min(batchdate) from ${catalog}.${wh_db}_${scale_factor}.BatchDate where batchid = int(${batch_id})) effectivedate,
     date('9999-12-31') enddate
-  FROM
-    ${catalog}.${wh_db}_${scale_factor}_stage.AccountIncremental a
-  JOIN 
-    ${catalog}.${wh_db}_${scale_factor}.BatchDate bd 
-    ON 
-      a.batchid = bd.batchid
-  JOIN 
-    ${catalog}.${wh_db}_${scale_factor}.DimCustomer dc
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch${batch_id}",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "Account.txt",
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
+  ) a
+  -- JOIN 
+  --   ${catalog}.${wh_db}_${scale_factor}.BatchDate bd 
+  --   ON 
+  --     a.batchid = bd.batchid
+  JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer dc
     ON 
       dc.iscurrent
       and dc.customerid = a.customerid
-  JOIN 
-    ${catalog}.${wh_db}_${scale_factor}.DimBroker b 
-    ON 
-      a.brokerid = b.brokerid
-  WHERE
-    a.batchid = cast(${batch_id} as int)
+  JOIN  ${catalog}.${wh_db}_${scale_factor}.DimBroker b 
+    ON  a.brokerid = b.brokerid
 ),
 cust_updates as (
   SELECT 
@@ -60,7 +62,7 @@ cust_updates as (
     FROM ${catalog}.${wh_db}_${scale_factor}.DimCustomer
     WHERE 
       iscurrent 
-      AND batchid = cast(${batch_id} as int)) ci
+      AND batchid = int(${batch_id})) ci
   JOIN (
     SELECT 
       sk_customerid, 
@@ -69,7 +71,7 @@ cust_updates as (
     FROM ${catalog}.${wh_db}_${scale_factor}.DimCustomer
     WHERE 
       !iscurrent
-      AND batchid < cast(${batch_id} as int)) ch
+      AND batchid < int(${batch_id})) ch
     ON 
       ci.customerid = ch.customerid
       AND ch.enddate = ci.effectivedate  
@@ -87,7 +89,7 @@ all_incr_updates as (
     nvl(a.TaxStatus, b.TaxStatus) TaxStatus,
     nvl(a.status, b.status) status,
     true iscurrent,
-    cast(${batch_id} as int) batchid,
+    int(${batch_id}) batchid,
     nvl(a.effectivedate, b.effectivedate) effectivedate,
     nvl(a.enddate, b.enddate) enddate
   FROM account a

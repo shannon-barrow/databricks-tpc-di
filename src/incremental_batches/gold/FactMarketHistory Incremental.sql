@@ -25,4 +25,4 @@ LEFT JOIN ${catalog}.${wh_db}_${scale_factor}_stage.CompanyFinancialsStg f
     f.sk_companyid = s.sk_companyid
     AND quarter(fmh.dm_date) = quarter(fi_qtr_start_date)
     AND year(fmh.dm_date) = year(fi_qtr_start_date)
-WHERE fmh.batchid = cast(${batch_id} as int)
+WHERE fmh.batchid = int(${batch_id})

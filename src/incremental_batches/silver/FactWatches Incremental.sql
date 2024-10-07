@@ -14,15 +14,20 @@
 
 with Watches as (
   SELECT 
-    wh.w_c_id customerid,
-    wh.w_s_symb symbol,        
+    w_c_id customerid,
+    w_s_symb symbol,        
     date(min(if(w_action != 'CNCL', w_dts, null))) dateplaced,
     date(max(if(w_action = 'CNCL', w_dts, null))) dateremoved
-  FROM ${catalog}.${wh_db}_${scale_factor}_stage.WatchIncremental wh
-  where batchid = cast(${batch_id} as int)
-  GROUP BY 
-    w_c_id,
-    w_s_symb
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch${batch_id}",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "WatchHistory.txt",
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
+  )
+  GROUP BY ALL
 ),
 Watch_actv AS (
   SELECT
@@ -30,7 +35,7 @@ Watch_actv AS (
     s.sk_securityid sk_securityid,
     bigint(date_format(dateplaced, 'yyyyMMdd')) sk_dateid_dateplaced,
     bigint(date_format(dateremoved, 'yyyyMMdd')) sk_dateid_dateremoved,
-    cast(${batch_id} as int) batchid
+    int(${batch_id}) batchid
   from Watches wh
   JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity s 
     ON 
@@ -48,13 +53,13 @@ Watch_cncl AS (
     fw.sk_securityid, 
     cast(null as bigint) sk_dateid_dateplaced, 
     bigint(date_format(dateremoved, 'yyyyMMdd')) sk_dateid_dateremoved,
-    cast(${batch_id} as int) batchid
+    int(${batch_id}) batchid
   FROM (
     SELECT
       sk_customerid,
       sk_securityid
     FROM ${catalog}.${wh_db}_${scale_factor}.FactWatches
-    WHERE sk_dateid_dateremoved is null
+    WHERE isnull(sk_dateid_dateremoved)
   ) fw -- existing Active watches
   JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
     ON fw.sk_customerid = c.sk_customerid
@@ -66,7 +71,7 @@ Watch_cncl AS (
       symbol,
       dateremoved
     FROM Watches
-    WHERE isnull(dateplaced) -- Canceled Watches
+    WHERE isnull(dateplaced) -- Cancelled Watches
   ) w
   ON
     w.customerid = c.customerid

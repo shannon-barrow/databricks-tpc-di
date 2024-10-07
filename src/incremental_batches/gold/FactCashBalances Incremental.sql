@@ -19,4 +19,4 @@ JOIN ${catalog}.${wh_db}_${scale_factor}.DimAccount a
   ON 
     c.accountid = a.accountid
     AND a.iscurrent
-WHERE c.batchid = cast(${batch_id} as int)
+WHERE c.batchid = int(${batch_id})

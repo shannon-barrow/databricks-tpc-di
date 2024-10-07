@@ -1,5 +1,49 @@
 -- Databricks notebook source
-WITH Trades AS (
+SET timezone = Etc/UTC;
+
+-- COMMAND ----------
+
+with tradeincrementalraw as (
+  SELECT
+    tradeid,
+    t_dts,
+    if(cdc_flag = 'I', t_dts, cast(NULL AS TIMESTAMP)) create_ts,
+    if(status IN ("CMPT", "CNCL"), t_dts, cast(NULL AS TIMESTAMP)) close_ts,
+    decode(status, 
+      'ACTV',	'Active',
+      'CMPT','Completed',
+      'CNCL','Canceled',
+      'PNDG','Pending',
+      'SBMT','Submitted',
+      'INAC','Inactive') status,
+    decode(t_tt_id,
+      'TMB', 'Market Buy',
+      'TMS', 'Market Sell',
+      'TSL', 'Stop Loss',
+      'TLS', 'Limit Sell',
+      'TLB', 'Limit Buy'
+    ) type,
+    if(cashflag = 1, TRUE, FALSE) cashflag,
+    t_s_symb,
+    quantity,
+    bidprice,
+    t_ca_id,
+    executedby,
+    tradeprice,
+    fee,
+    commission,
+    tax
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch${batch_id}",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "Trade.txt",
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
+  )
+),
+Trades AS (
   SELECT
     tradeid,
     min(create_ts) create_ts,
@@ -21,12 +65,8 @@ WITH Trades AS (
       ),
       t_dts
     ) current_record
-  FROM
-    ${catalog}.${wh_db}_${scale_factor}_stage.TradeIncremental t
-  WHERE
-    batchid = cast(${batch_id} as int)
-  group by
-    tradeid
+  FROM tradeincrementalraw t
+  group by tradeid
 ),
 TradeIncremental as (
   SELECT
@@ -50,7 +90,7 @@ TradeIncremental as (
     trade.fee,
     trade.commission,
     trade.tax,
-    cast(${batch_id} as int) batchid
+    int(${batch_id}) batchid
   FROM (
     SELECT
       tradeid,
@@ -92,6 +132,19 @@ VALUES (tradeid, sk_brokerid, sk_createdateid, sk_createtimeid, sk_closedateid, 
 -- COMMAND ----------
 
 INSERT INTO ${catalog}.${wh_db}_${scale_factor}.FactHoldings 
+WITH Holdings as (
+  SELECT
+    * except(cdc_flag, cdc_dsn)
+  FROM read_files(
+    "${tpcdi_directory}sf=${scale_factor}/Batch${batch_id}",
+    format => "csv",
+    inferSchema => False,
+    header => False,
+    sep => "|",
+    fileNamePattern => "HoldingHistory.txt",
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+  )
+)
 SELECT
   hh_h_t_id tradeid,
   hh_t_id currenttradeid,
@@ -103,10 +156,17 @@ SELECT
   sk_closetimeid sk_timeid,
   tradeprice currentprice,
   hh_after_qty currentholding,
-  h.batchid
-FROM ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncremental h
-  JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
-    ON 
-      dt.batchid = cast(${batch_id} as int)
-      and tradeid = hh_t_id
-WHERE h.batchid = cast(${batch_id} as int)
+  int(${batch_id}) batchid
+FROM read_files(
+  "${tpcdi_directory}sf=${scale_factor}/Batch${batch_id}",
+  format => "csv",
+  inferSchema => False,
+  header => False,
+  sep => "|",
+  fileNamePattern => "HoldingHistory.txt",
+  schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+) h
+JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
+  ON 
+    dt.batchid = int(${batch_id})
+    and tradeid = hh_t_id
