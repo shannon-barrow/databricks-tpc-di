@@ -32,7 +32,7 @@ alltransactions as (
     sum(ct_amt) account_daily_total,
     int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
   FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
+    "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
     format => "csv",
     inferSchema => False,
     header => False,
