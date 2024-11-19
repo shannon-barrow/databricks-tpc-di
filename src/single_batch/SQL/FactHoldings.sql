@@ -6,6 +6,10 @@
 
 -- COMMAND ----------
 
+
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.FactHoldings 
 WITH Holdings as (
   SELECT 
@@ -25,7 +29,7 @@ WITH Holdings as (
     * except(cdc_flag, cdc_dsn),
     int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
   FROM read_files(
-    "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
+    "${tpcdi_directory}sf=${scale_factor}/Batch[23]",
     format => "csv",
     inferSchema => False,
     header => False,
