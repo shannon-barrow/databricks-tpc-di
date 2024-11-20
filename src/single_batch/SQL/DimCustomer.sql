@@ -6,7 +6,7 @@
 
 -- COMMAND ----------
 
--- INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
 WITH customerincremental AS (
   SELECT
     customerid,
