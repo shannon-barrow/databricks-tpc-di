@@ -1,5 +1,12 @@
 -- Databricks notebook source
-SET timezone = Etc/UTC;
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Prospect (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.Prospect
 with cust as (
   SELECT 

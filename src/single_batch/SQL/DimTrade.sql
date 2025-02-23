@@ -6,6 +6,15 @@
 
 -- COMMAND ----------
 
+USE ${catalog}.${wh_db}_${scale_factor};
+CREATE OR REPLACE TABLE DimTrade (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
 WITH tradeincremental AS (
   SELECT

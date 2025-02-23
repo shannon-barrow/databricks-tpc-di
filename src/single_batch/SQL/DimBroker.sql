@@ -6,6 +6,14 @@
 
 -- COMMAND ----------
 
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimBroker (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimBroker
 SELECT
   employeeid sk_brokerid,

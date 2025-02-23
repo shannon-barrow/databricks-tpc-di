@@ -1,4 +1,35 @@
 -- Databricks notebook source
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental (
+  agencyid STRING COMMENT 'Unique identifier from agency',
+  lastname STRING COMMENT 'Last name',
+  firstname STRING COMMENT 'First name',
+  middleinitial STRING COMMENT 'Middle initial',
+  gender STRING COMMENT '‘M’ or ‘F’ or ‘U’',
+  addressline1 STRING COMMENT 'Postal address',
+  addressline2 STRING COMMENT 'Postal address',
+  postalcode STRING COMMENT 'Postal code',
+  city STRING COMMENT 'City',
+  state STRING COMMENT 'State or province',
+  country STRING COMMENT 'Postal country',
+  phone STRING COMMENT 'Telephone number',
+  income STRING COMMENT 'Annual income',
+  numbercars INT COMMENT 'Cars owned',
+  numberchildren INT COMMENT 'Dependent children',
+  maritalstatus STRING COMMENT '‘S’ or ‘M’ or ‘D’ or ‘W’ or ‘U’',
+  age INT COMMENT 'Current age',
+  creditrating INT COMMENT 'Numeric rating',
+  ownorrentflag STRING COMMENT '‘O’ or ‘R’ or ‘U’',
+  employer STRING COMMENT 'Name of employer',
+  numbercreditcards INT COMMENT 'Credit cards',
+  networth INT COMMENT 'Estimated total net worth',
+  marketingnameplate STRING COMMENT 'Marketing nameplate',
+  recordbatchid INT COMMENT 'Batch ID when this record last inserted',
+  batchid INT COMMENT 'Batch ID when this record was initially inserted'
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental
 with p as (
   SELECT

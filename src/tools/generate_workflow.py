@@ -11,18 +11,27 @@ try:
   pipeline_api_endpoint  = "/api/2.0/pipelines"
   wh_api_endpoint        = "/api/2.0/sql/warehouses"
   wh_config_api_endpoint = "/api/2.0/sql/config/warehouses"
-  DLT_PIPELINE_TEMPLATE  = "dlt_pipeline_jinja_template.json" 
-  if incremental:
-    WORKFLOW_TEMPLATE    = "_incremental_workflow_jinja_template.json"
+  DLT_PIPELINE_TEMPLATE  = "dlt_pipeline.json" 
+  if sku[0] == 'DLT':
+    WORKFLOW_TEMPLATE    = "dlt_workflow.json"
+    print("All 3 TPC-DI batches will be executed in a single DLT pipeline batch.")
+  elif incremental:
+    WORKFLOW_TEMPLATE    = "workflows_incremental.json"
     print("Each of the 3 TPC-DI batches will be executed incrementally with batches 2 and 3 performing merges.")
   else:
-    WORKFLOW_TEMPLATE    = "_workflow_jinja_template.json"
+    WORKFLOW_TEMPLATE    = "workflows_single_batch.json"
     print("All 3 TPC-DI batches will be executed in a single job batch.")
   WAREHOUSE_TEMPLATE     = "warehouse_jinja_template.json"
   json_templates_path    = f"{workspace_src_path}/tools/jinja_templates/"
-  template_type          = "dbsql" if sku[0] == 'STMV' else sku[0]
   exec_folder            = "SQL" if sku[0] == 'DBSQL' else sku[0]
-  # WORKFLOW_TEMPLATE      = "_no_audit.json"
+  if perf_opt_flg:
+    null_constraint      = ""
+    opt_write            = "'delta.autoOptimize.optimizeWrite'=False"
+    index_cols           = ", 'delta.dataSkippingNumIndexedCols' = 0"
+  else:
+    null_constraint      = "NOT NULL"
+    opt_write            = "'delta.autoOptimize.optimizeWrite'=True"
+    index_cols           = ""
   
   # DAG of args to send to Jinja
   dag_args = {
@@ -36,7 +45,11 @@ try:
     "exec_type":sku[0],
     "serverless":serverless,
     "pred_opt":pred_opt,
-    "exec_folder":exec_folder
+    "exec_folder":exec_folder,
+    "null_constraint": null_constraint,
+    "perf_opt_flg": perf_opt_flg,
+    "opt_write": opt_write,
+    "index_cols": index_cols
   }
 
   if sku[0] == 'CLUSTER' and serverless != 'YES':
@@ -131,7 +144,7 @@ def generate_workflow():
     dag_args['pipeline_id'] = submit_dag(rendered_pipeline_dag, pipeline_api_endpoint, 'pipeline')
   if sku[0] in ['DBT', 'STMV', 'DBSQL']:
     dag_args['wh_id'] = get_warehouse_id()
-  jinja_template_path = f"{json_templates_path}{template_type.lower()}{WORKFLOW_TEMPLATE}"
+  jinja_template_path = f"{json_templates_path}{WORKFLOW_TEMPLATE}"
   print(f"Rendering New Workflow JSON via jinja template located at {jinja_template_path}")
   rendered_workflow_dag = generate_dag(jinja_template_path, dag_args)  
   print("Submitting rendered Workflow JSON to Databricks Jobs API")

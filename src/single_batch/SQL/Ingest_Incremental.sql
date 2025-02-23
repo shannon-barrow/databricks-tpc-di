@@ -9,6 +9,15 @@
 
 -- COMMAND ----------
 
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.${tbl} (
+  ${raw_schema},
+  batchid INT COMMENT 'Batch ID when this record was inserted'
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.' || :tbl)
 SELECT 
   *,

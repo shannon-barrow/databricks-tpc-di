@@ -6,6 +6,15 @@
 
 -- COMMAND ----------
 
+USE ${catalog}.${wh_db}_${scale_factor};
+CREATE OR REPLACE TABLE DimAccount (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimAccount
 WITH accountincremental AS (
   SELECT

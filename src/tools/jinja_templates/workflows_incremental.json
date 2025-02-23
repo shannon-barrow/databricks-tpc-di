@@ -73,20 +73,7 @@
           "spark.databricks.cluster.profile": "singleNode",
           "spark.databricks.adaptive.localShuffleReader.enabled": "true",
           {% endif %}
-          "spark.sql.shuffle.partitions": "auto",
-          "spark.databricks.delta.schema.autoMerge.enabled": "true",
-          "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
-          "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-          "spark.databricks.photon.photonRowToColumnar.enabled": "true",
-          "spark.databricks.photon.allDataSources.enabled": "true",
-          "spark.databricks.photon.window.experimental.features.enabled": "true",
-          "spark.databricks.photon.sort.enabled": "true",
-          "spark.databricks.preemption.enabled": "false",
-          "spark.databricks.photon.window.enabled": "true",
-          "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-          "spark.databricks.photon.scan.enabled": "true",
-          "spark.databricks.sql.nativeXmlDataSourcePreview.enabled": "true",
-          "spark.databricks.delta.identityColumn.enabled": "true"
+          "spark.sql.shuffle.partitions": "auto"
         },
         {% if cloud_provider == "Azure" %} 
         "azure_attributes": {
@@ -130,6 +117,9 @@
         "base_parameters": {
           {% raw %}"pred_opt": "{{job.parameters.predictive_optimization}}"{% endraw %}
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -156,6 +146,9 @@
         "base_parameters": {
           "batch_id": "0"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -182,6 +175,9 @@
         "base_parameters": {
           "batch_id": "0"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -240,17 +236,21 @@
           }
         }
       ],
+      "job_cluster_key": "{{ job_name }}_compute",
       {% else %}
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw",
         "base_parameters": {
           "xml_lib": "xml"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
-      {% endif %}
-      {% if serverless != "YES" or scale_factor > 100 %}
+      {% if serverless != "YES" %}
       "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
       {% endif %}
       "timeout_seconds": 0,
       "email_notifications": {},
@@ -279,6 +279,9 @@
           "filename": "Date.txt",
           "tbl": "DimDate"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -306,6 +309,9 @@
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/ingest_finwire",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -334,6 +340,9 @@
           "filename": "Time.txt",
           "tbl": "DimTime"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -362,6 +371,9 @@
           "filename": "StatusType.txt",
           "tbl": "StatusType"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -394,6 +406,9 @@
           "filename": "TaxRate.txt",
           "tbl": "TaxRate"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -422,6 +437,9 @@
           "filename": "TradeType.txt",
           "tbl": "TradeType"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -454,6 +472,9 @@
           "filename": "Industry.txt",
           "tbl": "Industry"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -481,6 +502,9 @@
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/ingest_prospectincremental",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -508,6 +532,9 @@
       "run_if": "AT_LEAST_ONE_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/ingest_dailymarketincremental",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -540,6 +567,9 @@
           "raw_schema": "batchdate DATE",
           "tbl": "BatchDate"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -563,6 +593,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimBroker",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -589,6 +622,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimCustomer Historical",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -615,6 +651,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/DimAccount Historical",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -638,6 +677,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactCashBalances Historical",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -667,6 +709,9 @@
         "base_parameters": {
           "batch_id": "1"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -693,6 +738,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimCompany",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -716,6 +764,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/DimSecurity",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -742,6 +793,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/silver/FactWatches Historical",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -771,6 +825,9 @@
         "base_parameters": {
           "wh_timezone": ""
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -797,6 +854,9 @@
         "base_parameters": {
           "conameorcik": "COMPANYID"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -823,6 +883,9 @@
         "base_parameters": {
           "conameorcik": "NAME"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -855,6 +918,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/gold/FactMarketHistory Historical",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -902,6 +968,9 @@
         "base_parameters": {
           "batch_id": "1"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -928,6 +997,9 @@
         "base_parameters": {
           "batch_id": "1"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -954,6 +1026,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -980,6 +1055,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1006,6 +1084,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1032,6 +1113,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1058,6 +1142,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1084,6 +1171,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1110,6 +1200,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1148,6 +1241,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1174,6 +1270,9 @@
         "base_parameters": {
           "batch_id": "2"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1200,6 +1299,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1226,6 +1328,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1252,6 +1357,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1278,6 +1386,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1304,6 +1415,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1330,6 +1444,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1356,6 +1473,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1394,6 +1514,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1420,6 +1543,9 @@
         "base_parameters": {
           "batch_id": "3"
         },
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1446,6 +1572,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/audit_validation/audit_alerts",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}
@@ -1472,6 +1601,9 @@
       "run_if": "ALL_SUCCESS",
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/audit_validation/automated_audit",
+        {% if exec_type == "DBSQL" %}
+        "warehouse_id": "{{ wh_id }}",
+        {% endif %}
         "source": "WORKSPACE"
       },
       {% if serverless != "YES" %}

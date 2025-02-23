@@ -6,6 +6,14 @@
 
 -- COMMAND ----------
 
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimCustomer (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
 WITH customerincremental AS (
   SELECT

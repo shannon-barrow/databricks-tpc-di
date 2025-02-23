@@ -75,7 +75,7 @@ default_job_name   = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
 default_wh         = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
 min_dbr_version    = 14.1
 invalid_dbr_list   = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
-
+features_or_perf   = ['Feature-Rich', 'Fastest Performance']
 try: 
   lighthouse  = lh
 except NameError: 
@@ -96,7 +96,7 @@ else:
   default_dbr_version   = list(dbrs.keys())[0]
   default_dbr           = list(dbrs.values())[0]
   default_serverless    = 'NO'
-  worker_cores_mult     = 0.0224
+  worker_cores_mult     = 0.016
   if cloud_provider == 'AWS':
     default_worker_type = "m7gd.2xlarge"
     default_driver_type = "m7gd.xlarge"
@@ -105,6 +105,7 @@ else:
     default_worker_type = "n2-standard-8"
     default_driver_type = "n2-standard-4"
     cust_mgmt_type      = "n2-standard-64"
+    worker_cores_mult   = worker_cores_mult * 1.5
   elif cloud_provider == 'Azure':
     default_worker_type = "Standard_D8ads_v5" 
     default_driver_type = "Standard_D4as_v5"

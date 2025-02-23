@@ -33,6 +33,8 @@
 # MAGIC         The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI,  you could change it to the preferred job name and target database name if required.
 # MAGIC - **Various cluster options**:  
 # MAGIC         If you do not choose serverless you can adjust the DBR and worker/driver type.  The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
+# MAGIC - **Optimize For UC Features or Fastest Performance**:
+# MAGIC         In some cases this benchmark is used to test Databricks SKUs against one another. In which case, feel free to leave as 'Feature-Rich'.  However, in other cases this benchmark is used to compare Databricks against competitive platforms that can not or will not implement the same features that optimize the downstream user experience and performance. To ensure these competitive benchmarks test platforms on a 'like-to-like' set of features, choose 'Fastest Performance' in this widget. Choosing this removes some of the constraints that are checked at write time (which can adversely affect performance to a small degree), removes optimized writes (which coalesces small files into bigger files that improves downstream consumption), and removes some other constraint checks that help enable PK/FK relationship.  In normal production scenarios we encourag customers to leverage these Delta and Unity Catalog features.  Only choose to disable them here when comparing against competitive platforms that cannot or will not also perform the same optimizations which improve user experience at the cost of some ETL performance.
 # MAGIC
 # MAGIC ### Many options are configurable from the workflow_builder EXCEPT the cluster or warehouse size.
 # MAGIC - Serverless clusters/DLT pipelines are dynamically autoscaled
@@ -58,6 +60,9 @@ dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale 
 dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Target Database')
 dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
+dbutils.widgets.dropdown("perf_or_features", features_or_perf[0], features_or_perf, 'Optimize For UC Features or Fastest Performance')
+
+perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == features_or_perf[1] else False
 catalog           = dbutils.widgets.get("catalog")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
@@ -83,6 +88,8 @@ if not lighthouse:
     dbutils.widgets.remove('worker_type')
     dbutils.widgets.remove('driver_type')
     dbutils.widgets.remove('dbr')
+    dbutils.widgets.remove('serverless')
+    serverless = 'YES'
 
 if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')

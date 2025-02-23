@@ -6,7 +6,15 @@
 
 -- COMMAND ----------
 
-SET timezone = Etc/UTC;
+USE ${catalog}.${wh_db}_${scale_factor};
+CREATE OR REPLACE TABLE DimSecurity (
+  ${tgt_schema}
+  ${constraints}
+)
+TBLPROPERTIES (${tbl_props});
+
+-- COMMAND ----------
+
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
 WITH SEC as (
   SELECT
