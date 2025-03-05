@@ -27,7 +27,13 @@
                 "path": "{{ repo_src_path }}/single_batch/delta_live_tables/non-incremental"
             }
         },
-        {% if edition == "PRO" %}
+        {% if edition == "CORE" %}
+        {
+            "notebook": {                
+                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/incremental"
+            }
+        }
+        {% else %}
         {
             "notebook": {
                 "path": "{{ repo_src_path }}/single_batch/delta_live_tables/incremental_apply_changes_into"
@@ -36,12 +42,6 @@
         {
             "notebook": {
                 "path": "{{ repo_src_path }}/single_batch/delta_live_tables/Apply Changes ONCE Flow"
-            }
-        }
-        {% else %}
-        {
-            "notebook": {                
-                "path": "{{ repo_src_path }}/single_batch/delta_live_tables/incremental"
             }
         }
         {% endif %}
@@ -55,20 +55,7 @@
         {
             "label": "default",
             "spark_conf": {
-                "spark.databricks.preemption.enabled": "false",
-                "spark.databricks.delta.schema.autoMerge.enabled": "true",
-                "spark.databricks.delta.properties.defaults.autoOptimize.optimizeWrite": "true",
-                "spark.sql.shuffle.partitions": "auto",
-                "spark.databricks.photon.scan.enabled": "true",
-                "spark.databricks.photon.photonRowToColumnar.enabled": "true",
-                "spark.databricks.photon.sort.enabled": "true",
-                {% if edition != "PRO" %}
-                "spark.databricks.streaming.forEachBatch.optimized.enabled": "true",
-                "spark.databricks.streaming.forEachBatch.optimized.fastPath.enabled": "true",
-                {% endif %}
-                "spark.databricks.photon.window.experimental.features.enabled": "true",
-                "spark.databricks.photon.window.enabled": "true",
-                "spark.databricks.photon.allDataSources.enabled": "true"
+                "spark.sql.shuffle.partitions": "auto"
             },
             "node_type_id": "{{ dlt_worker_node_type }}",
             "driver_node_type_id": "{{ dlt_driver_node_type }}",
@@ -116,7 +103,7 @@
         "FactMarketHistory.constraints": "CONSTRAINT no_earnings_for_company EXPECT (PERatio IS NOT NULL)",
         "DimTrade.constraints": "CONSTRAINT invalid_trade_commission EXPECT (commission IS NULL OR commission <= tradeprice * quantity), CONSTRAINT invalid_trade_fee EXPECT (fee IS NULL OR fee <= tradeprice * quantity)",
         {% endif %}
-        {% if edition == "PRO" %}
+        {% if edition != "CORE" %}
         "DimCustomerStg.schema": "sk_customerid BIGINT COMMENT 'Surrogate key for CustomerID', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer’s tax identifier', status STRING COMMENT 'Customer status type', lastname STRING COMMENT 'Customers last name.', firstname STRING COMMENT 'Customers first name.', middleinitial STRING COMMENT 'Customers middle name initial', gender STRING COMMENT 'Gender of the customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer’s date of birth.', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or Postal Code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', phone1 STRING COMMENT 'Phone number 1', phone2 STRING COMMENT 'Phone number 2', phone3 STRING COMMENT 'Phone number 3', email1 STRING COMMENT 'Email address 1', email2 STRING COMMENT 'Email address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate', batchid INT COMMENT 'Batch ID when this record was inserted', iscurrent BOOLEAN GENERATED ALWAYS AS (nvl2(__END_AT, false, true)) COMMENT 'True if this is the current record', effectivedate DATE GENERATED ALWAYS AS (date(__START_AT)) COMMENT 'Beginning of date range when this record was the current record', enddate DATE GENERATED ALWAYS AS (nvl(date(__END_AT), date('9999-12-31'))) COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.', __START_AT TIMESTAMP COMMENT 'Beginning of date range when this record was the current record', __END_AT TIMESTAMP COMMENT 'Ending of date range when this record was the current record.'"
         {% else %}
         "DimCustomerStg.schema": "sk_customerid BIGINT COMMENT 'Surrogate key for CustomerID', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer’s tax identifier', status STRING COMMENT 'Customer status type', lastname STRING COMMENT 'Customers last name.', firstname STRING COMMENT 'Customers first name.', middleinitial STRING COMMENT 'Customers middle name initial', gender STRING COMMENT 'Gender of the customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer’s date of birth.', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or Postal Code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', phone1 STRING COMMENT 'Phone number 1', phone2 STRING COMMENT 'Phone number 2', phone3 STRING COMMENT 'Phone number 3', email1 STRING COMMENT 'Email address 1', email2 STRING COMMENT 'Email address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate', batchid INT COMMENT 'Batch ID when this record was inserted', iscurrent BOOLEAN COMMENT 'True if this is the current record', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'"

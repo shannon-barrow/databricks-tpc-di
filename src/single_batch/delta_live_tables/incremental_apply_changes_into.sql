@@ -134,7 +134,10 @@
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE DimCustomer (${DimCustomer.schema}) AS SELECT 
+CREATE OR REFRESH LIVE TABLE DimCustomer (
+  ${DimCustomer.schema}
+  ${DimCustomer.constraints}
+) AS SELECT 
   sk_customerid,
   c.customerid,
   c.taxid,
@@ -451,7 +454,10 @@ JOIN LIVE.DimBroker b
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE FactMarketHistory (${FactMarketHistory.schema}) AS
+CREATE OR REFRESH LIVE TABLE FactMarketHistory (
+  ${FactMarketHistory.schema}
+  ${FactMarketHistory.constraints}
+) AS
 WITH dailymarkethistorical AS (
   SELECT
     *,
@@ -648,7 +654,10 @@ LEFT JOIN CompanyFinancialsStg f
 
 -- COMMAND ----------
 
-CREATE OR REFRESH LIVE TABLE DimTrade (${DimTrade.schema}) AS SELECT
+CREATE OR REFRESH LIVE TABLE DimTrade (
+  ${DimTrade.schema}
+  ${DimTrade.constraints}
+) AS SELECT
   trade.tradeid,
   sk_brokerid,
   bigint(date_format(create_ts, 'yyyyMMdd')) sk_createdateid,

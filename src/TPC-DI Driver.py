@@ -79,20 +79,22 @@ if not lighthouse:
   dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
   dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
   dbutils.widgets.dropdown("dbr", default_dbr, list(dbrs.values()), "Databricks Runtime")
-  serverless        = dbutils.widgets.get('serverless')
+  serverless        = 'YES' if sku[0] not in ['CLUSTER','DLT'] else dbutils.widgets.get('serverless')
   worker_node_type  = dbutils.widgets.get("worker_type")
   driver_node_type  = dbutils.widgets.get("driver_type")
   dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
 
-  if sku[0] not in ['CLUSTER','DLT'] or serverless == 'YES':
+  if serverless == 'YES':
     dbutils.widgets.remove('worker_type')
     dbutils.widgets.remove('driver_type')
     dbutils.widgets.remove('dbr')
+    
+  if sku[0] in ['DBSQL']:
     dbutils.widgets.remove('serverless')
-    serverless = 'YES'
 
 if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')
+  dbutils.widgets.remove('perf_or_features')
   incremental = False
 
 # COMMAND ----------
