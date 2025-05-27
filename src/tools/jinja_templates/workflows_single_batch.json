@@ -33,7 +33,7 @@
       "default": "{{ pred_opt }}"
     }
   ],
-  {% if scale_factor > 100 and serverless == "YES" %}
+  {% if scale_factor > 100 and serverless != "YES" %}
   "job_clusters": [
     {
       "job_cluster_key": "{{ job_name }}_compute",
@@ -167,10 +167,15 @@
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/incremental_batches/bronze/CustomerMgmtRaw_mavenlib",
         "base_parameters": {
+          {% if serverless != "YES" %}
           "xml_lib": "com.databricks.spark.xml"
+          {% else %}
+          "xml_lib": "xml"
+          {% endif %}
         },
         "source": "WORKSPACE"
       },
+      {% if serverless != "YES" %}
       "libraries": [
         {
           "maven": {
@@ -179,6 +184,7 @@
         }
       ],
       "job_cluster_key": "{{ job_name }}_compute",
+      {% endif %}
       {% else %}
       "notebook_task": {
         "notebook_path": "{{ repo_src_path }}/single_batch/SQL/CustomerMgmtRaw",
