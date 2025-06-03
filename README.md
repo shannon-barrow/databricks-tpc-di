@@ -3,6 +3,9 @@
 Databricks TPC-DI (Data Integration) is an implementation of specifications derived from the [TPC-DI](http://tpc.org/tpcdi/default5.asp) Benchmark.  
 This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **14.1** or higher. 
 
+## Note About Data Generation: 
+**_To generate data you need to be on a non-serverless Unity Catalog-enabled cluster.  As of today (until a workaround is found) you will also need to use DBR 15.4 or under (DBR 16.x or higher does not like running the JAR on the driver!)_**
+
 [![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
 
