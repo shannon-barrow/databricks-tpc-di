@@ -1,0 +1,25 @@
+sql_endpoints:
+  target: snowflake
+
+  outputs:
+     
+     snowflake:
+        type: snowflake
+        account: "{{ env_var('DBT_SNOWFLAKE_ACCOUNT') }}"
+        user: "{{ env_var('DBT_SNOWFLAKE_USER') }}"
+        password: "{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}"
+        role: "{{ env_var('DBT_SNOWFLAKE_ROLE') }}"
+        warehouse: "{{ env_var('DBT_SNOWFLAKE_WAREHOUSE') }}"
+        database: "{{ env_var('DBT_SNOWFLAKE_DATABASE') }}"
+        schema: "{{ env_var('DBT_SNOWFLAKE_SCHEMA') }}"
+        threads: 25
+
+     databricks:
+        type: databricks
+        method: http
+        host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
+        token: "{{ env_var('DBT_DATABRICKS_TOKEN') }}"
+        http_path: "{{ env_var('DBT_DATABRICKS_PATH') }}"
+        catalog: "{{ env_var('DBT_UC_CATALOG') }}"
+        schema: "{{ env_var('DBT_UC_SCHEMA') }}"
+        threads: 25

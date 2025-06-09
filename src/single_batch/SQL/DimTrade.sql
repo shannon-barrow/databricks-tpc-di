@@ -18,8 +18,24 @@ TBLPROPERTIES (${tbl_props});
 INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
 WITH tradeincremental AS (
   SELECT
-    *,
-    int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1)) batchid
+    tradeid,
+    t_dts,
+    status,
+    t_tt_id,
+    cashflag,
+    t_s_symb,
+    quantity,
+    bidprice,
+    t_ca_id,
+    executedby,
+    tradeprice,
+    fee,
+    commission,
+    tax,
+    cdc_flag,
+    MIN(t_dts) OVER (PARTITION BY tradeid) AS create_ts,
+    MIN(cdc_flag) OVER (PARTITION BY tradeid) AS min_cdc_flag,
+    MIN(int(substring(_metadata.file_path FROM (position('/Batch', _metadata.file_path) + 6) FOR 1))) OVER (PARTITION BY tradeid) AS batchid
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
     format => "csv",
@@ -29,43 +45,20 @@ WITH tradeincremental AS (
     fileNamePattern => "Trade.txt",
     schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   )
-),
-finaltrades AS (
-  SELECT
-    min(cdc_flag) cdc_flag,
-    tradeid,
-    min(t_dts) create_ts,
-    max_by(
-      struct(
-        t_dts,
-        status,
-        t_tt_id,
-        cashflag,
-        t_s_symb,
-        quantity,
-        bidprice,
-        t_ca_id,
-        executedby,
-        tradeprice,
-        fee,
-        commission,
-        tax
-      ),
-      t_dts
-    ) current_record,
-    min(t.batchid) batchid
-  FROM tradeincremental t
-  group by tradeid
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY tradeid ORDER BY t_dts DESC)=1
 ),
 TradeIncrementalHistory AS (
   SELECT
     tradeid,
-    current_record.t_dts ts,
-    current_record.status
-  FROM finaltrades
-  WHERE cdc_flag = "U"
+    t_dts AS ts,
+    status
+  FROM tradeincremental
+  WHERE min_cdc_flag = "U"
   UNION ALL
-  SELECT *
+  SELECT 
+    tradeid,
+    th_dts AS ts,
+    status
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch1",
     format => "csv",
@@ -79,19 +72,20 @@ TradeIncrementalHistory AS (
 Current_Trades as (
   SELECT
     tradeid,
-    min(ts) create_ts,
-    max_by(struct(ts, status), ts) current_status
+    MIN(ts) OVER (PARTITION BY tradeid) create_ts,
+    status,
+    ts
   FROM TradeIncrementalHistory
-  group by tradeid
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY tradeid ORDER BY ts DESC) = 1
 ),
 Trades_Final (
   SELECT
-    tradeid,
-    create_ts,
+    ct.tradeid,
+    ct.create_ts,
     CASE
-      WHEN current_status.status IN ("CMPT", "CNCL") THEN current_status.ts 
+      WHEN ct.status IN ("CMPT", "CNCL") THEN ct.ts 
       END close_ts,
-    current_status.status,
+    ct.status,
     t_is_cash cashflag,
     t_st_id,
     t_tt_id,
@@ -121,24 +115,24 @@ Trades_Final (
     tradeid,
     create_ts,
     CASE
-      WHEN current_record.status IN ("CMPT", "CNCL") THEN current_record.t_dts 
+      WHEN status IN ("CMPT", "CNCL") THEN t_dts 
       END close_ts,
-    current_record.status,
-    current_record.cashflag,
-    current_record.status,
-    current_record.t_tt_id,
-    current_record.t_s_symb,
-    current_record.quantity,
-    current_record.bidprice,
-    current_record.t_ca_id,
-    current_record.executedby,
-    current_record.tradeprice,
-    current_record.fee,
-    current_record.commission,
-    current_record.tax,
+    status,
+    cashflag,
+    status,
+    t_tt_id,
+    t_s_symb,
+    quantity,
+    bidprice,
+    t_ca_id,
+    executedby,
+    tradeprice,
+    fee,
+    commission,
+    tax,
     batchid
-  FROM finaltrades
-  WHERE cdc_flag = "I"
+  FROM tradeincremental
+  WHERE min_cdc_flag = "I"
 )
 SELECT
   trade.tradeid,

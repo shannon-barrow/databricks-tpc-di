@@ -1,0 +1,38 @@
+name: 'dbsql_dbt_tpcdi'
+version: '1.0.0'
+config-version: 2
+
+profile: 'sql_endpoints'
+
+vars:
+
+  benchmark: tpcdi
+  scalefactor: 10000
+
+  catalog: tpcdi
+  schema: schma
+  stagingschema: staging_schema
+
+  stage: external_stage_name/path #snowflake stage and raw files location path
+  rawfilelocation : abfss://xx@xx.dfs.core.windows.net/ #databricks external location path
+  
+
+model-paths: ["Databricks/models/"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+
+dispatch:
+  - macro_namespace: dbt_utils
+    search_order: ['dbsql_dbt_tpcdi', 'dbt_utils']
+
+models:
+  +transient: false
