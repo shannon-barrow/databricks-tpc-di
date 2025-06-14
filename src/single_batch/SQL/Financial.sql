@@ -16,7 +16,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT INTO ${catalog}.${wh_db}_${scale_factor}.Financial
+INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.Financial
 SELECT 
   sk_companyid,
   cast(substring(value, 1, 4) AS INT) AS fi_year,
