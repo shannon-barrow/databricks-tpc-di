@@ -25,8 +25,7 @@ account AS (
     update_ts,
     1 batchid
   FROM
-    ${catalog}.tpcdi_${scale_factor}_stage.CustomerMgmt c
-    --${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
+    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
   WHERE
     ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL

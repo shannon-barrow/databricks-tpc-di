@@ -96,7 +96,6 @@ Customers as (
     1 batchid,
     update_ts
   FROM
-    --${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
     ${catalog}.tpcdi_${scale_factor}_stage.CustomerMgmt c
   WHERE
     ActionType in ('NEW', 'INACT', 'UPDCUST')
