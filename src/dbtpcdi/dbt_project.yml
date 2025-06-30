@@ -5,34 +5,24 @@ config-version: 2
 profile: 'sql_endpoints'
 
 vars:
-
   benchmark: tpcdi
   scalefactor: 10000
+  catalog: {ENTER_YOUR_CATALOG_HERE}
+  schema: {ENTER_YOUR_SCHEMA_HERE}
+  stagingschema: {ENTER_YOUR_STAGING_SCHEMA_HERE} # often this is the schema above with "_stage" appended
+  stage: {ENTER_YOUR_SF_EXTERNAL_STAGE_LOCATION_HERE} #snowflake stage and raw files location path. Usually this is: EXTERNAL_STAGE/tpcdi/sf=10000
+  rawfilelocation: {ENTER_YOUR_DB_RAW_FILES_DIR_HERE} #databricks external location path. Usually this is: /Volumes/main/tpcdi_raw_data/tpcdi_volume
 
-  catalog: tpcdi
-  schema: schma
-  stagingschema: staging_schema
-
-  stage: external_stage_name/path #snowflake stage and raw files location path
-  rawfilelocation : abfss://xx@xx.dfs.core.windows.net/ #databricks external location path
-  
-
-model-paths: ["Databricks/models/"]
-analysis-paths: ["analyses"]
-test-paths: ["tests"]
-seed-paths: ["seeds"]
-macro-paths: ["macros"]
-snapshot-paths: ["snapshots"]
+model-paths: ["Databricks_CSV/models/"]
 
 target-path: "target"
-clean-targets:
-  - "target"
-  - "dbt_packages"
 
+#dispatch:
+#  - macro_namespace: dbt_utils
+#    search_order: ['dbsql_dbt_tpcdi', 'dbt_utils']
 
-dispatch:
-  - macro_namespace: dbt_utils
-    search_order: ['dbsql_dbt_tpcdi', 'dbt_utils']
+#models:
+#  +transient: false
 
-models:
-  +transient: false
+# flags:
+#   use_materialization_v2: True

@@ -1,25 +1,26 @@
 sql_endpoints:
-  target: snowflake
+
+  target: databricks
 
   outputs:
      
      snowflake:
         type: snowflake
-        account: "{{ env_var('DBT_SNOWFLAKE_ACCOUNT') }}"
-        user: "{{ env_var('DBT_SNOWFLAKE_USER') }}"
-        password: "{{ env_var('DBT_SNOWFLAKE_PASSWORD') }}"
-        role: "{{ env_var('DBT_SNOWFLAKE_ROLE') }}"
-        warehouse: "{{ env_var('DBT_SNOWFLAKE_WAREHOUSE') }}"
-        database: "{{ env_var('DBT_SNOWFLAKE_DATABASE') }}"
-        schema: "{{ env_var('DBT_SNOWFLAKE_SCHEMA') }}"
-        threads: 25
-
+        account: {ENTER_YOUR_ACCT_ID_HERE}
+        user: {ENTER_YOUR_USER_ID_HERE}
+        password: {ENTER_YOUR_PASSWORD_HERE}
+        role : {ENTER_YOUR_ROLE_HERE}
+        warehouse: {ENTER_YOUR_WH_HERE}
+        database: {ENTER_YOUR_DATABASE_HERE}
+        schema: {ENTER_YOUR_SCHEMA_HERE}
+        threads: 21
+     
      databricks:
-        type: databricks
-        method: http
-        host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
-        token: "{{ env_var('DBT_DATABRICKS_TOKEN') }}"
-        http_path: "{{ env_var('DBT_DATABRICKS_PATH') }}"
-        catalog: "{{ env_var('DBT_UC_CATALOG') }}"
-        schema: "{{ env_var('DBT_UC_SCHEMA') }}"
-        threads: 25
+         type: databricks
+         method: http
+         host: {ENTER_YOUR_HOST_HERE}
+         token: {ENTER_YOUR_TOKEN_HERE}
+         http_path: /sql/1.0/warehouses/{ENTER_YOUR_WH_ID_HERE}
+         catalog: {ENTER_YOUR_CATALOG_HERE}
+         schema: {ENTER_YOUR_SCHEMA_HERE}
+         threads: 21
