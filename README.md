@@ -19,7 +19,8 @@ The TPC-DI spec does not provide code, instead relying on documenting business r
 This repo is an implementation of the spec only - one that executes only on the cloud-based Databricks platform.   
 
 ### LIMITATIONS
-* The code base is implemented to execute successfully ONLY on the Databricks platform (GCP, AZURE, OR AWS).    
+* The code base is implemented to execute successfully ONLY on the Databricks platform EXCEPT the nested dbt version of the code, which is a STANDALONE version meant to be run from your local dev environment.
+  * The remainder of of this README is dedicated to the Databricks implementation. Please refer to the README found in the src/dbtpcdi folder for short instructions about how to execute the dbt version of the code against Databricks and Snowflake warehouses
 * This code requires:
   * Databricks E2 Deployment. 
   * Databricks Repos functionality. 
