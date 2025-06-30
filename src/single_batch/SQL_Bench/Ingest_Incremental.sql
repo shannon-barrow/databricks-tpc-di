@@ -10,5 +10,6 @@ FROM read_files(
   header => False,
   sep => "|",
   fileNamePattern => "${filename}", 
+  schemaEvolutionMode => 'none',
   schema => "${raw_schema}"
 )

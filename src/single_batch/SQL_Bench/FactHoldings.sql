@@ -11,6 +11,7 @@ WITH Holdings as (
     header => False,
     sep => "|",
     fileNamePattern => "HoldingHistory.txt",
+    schemaEvolutionMode => 'none',
     schema => "hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
   )
   UNION ALL
@@ -24,6 +25,7 @@ WITH Holdings as (
     header => False,
     sep => "|",
     fileNamePattern => "HoldingHistory.txt",
+    schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
   )
 )

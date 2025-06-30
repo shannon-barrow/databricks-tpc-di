@@ -36,6 +36,7 @@ FROM read_files(
   header => False,
   sep => ",",
   fileNamePattern => "HR.csv", 
+  schemaEvolutionMode => 'none',
   schema => "employeeid BIGINT, managerid BIGINT, employeefirstname STRING, employeelastname STRING, employeemi STRING, employeejobcode STRING , employeebranch STRING, employeeoffice STRING, employeephone STRING"
 )
 WHERE employeejobcode = 314;

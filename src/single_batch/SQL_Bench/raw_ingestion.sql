@@ -7,6 +7,7 @@ FROM read_files(
   inferSchema => False, 
   header => False,
   sep => "|",
-  fileNamePattern => "${filename}", 
+  fileNamePattern => "${filename}",
+  schemaEvolutionMode => 'none', 
   schema => "${raw_schema}"
 )

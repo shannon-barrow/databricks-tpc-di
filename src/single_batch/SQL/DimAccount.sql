@@ -27,6 +27,7 @@ WITH accountincremental AS (
     header => False,
     sep => "|",
     fileNamePattern => "Account.txt",
+    schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
   )
 ),

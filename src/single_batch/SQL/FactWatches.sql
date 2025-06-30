@@ -27,6 +27,7 @@ with watchhistory AS (
     header => False,
     sep => "|",
     fileNamePattern => "WatchHistory.txt",
+    schemaEvolutionMode => 'none',
     schema => "w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
   )
   UNION ALL
@@ -41,6 +42,7 @@ with watchhistory AS (
       header => False,
       sep => "|",
       fileNamePattern => "WatchHistory.txt",
+      schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
     )
 ),

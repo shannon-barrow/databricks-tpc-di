@@ -28,6 +28,7 @@ FROM read_files(
   inferSchema => False, 
   header => False,
   sep => "|",
+  schemaEvolutionMode => 'none',
   fileNamePattern => "${filename}", 
   schema => "${raw_schema}"
 )
