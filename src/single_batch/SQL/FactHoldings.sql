@@ -6,7 +6,7 @@
 
 -- COMMAND ----------
 
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE FactHoldings (
   ${tgt_schema}
   ${constraints}
@@ -15,7 +15,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.FactHoldings 
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings')
 WITH Holdings as (
   SELECT 
     *, 
@@ -58,5 +58,5 @@ SELECT
   hh_after_qty currentholding,
   h.batchid
 FROM Holdings h
-  JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
+  JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade') dt 
     ON tradeid = hh_t_id

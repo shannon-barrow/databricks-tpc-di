@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental (
+CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.ProspectIncremental') (
   agencyid STRING COMMENT 'Unique identifier from agency',
   lastname STRING COMMENT 'Last name',
   firstname STRING COMMENT 'First name',
@@ -30,7 +30,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.ProspectIncremental')
 with p as (
   SELECT
     *,

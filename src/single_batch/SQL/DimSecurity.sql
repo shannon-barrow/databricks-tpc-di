@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE DimSecurity (
   ${tgt_schema}
   ${constraints}
@@ -15,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimSecurity 
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity')
 WITH SEC as (
   SELECT
     recdate AS effectivedate,
@@ -29,7 +22,7 @@ WITH SEC as (
     to_date(substring(value, 123, 8), 'yyyyMMdd') AS firsttradeonexchange,
     cast(substring(value, 131, 12) AS DOUBLE) AS Dividend,
     trim(substring(value, 143, 60)) AS conameorcik
-  FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
+  FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.FinWire')
   WHERE rectype = 'SEC'
 ),
 dc as (
@@ -38,14 +31,14 @@ dc as (
     name conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
+  FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany')
   UNION ALL
   SELECT 
     sk_companyid,
     cast(companyid as string) conameorcik,
     EffectiveDate,
     EndDate
-  FROM ${catalog}.${wh_db}_${scale_factor}.DimCompany
+  FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany')
 ),
 SEC_prep AS (
   SELECT 

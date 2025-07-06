@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE DimAccount (
   ${tgt_schema}
   ${constraints}
@@ -15,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimAccount
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount')
 WITH accountincremental AS (
   SELECT
     * except(cdc_flag, cdc_dsn),
@@ -42,7 +35,7 @@ account AS (
     update_ts,
     1 batchid
   FROM
-    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
+    IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt') c
   WHERE
     ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL
@@ -61,9 +54,9 @@ account AS (
       'INAC','Inactive') status,
     TIMESTAMP(bd.batchdate) update_ts,
     a.batchid
-  FROM
-    accountincremental a
-    JOIN ${catalog}.${wh_db}_${scale_factor}.BatchDate bd ON a.batchid = bd.batchid
+  FROM accountincremental a
+  JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.BatchDate') bd 
+    ON a.batchid = bd.batchid
 ),
 account_final AS (
   SELECT
@@ -119,7 +112,7 @@ account_cust_updates AS (
     ) effectivedate,
     if(a.enddate > c.enddate, c.enddate, a.enddate) enddate
   FROM account_final a
-  FULL OUTER JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
+  FULL OUTER JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c 
     ON a.customerid = c.customerid
     AND c.enddate > a.effectivedate
     AND c.effectivedate < a.enddate
@@ -138,5 +131,5 @@ SELECT
   a.effectivedate,
   a.enddate
 FROM account_cust_updates a
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimBroker b 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimBroker') b 
   ON a.brokerid = b.brokerid;

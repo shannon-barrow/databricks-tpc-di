@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimCustomer (
+CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') (
   ${tgt_schema}
   ${constraints}
 )
@@ -14,7 +7,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCustomer
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
 WITH customerincremental AS (
   SELECT
     customerid,
@@ -105,7 +98,7 @@ Customers as (
     1 batchid,
     update_ts
   FROM
-    ${catalog}.${wh_db}_${scale_factor}_stage.CustomerMgmt c
+    IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt') c
   WHERE
     ActionType in ('NEW', 'INACT', 'UPDCUST')
   UNION ALL
@@ -135,7 +128,7 @@ Customers as (
     c.batchid,
     timestamp(bd.batchdate) update_ts
   FROM customerincremental c
-  JOIN ${catalog}.${wh_db}_${scale_factor}.BatchDate bd 
+  JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.BatchDate') bd 
     ON c.batchid = bd.batchid
 ),
 CustomerFinal AS (
@@ -337,11 +330,11 @@ SELECT
   c.effectivedate,
   c.enddate
 FROM CustomerFinal c
-JOIN ${catalog}.${wh_db}_${scale_factor}.TaxRate r_lcl 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_lcl 
   ON c.lcl_tx_id = r_lcl.TX_ID
-JOIN ${catalog}.${wh_db}_${scale_factor}.TaxRate r_nat 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_nat 
   ON c.nat_tx_id = r_nat.TX_ID
-LEFT JOIN ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental p 
+LEFT JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.ProspectIncremental') p 
   on 
     upper(p.lastname) = upper(c.lastname)
     and upper(p.firstname) = upper(c.firstname)

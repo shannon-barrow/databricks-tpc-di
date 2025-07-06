@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE FactWatches (
   ${tgt_schema}
   ${constraints}
@@ -15,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.FactWatches
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')
 with watchhistory AS (
   SELECT
     *,
@@ -65,12 +58,12 @@ select
   bigint(date_format(dateremoved, 'yyyyMMdd')) sk_dateid_dateremoved,
   wh.batchid 
 from watches wh
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity s 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') s 
   ON 
     s.symbol = wh.symbol
     AND wh.dateplaced >= s.effectivedate 
     AND wh.dateplaced < s.enddate
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimCustomer c 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c 
   ON
     wh.customerid = c.customerid
     AND wh.dateplaced >= c.effectivedate 

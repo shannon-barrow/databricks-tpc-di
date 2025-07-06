@@ -1,13 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
--- CREATE WIDGET DROPDOWN conameorcik DEFAULT "NAME" CHOICES SELECT * FROM (VALUES ("COMPANYID"), ("NAME"));
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE Financial (
   ${tgt_schema}
   ${constraints}
@@ -16,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.Financial
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.Financial')
 SELECT 
   sk_companyid,
   cast(substring(value, 1, 4) AS INT) AS fi_year,
@@ -32,8 +24,8 @@ SELECT
   cast(substring(value, 126, 17) AS DOUBLE) AS fi_liability,
   cast(substring(value, 143, 13) AS BIGINT) AS fi_out_basic,
   cast(substring(value, 156, 13) AS BIGINT) AS fi_out_dilut
-FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimCompany dc
+FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.finwire')
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') dc
 ON
   rectype = 'FIN_NAME'
   and trim(substring(value, 169, 60)) = dc.NAME
@@ -55,8 +47,8 @@ SELECT
   cast(substring(value, 126, 17) AS DOUBLE) AS fi_liability,
   cast(substring(value, 143, 13) AS BIGINT) AS fi_out_basic,
   cast(substring(value, 156, 13) AS BIGINT) AS fi_out_dilut
-FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimCompany dc
+FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.finwire')
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') dc
 ON
   rectype = 'FIN_COMPANYID'
   and trim(substring(value, 169, 60)) = dc.COMPANYID

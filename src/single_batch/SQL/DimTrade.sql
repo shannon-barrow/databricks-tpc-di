@@ -1,5 +1,5 @@
 -- Databricks notebook source
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE DimTrade (
   ${tgt_schema}
   ${constraints}
@@ -8,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimTrade
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade')
 WITH tradeincremental AS (
   SELECT
     *,
@@ -170,12 +170,12 @@ SELECT
   trade.tax,
   trade.batchid
 FROM Trades_Final trade
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity ds
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') ds
   ON 
     ds.symbol = trade.t_s_symb
     AND date(create_ts) >= ds.effectivedate 
     AND date(create_ts) < ds.enddate
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimAccount da
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') da
   ON 
     trade.t_ca_id = da.accountid 
     AND date(create_ts) >= da.effectivedate 

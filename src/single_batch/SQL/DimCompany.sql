@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE DimCompany (
   ${tgt_schema}
   ${constraints}
@@ -15,7 +8,7 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.DimCompany
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany')
 WITH cmp as (
   SELECT
     recdate,
@@ -33,7 +26,7 @@ WITH cmp as (
     trim(substring(value, 306, 24)) AS Country,
     trim(substring(value, 330, 46)) AS CEOname,
     trim(substring(value, 376, 150)) AS Description
-  FROM ${catalog}.${wh_db}_${scale_factor}_stage.FinWire
+  FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.FinWire')
   WHERE rectype = 'CMP'
 )
 SELECT 
@@ -93,6 +86,6 @@ FROM (
       lead(date(recdate)) OVER (PARTITION BY cik ORDER BY recdate),
       cast('9999-12-31' as date)) enddate
   FROM cmp
-  JOIN ${catalog}.${wh_db}_${scale_factor}.Industry ind ON cmp.industryid = ind.in_id
+  JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.Industry') ind ON cmp.industryid = ind.in_id
 )
 where effectivedate < enddate;

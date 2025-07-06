@@ -1,12 +1,5 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
-
--- COMMAND ----------
-
-USE ${catalog}.${wh_db}_${scale_factor};
+USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
 CREATE OR REPLACE TABLE FactMarketHistory (
   ${tgt_schema}
   ${constraints}
@@ -15,14 +8,14 @@ TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
-INSERT OVERWRITE ${catalog}.${wh_db}_${scale_factor}.FactMarketHistory
+INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')
 WITH companyfinancials as (
   SELECT
     f.sk_companyid,
     fi_qtr_start_date,
     sum(fi_basic_eps) OVER (PARTITION BY companyid ORDER BY fi_qtr_start_date ROWS BETWEEN 4 PRECEDING AND CURRENT ROW) - fi_basic_eps sum_fi_basic_eps
-  FROM ${catalog}.${wh_db}_${scale_factor}.Financial f
-  JOIN ${catalog}.${wh_db}_${scale_factor}.DimCompany d
+  FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.Financial') f
+  JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') d
     on f.sk_companyid = d.sk_companyid
 ),
 dailymarket as (
@@ -89,7 +82,7 @@ select
   dm_vol volume,
   mh.batchid
 FROM markethistory mh
-JOIN ${catalog}.${wh_db}_${scale_factor}.DimSecurity s 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') s 
   ON 
     s.symbol = mh.dm_s_symb
     AND mh.dm_date >= s.effectivedate 

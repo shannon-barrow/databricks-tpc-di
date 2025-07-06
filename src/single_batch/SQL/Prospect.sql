@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Prospect (
+CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.Prospect') (
   ${tgt_schema}
   ${constraints}
 )
