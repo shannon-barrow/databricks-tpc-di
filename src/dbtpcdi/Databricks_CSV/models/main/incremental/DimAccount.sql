@@ -37,7 +37,7 @@ account AS (
     status,
     update_ts,
     1 batchid
-  FROM {{var('catalog')}}.{{var('stagingschema')}}.customermgmt  c
+  FROM {{ ref('CustomerMgmt') }}  c
   WHERE
     ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL

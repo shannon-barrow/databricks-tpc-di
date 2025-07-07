@@ -127,7 +127,7 @@ Customers as (
     1 batchid,
     update_ts
   FROM
-    {{var('catalog')}}.{{var('stagingschema')}}.customermgmt  c
+    {{ ref('CustomerMgmt') }}  c
   WHERE
     ActionType in ('NEW', 'INACT', 'UPDCUST')
   UNION ALL
