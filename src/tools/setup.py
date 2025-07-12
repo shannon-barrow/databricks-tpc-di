@@ -8,6 +8,7 @@ import requests
 import string
 import json
 import collections
+import os
 
 # COMMAND ----------
 
@@ -49,6 +50,10 @@ def is_lighthouse():
   ##
   return False
 
+def is_serverless():
+  return os.getenv("IS_SERVERLESS", "") == 'TRUE'
+
+
 # COMMAND ----------
 
 # ENV-Specific API calls and variables
@@ -69,7 +74,6 @@ workflows_dict      = {
   # "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
 }
 default_workflow   = workflows_dict['CLUSTER']
-workflow_vals      = list(workflows_dict.values())
 default_sf         = '10'
 default_job_name   = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
 default_wh         = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
@@ -81,6 +85,8 @@ try:
 except NameError: 
   lighthouse = is_lighthouse()
 
+running_on_serverless = is_serverless()
+
 if lighthouse:
   UC_enabled            = True
   cloud_provider        = 'AWS'
@@ -89,13 +95,19 @@ if lighthouse:
   default_sf_options    = ['10', '100'] # Limited Scale Factor since 8-core driver will struggle to generate and also native XML lib will not be able to scale adequately for CustomerMgmt
 else:
   default_sf_options    = ['10', '100', '1000', '5000', '10000']
-  UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
-  cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
+  if running_on_serverless:
+    UC_enabled            = True
+    cloud_provider        = ''
+    default_serverless    = 'YES'
+  else:
+    UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
+    cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
+    default_serverless    = 'NO'
+    
   node_types            = get_node_types()
   dbrs                  = get_dbr_versions(min_dbr_version)
   default_dbr_version   = list(dbrs.keys())[0]
   default_dbr           = list(dbrs.values())[0]
-  default_serverless    = 'NO'
   worker_cores_mult     = 0.016
   if cloud_provider == 'AWS':
     default_worker_type = "m7gd.2xlarge"
@@ -109,5 +121,20 @@ else:
   elif cloud_provider == 'Azure':
     default_worker_type = "Standard_D8ads_v5" 
     default_driver_type = "Standard_D4as_v5"
-    cust_mgmt_type      = "Standard_D64ads_v5" 
+    cust_mgmt_type      = "Standard_D64ads_v5"
+  else:
+    default_worker_type = (
+      "Standard_D8ads_v5" if "Standard_D8ads_v5" in list(node_types.keys())
+      else "n2-standard-8" if "n2-standard-8" in list(node_types.keys()) else "m7gd.2xlarge"
+    )
+    default_driver_type = (
+      "Standard_D4as_v5" if "Standard_D4as_v5" in list(node_types.keys())
+      else "n2-standard-4" if "n2-standard-4" in list(node_types.keys()) else "m7gd.xlarge"
+    )
+    cust_mgmt_type = (
+      "Standard_D64ads_v5" if "Standard_D64ads_v5" in list(node_types.keys())
+      else "n2-standard-64" if "n2-standard-64" in list(node_types.keys()) else "m7gd.16xlarge"
+    )
   default_catalog = 'tpcdi' if UC_enabled else 'hive_metastore'
+
+workflow_vals      = list(workflows_dict.values())
