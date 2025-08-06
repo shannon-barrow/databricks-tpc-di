@@ -6,10 +6,10 @@ profile: 'sql_endpoints'
 
 vars:
   benchmark: tpcdi
-  scalefactor: 1000
+  scalefactor: 10000
   catalog: skhanbhai
-  schema: tpcdi_dbtcloud_sf1000
-  stagingschema: tpcdi_dbtcloud_sf1000_stage # often this is the schema above with "_stage" appended
+  schema: tpcdi_dbtcloud_sf10000
+  stagingschema: tpcdi_dbtcloud_sf10000_stage # often this is the schema above with "_stage" appended
   # stage: {ENTER_YOUR_SF_EXTERNAL_STAGE_LOCATION_HERE} #snowflake stage and raw files location path. Usually this is: EXTERNAL_STAGE/tpcdi/sf=10000
   rawfilelocation: /Volumes/skhanbhai/tpcdi_raw_data/tpcdi_volume #databricks external location path. Usually this is: /Volumes/main/tpcdi_raw_data/tpcdi_volume
 
