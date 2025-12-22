@@ -1,8 +1,9 @@
 -- Databricks notebook source
--- CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
--- CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
--- CREATE WIDGET TEXT wh_db DEFAULT '';
--- CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
+CREATE WIDGET DROPDOWN scale_factor DEFAULT "10" CHOICES SELECT * FROM (VALUES ("10"), ("100"), ("1000"), ("5000"), ("10000"));
+CREATE WIDGET DROPDOWN xml_lib DEFAULT "com.databricks.spark.xml" CHOICES SELECT * FROM (VALUES ("xml"), ("com.databricks.spark.xml"));
+CREATE WIDGET TEXT tpcdi_directory DEFAULT "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/";
+CREATE WIDGET TEXT wh_db DEFAULT '';
+CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
 
 -- COMMAND ----------
 

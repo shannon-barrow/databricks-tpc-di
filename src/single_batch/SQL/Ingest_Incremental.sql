@@ -4,7 +4,7 @@ CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_fa
   batchid INT COMMENT 'Batch ID when this record was inserted'
   ${constraints}
 )
-TBLPROPERTIES (${tblprops});
+TBLPROPERTIES (${tbl_props});
 
 -- COMMAND ----------
 
