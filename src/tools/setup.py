@@ -89,8 +89,13 @@ if lighthouse:
   default_sf_options    = ['10', '100'] # Limited Scale Factor since 8-core driver will struggle to generate and also native XML lib will not be able to scale adequately for CustomerMgmt
 else:
   default_sf_options    = ['10', '100', '1000', '5000', '10000']
-  UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
-  cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
+  UC_enabled = True 
+  cloud_provider = "AWS" # replace with either AWS, GCP or Azure
+  try:
+    metastore = spark.sql("SELECT current_metastore()").collect()[0][0]
+    UC_enabled = bool(metastore)  # True if non-empty string, False otherwise
+  except Exception as e:
+    print(f"[WARN] Could not retrieve 'current_metastore': {e} -- using UC_enabled = {UC_enabled}")
   node_types            = get_node_types()
   dbrs                  = get_dbr_versions(min_dbr_version)
   default_dbr_version   = list(dbrs.keys())[0]
