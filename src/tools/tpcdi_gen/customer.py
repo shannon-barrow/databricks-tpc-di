@@ -727,7 +727,6 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .option("rootTag", "Actions")
         .option("rowTag", "Action")
         .option("nullValue", None)
-        .option("indent", "none")
         .save(tmp_path))
 
     part_files = [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")]
