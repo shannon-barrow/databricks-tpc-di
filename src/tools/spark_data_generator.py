@@ -91,7 +91,7 @@ def spark_generate():
   all_counts = {}
 
   print(f"TPC-DI Spark Data Generator")
-  print(f"Scale Factor: {scale_factor} (internal: {cfg.internal_sf})")
+  print(f"Scale Factor: {scale_factor} ")
   print(f"Output: {cfg.volume_path}")
 
   # Clean previous output to prevent stale files
@@ -163,7 +163,7 @@ def spark_generate():
   total_records = sum(v for k, v in all_counts.items() if k[0] != "HR_BROKERS")
   print(f"\n{'=' * 60}")
   print(f"TPC-DI Data Generation Complete!")
-  print(f"  Scale Factor: {scale_factor} (internal: {cfg.internal_sf})")
+  print(f"  Scale Factor: {scale_factor} ")
   print(f"  Total Records: {total_records:,}")
   print(f"  Elapsed: {elapsed:.1f}s ({total_records / max(1,elapsed):,.0f} records/sec)")
   print(f"  Output: {cfg.volume_path}")
