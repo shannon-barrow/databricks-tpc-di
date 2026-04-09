@@ -58,9 +58,9 @@ SELECT
   to_timestamp(_ActionTS) update_ts,
   _ActionType ActionType
 FROM read_files(
-  "${tpcdi_directory}/${path}",
+  "${tpcdi_directory}sf=${scale_factor}/${path}",
   format => "xml",
-  inferSchema => False, 
+  inferSchema => False,
   rowTag => "TPCDI:Action",
   fileNamePattern => "CustomerMgmt(_[0-9]+)?.xml"
 );
