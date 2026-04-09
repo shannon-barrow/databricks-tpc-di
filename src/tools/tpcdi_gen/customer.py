@@ -395,10 +395,22 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("C_ID"), seed_for("CM", "apt")) % 999 + 1).cast("string"))))
     all_df = all_df.withColumn("C_CTRY",
         F.when(hash_key(F.col("C_ID"), seed_for("CM", "ctry")) % 100 < 80, F.lit("United States of America")).otherwise(F.lit("Canada")))
+    # Phone 1: country code, area code, local, extension
+    all_df = all_df.withColumn("C_CTRY_1", F.lit("1"))
     all_df = all_df.withColumn("C_AREA_1", (hash_key(F.col("C_ID"), seed_for("CM", "ar1")) % 900 + 100).cast("string"))
     all_df = all_df.withColumn("C_LOCAL_1", F.concat(
         (hash_key(F.col("C_ID"), seed_for("CM", "l1a")) % 900 + 100).cast("string"), F.lit("-"),
         (hash_key(F.col("C_ID"), seed_for("CM", "l1b")) % 9000 + 1000).cast("string")))
+    all_df = all_df.withColumn("C_EXT_1", F.lit(""))
+    # Phone 2/3: empty for initial NEW actions (populated via UPDCUST)
+    all_df = all_df.withColumn("C_CTRY_2", F.lit(""))
+    all_df = all_df.withColumn("C_AREA_2", F.lit(""))
+    all_df = all_df.withColumn("C_LOCAL_2", F.lit(""))
+    all_df = all_df.withColumn("C_EXT_2", F.lit(""))
+    all_df = all_df.withColumn("C_CTRY_3", F.lit(""))
+    all_df = all_df.withColumn("C_AREA_3", F.lit(""))
+    all_df = all_df.withColumn("C_LOCAL_3", F.lit(""))
+    all_df = all_df.withColumn("C_EXT_3", F.lit(""))
     all_df = all_df.withColumn("CA_TAX_ST",
         F.when(F.col("CA_ID") < 0, F.lit(""))
         .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "ct")) % 100 < 70, F.lit("1"))
