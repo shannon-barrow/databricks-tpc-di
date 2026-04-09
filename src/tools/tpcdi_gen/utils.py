@@ -224,17 +224,13 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
     part_files = sorted([f for f in files if f.name.startswith("part-")], key=lambda f: f.name)
 
     targets = []
-    if len(part_files) == 1:
-        # Single partition output -> use the exact final path
-        register_copy(part_files[0].path, final_path)
-        targets.append(final_path)
-    else:
-        # Multiple partitions -> split into numbered files (e.g., file_1.txt, file_2.txt)
-        base, ext = os.path.splitext(final_path)
-        for i, pf in enumerate(part_files):
-            target = f"{base}_{i+1}{ext}"
-            register_copy(pf.path, target)
-            targets.append(target)
+    # Always use numbered suffix (e.g., file_1.txt, file_2.txt) even for single files.
+    # This ensures the fileNamePattern regex (_[0-9]+)? consistently matches all outputs.
+    base, ext = os.path.splitext(final_path)
+    for i, pf in enumerate(part_files):
+        target = f"{base}_{i+1}{ext}"
+        register_copy(pf.path, target)
+        targets.append(target)
     return targets
 
 
