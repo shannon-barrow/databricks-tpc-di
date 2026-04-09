@@ -59,6 +59,6 @@ FROM read_files(
   "${files_directory}sf=${scale_factor}/Batch1",
   format => "xml",
   inferSchema => False, 
-  rowTag => "Action",
+  rowTag => "TPCDI Action",
   fileNamePattern => "CustomerMgmt(_[0-9]+)?.xml"
 )
