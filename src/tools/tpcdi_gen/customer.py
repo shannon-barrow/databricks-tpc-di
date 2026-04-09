@@ -379,7 +379,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         F.lpad((hash_key(F.col("C_ID"), seed_for("CM", "t2")) % 99).cast("string"), 2, "0"), F.lit("-"),
         F.lpad((hash_key(F.col("C_ID"), seed_for("CM", "t3")) % 9999).cast("string"), 4, "0")))
     all_df = all_df.withColumn("C_GNDR",
-        F.when(hash_key(F.col("C_ID"), seed_for("CM", "gn")) % 100 < 5, F.lit(""))
+        F.when(hash_key(F.col("C_ID"), seed_for("CM", "gn")) % 100 < 5, F.lit(None).cast("string"))
         .otherwise(F.array([F.lit(g) for g in ["M","F","m","f"]])[(hash_key(F.col("C_ID"), seed_for("CM", "gndr")) % 4).cast("int")]))
     all_df = all_df.withColumn("C_TIER",
         F.when(hash_key(F.col("C_ID"), seed_for("CM", "tier")) % 100 < 50, F.lit("3"))
@@ -387,37 +387,38 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     all_df = all_df.withColumn("C_DOB", F.date_format(F.date_add(F.lit("1920-01-01"),
         (hash_key(F.col("C_ID"), seed_for("CM", "dob")) % 25000).cast("int")), "yyyy-MM-dd"))
     all_df = all_df.withColumn("C_M_NAME",
-        F.when(hash_key(F.col("C_ID"), seed_for("CM", "mn")) % 100 < 25, F.lit(""))
+        F.when(hash_key(F.col("C_ID"), seed_for("CM", "mn")) % 100 < 25, F.lit(None).cast("string"))
         .otherwise(F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
             (hash_key(F.col("C_ID"), seed_for("CM", "mi_v")) % 26 + 1).cast("int"), 1)))
     all_df = all_df.withColumn("C_ADLINE2",
-        F.when(hash_key(F.col("C_ID"), seed_for("CM", "a2n")) % 100 < 90, F.lit(""))
+        F.when(hash_key(F.col("C_ID"), seed_for("CM", "a2n")) % 100 < 90, F.lit(None).cast("string"))
         .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("C_ID"), seed_for("CM", "apt")) % 999 + 1).cast("string"))))
     all_df = all_df.withColumn("C_CTRY",
         F.when(hash_key(F.col("C_ID"), seed_for("CM", "ctry")) % 100 < 80, F.lit("United States of America")).otherwise(F.lit("Canada")))
     # Phone 1: country code, area code, local, extension
+    # Use null (not empty string) for empty fields so XML writer omits them
     all_df = all_df.withColumn("C_CTRY_1", F.lit("1"))
     all_df = all_df.withColumn("C_AREA_1", (hash_key(F.col("C_ID"), seed_for("CM", "ar1")) % 900 + 100).cast("string"))
     all_df = all_df.withColumn("C_LOCAL_1", F.concat(
         (hash_key(F.col("C_ID"), seed_for("CM", "l1a")) % 900 + 100).cast("string"), F.lit("-"),
         (hash_key(F.col("C_ID"), seed_for("CM", "l1b")) % 9000 + 1000).cast("string")))
-    all_df = all_df.withColumn("C_EXT_1", F.lit(""))
-    # Phone 2/3: empty for initial NEW actions (populated via UPDCUST)
-    all_df = all_df.withColumn("C_CTRY_2", F.lit(""))
-    all_df = all_df.withColumn("C_AREA_2", F.lit(""))
-    all_df = all_df.withColumn("C_LOCAL_2", F.lit(""))
-    all_df = all_df.withColumn("C_EXT_2", F.lit(""))
-    all_df = all_df.withColumn("C_CTRY_3", F.lit(""))
-    all_df = all_df.withColumn("C_AREA_3", F.lit(""))
-    all_df = all_df.withColumn("C_LOCAL_3", F.lit(""))
-    all_df = all_df.withColumn("C_EXT_3", F.lit(""))
+    all_df = all_df.withColumn("C_EXT_1", F.lit(None).cast("string"))
+    # Phone 2/3: null for initial NEW actions (populated via UPDCUST)
+    all_df = all_df.withColumn("C_CTRY_2", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_AREA_2", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_LOCAL_2", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_EXT_2", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_CTRY_3", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_AREA_3", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_LOCAL_3", F.lit(None).cast("string"))
+    all_df = all_df.withColumn("C_EXT_3", F.lit(None).cast("string"))
     all_df = all_df.withColumn("CA_TAX_ST",
-        F.when(F.col("CA_ID") < 0, F.lit(""))
+        F.when(F.col("CA_ID") < 0, F.lit(None).cast("string"))
         .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "ct")) % 100 < 70, F.lit("1"))
         .when(hash_key(F.col("CA_ID"), seed_for("CM", "ct")) % 100 < 90, F.lit("2")).otherwise(F.lit("0"))))
     all_df = all_df.withColumn("CA_NAME",
-        F.when(F.col("CA_ID") < 0, F.lit(""))
-        .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "can")) % 100 < 5, F.lit(""))
+        F.when(F.col("CA_ID") < 0, F.lit(None).cast("string"))
+        .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "can")) % 100 < 5, F.lit(None).cast("string"))
         .otherwise(F.substring(F.md5(F.concat(F.col("CA_ID").cast("string"), F.lit("ca"))), 1, 30))))
 
     # Dictionary-based attribute lookups: hash the entity ID with a domain seed to
