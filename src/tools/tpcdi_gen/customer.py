@@ -659,76 +659,36 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     n_cust = cust_dates.count()
     print(f"  CustomerMgmt: {n_cust} customers -> _customer_dates view")
 
-    # === Build structured DataFrame for native XML writer ===
-    # The downstream reader expects nested XML: TPCDI:Action > Customer > Account/Name/Address/ContactInfo/TaxInfo
-    # Spark's XML writer uses column names as element names and '_' prefix for XML attributes.
-    # Using struct() to create the nested structure the reader expects.
+    # === Write XML as compact text with per-partition header/footer ===
+    # Uses the pre-built xml_body strings (compact, no indentation) and wraps
+    # each partition with XML root tags via mapInPandas. This produces valid XML
+    # files that are ~3x smaller than the native XML writer's indented output,
+    # while keeping writes fully distributed (no coalesce).
+    xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line")
 
-    phone_struct = lambda prefix: F.struct(
-        F.col(f"C_CTRY_{prefix}").alias("C_CTRY_CODE"),
-        F.col(f"C_AREA_{prefix}").alias("C_AREA_CODE"),
-        F.col(f"C_LOCAL_{prefix}").alias("C_LOCAL"),
-        F.col(f"C_EXT_{prefix}").alias("C_EXT"))
+    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">'
+    xml_footer = '</TPCDI:Actions>'
 
-    xml_df = (all_df.select(
-        F.col("ActionType").alias("_ActionType"),
-        F.col("ActionTS").alias("_ActionTS"),
-        F.struct(
-            F.col("C_ID_str").alias("_C_ID"),
-            F.col("C_TAX_ID").alias("_C_TAX_ID"),
-            F.col("C_GNDR").alias("_C_GNDR"),
-            F.col("C_TIER").alias("_C_TIER"),
-            F.col("C_DOB").alias("_C_DOB"),
-            F.struct(
-                F.col("CA_ID_str").alias("_CA_ID"),
-                F.col("CA_TAX_ST").alias("_CA_TAX_ST"),
-                F.col("CA_B_ID").alias("CA_B_ID"),
-                F.col("CA_NAME").alias("CA_NAME")
-            ).alias("Account"),
-            F.struct(
-                F.col("C_L_NAME"),
-                F.col("C_F_NAME"),
-                F.col("C_M_NAME")
-            ).alias("Name"),
-            F.struct(
-                F.col("C_ADLINE1"),
-                F.col("C_ADLINE2"),
-                F.col("C_ZIPCODE"),
-                F.col("C_CITY"),
-                F.col("C_STATE_PROV"),
-                F.col("C_CTRY")
-            ).alias("Address"),
-            F.struct(
-                phone_struct("1").alias("C_PHONE_1"),
-                phone_struct("2").alias("C_PHONE_2"),
-                phone_struct("3").alias("C_PHONE_3"),
-                F.col("C_PRIM_EMAIL"),
-                F.col("C_ALT_EMAIL")
-            ).alias("ContactInfo"),
-            F.struct(
-                F.col("C_LCL_TX_ID"),
-                F.col("C_NAT_TX_ID")
-            ).alias("TaxInfo")
-        ).alias("Customer")
-    ))
+    import pandas as pd
+    from pyspark.sql.types import StructType, StructField, StringType
 
-    # === Write XML using native Spark XML writer ===
-    # rootTag provides the outer wrapper with namespace declaration.
-    # rowTag specifies the per-record element name.
-    # Each output partition file is valid XML — no coalesce needed.
+    def wrap_xml_partition(iterator):
+        """Wrap each partition's XML lines with root element tags."""
+        yield pd.DataFrame({"xml_line": [xml_header]})
+        for pdf in iterator:
+            yield pdf
+        yield pd.DataFrame({"xml_line": [xml_footer]})
+
+    out_schema = StructType([StructField("xml_line", StringType())])
+    wrapped_df = xml_df.mapInPandas(wrap_xml_partition, schema=out_schema)
+
     tmp_path = f"{cfg.batch_path(1)}/CustomerMgmt.xml__tmp"
     try:
         dbutils.fs.rm(tmp_path, recurse=True)
     except:
         pass
 
-    (xml_df.write
-        .format("xml")
-        .mode("overwrite")
-        .option("rootTag", "Actions")
-        .option("rowTag", "Action")
-        .option("nullValue", None)
-        .save(tmp_path))
+    wrapped_df.write.mode("overwrite").text(tmp_path)
 
     part_files = [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")]
     for i, pf in enumerate(part_files):
