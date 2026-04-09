@@ -58,7 +58,7 @@ SELECT
   to_timestamp(_ActionTS) update_ts,
   _ActionType ActionType
 FROM read_files(
-  "${tpcdi_directory}sf=${scale_factor}/${path}",
+  "${tpcdi_directory}sf=${scale_factor}/Batch1",
   format => "xml",
   inferSchema => False,
   rowTag => "TPCDI:Action",
