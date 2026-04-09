@@ -25,7 +25,7 @@ with Watches as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "WatchHistory(_[0-9]+)?.txt",
+    fileNamePattern => "WatchHistory*.txt",
     schema => "w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
   )
   GROUP BY ALL

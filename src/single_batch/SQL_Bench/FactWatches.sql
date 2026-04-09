@@ -10,7 +10,7 @@ with watchhistory AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "WatchHistory(_[0-9]+)?.txt",
+    fileNamePattern => "WatchHistory*.txt",
     schemaEvolutionMode => 'none',
     schema => "w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
   )
@@ -25,7 +25,7 @@ with watchhistory AS (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "WatchHistory(_[0-9]+)?.txt",
+      fileNamePattern => "WatchHistory*.txt",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING"
     )

@@ -38,7 +38,7 @@ with p as (
         header          => False,
         sep             => ",",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "Prospect(_[0-9]+)?.csv",
+        fileNamePattern => "Prospect*.csv",
         schema          => """
             agencyid          STRING,
             lastname          STRING,

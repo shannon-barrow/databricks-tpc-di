@@ -10,7 +10,7 @@ WITH tradeincremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Trade(_[0-9]+)?.txt",
+    fileNamePattern => "Trade*.txt",
     schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   )
@@ -57,7 +57,7 @@ TradeIncrementalHistory AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "TradeHistory(_[0-9]+)?.txt",
+    fileNamePattern => "TradeHistory*.txt",
     schemaEvolutionMode => 'none',
     schema => "tradeid BIGINT, th_dts TIMESTAMP, status STRING"
   )
@@ -97,7 +97,7 @@ Trades_Final (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Trade(_[0-9]+)?.txt",
+    fileNamePattern => "Trade*.txt",
     schema => "t_id BIGINT, t_dts TIMESTAMP, t_st_id STRING, t_tt_id STRING, t_is_cash TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   ) t
   JOIN Current_Trades ct
