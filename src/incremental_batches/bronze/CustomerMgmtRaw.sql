@@ -76,5 +76,5 @@ FROM
     format => "xml",
     inferSchema => False,
     rowTag => "TPCDI:Action",
-    fileNamePattern => "CustomerMgmt.xml"
+    fileNamePattern => "CustomerMgmt(_[0-9]+)?.xml"
   );

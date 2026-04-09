@@ -58,7 +58,7 @@ if API_URL is None or TOKEN is None:
   dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
 repo_src_path = f"{dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().split('/src')[0]}/src"
 workspace_src_path = f"/Workspace{repo_src_path}"
-user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\W+)', ' '))").collect()[0][0]
+user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\\W+)', ' '))").collect()[0][0]
 workflows_dict      = {
   "CLUSTER": "Workspace Cluster Workflow", 
   "DBSQL": "DBSQL Warehouse Workflow",

@@ -16,7 +16,7 @@ WITH historical as (
       inferSchema     => false,
       sep             => "|",
       schemaEvolutionMode => 'none',
-      fileNamePattern => "CashTransaction\\.txt",
+      fileNamePattern => "CashTransaction(_[0-9]+)?\\.txt",
       schema => "accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
     )
   GROUP BY ALL
@@ -38,7 +38,7 @@ alltransactions as (
       inferSchema     => false,
       sep             => "|",
       schemaEvolutionMode => 'none',
-      fileNamePattern => "CashTransaction\\.txt",
+      fileNamePattern => "CashTransaction(_[0-9]+)?\\.txt",
       schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
     )
   GROUP BY ALL

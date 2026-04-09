@@ -33,13 +33,19 @@ try:
     opt_write            = "'delta.autoOptimize.optimizeWrite'=True"
     index_cols           = ""
   
+  # Pass tpcdi_directory up to (but not including) sf={scale_factor}.
+  # Downstream notebooks append sf=${scale_factor}/ themselves so they can be
+  # reused across different scale factors by just changing the scale_factor param.
+  # Spark generator writes to: {tpcdi_directory}spark_datagen/
+  tpcdi_sf_directory = f"{tpcdi_directory}spark_datagen/"
+
   # DAG of args to send to Jinja
   dag_args = {
-    "catalog":catalog, 
-    "wh_target":wh_target, 
-    "tpcdi_directory":tpcdi_directory, 
-    "scale_factor":scale_factor, 
-    "job_name":job_name, 
+    "catalog":catalog,
+    "wh_target":wh_target,
+    "tpcdi_directory":tpcdi_sf_directory,
+    "scale_factor":scale_factor,
+    "job_name":job_name,
     "repo_src_path":repo_src_path,
     "cloud_provider":cloud_provider,
     "exec_type":sku[0],

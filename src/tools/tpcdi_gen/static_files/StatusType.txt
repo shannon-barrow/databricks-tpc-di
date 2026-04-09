@@ -1,0 +1,6 @@
+ACTV|Active
+CMPT|Completed
+CNCL|Canceled
+PNDG|Pending
+SBMT|Submitted
+INAC|Inactive

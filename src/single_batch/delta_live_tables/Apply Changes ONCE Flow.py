@@ -22,7 +22,7 @@ def TradeHistory():
           inferSchema => False,
           header => False,
           sep => "|",
-          fileNamePattern => "Trade.txt",
+          fileNamePattern => "Trade(_[0-9]+)?.txt",
           schema => "${TradeHistory.schema}"
         ))
     ),
@@ -38,7 +38,7 @@ def TradeHistory():
           inferSchema => False,
           header => False,
           sep => "|",
-          fileNamePattern => "TradeHistory.txt",
+          fileNamePattern => "TradeHistory(_[0-9]+)?.txt",
           schema => "${TradeHistoryRaw.schema}"
       )
       group by th_t_id
@@ -100,7 +100,7 @@ def TradeIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Trade.txt",
+        fileNamePattern => "Trade(_[0-9]+)?.txt",
         schema => "${TradeIncremental.schema}"
       ))
     )
@@ -422,7 +422,7 @@ def WatchHistory():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "WatchHistory.txt",
+        fileNamePattern => "WatchHistory(_[0-9]+)?.txt",
         schema => "${WatchHistory.schema}"
       ))
 """)
@@ -446,7 +446,7 @@ def WatchIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "WatchHistory.txt",
+        fileNamePattern => "WatchHistory(_[0-9]+)?.txt",
         schema => "${WatchIncremental.schema}"
       ))
 """)

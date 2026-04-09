@@ -12,7 +12,7 @@ with watchhistory AS (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "WatchHistory\\.txt",
+        fileNamePattern => "WatchHistory(_[0-9]+)?\\.txt",
         schema          => """
             w_c_id   BIGINT,
             w_s_symb STRING,
@@ -31,7 +31,7 @@ with watchhistory AS (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "WatchHistory\\.txt",
+        fileNamePattern => "WatchHistory(_[0-9]+)?\\.txt",
         schema          => """
             cdc_flag STRING,
             cdc_dsn  BIGINT,

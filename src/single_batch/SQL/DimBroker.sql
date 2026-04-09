@@ -31,7 +31,7 @@ FROM read_files(
   inferSchema => False, 
   header => False,
   sep => ",",
-  fileNamePattern => "HR.csv", 
+  fileNamePattern => "HR(_[0-9]+)?.csv", 
   schemaEvolutionMode => 'none',
   schema => "employeeid BIGINT, managerid BIGINT, employeefirstname STRING, employeelastname STRING, employeemi STRING, employeejobcode STRING , employeebranch STRING, employeeoffice STRING, employeephone STRING"
 )

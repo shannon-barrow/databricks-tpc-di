@@ -24,7 +24,7 @@ dailymarket as (
       inferSchema     => false,
       sep             => "|",
       schemaEvolutionMode => 'none',
-      fileNamePattern => "DailyMarket\\.txt",
+      fileNamePattern => "DailyMarket(_[0-9]+)?\\.txt",
       schema          => """
         dm_date   DATE,
         dm_s_symb STRING,
@@ -45,7 +45,7 @@ dailymarket as (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "DailyMarket\\.txt",
+        fileNamePattern => "DailyMarket(_[0-9]+)?\\.txt",
         schema          => """
             cdc_flag STRING,
             cdc_dsn  BIGINT,

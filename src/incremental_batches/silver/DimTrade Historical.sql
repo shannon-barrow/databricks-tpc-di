@@ -22,7 +22,7 @@ WITH TradeHistory AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "TradeHistory.txt",
+    fileNamePattern => "TradeHistory(_[0-9]+)?.txt",
     schema => "tradeid BIGINT, th_dts TIMESTAMP, status STRING"
   )
   group by tradeid
@@ -52,7 +52,7 @@ Trades as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Trade.txt",
+    fileNamePattern => "Trade(_[0-9]+)?.txt",
     schema => "t_id BIGINT, t_dts TIMESTAMP, t_st_id STRING, t_tt_id STRING, t_is_cash TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   ) t
   JOIN TradeHistory ct
@@ -125,7 +125,7 @@ FROM read_files(
   inferSchema => False,
   header => False,
   sep => "|",
-  fileNamePattern => "HoldingHistory.txt",
+  fileNamePattern => "HoldingHistory(_[0-9]+)?.txt",
   schema => "hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
 ) h
 JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 

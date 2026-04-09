@@ -61,8 +61,10 @@ dbutils.widgets.text("job_name", default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", default_wh, 'Target Database')
 dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
 dbutils.widgets.dropdown("perf_or_features", features_or_perf[0], features_or_perf, 'Optimize For UC Features or Fastest Performance')
+dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
 
 perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == features_or_perf[1] else False
+regenerate_data   = dbutils.widgets.get("regenerate_data") == "YES"
 catalog           = dbutils.widgets.get("catalog")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
@@ -99,8 +101,8 @@ if sku[0] not in ['CLUSTER','DBSQL']:
 
 # COMMAND ----------
 
-# DBTITLE 1,Review Data Generation documentation in the README for more information about Data Generation
-# MAGIC %run ./tools/data_generator
+# DBTITLE 1,Generate TPC-DI Data using Spark-native distributed generator
+# MAGIC %run ./tools/spark_data_generator
 
 # COMMAND ----------
 

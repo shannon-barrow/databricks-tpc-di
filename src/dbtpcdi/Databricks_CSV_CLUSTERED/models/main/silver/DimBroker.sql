@@ -25,7 +25,7 @@ FROM read_files(
   inferSchema     => false,
   sep             => ",",
   schemaEvolutionMode => 'none',
-  fileNamePattern => "HR\\.csv",
+  fileNamePattern => "HR(_[0-9]+)?\\.csv",
   schema          => """
     employeeid BIGINT,
     managerid BIGINT,

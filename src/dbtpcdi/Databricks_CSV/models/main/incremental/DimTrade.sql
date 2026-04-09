@@ -34,7 +34,7 @@ WITH finaltrades AS (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "Trade\\.txt",
+        fileNamePattern => "Trade(_[0-9]+)?\\.txt",
         schema          => """
             cdc_flag     STRING,
             cdc_dsn      BIGINT,
@@ -72,7 +72,7 @@ TradeIncrementalHistory AS (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "TradeHistory\\.txt",
+        fileNamePattern => "TradeHistory(_[0-9]+)?\\.txt",
         schema          => """
             tradeid  BIGINT,
             th_dts   TIMESTAMP,
@@ -116,7 +116,7 @@ Trades_Final (
         header          => False,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "Trade\\.txt",
+        fileNamePattern => "Trade(_[0-9]+)?\\.txt",
         schema          => """
             t_id BIGINT,
             t_dts TIMESTAMP,
