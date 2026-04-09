@@ -724,9 +724,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     (xml_df.write
         .format("xml")
         .mode("overwrite")
-        .option("rootTag", 'TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di"')
-        .option("rowTag", "TPCDI:Action")
-        .option("declaration", 'version="1.0" encoding="UTF-8"')
+        .option("rootTag", "Actions")
+        .option("rowTag", "Action")
+        .option("nullValue", "")
         .save(tmp_path))
 
     part_files = [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")]
