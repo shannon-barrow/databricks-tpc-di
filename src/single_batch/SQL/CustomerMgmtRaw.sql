@@ -61,6 +61,6 @@ FROM read_files(
   "${tpcdi_directory}/${path}",
   format => "xml",
   inferSchema => False, 
-  rowTag => "TPCDI Action",
+  rowTag => "Action",
   fileNamePattern => "CustomerMgmt(_[0-9]+)?.xml"
 );

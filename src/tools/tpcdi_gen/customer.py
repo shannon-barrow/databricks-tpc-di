@@ -724,8 +724,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     (xml_df.write
         .format("xml")
         .mode("overwrite")
-        .option("rootTag", "TPCDI Actions")
-        .option("rowTag", "TPCDI Action")
+        .option("rootTag", "Actions")
+        .option("rowTag", "Action")
         .option("nullValue", "")
         .save(tmp_path))
 
