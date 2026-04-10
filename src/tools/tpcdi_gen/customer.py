@@ -305,11 +305,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.col("_acct_idx_in_update"))  # historical
          .when(F.col("ActionType").isin("NEW", "ADDACCT"),
             F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_accts) + F.col("_acct_idx_in_update"))
-         .when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
-            # Reference existing CA_ID from prior updates only
-            hash_key(F.col("global_seq"), seed_for("CM", "ref_caid")) %
-                F.greatest(F.lit(1), F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_accts)))  # only ref CA_IDs from PRIOR updates
-         .otherwise(F.lit(-1)))  # UPDCUST/INACT: no account
+         .otherwise(F.lit(-1)))  # Placeholder for UPDACCT/CLOSEACCT (set below), -1 for UPDCUST/INACT
 
     # For ADDACCT: C_ID should be an existing customer (not the new one being created).
     # Override the default C_ID with a hash-based reference to a prior customer.
@@ -319,59 +315,45 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
                 F.greatest(F.lit(1), F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_custs)))  # ref existing customers from PRIOR updates
          .otherwise(F.col("C_ID")))
 
-    # --- Account ownership + INACT tracking ---
-    # The downstream DimAccount pipeline does a date-range join with DimCustomer:
-    #   ON a.customerid = c.customerid AND c.enddate > a.effectivedate AND c.effectivedate < a.enddate
-    # When a customer is INACT'd, their DimCustomer record ends. Any subsequent account
-    # action (UPDACCT/CLOSEACCT/ADDACCT) for that customer creates an account SCD record
-    # that doesn't overlap with any DimCustomer record, producing null sk_customerid.
-    # DIGen's state machine avoids this by never generating account actions for INACT'd
-    # customers. We emulate this by filtering out such actions.
+    # --- UPDACCT/CLOSEACCT: derive CA_ID from the customer's first account ---
+    # Instead of picking a random CA_ID from the global pool (which creates broken
+    # customer-account pairings), derive the CA_ID from the C_ID that's already
+    # assigned. Each customer's first account was created by the NEW action:
+    #   - Historical customer (C_ID < hist_size): CA_ID = C_ID
+    #   - Customer from update k: CA_ID = hist_size + (k-1)*new_accts + offset_in_update
+    # This guarantees referential integrity: the account belongs to the customer.
+    _cid_from_hist = F.col("C_ID") < F.lit(hist_size)
+    _update_of_cid = ((F.col("C_ID") - F.lit(hist_size)) / F.lit(new_custs)).cast("int")
+    _offset_in_update = (F.col("C_ID") - F.lit(hist_size)) % F.lit(new_custs)
+    _first_acct = F.when(_cid_from_hist, F.col("C_ID")).otherwise(
+        F.lit(hist_size) + _update_of_cid * F.lit(new_accts) + _offset_in_update)
 
-    # Account ownership: which customer owns each account (from account-creating actions)
-    acct_to_cust = (all_df
-        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-        .select(F.col("CA_ID").alias("_own_caid"), F.col("C_ID").alias("_own_cid")))
+    all_df = all_df.withColumn("CA_ID",
+        F.when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"), _first_acct)
+         .otherwise(F.col("CA_ID")))
 
-    # INACT tracking: earliest update when each customer was deactivated
+    # --- INACT filtering ---
+    # The downstream DimAccount pipeline does a date-range join with DimCustomer.
+    # When a customer is INACT'd, their DimCustomer record ends. Any subsequent
+    # account action for that customer creates an SCD record with no overlapping
+    # DimCustomer record, producing null sk_customerid. DIGen's state machine never
+    # generates account actions for INACT'd customers. We filter them out.
     inact_map = (all_df
         .filter(F.col("ActionType") == "INACT")
         .groupBy("C_ID")
         .agg(F.min("update_id").alias("_inact_at"))
         .select(F.col("C_ID").alias("_inact_cid"), "_inact_at"))
 
-    # Enrich ownership with INACT status of the owning customer
-    acct_owner = (acct_to_cust
-        .join(inact_map, F.col("_own_cid") == F.col("_inact_cid"), "left")
-        .select("_own_caid", "_own_cid", F.col("_inact_at").alias("_own_inact")))
-
-    # UPDACCT/CLOSEACCT: set correct owner C_ID and filter if owner was INACT'd
     all_df = (all_df
-        .join(F.broadcast(acct_owner),
-              F.col("ActionType").isin("UPDACCT", "CLOSEACCT") & (F.col("CA_ID") == F.col("_own_caid")),
-              "left")
-        .withColumn("C_ID",
-            F.when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
-                F.coalesce(F.col("_own_cid"), F.col("C_ID")))
-             .otherwise(F.col("C_ID")))
-        .filter(~(
-            F.col("ActionType").isin("UPDACCT", "CLOSEACCT") &
-            F.col("_own_inact").isNotNull() &
-            (F.col("_own_inact") < F.col("update_id"))))
-        .drop("_own_caid", "_own_cid", "_own_inact"))
-
-    # ADDACCT: filter if the referenced customer was INACT'd before this update
-    all_df = (all_df
-        .join(F.broadcast(inact_map.select(
-                F.col("_inact_cid").alias("_ai_cid"),
-                F.col("_inact_at").alias("_ai_at"))),
-              (F.col("ActionType") == "ADDACCT") & (F.col("C_ID") == F.col("_ai_cid")),
+        .join(F.broadcast(inact_map),
+              F.col("ActionType").isin("UPDACCT", "CLOSEACCT", "ADDACCT") &
+              (F.col("C_ID") == F.col("_inact_cid")),
               "left")
         .filter(~(
-            (F.col("ActionType") == "ADDACCT") &
-            F.col("_ai_at").isNotNull() &
-            (F.col("_ai_at") < F.col("update_id"))))
-        .drop("_ai_cid", "_ai_at"))
+            F.col("ActionType").isin("UPDACCT", "CLOSEACCT", "ADDACCT") &
+            F.col("_inact_at").isNotNull() &
+            (F.col("_inact_at") < F.col("update_id"))))
+        .drop("_inact_cid", "_inact_at"))
 
     # === Assign timestamp ===
     # Each update gets a time window of secs_per_update seconds. Within each update:
@@ -494,6 +476,33 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.when(hash_key(F.col("C_ID"), seed_for("CM", "em2n")) % 100 < 50, F.lit(""))
             .otherwise(F.concat(F.col("C_F_NAME"), F.lit("."), F.col("C_L_NAME"), F.lit("@"), F.col("_mp2")))))
 
+    # === UPDCUST-specific values ===
+    # UPDCUST sparse fields must represent actual CHANGES, not repeat the original values.
+    # Generate different values using global_seq (unique per action) instead of C_ID
+    # (same for all actions on the same customer). This ensures that when a field is
+    # populated in UPDCUST, the value differs from the customer's current attributes.
+    all_df = dict_join(all_df, "address_lines", hash_key(F.col("global_seq"), seed_for("CM", "upd_a1v")), "_upd_ADLINE1")
+    all_df = all_df.withColumn("_upd_ADLINE2",
+        F.when(hash_key(F.col("global_seq"), seed_for("CM", "upd_a2v")) % 100 < 90, F.lit(None).cast("string"))
+        .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("global_seq"), seed_for("CM", "upd_aptv")) % 999 + 1).cast("string"))))
+    all_df = dict_join(all_df, "zip_codes", hash_key(F.col("global_seq"), seed_for("CM", "upd_zipv")), "_upd_ZIPCODE")
+    all_df = dict_join(all_df, "cities", hash_key(F.col("global_seq"), seed_for("CM", "upd_cityv")), "_upd_CITY")
+    all_df = dict_join(all_df, "provinces", hash_key(F.col("global_seq"), seed_for("CM", "upd_stv")), "_upd_STATE_PROV")
+    # Country: toggle from original to guarantee a change
+    all_df = all_df.withColumn("_upd_CTRY",
+        F.when(F.col("C_CTRY") == "United States of America", F.lit("Canada"))
+         .otherwise(F.lit("United States of America")))
+    # Email: use different mail providers so the email address changes
+    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em1v")), "_upd_mp1")
+    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em2v")), "_upd_mp2")
+    all_df = (all_df
+        .withColumn("_upd_PRIM_EMAIL", F.concat(F.col("C_F_NAME"), F.lit("."),
+            F.when(F.length(F.col("C_M_NAME")) > 0, F.concat(F.col("C_M_NAME"), F.lit("."))).otherwise(F.lit("")),
+            F.col("C_L_NAME"), F.lit("@"), F.col("_upd_mp1")))
+        .withColumn("_upd_ALT_EMAIL",
+            F.when(hash_key(F.col("global_seq"), seed_for("CM", "upd_em2nv")) % 100 < 50, F.lit(""))
+            .otherwise(F.concat(F.col("C_F_NAME"), F.lit("."), F.col("C_L_NAME"), F.lit("@"), F.col("_upd_mp2")))))
+
     # === Build XML using pure Spark SQL ===
     # Helper to emit an XML element: populated if value is non-empty, self-closing otherwise.
     def _e(tag, col):
@@ -545,13 +554,15 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
                 .otherwise(F.lit(f"\t\t\t\t<{tag}/>"))
 
     gs = F.col("global_seq")
+    # UPDCUST address uses _upd_* columns (different values from NEW) so updates
+    # represent actual changes to the customer's address, not repeats of originals.
     ad_upd = F.concat(F.lit("\t\t\t<Address>\n"),
-        _sparse("C_ADLINE1", "C_ADLINE1", gs, seed_for("CM", "upd_a1")), F.lit("\n"),
-        _sparse("C_ADLINE2", "C_ADLINE2", gs, seed_for("CM", "upd_a2")), F.lit("\n"),
-        _sparse("C_ZIPCODE", "C_ZIPCODE", gs, seed_for("CM", "upd_zip")), F.lit("\n"),
-        _sparse("C_CITY", "C_CITY", gs, seed_for("CM", "upd_city")), F.lit("\n"),
-        _sparse("C_STATE_PROV", "C_STATE_PROV", gs, seed_for("CM", "upd_st")), F.lit("\n"),
-        _sparse("C_CTRY", "C_CTRY", gs, seed_for("CM", "upd_ctry")), F.lit("\n"),
+        _sparse("C_ADLINE1", "_upd_ADLINE1", gs, seed_for("CM", "upd_a1")), F.lit("\n"),
+        _sparse("C_ADLINE2", "_upd_ADLINE2", gs, seed_for("CM", "upd_a2")), F.lit("\n"),
+        _sparse("C_ZIPCODE", "_upd_ZIPCODE", gs, seed_for("CM", "upd_zip")), F.lit("\n"),
+        _sparse("C_CITY", "_upd_CITY", gs, seed_for("CM", "upd_city")), F.lit("\n"),
+        _sparse("C_STATE_PROV", "_upd_STATE_PROV", gs, seed_for("CM", "upd_st")), F.lit("\n"),
+        _sparse("C_CTRY", "_upd_CTRY", gs, seed_for("CM", "upd_ctry")), F.lit("\n"),
         F.lit("\t\t\t</Address>\n"))
 
     # ContactInfo block with sparse fields and phone blocks matching DIGen patterns:
@@ -595,8 +606,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.lit(f"\t\t\t\t</C_PHONE_{n}>\n"))
 
     ci_upd = F.concat(F.lit("\t\t\t<ContactInfo>\n"),
-        _sparse("C_PRIM_EMAIL", "C_PRIM_EMAIL", gs, seed_for("CM", "upd_em1")), F.lit("\n"),
-        _sparse("C_ALT_EMAIL", "C_ALT_EMAIL", gs, seed_for("CM", "upd_em2")), F.lit("\n"),
+        _sparse("C_PRIM_EMAIL", "_upd_PRIM_EMAIL", gs, seed_for("CM", "upd_em1")), F.lit("\n"),
+        _sparse("C_ALT_EMAIL", "_upd_ALT_EMAIL", gs, seed_for("CM", "upd_em2")), F.lit("\n"),
         _phone_upd(1, gs, 97),
         _phone_upd(2, gs, 74),
         _phone_upd(3, gs, 30),
