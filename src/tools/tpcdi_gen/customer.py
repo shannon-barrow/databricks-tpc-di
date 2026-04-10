@@ -690,12 +690,11 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
 
     wrapped_df.write.mode("overwrite").text(tmp_path)
 
-    part_files = [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")]
+    part_files = sorted(
+        [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")],
+        key=lambda f: f.name)
     for i, pf in enumerate(part_files):
-        if len(part_files) == 1:
-            register_copy(pf.path, f"{cfg.batch_path(1)}/CustomerMgmt.xml")
-        else:
-            register_copy(pf.path, f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
+        register_copy(pf.path, f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
 
     total_new = hist_size + update_last_id * new_custs
     total_caids = hist_size + update_last_id * new_accts
