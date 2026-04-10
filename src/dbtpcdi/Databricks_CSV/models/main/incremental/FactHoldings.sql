@@ -14,7 +14,7 @@ WITH Holdings as (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "HoldingHistory*.txt",
+        fileNamePattern => "HoldingHistory_[0-9]*.txt",
         schema          => """
             hh_h_t_id     BIGINT,
             hh_t_id       BIGINT,
@@ -33,7 +33,7 @@ WITH Holdings as (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "HoldingHistory*.txt",
+        fileNamePattern => "HoldingHistory_[0-9]*.txt",
         schema          => """
             cdc_flag       STRING,
             cdc_dsn        BIGINT,

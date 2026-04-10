@@ -63,7 +63,7 @@ WITH customerincremental as (
       inferSchema     => false,
       sep             => "|",
       schemaEvolutionMode => 'none',
-      fileNamePattern => "Customer*.txt",
+      fileNamePattern => "Customer_[0-9]*.txt",
       schema          => """
         cdc_flag     STRING,
         cdc_dsn      BIGINT,

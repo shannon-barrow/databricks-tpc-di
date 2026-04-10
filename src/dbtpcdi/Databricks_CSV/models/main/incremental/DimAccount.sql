@@ -14,7 +14,7 @@ WITH accountincremental as (
         inferSchema     => false,
         sep             => "|",
         schemaEvolutionMode => 'none',
-        fileNamePattern => "Account*.txt",
+        fileNamePattern => "Account_[0-9]*.txt",
         schema => """
             cdc_flag    STRING,
             cdc_dsn     BIGINT,

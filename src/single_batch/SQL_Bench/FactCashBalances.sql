@@ -11,7 +11,7 @@ with historical as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "CashTransaction*.txt",
+    fileNamePattern => "CashTransaction_[0-9]*.txt",
     schemaEvolutionMode => 'none',
     schema => "accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
   )
@@ -31,7 +31,7 @@ alltransactions as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "CashTransaction*.txt",
+    fileNamePattern => "CashTransaction_[0-9]*.txt",
     schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
   )
