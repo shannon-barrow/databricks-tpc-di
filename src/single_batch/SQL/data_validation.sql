@@ -214,7 +214,8 @@ WITH cash_source AS (
       "${tpcdi_directory}sf=${scale_factor}/Batch1",
       format => "csv", inferSchema => False, header => False, sep => "|",
       fileNamePattern => "CashTransaction_[0-9]*.txt",
-      schema => "ct_ca_id BIGINT, ct_dts STRING, ct_amt DOUBLE, ct_name STRING"
+      schemaEvolutionMode => 'none',
+      schema => "ct_ca_id BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
     )
     GROUP BY ct_ca_id, to_date(ct_dts)
   )
@@ -226,7 +227,8 @@ cash_inc AS (
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
       fileNamePattern => "CashTransaction_[0-9]*.txt",
-      schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts STRING, ct_amt DOUBLE, ct_name STRING"
+      schemaEvolutionMode => 'none',
+      schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
     )
     GROUP BY accountid, to_date(ct_dts)
   )
