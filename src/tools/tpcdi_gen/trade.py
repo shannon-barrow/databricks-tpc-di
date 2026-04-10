@@ -337,10 +337,32 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
          .when(F.col("t_st_id") == "CNCL", F.date_format(F.col("_submit_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
          .otherwise(F.date_format(F.col("_complete_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss")))
 
-    # Join symbol name from the indexed _symbols table
+    # Join symbol with temporal validity check.
+    # Trades must only reference securities that existed at the trade date.
+    # Convert trade timestamp to a FINWIRE quarter index for comparison with
+    # the symbol's creation_quarter and deactivation_quarter.
+    fw_begin_s = int(FW_BEGIN_DATE.timestamp())
+    quarter_secs = ONE_QUARTER_MS / 1000
+    trade_df = trade_df.withColumn("_trade_quarter",
+        ((F.col("_base_ts") - F.lit(fw_begin_s)) / F.lit(quarter_secs)).cast("int"))
+
+    # Symbol 0 (always active from Q0) used as fallback for temporal violations
+    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
+
     trade_df = trade_df.join(
-        F.broadcast(symbols_df.select(F.col("_idx").alias("_sym_idx"), F.col("Symbol").alias("t_s_symb"))),
+        F.broadcast(symbols_df.select(
+            F.col("_idx").alias("_sym_idx"),
+            F.col("Symbol").alias("_sym_name"),
+            F.col("creation_quarter").alias("_sym_cq"),
+            F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_idx", how="left")
+
+    # If the symbol wasn't active at trade time, fall back to symbol 0
+    trade_df = trade_df.withColumn("t_s_symb",
+        F.when((F.col("_trade_quarter") >= F.col("_sym_cq")) &
+               (F.col("_trade_quarter") < F.col("_sym_dq")),
+            F.col("_sym_name"))
+         .otherwise(F.lit(_sym0)))
 
     # Join valid (non-closed) account IDs via the sequential index
     trade_df = trade_df.join(
@@ -632,10 +654,27 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
                    "t_trade_price", "t_chrg", "t_comm", "t_tax"]
     inc_df = new_df.select(*common_cols).union(upd_df.select(*common_cols))
 
-    # Join symbol name
+    # Join symbol with temporal validity (same as historical trades).
+    # Incremental trades are at batch_date (~2017-07-08), so most symbols are active,
+    # but deactivated symbols still need to be excluded.
+    fw_begin_s = int(FW_BEGIN_DATE.timestamp())
+    quarter_secs = ONE_QUARTER_MS / 1000
+    batch_date = FIRST_BATCH_DATE + timedelta(days=batch_id - 1)
+    batch_quarter = int((int(batch_date.timestamp()) - fw_begin_s) / quarter_secs)
+    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
+
     inc_df = inc_df.join(
-        F.broadcast(symbols_df.select(F.col("_idx").alias("_sym_idx"), F.col("Symbol").alias("t_s_symb"))),
+        F.broadcast(symbols_df.select(
+            F.col("_idx").alias("_sym_idx"),
+            F.col("Symbol").alias("_sym_name"),
+            F.col("creation_quarter").alias("_sym_cq"),
+            F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_idx", how="left")
+    inc_df = inc_df.withColumn("t_s_symb",
+        F.when((F.lit(batch_quarter) >= F.col("_sym_cq")) &
+               (F.lit(batch_quarter) < F.col("_sym_dq")),
+            F.col("_sym_name"))
+         .otherwise(F.lit(_sym0)))
     # Join valid (non-closed) account
     inc_df = inc_df.join(F.broadcast(valid_accts), on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
 
