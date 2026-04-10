@@ -649,15 +649,15 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # Generate CashTransaction for completed trades in this batch
+    # Use t_trade_price and t_qty from the selected columns (not _tp which was dropped)
     completed = inc_df.filter(F.col("t_st_id") == "CMPT")
     ct_df = (completed
+        .withColumn("_trade_val", F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double"))
         .withColumn("ct_ca_id", F.col("t_ca_id"))
         .withColumn("ct_dts", F.col("t_dts"))
         .withColumn("ct_amt", F.format_string("%.2f",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"),
-                -F.col("_tp") * (hash_key(F.col("t_id").cast("long"), bs + 2) % 9991 + 10).cast("double"))
-            .otherwise(
-                F.col("_tp") * (hash_key(F.col("t_id").cast("long"), bs + 2) % 9991 + 10).cast("double"))))
+            F.when(F.col("t_tt_id").isin("TLB", "TMB"), -F.col("_trade_val"))
+            .otherwise(F.col("_trade_val"))))
         .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
         .select("ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
     write_file(ct_df, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
