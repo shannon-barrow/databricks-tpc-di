@@ -119,61 +119,86 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     n_addr = dict_count("address_lines")
     n_zip = dict_count("zip_codes")
 
+    # --- RandomAString helper for non-matching rows ---
+    # DIGen uses RandomAString (random A-Za-z of variable length) for non-matching
+    # prospect rows, NOT dictionary lookups. We approximate this by generating long
+    # strings from concatenated MD5 hashes, translating hex to mixed-case alpha,
+    # then taking a variable-length substring.
+    def _rand_astring(id_col, seed_name, min_len, max_len):
+        """Generate a random A-Za-z string of length uniformly in [min_len, max_len]."""
+        _len = (hash_key(id_col, seed_for("P", seed_name + "_len")) % (max_len - min_len + 1) + min_len).cast("int")
+        # Concatenate 3 MD5 hashes (96 hex chars) to cover up to 80 char output
+        _raw = F.concat(
+            F.md5(F.concat(id_col.cast("string"), F.lit(seed_name + "a"))),
+            F.md5(F.concat(id_col.cast("string"), F.lit(seed_name + "b"))),
+            F.md5(F.concat(id_col.cast("string"), F.lit(seed_name + "c"))))
+        # Translate hex digits to mixed-case alpha
+        _alpha = F.translate(_raw, "0123456789abcdef", "ABCDEFGHIJabcdef")
+        return F.substring(_alpha, 1, _len)
+
+    def _case_transform(id_col, seed_name, val):
+        """Apply DIGen case variation: 50% first_uppercase, 25% all uppercase, 25% all lowercase."""
+        _r = hash_key(id_col, seed_for("P", seed_name)) % 4
+        return (F.when(_r < 2, F.concat(F.upper(F.substring(val, 1, 1)), F.lower(F.substring(val, 2, 999))))
+                 .when(_r == 2, F.upper(val))
+                 .otherwise(F.lower(val)))
+
     # For matching rows: compute dict index using same hash as CustomerMgmt (shared seeds).
-    # For non-matching rows: use different seeds ("P" prefix) to guarantee different values.
+    # For non-matching rows: generate RandomAString (random gibberish) to match DIGen.
     prospect_df = (prospect_df
         .withColumn("_ln_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_ln_seed) % n_ln)
-            .otherwise(hash_key(F.col("p_id"), seed_for("P", "ln")) % n_ln))
+            .otherwise(F.lit(-1)))
         .withColumn("_fn_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_fn_seed) % n_fn)
-            .otherwise(hash_key(F.col("p_id"), seed_for("P", "fn")) % n_fn))
+            .otherwise(F.lit(-1)))
         .withColumn("_a1_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_a1_seed) % n_addr)
-            .otherwise(hash_key(F.col("p_id"), seed_for("P", "a1")) % n_addr))
+            .otherwise(F.lit(-1)))
         .withColumn("_zip_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_zip_seed) % n_zip)
-            .otherwise(hash_key(F.col("p_id"), seed_for("P", "zip")) % n_zip))
-        # AddressLine2: match the exact same empty/value pattern as CustomerMgmt.
-        # Matching rows use 90% empty + "Apt. NNN"; non-matching use 70% empty + "apt. NNN".
+            .otherwise(F.lit(-1)))
+        # AddressLine2: matching rows use 90% empty + "Apt. NNN";
+        # non-matching use 5% null (empty), 95% RandomAString(5,80).
         .withColumn("_addr2_match",
             F.when(F.col("_is_match"),
                 F.when(hash_key(F.col("_cust_ref"), cm_a2n_seed) % 100 < 90, F.lit(""))
                 .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("_cust_ref"), cm_apt_seed) % 999 + 1).cast("string"))))
             .otherwise(
-                F.when(hash_key(F.col("p_id"), seed_for("P", "a2n")) % 100 < 70, F.lit(""))
-                .otherwise(F.concat(F.lit("apt. "), (hash_key(F.col("p_id"), seed_for("P", "apt")) % 999).cast("string")))))
+                F.when(hash_key(F.col("p_id"), seed_for("P", "a2n")) % 100 < 5, F.lit(""))
+                .otherwise(_case_transform(F.col("p_id"), "case_a2",
+                    _rand_astring(F.col("p_id"), "a2", 5, 80)))))
     )
 
-    # Join dictionary values for lastname, firstname, address, zip via broadcast joins
+    # Join dictionary values for matching rows (non-matching get -1 key, no match)
     prospect_df = dict_join(prospect_df, "hr_family_names", F.col("_ln_key"), "_ln_raw")
     prospect_df = dict_join(prospect_df, "hr_given_names", F.col("_fn_key"), "_fn_raw")
     prospect_df = dict_join(prospect_df, "address_lines", F.col("_a1_key"), "_a1_raw")
     prospect_df = dict_join(prospect_df, "zip_codes", F.col("_zip_key"), "_zip_raw")
 
-    # --- Case variation ---
-    # DIGen uses mixed case for Prospect names (not all uppercase).
-    # Matching still works because the TPC-DI pipeline uses upper() for comparison.
-    # For non-matching rows, randomly vary the case to add realistic noise.
+    # --- Assign final field values ---
+    # Matching rows: use dictionary values (same as CustomerMgmt for matching).
+    # Non-matching rows: RandomAString with case transformation (DIGen pattern).
     prospect_df = (prospect_df
         .withColumn("lastname",
-            F.when(F.col("_is_match"), F.col("_ln_raw"))  # same case as customer dict
-            .otherwise(
-                F.when(hash_key(F.col("p_id"), seed_for("P", "case_ln")) % 3 == 0, F.upper(F.col("_ln_raw")))
-                .when(hash_key(F.col("p_id"), seed_for("P", "case_ln")) % 3 == 1, F.lower(F.col("_ln_raw")))
-                .otherwise(F.col("_ln_raw"))))
+            F.when(F.col("_is_match"), F.col("_ln_raw"))
+            .otherwise(_case_transform(F.col("p_id"), "case_ln",
+                _rand_astring(F.col("p_id"), "ln", 5, 30))))
         .withColumn("firstname",
             F.when(F.col("_is_match"), F.col("_fn_raw"))
-            .otherwise(
-                F.when(hash_key(F.col("p_id"), seed_for("P", "case_fn")) % 3 == 0, F.upper(F.col("_fn_raw")))
-                .when(hash_key(F.col("p_id"), seed_for("P", "case_fn")) % 3 == 1, F.lower(F.col("_fn_raw")))
-                .otherwise(F.col("_fn_raw"))))
+            .otherwise(_case_transform(F.col("p_id"), "case_fn",
+                _rand_astring(F.col("p_id"), "fn", 5, 30))))
         .withColumn("addressline1",
             F.when(F.col("_is_match"), F.col("_a1_raw"))
-            .otherwise(F.lower(F.col("_a1_raw"))))  # DIGen uses lowercase for non-match addresses
+            .otherwise(
+                F.when(hash_key(F.col("p_id"), seed_for("P", "a1n")) % 100 < 5, F.lit(""))
+                .otherwise(_case_transform(F.col("p_id"), "case_a1",
+                    _rand_astring(F.col("p_id"), "a1", 5, 80)))))
         .withColumn("postalcode",
             F.when(F.col("_is_match"), F.col("_zip_raw"))
-            .otherwise(F.col("_zip_raw")))
+            .otherwise(
+                F.when(hash_key(F.col("p_id"), seed_for("P", "zipn")) % 100 < 5, F.lit(""))
+                .otherwise(_rand_astring(F.col("p_id"), "zip", 5, 12))))
         .withColumn("addressline2", F.col("_addr2_match"))
     )
 
@@ -181,20 +206,20 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     prospect_df = prospect_df.withColumn("agencyid",
         F.concat(F.substring(F.col("lastname"), 1, 3), F.col("p_id").cast("string")))
 
-    # Middle initial: ~55% empty (matching DIGen's 27942/49940 at SF=10)
+    # Middle initial: DIGen uses NullGenerator(0.05) wrapping RandomAString max=1.
+    # So 5% null, 95% have a single random A-Za-z char.
     prospect_df = prospect_df.withColumn("middleinitial",
-        F.when(hash_key(F.col("p_id"), seed_for("P", "mi")) % 100 < 55, F.lit(""))
-        .otherwise(F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZ"),
-            (hash_key(F.col("p_id"), seed_for("P", "mi_v")) % 26 + 1).cast("int"), 1)))
+        F.when(hash_key(F.col("p_id"), seed_for("P", "mi")) % 100 < 5, F.lit(""))
+        .otherwise(F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
+            (hash_key(F.col("p_id"), seed_for("P", "mi_v")) % 52 + 1).cast("int"), 1)))
 
-    # --- Gender with error injection ---
-    # ~52% empty (no gender data available)
-    # ~46% valid: M/F in mixed case ("M", "F", "m", "f")
+    # --- Gender ---
+    # DIGen: NullGenerator(0.05) wrapping ProbabilityGenerator for M/F/m/f.
+    # So 5% null, 95% have a gender value. Of the 95%: equal mix of M/F/m/f.
     # ~2% error injection: single random char from A-Za-z plus space
-    # The 2% error rate tests the pipeline's dirty-data handling (should map to 'U').
     all_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
     prospect_df = prospect_df.withColumn("gender",
-        F.when(hash_key(F.col("p_id"), seed_for("P", "gn")) % 100 < 52, F.lit(""))
+        F.when(hash_key(F.col("p_id"), seed_for("P", "gn")) % 100 < 5, F.lit(""))
         .when(hash_key(F.col("p_id"), seed_for("P", "gn")) % 100 < 98,
             F.array([F.lit(g) for g in ["M", "F", "m", "f"]])[
                 (hash_key(F.col("p_id"), seed_for("P", "gndr")) % 4).cast("int")])
