@@ -357,9 +357,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_idx", how="left")
 
-    # If the symbol wasn't active at trade time, fall back to symbol 0
+    # If the symbol wasn't active at trade time, fall back to symbol 0.
+    # Use strict > for creation_quarter (not >=) because a security created
+    # mid-quarter has a SEC posting date partway through that quarter. A trade
+    # earlier in the same quarter would have date(create_ts) < ds.effectivedate,
+    # failing the DimSecurity temporal join even though the quarter matches.
     trade_df = trade_df.withColumn("t_s_symb",
-        F.when((F.col("_trade_quarter") >= F.col("_sym_cq")) &
+        F.when((F.col("_trade_quarter") > F.col("_sym_cq")) &
                (F.col("_trade_quarter") < F.col("_sym_dq")),
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
@@ -671,7 +675,7 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
             F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_idx", how="left")
     inc_df = inc_df.withColumn("t_s_symb",
-        F.when((F.lit(batch_quarter) >= F.col("_sym_cq")) &
+        F.when((F.lit(batch_quarter) > F.col("_sym_cq")) &
                (F.lit(batch_quarter) < F.col("_sym_dq")),
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
