@@ -519,8 +519,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
 
     # XML fragments for each section of a full Customer element (used by NEW action):
     ah = F.concat(F.lit('\t<TPCDI:Action ActionType="'), F.col("ActionType"), F.lit('" ActionTS="'), F.col("ActionTS"), F.lit('">\n'))
+    # coalesce nullable fields to empty string — a single null in F.concat kills the entire row
     cf = F.concat(F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('" C_TAX_ID="'), F.col("C_TAX_ID"),
-        F.lit('" C_GNDR="'), F.col("C_GNDR"), F.lit('" C_TIER="'), F.col("C_TIER"), F.lit('" C_DOB="'), F.col("C_DOB"), F.lit('">\n'))
+        F.lit('" C_GNDR="'), F.coalesce(F.col("C_GNDR"), F.lit("")), F.lit('" C_TIER="'), F.col("C_TIER"), F.lit('" C_DOB="'), F.col("C_DOB"), F.lit('">\n'))
     nm = F.concat(F.lit("\t\t\t<Name>\n"), _e("C_L_NAME","C_L_NAME"), F.lit("\n"), _e("C_F_NAME","C_F_NAME"), F.lit("\n"), _e("C_M_NAME","C_M_NAME"), F.lit("\n\t\t\t</Name>\n"))
     ad = F.concat(F.lit("\t\t\t<Address>\n"), _e("C_ADLINE1","C_ADLINE1"), F.lit("\n"), _e("C_ADLINE2","C_ADLINE2"), F.lit("\n"), _e("C_ZIPCODE","C_ZIPCODE"), F.lit("\n"), _e("C_CITY","C_CITY"), F.lit("\n"), _e("C_STATE_PROV","C_STATE_PROV"), F.lit("\n"), _e("C_CTRY","C_CTRY"), F.lit("\n\t\t\t</Address>\n"))
     ci = F.concat(F.lit("\t\t\t<ContactInfo>\n"), _e("C_PRIM_EMAIL","C_PRIM_EMAIL"), F.lit("\n"), _e("C_ALT_EMAIL","C_ALT_EMAIL"), F.lit("\n"),
@@ -528,7 +529,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         F.lit("</C_AREA_CODE>\n\t\t\t\t\t<C_LOCAL>"), F.col("C_LOCAL_1"), F.lit("</C_LOCAL>\n\t\t\t\t\t<C_EXT/>\n\t\t\t\t</C_PHONE_1>\n"),
         F.lit(ph23), F.lit("\t\t\t</ContactInfo>\n"))
     tx = F.concat(F.lit("\t\t\t<TaxInfo>\n"), _e("C_LCL_TX_ID","C_LCL_TX_ID"), F.lit("\n"), _e("C_NAT_TX_ID","C_NAT_TX_ID"), F.lit("\n\t\t\t</TaxInfo>\n"))
-    ac = F.concat(F.lit('\t\t\t<Account CA_ID="'), F.col("CA_ID_str"), F.lit('" CA_TAX_ST="'), F.col("CA_TAX_ST"), F.lit('">\n\t\t\t\t<CA_B_ID>'), F.col("CA_B_ID"), F.lit('</CA_B_ID>\n'), _e("CA_NAME","CA_NAME"), F.lit("\n\t\t\t</Account>\n"))
+    ac = F.concat(F.lit('\t\t\t<Account CA_ID="'), F.col("CA_ID_str"), F.lit('" CA_TAX_ST="'), F.coalesce(F.col("CA_TAX_ST"), F.lit("")), F.lit('">\n\t\t\t\t<CA_B_ID>'), F.coalesce(F.col("CA_B_ID"), F.lit("")), F.lit('</CA_B_ID>\n'), _e("CA_NAME","CA_NAME"), F.lit("\n\t\t\t</Account>\n"))
     ft = F.lit("\t</TPCDI:Action>")
 
     # === UPDCUST: sparse update matching DIGen pattern ===
