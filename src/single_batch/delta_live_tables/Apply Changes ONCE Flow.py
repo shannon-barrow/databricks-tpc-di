@@ -212,7 +212,7 @@ def CustomerIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Customer.txt",
+        fileNamePattern => "Customer*.txt",
         schema => "${CustomerIncremental.schema}"
       ))
     )
@@ -346,7 +346,7 @@ def AccountIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Account.txt",
+        fileNamePattern => "Account*.txt",
         schema => "${AccountIncremental.schema}"
       ))
     )

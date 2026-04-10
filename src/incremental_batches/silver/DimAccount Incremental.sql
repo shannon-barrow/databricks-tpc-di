@@ -29,7 +29,7 @@ WITH account AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Account.txt",
+    fileNamePattern => "Account*.txt",
     schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
   ) a
   -- JOIN 

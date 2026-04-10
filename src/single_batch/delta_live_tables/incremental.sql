@@ -61,7 +61,7 @@ CustomerIncrementalRaw AS (
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Customer.txt",
+        fileNamePattern => "Customer*.txt",
         schema => "${CustomerIncremental.schema}"
     )
 ),
@@ -531,7 +531,7 @@ WITH AccountIncremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Account.txt",
+    fileNamePattern => "Account*.txt",
     schema => "${AccountIncremental.schema}"
   )
 ),
