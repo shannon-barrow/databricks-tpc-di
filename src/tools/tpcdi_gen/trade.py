@@ -649,7 +649,8 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # Generate CashTransaction for completed trades in this batch
-    # Use t_trade_price and t_qty from the selected columns (not _tp which was dropped)
+    # Incremental files need cdc_flag and cdc_dsn prefix columns to match the
+    # schema expected by the downstream FactCashBalances pipeline reader.
     completed = inc_df.filter(F.col("t_st_id") == "CMPT")
     ct_df = (completed
         .withColumn("_trade_val", F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double"))
@@ -659,10 +660,13 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
             F.when(F.col("t_tt_id").isin("TLB", "TMB"), -F.col("_trade_val"))
             .otherwise(F.col("_trade_val"))))
         .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
-        .select("ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+        .withColumn("cdc_flag", F.lit("I"))
+        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+        .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
     write_file(ct_df, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # Generate HoldingHistory for completed trades in this batch
+    # Incremental files need cdc_flag and cdc_dsn prefix columns.
     hh_df = (completed
         .withColumn("hh_h_t_id",
             F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_id"))
@@ -673,7 +677,9 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
             F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.lit("0")).otherwise(F.col("t_qty")))
         .withColumn("hh_after_qty",
             F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_qty")).otherwise(F.lit("0")))
-        .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+        .withColumn("cdc_flag", F.lit("I"))
+        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+        .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
     write_file(hh_df, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     ct_count = ct_df.count()
