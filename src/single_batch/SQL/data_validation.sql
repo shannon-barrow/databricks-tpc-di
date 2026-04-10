@@ -373,10 +373,10 @@ SELECT
   'FactWatches' as target_table,
   (SELECT cnt FROM watch_all) as source_distinct_pairs,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')) as target_rows,
-  CASE WHEN (SELECT cnt FROM watch_all) =
-            (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')) >=
+            (SELECT cnt FROM watch_all)
        THEN 'PASS' ELSE 'FAIL' END as status,
-  'Every distinct (w_c_id, w_s_symb) pair should appear in FactWatches via DimCustomer+DimSecurity joins' as description;
+  'FactWatches should have >= source distinct pairs (Batch2/3 can add new watch pairs)' as description;
 
 -- COMMAND ----------
 
