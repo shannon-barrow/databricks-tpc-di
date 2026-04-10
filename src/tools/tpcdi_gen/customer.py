@@ -319,14 +319,22 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
                 F.greatest(F.lit(1), F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_custs)))  # ref existing customers from PRIOR updates
          .otherwise(F.col("C_ID")))
 
-    # For UPDACCT/CLOSEACCT: derive C_ID from CA_ID, bounded to prior updates.
-    # This simulates the real-world relationship: the account's owning customer
-    # is deterministically derived from the account ID.
-    _max_prior_cids = F.greatest(F.lit(1), F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_custs))
-    all_df = all_df.withColumn("C_ID",
-        F.when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
-            hash_key(F.col("CA_ID"), seed_for("CM", "caid_to_cid")) % _max_prior_cids)
-         .otherwise(F.col("C_ID")))
+    # For UPDACCT/CLOSEACCT: look up the actual owner C_ID from the account-creating
+    # action (NEW or ADDACCT). Using a random hash here would assign an arbitrary
+    # customer that may not have overlapping effective dates in DimCustomer, causing
+    # null sk_customerid in the downstream pipeline's date-range join.
+    acct_to_cust = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("CA_ID").alias("_owner_caid"), F.col("C_ID").alias("_owner_cid")))
+    all_df = (all_df
+        .join(F.broadcast(acct_to_cust),
+              (F.col("ActionType").isin("UPDACCT", "CLOSEACCT")) & (F.col("CA_ID") == F.col("_owner_caid")),
+              "left")
+        .withColumn("C_ID",
+            F.when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
+                F.coalesce(F.col("_owner_cid"), F.col("C_ID")))
+             .otherwise(F.col("C_ID")))
+        .drop("_owner_caid", "_owner_cid"))
 
     # === Assign timestamp ===
     # Each update gets a time window of secs_per_update seconds. Within each update:
