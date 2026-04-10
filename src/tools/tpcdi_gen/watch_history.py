@@ -370,12 +370,32 @@ def _gen_historical(spark, cfg, dbutils):
 
     # Map _sec_idx to w_s_symb via broadcast join against the symbols table.
     # Modulo wraps around if sec_idx exceeds the symbol count (defensive).
+    # Include creation_quarter for temporal validity check — watches must only
+    # reference securities that existed before the watch's dateplaced.
     all_df = all_df.withColumn("_sym_join_idx", (F.col("_sec_idx") % F.lit(num_sec)).cast("long"))
     all_df = all_df.join(
         F.broadcast(symbols_df.select(
             F.col("_idx").cast("long").alias("_sym_join_idx"),
-            F.col("Symbol").alias("w_s_symb"))),
+            F.col("Symbol").alias("_sym_name"),
+            F.col("creation_quarter").alias("_sym_cq"),
+            F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_join_idx", how="left")
+
+    # Temporal check: convert watch timestamp to FINWIRE quarter.
+    # Use strict > for creation_quarter (not >=) to avoid within-quarter timing
+    # conflicts where the watch's dateplaced is before the SEC posting date.
+    from .config import FW_BEGIN_DATE, ONE_QUARTER_MS
+    fw_begin_s = int(FW_BEGIN_DATE.timestamp())
+    quarter_secs = ONE_QUARTER_MS / 1000
+    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
+
+    all_df = all_df.withColumn("_watch_quarter",
+        ((F.col("_ts") - F.lit(fw_begin_s)) / F.lit(quarter_secs)).cast("int"))
+    all_df = all_df.withColumn("w_s_symb",
+        F.when((F.col("_watch_quarter") > F.col("_sym_cq")) &
+               (F.col("_watch_quarter") < F.col("_sym_dq")),
+            F.col("_sym_name"))
+         .otherwise(F.lit(_sym0)))
 
     # === Step 4: Timestamps for ACTV records ===
     # Each generation's base timestamp is wh_begin + update_id * secs_per_update.
@@ -502,12 +522,27 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
         .withColumn("w_dts", F.lit(batch_date))
     )
 
-    # Map _sym_idx to w_s_symb via broadcast join.
+    # Map _sym_idx to w_s_symb with temporal validity check.
+    from .config import FW_BEGIN_DATE, ONE_QUARTER_MS, FIRST_BATCH_DATE
+    from datetime import timedelta
+    fw_begin_s = int(FW_BEGIN_DATE.timestamp())
+    quarter_secs = ONE_QUARTER_MS / 1000
+    batch_dt = FIRST_BATCH_DATE + timedelta(days=batch_id - 1)
+    batch_quarter = int((int(batch_dt.timestamp()) - fw_begin_s) / quarter_secs)
+    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
+
     inc_df = inc_df.join(
         F.broadcast(symbols_df.select(
             F.col("_idx").cast("long").alias("_sym_idx"),
-            F.col("Symbol").alias("w_s_symb"))),
+            F.col("Symbol").alias("_sym_name"),
+            F.col("creation_quarter").alias("_sym_cq"),
+            F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_idx", how="left")
+    inc_df = inc_df.withColumn("w_s_symb",
+        F.when((F.lit(batch_quarter) > F.col("_sym_cq")) &
+               (F.lit(batch_quarter) < F.col("_sym_dq")),
+            F.col("_sym_name"))
+         .otherwise(F.lit(_sym0)))
 
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 

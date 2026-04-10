@@ -110,7 +110,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .withColumn("PTS", F.date_format(((F.col("_q_start_ms") / 1000) + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
         # CIK: zero-padded 10-digit company identifier (natural key)
         .withColumn("CIK", F.lpad(F.col("cmp_id").cast("string"), 10, "0"))
-        .withColumn("CompanyName", F.substring(F.md5(F.concat(F.col("cmp_id").cast("string"), F.lit("cname"))), 1, 15))
+        # Prefix with "C" to ensure name is never all-numeric. If the name were all
+        # digits, ingest_finwire would misclassify FIN_NAME records as FIN_COMPANYID,
+        # causing the Financial->DimCompany join to fail on those records.
+        .withColumn("CompanyName", F.concat(F.lit("C"), F.substring(F.md5(F.concat(F.col("cmp_id").cast("string"), F.lit("cname"))), 1, 14)))
         # Status: 97% ACTV (active), 3% INAC (inactive) — matches DIGen's distribution
         .withColumn("Status", F.when(hash_key(F.col("cmp_id"), seed_for("CMP", "st")) % 100 < 97, F.lit("ACTV")).otherwise(F.lit("INAC")))
     )
@@ -240,7 +243,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # this SEC record's quarter, fall back to CMP 0 (always exists in Q0).
     # 50/50 split between using CIK (numeric) vs CompanyName (string) as the reference.
     # Company 0's actual name (used as temporal fallback for name-based references)
-    _cmp0_name = F.substring(F.md5(F.concat(F.lit("0"), F.lit("cname"))), 1, 15)
+    _cmp0_name = F.concat(F.lit("C"), F.substring(F.md5(F.concat(F.lit("0"), F.lit("cname"))), 1, 14))
     sec_df = sec_df.withColumn("CoNameOrCIK",
         F.when(hash_key(F.col("sec_id"), seed_for("SEC", "cn")) % 100 < 50,
             F.rpad(F.when(F.col("_ref_cq") <= F.col("quarter_id"), F.col("_ref_cik")).otherwise(F.lit("0000000000")), 60, " "))
