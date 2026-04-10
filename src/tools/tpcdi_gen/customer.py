@@ -319,22 +319,59 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
                 F.greatest(F.lit(1), F.lit(hist_size) + (F.col("update_id") - 1) * F.lit(new_custs)))  # ref existing customers from PRIOR updates
          .otherwise(F.col("C_ID")))
 
-    # For UPDACCT/CLOSEACCT: look up the actual owner C_ID from the account-creating
-    # action (NEW or ADDACCT). Using a random hash here would assign an arbitrary
-    # customer that may not have overlapping effective dates in DimCustomer, causing
-    # null sk_customerid in the downstream pipeline's date-range join.
+    # --- Account ownership + INACT tracking ---
+    # The downstream DimAccount pipeline does a date-range join with DimCustomer:
+    #   ON a.customerid = c.customerid AND c.enddate > a.effectivedate AND c.effectivedate < a.enddate
+    # When a customer is INACT'd, their DimCustomer record ends. Any subsequent account
+    # action (UPDACCT/CLOSEACCT/ADDACCT) for that customer creates an account SCD record
+    # that doesn't overlap with any DimCustomer record, producing null sk_customerid.
+    # DIGen's state machine avoids this by never generating account actions for INACT'd
+    # customers. We emulate this by filtering out such actions.
+
+    # Account ownership: which customer owns each account (from account-creating actions)
     acct_to_cust = (all_df
         .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-        .select(F.col("CA_ID").alias("_owner_caid"), F.col("C_ID").alias("_owner_cid")))
+        .select(F.col("CA_ID").alias("_own_caid"), F.col("C_ID").alias("_own_cid")))
+
+    # INACT tracking: earliest update when each customer was deactivated
+    inact_map = (all_df
+        .filter(F.col("ActionType") == "INACT")
+        .groupBy("C_ID")
+        .agg(F.min("update_id").alias("_inact_at"))
+        .select(F.col("C_ID").alias("_inact_cid"), "_inact_at"))
+
+    # Enrich ownership with INACT status of the owning customer
+    acct_owner = (acct_to_cust
+        .join(inact_map, F.col("_own_cid") == F.col("_inact_cid"), "left")
+        .select("_own_caid", "_own_cid", F.col("_inact_at").alias("_own_inact")))
+
+    # UPDACCT/CLOSEACCT: set correct owner C_ID and filter if owner was INACT'd
     all_df = (all_df
-        .join(F.broadcast(acct_to_cust),
-              (F.col("ActionType").isin("UPDACCT", "CLOSEACCT")) & (F.col("CA_ID") == F.col("_owner_caid")),
+        .join(F.broadcast(acct_owner),
+              F.col("ActionType").isin("UPDACCT", "CLOSEACCT") & (F.col("CA_ID") == F.col("_own_caid")),
               "left")
         .withColumn("C_ID",
             F.when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
-                F.coalesce(F.col("_owner_cid"), F.col("C_ID")))
+                F.coalesce(F.col("_own_cid"), F.col("C_ID")))
              .otherwise(F.col("C_ID")))
-        .drop("_owner_caid", "_owner_cid"))
+        .filter(~(
+            F.col("ActionType").isin("UPDACCT", "CLOSEACCT") &
+            F.col("_own_inact").isNotNull() &
+            (F.col("_own_inact") < F.col("update_id"))))
+        .drop("_own_caid", "_own_cid", "_own_inact"))
+
+    # ADDACCT: filter if the referenced customer was INACT'd before this update
+    all_df = (all_df
+        .join(F.broadcast(inact_map.select(
+                F.col("_inact_cid").alias("_ai_cid"),
+                F.col("_inact_at").alias("_ai_at"))),
+              (F.col("ActionType") == "ADDACCT") & (F.col("C_ID") == F.col("_ai_cid")),
+              "left")
+        .filter(~(
+            (F.col("ActionType") == "ADDACCT") &
+            F.col("_ai_at").isNotNull() &
+            (F.col("_ai_at") < F.col("update_id"))))
+        .drop("_ai_cid", "_ai_at"))
 
     # === Assign timestamp ===
     # Each update gets a time window of secs_per_update seconds. Within each update:
