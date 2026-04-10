@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE TABLE IF NOT EXISTS IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt')
+CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt')
 PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 
