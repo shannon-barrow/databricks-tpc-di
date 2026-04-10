@@ -75,16 +75,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     # --- Broker allocation ---
     # 30% of employees become brokers (jobcode 314).
-    # 5% of all employees have NULL jobcode (DIGen's PERCENT_NULL pattern).
-    # Remaining non-broker employees get a random jobcode from OTHER_JOBCODES (9 values).
+    # Remaining employees get a random jobcode from OTHER_JOBCODES (9 values).
+    # DIGen never has null jobcodes — every employee has one.
     jc_arr = F.array([F.lit(str(j)) for j in OTHER_JOBCODES])
     hr_df = (hr_df
         .withColumn("_is_broker", hash_key(F.col("employeeid"), seed_for("HR", "broker")) % 1000 < int(BROKER_PCT * 1000))
         .withColumn("employeejobcode",
-            F.when(hash_key(F.col("employeeid"), seed_for("HR", "jc_null")) % 100 < 5, F.lit(None))
-             .otherwise(
-                F.when(F.col("_is_broker"), F.lit(str(BROKER_JOBCODE)))
-                 .otherwise(jc_arr[(hash_key(F.col("employeeid"), seed_for("HR", "jc")) % len(OTHER_JOBCODES)).cast("int")]))))
+            F.when(F.col("_is_broker"), F.lit(str(BROKER_JOBCODE)))
+             .otherwise(jc_arr[(hash_key(F.col("employeeid"), seed_for("HR", "jc")) % len(OTHER_JOBCODES)).cast("int")])))
 
     # Branch: 20-30 char random string using A-Za-z (DIGen pattern).
     # Built by concatenating two MD5 hashes (64 hex chars total), translating
