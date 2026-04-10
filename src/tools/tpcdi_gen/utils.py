@@ -365,11 +365,11 @@ def write_text(content: str, path: str, dbutils=None):
 
 
 def cleanup_staging(volume_path: str, dbutils):
-    """Remove all ``__staging`` directories after bulk copy is complete.
+    """Remove all temporary directories (__staging, __tmp) after bulk copy is complete.
 
     Walks the output volume's batch directories and deletes any leftover staging
-    directories. This is a cleanup step run at the very end of generation to
-    reclaim temporary storage.
+    or temp directories. This is a cleanup step run at the very end of generation
+    to reclaim temporary storage.
 
     Args:
         volume_path: Root volume path containing Batch1/, Batch2/, etc.
@@ -380,7 +380,7 @@ def cleanup_staging(volume_path: str, dbutils):
             if not batch_dir.isDir():
                 continue
             for f in dbutils.fs.ls(batch_dir.path):
-                if f.name.endswith("__staging/"):
+                if f.name.endswith("__staging/") or f.name.endswith("__tmp/"):
                     dbutils.fs.rm(f.path, recurse=True)
     except:
         pass
