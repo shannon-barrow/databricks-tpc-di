@@ -395,7 +395,7 @@ def _gen_historical(spark, cfg, dbutils):
 
     # Temporal symbol check (now that _ts is available from Step 4).
     # Use strict > for creation_quarter to avoid within-quarter timing conflicts.
-    from .config import FW_BEGIN_DATE, ONE_QUARTER_MS
+    # FW_BEGIN_DATE, ONE_QUARTER_MS already imported via "from .config import *"
     fw_begin_s_sym = int(FW_BEGIN_DATE.timestamp())
     quarter_secs = ONE_QUARTER_MS / 1000
     _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
@@ -519,8 +519,7 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     )
 
     # Map _sym_idx to w_s_symb with temporal validity check.
-    from .config import FW_BEGIN_DATE, ONE_QUARTER_MS, FIRST_BATCH_DATE
-    from datetime import timedelta
+    # FW_BEGIN_DATE, ONE_QUARTER_MS, FIRST_BATCH_DATE already imported via "from .config import *"
     fw_begin_s = int(FW_BEGIN_DATE.timestamp())
     quarter_secs = ONE_QUARTER_MS / 1000
     batch_dt = FIRST_BATCH_DATE + timedelta(days=batch_id - 1)
