@@ -647,5 +647,36 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
         "t_trade_price", "t_chrg", "t_comm", "t_tax")
 
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
-    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U)")
-    return {("Trade", batch_id): inc_trades}
+
+    # Generate CashTransaction for completed trades in this batch
+    completed = inc_df.filter(F.col("t_st_id") == "CMPT")
+    ct_df = (completed
+        .withColumn("ct_ca_id", F.col("t_ca_id"))
+        .withColumn("ct_dts", F.col("t_dts"))
+        .withColumn("ct_amt", F.format_string("%.2f",
+            F.when(F.col("t_tt_id").isin("TLB", "TMB"),
+                -F.col("_tp") * (hash_key(F.col("t_id").cast("long"), bs + 2) % 9991 + 10).cast("double"))
+            .otherwise(
+                F.col("_tp") * (hash_key(F.col("t_id").cast("long"), bs + 2) % 9991 + 10).cast("double"))))
+        .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
+        .select("ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+    write_file(ct_df, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+
+    # Generate HoldingHistory for completed trades in this batch
+    hh_df = (completed
+        .withColumn("hh_h_t_id",
+            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_id"))
+             .otherwise((hash_key(F.col("t_id").cast("long"), seed_for("T", "hh_ref")) %
+                F.greatest(F.lit(1), F.col("t_id").cast("long"))).cast("string")))
+        .withColumn("hh_t_id", F.col("t_id"))
+        .withColumn("hh_before_qty",
+            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.lit("0")).otherwise(F.col("t_qty")))
+        .withColumn("hh_after_qty",
+            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_qty")).otherwise(F.lit("0")))
+        .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+    write_file(hh_df, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+
+    ct_count = ct_df.count()
+    hh_count = hh_df.count()
+    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
+    return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
