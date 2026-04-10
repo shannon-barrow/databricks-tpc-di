@@ -143,32 +143,42 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
     """Build the valid (non-closed) account pool for trade assignment.
 
-    The account pool represents all accounts that existed by TRADE_BEGIN_DATE.
-    We estimate this count as a time-proportional fraction of total accounts
-    (accounts created between CM_BEGIN_DATE and TRADE_BEGIN_DATE out of the
-    full CM_BEGIN_DATE to CM_END_DATE range), floored at hist_size.
+    Uses the _created_accounts temp view from CustomerMgmt generation, which
+    contains only accounts that were actually written to the XML output. This
+    is critical because INACT filtering removes some ADDACCT actions, creating
+    gaps in the account ID space. Using a synthetic range(0, N) would include
+    account IDs that don't exist in DimAccount, causing trade-to-account join
+    failures downstream.
 
-    Closed accounts (from _closed_accounts temp view) are excluded via LEFT ANTI
-    join so that no trade ever references a closed account. The surviving accounts
-    are assigned sequential indices (_va_idx) for deterministic hash-based lookup.
+    Closed accounts (from _closed_accounts temp view) are further excluded so
+    trades only reference active accounts.
 
     Returns:
         (valid_accts DataFrame with [_va_idx, _valid_ca_id], count of valid accounts)
     """
-    # Estimate how many accounts existed by the time trading begins
-    n_available = max(hist_size, int(n_hist_accounts *
-        (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() /
-        (CM_END_DATE - CM_BEGIN_DATE).total_seconds()))
-    all_accts = spark.range(0, n_available).withColumnRenamed("id", "ca_id")
-    # Exclude closed accounts so trades only reference active accounts
+    # Use actual accounts from CustomerMgmt (not a synthetic range)
+    created_df = spark.table("_created_accounts")
     closed_df = spark.table("_closed_accounts")
+
+    # Filter to accounts that existed by TRADE_BEGIN_DATE (time-proportional estimate)
+    n_total_created = created_df.count()
+    trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
+    n_available = max(hist_size, int(n_total_created * trade_fraction))
+
+    # Take only accounts up to the estimated cutoff, then exclude closed ones
+    all_accts = (created_df
+        .withColumn("_rank", F.row_number().over(Window.orderBy("created_ca_id")) - 1)
+        .filter(F.col("_rank") < n_available)
+        .select(F.col("created_ca_id").alias("ca_id"))
+        .drop("_rank"))
+
     valid_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti")
         .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
         .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
 
     n_valid = valid_accts.count()
-    print(f"  Trade account pool: {n_available} total - {n_available - n_valid} closed = {n_valid} valid")
+    print(f"  Trade account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
 
 

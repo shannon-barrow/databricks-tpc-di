@@ -696,6 +696,19 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     n_closed = closed_accts.count()
     print(f"  CustomerMgmt: {n_closed} closed accounts -> _closed_accounts view")
 
+    # === Create _created_accounts temp view ===
+    # All CA_IDs that were actually created (by NEW or ADDACCT actions that survived
+    # INACT filtering and dedup). Consumed by trade.py to build the valid account pool.
+    # Without this, trade.py assumes a contiguous range of account IDs, but INACT
+    # filtering creates gaps where allocated CA_IDs never appear in the XML output.
+    created_accts = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("CA_ID").alias("created_ca_id"))
+        .distinct())
+    created_accts.createOrReplaceTempView("_created_accounts")
+    n_created = created_accts.count()
+    print(f"  CustomerMgmt: {n_created} created accounts -> _created_accounts view")
+
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
     # were inactivated (INACT, if ever). This is used by watch_history.py to ensure
