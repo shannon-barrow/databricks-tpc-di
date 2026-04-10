@@ -239,12 +239,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # Temporal integrity enforcement: if the referenced company was created AFTER
     # this SEC record's quarter, fall back to CMP 0 (always exists in Q0).
     # 50/50 split between using CIK (numeric) vs CompanyName (string) as the reference.
+    # Company 0's actual name (used as temporal fallback for name-based references)
+    _cmp0_name = F.substring(F.md5(F.concat(F.lit("0"), F.lit("cname"))), 1, 15)
     sec_df = sec_df.withColumn("CoNameOrCIK",
         F.when(hash_key(F.col("sec_id"), seed_for("SEC", "cn")) % 100 < 50,
             F.rpad(F.when(F.col("_ref_cq") <= F.col("quarter_id"), F.col("_ref_cik")).otherwise(F.lit("0000000000")), 60, " "))
         .otherwise(
             F.rpad(F.when(F.col("_ref_cq") <= F.col("quarter_id"), F.col("_ref_name")).otherwise(
-                F.substring(F.md5(F.lit("cmp0cname")), 1, 15)), 60, " ")))
+                _cmp0_name), 60, " ")))
 
     # Format SEC as fixed-width line
     sec_lines = sec_df.select(
