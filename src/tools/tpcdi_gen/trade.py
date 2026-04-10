@@ -455,64 +455,85 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         return {("TradeHistory", 1): th_est}
 
     def write_cash_transaction():
-        """Write CashTransaction.txt — one row per completed trade (settlement).
+        """Write CashTransaction.txt for Batch1 AND Batch2/3.
 
-        Only CMPT trades with _cash_ts <= cutoff produce a CashTransaction row.
-        ct_amt is negative for buys (cash leaves the account to purchase securities)
-        and positive for sells (cash enters the account from selling securities).
+        In DIGen, CashTransaction is routed by the cash settlement timestamp:
+        - _cash_ts <= cutoff → Batch1
+        - _cash_ts > cutoff → incremental batch based on calcBatch(ct_dts)
+        This produces the incremental CT files that the pipeline reads.
         """
-        ct_df = (trade_df
-            .filter((F.col("t_st_id") == "CMPT") & (F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")))
+        completed = trade_df.filter(F.col("t_st_id") == "CMPT")
+        ct_base = (completed
             .withColumn("ct_ca_id", F.col("t_ca_id"))
             .withColumn("ct_dts", F.date_format(F.col("_cash_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
-            # Buys cost money (negative), sells earn money (positive)
             .withColumn("ct_amt", F.format_string("%.2f",
                 F.when(F.col("_is_buy"), -F.col("_trade_val")).otherwise(F.col("_trade_val"))))
-            .withColumn("ct_name", F.substring(F.col("_ct_name_raw"), 1, F.col("_ct_name_len")))
-            .select("ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
-        # Estimate: ~92.7% of trades complete (CMPT)
+            .withColumn("ct_name", F.substring(F.col("_ct_name_raw"), 1, F.col("_ct_name_len"))))
+
+        # Batch1: settlement before cutoff
+        ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         ct_est = int(cfg.trade_total * 0.927)
-        write_file(ct_df, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
-        return {("CashTransaction", 1): ct_est}
+        write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+
+        # Batch2/3: settlement after cutoff, routed by day offset from cutoff
+        counts_ct = {("CashTransaction", 1): ct_est}
+        for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
+            b_start = batch_cutoff_s + (b - 2) * 86400
+            b_end = batch_cutoff_s + (b - 1) * 86400
+            ct_inc = (ct_base
+                .filter((F.col("_cash_ts") > F.lit(b_start).cast("long")) &
+                        (F.col("_cash_ts") <= F.lit(b_end).cast("long")))
+                .withColumn("cdc_flag", F.lit("I"))
+                .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+                .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+            write_file(ct_inc, f"{cfg.batch_path(b)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+            counts_ct[("CashTransaction", b)] = 0  # estimate not critical
+        return counts_ct
 
     def write_holding_history():
-        """Write HoldingHistory.txt — one row per completed trade (position change).
+        """Write HoldingHistory.txt for Batch1 AND Batch2/3.
 
-        Only CMPT trades produce a HoldingHistory row. Each row tracks the change
-        in holding quantity for the associated security position:
+        In DIGen, HoldingHistory is routed by the completion timestamp:
+        - _complete_ts <= cutoff → Batch1
+        - _complete_ts > cutoff → incremental batch based on calcBatch(th_dts_cmpt)
 
-        For buy trades:
-            hh_h_t_id = t_id    (this trade creates a NEW holding)
-            hh_before_qty = 0   (no prior position)
-            hh_after_qty = t_qty (new position equals purchased quantity)
-
-        For sell trades:
-            hh_h_t_id = hash into a prior trade ID (the original buy being sold)
-            hh_before_qty = t_qty (had this many shares)
-            hh_after_qty = 0     (position fully liquidated)
+        Only CMPT trades produce HoldingHistory. Each row tracks the change
+        in holding quantity for the associated security position.
 
         The hh_h_t_id for sells uses hash_key % t_id to pick a trade ID that is
         guaranteed to be less than the current trade, simulating a reference to
         the original buy trade that created the holding.
         """
         completed = trade_df.filter(F.col("t_st_id") == "CMPT")
-        hh_df = (completed
+        hh_base = (completed
             .withColumn("hh_t_id", F.col("t_id").cast("string"))
-            # hh_h_t_id: buys create new holdings (= t_id), sells reference a prior buy
             .withColumn("hh_h_t_id",
                 F.when(F.col("_is_buy"), F.col("t_id").cast("string"))
                  .otherwise(
-                    # Reference a prior completed buy trade (hash into earlier buy IDs)
                     (hash_key(F.col("t_id"), seed_for("T", "hh_ref")) %
                         F.greatest(F.lit(1), F.col("t_id"))).cast("string")))
             .withColumn("hh_before_qty", F.when(F.col("_is_buy"), F.lit("0")).otherwise(F.col("t_qty")))
-            .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0")))
-            .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+            .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0"))))
+
+        # Batch1: completed before cutoff
+        hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
         hh_est = int(cfg.trade_total * 0.927)
-        write_file(hh_df, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
-        return {("HoldingHistory", 1): hh_est}
+        write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+
+        # Batch2/3: completed after cutoff, routed by day offset
+        counts_hh = {("HoldingHistory", 1): hh_est}
+        for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
+            b_start = batch_cutoff_s + (b - 2) * 86400
+            b_end = batch_cutoff_s + (b - 1) * 86400
+            hh_inc = (hh_base
+                .filter((F.col("_complete_ts") > F.lit(b_start).cast("long")) &
+                        (F.col("_complete_ts") <= F.lit(b_end).cast("long")))
+                .withColumn("cdc_flag", F.lit("I"))
+                .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+                .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+            write_file(hh_inc, f"{cfg.batch_path(b)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+            counts_hh[("HoldingHistory", b)] = 0
+        return counts_hh
 
     counts = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -701,41 +722,11 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
 
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    # Generate CashTransaction for completed trades in this batch
-    # Incremental files need cdc_flag and cdc_dsn prefix columns to match the
-    # schema expected by the downstream FactCashBalances pipeline reader.
-    completed = inc_df.filter(F.col("t_st_id") == "CMPT")
-    ct_df = (completed
-        .withColumn("_trade_val", F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double"))
-        .withColumn("ct_ca_id", F.col("t_ca_id"))
-        .withColumn("ct_dts", F.col("t_dts"))
-        .withColumn("ct_amt", F.format_string("%.2f",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), -F.col("_trade_val"))
-            .otherwise(F.col("_trade_val"))))
-        .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
-        .withColumn("cdc_flag", F.lit("I"))
-        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
-        .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
-    write_file(ct_df, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+    # NOTE: CashTransaction and HoldingHistory for Batch2/3 are generated by
+    # the HISTORICAL trade generator (write_cash_transaction / write_holding_history),
+    # which routes trades by completion/settlement timestamp. DIGen does the same —
+    # incremental CT/HH come from historical trades that complete after the cutoff,
+    # NOT from the CDC update rows in the incremental Trade file.
 
-    # Generate HoldingHistory for completed trades in this batch
-    # Incremental files need cdc_flag and cdc_dsn prefix columns.
-    hh_df = (completed
-        .withColumn("hh_h_t_id",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_id"))
-             .otherwise((hash_key(F.col("t_id").cast("long"), seed_for("T", "hh_ref")) %
-                F.greatest(F.lit(1), F.col("t_id").cast("long"))).cast("string")))
-        .withColumn("hh_t_id", F.col("t_id"))
-        .withColumn("hh_before_qty",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.lit("0")).otherwise(F.col("t_qty")))
-        .withColumn("hh_after_qty",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_qty")).otherwise(F.lit("0")))
-        .withColumn("cdc_flag", F.lit("I"))
-        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
-        .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
-    write_file(hh_df, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-
-    ct_count = ct_df.count()
-    hh_count = hh_df.count()
-    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
-    return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
+    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U)")
+    return {("Trade", batch_id): inc_trades}
