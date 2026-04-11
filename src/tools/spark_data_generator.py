@@ -65,14 +65,15 @@ def spark_generate():
     pass
   try:
     dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
-    # Explicitly copy static_files subdirectory (dbutils.fs.cp from file: paths
-    # may not recurse into nested subdirectories of workspace repos)
+    # Explicitly copy static_files — dbutils.fs.cp from file: workspace paths
+    # doesn't recurse into nested subdirectories, so copy each file individually.
     _ws_static = f"file:{workspace_src_path}/tools/tpcdi_gen/static_files"
     _vol_static = f"{_vol_tpcdi_gen}/static_files"
-    try:
-      dbutils.fs.cp(_ws_static, _vol_static, recurse=True)
-    except:
-      pass
+    for _sf in ["StatusType.txt", "TaxRate.txt", "Date.txt", "Time.txt", "Industry.txt", "TradeType.txt"]:
+      try:
+        dbutils.fs.cp(f"{_ws_static}/{_sf}", f"{_vol_static}/{_sf}")
+      except:
+        pass
     sys.path.insert(0, _vol_tools_dir)
     print(f"Module path (volume, fresh copy): {_vol_tools_dir}/tpcdi_gen")
   except Exception as e:
