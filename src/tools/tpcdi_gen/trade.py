@@ -307,10 +307,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         .withColumn("_submit_ts", F.col("_base_ts") + F.col("_submit_offset"))
         # Completion happens 0-300 seconds after submission
         .withColumn("_complete_ts", F.col("_submit_ts") + (hash_key(F.col("t_id"), seed_for("T", "cmp")) % 300))
-        # Cash settlement: 0-5 days after completion, capped at batch cutoff
-        .withColumn("_cash_ts", F.least(
-            F.col("_complete_ts") + (hash_key(F.col("t_id"), seed_for("T", "ct")) % 432000),
-            F.lit(batch_cutoff_s).cast("long")))
+        # Cash settlement: 0-5 days after completion.
+        # NOT capped at cutoff — trades completing near the cutoff may settle in
+        # Batch2/3, which is how DIGen routes incremental CashTransaction files.
+        .withColumn("_cash_ts",
+            F.col("_complete_ts") + (hash_key(F.col("t_id"), seed_for("T", "ct")) % 432000))
         # Broker name assignment: each trade hashes into the broker pool
         .withColumn("_broker_idx", hash_key(F.col("t_id"), seed_for("T", "exec")) % F.lit(n_brokers))
     )
