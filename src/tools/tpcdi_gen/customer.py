@@ -349,8 +349,16 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
               F.col("ActionType").isin("UPDACCT", "CLOSEACCT", "ADDACCT") &
               (F.col("C_ID") == F.col("_inact_cid")),
               "left")
+        # ADDACCT: filter if customer INACT'd in same or prior update (<=).
+        # No point creating a new account for a customer being deactivated.
+        # UPDACCT/CLOSEACCT: filter only if INACT'd in prior update (<).
+        # Same-update UPDACCT is valid (happens before INACT in sort order).
         .filter(~(
-            F.col("ActionType").isin("UPDACCT", "CLOSEACCT", "ADDACCT") &
+            (F.col("ActionType") == "ADDACCT") &
+            F.col("_inact_at").isNotNull() &
+            (F.col("_inact_at") <= F.col("update_id"))))
+        .filter(~(
+            F.col("ActionType").isin("UPDACCT", "CLOSEACCT") &
             F.col("_inact_at").isNotNull() &
             (F.col("_inact_at") < F.col("update_id"))))
         .drop("_inact_cid", "_inact_at"))
@@ -922,10 +930,13 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                     F.when(hash_key(F.col("rid"), bs+17) % 1000 < 50, F.lit(None))
                      .when(hash_key(F.col("rid"), bs+17) % 1000 < 810, F.lit("United States of America"))
                      .otherwise(F.lit("Canada"))))
-            # Phone 1: country code, area code, local number, extension
-            .withColumn("c_ctry_1", F.when(hash_key(F.col("rid"), bs+30) % 100 < 50, F.lit("1")).otherwise(F.lit("")))
+            # Phone 1: country code requires area code (otherwise pipeline produces
+            # "+1 NNN-NNNN" which fails phone format validation)
             .withColumn("c_area_1", F.when(hash_key(F.col("rid"), bs+31) % 100 < 50,
                 (hash_key(F.col("rid"), bs+18) % 900 + 100).cast("string")).otherwise(F.lit("")))
+            .withColumn("c_ctry_1", F.when(
+                (F.col("c_area_1") != "") & (hash_key(F.col("rid"), bs+30) % 100 < 50),
+                F.lit("1")).otherwise(F.lit("")))
             # Phone 1 local: ~97% populated (DIGen shows 97-98%)
             .withColumn("c_local_1",
                 F.when(hash_key(F.col("rid"), bs+73) % 100 < 97,
