@@ -48,6 +48,7 @@ def spark_generate():
   # This avoids stale NFS/workspace file cache issues when the cluster is started
   # (not restarted) after code changes are pushed — the workspace file mounts may
   # serve cached versions of the .py files from before the git pull.
+  _tools_dir = f"{workspace_src_path}/tools"
   _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
   _vol_tools_dir = f"{_vol_module_dir}/tools"
 
@@ -55,15 +56,22 @@ def spark_generate():
     if _m.startswith("tpcdi_gen"):
       del sys.modules[_m]
 
-  _ws_tpcdi_gen = f"{workspace_src_path}/tools/tpcdi_gen"
+  # dbutils.fs.cp needs "file:" prefix for workspace paths
+  _ws_tpcdi_gen = f"file:{workspace_src_path}/tools/tpcdi_gen"
   _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
   try:
     dbutils.fs.rm(_vol_tpcdi_gen, recurse=True)
   except:
     pass
-  dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
-  sys.path.insert(0, _vol_tools_dir)
-  print(f"Module path (volume, fresh copy): {_vol_tools_dir}/tpcdi_gen")
+  try:
+    dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
+    sys.path.insert(0, _vol_tools_dir)
+    print(f"Module path (volume, fresh copy): {_vol_tools_dir}/tpcdi_gen")
+  except Exception as e:
+    # Fallback: use workspace path directly (works on SINGLE_USER clusters)
+    print(f"Volume copy failed ({e}), using workspace path directly")
+    sys.path.insert(0, _tools_dir)
+    print(f"Module path (workspace): {_tools_dir}/tpcdi_gen")
 
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
   from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging
