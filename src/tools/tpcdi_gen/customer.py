@@ -125,7 +125,7 @@ the temporal window when the customer was active (created and not yet inactivate
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, write_text, seed_for, dict_join, hash_key, register_copy
+from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy
 
 
 def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -456,18 +456,21 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "can")) % 100 < 5, F.lit(None).cast("string"))
         .otherwise(F.substring(F.md5(F.concat(F.col("CA_ID").cast("string"), F.lit("ca"))), 1, 30))))
 
-    # Dictionary-based attribute lookups: hash the entity ID with a domain seed to
-    # get a deterministic index into each reference dictionary.
-    all_df = dict_join(all_df, "hr_family_names", hash_key(F.col("C_ID"), seed_for("CM", "ln")), "C_L_NAME")
-    all_df = dict_join(all_df, "hr_given_names", hash_key(F.col("C_ID"), seed_for("CM", "fn")), "C_F_NAME")
-    all_df = dict_join(all_df, "address_lines", hash_key(F.col("C_ID"), seed_for("CM", "a1")), "C_ADLINE1")
-    all_df = dict_join(all_df, "zip_codes", hash_key(F.col("C_ID"), seed_for("CM", "zip")), "C_ZIPCODE")
-    all_df = dict_join(all_df, "cities", hash_key(F.col("C_ID"), seed_for("CM", "city")), "C_CITY")
-    all_df = dict_join(all_df, "provinces", hash_key(F.col("C_ID"), seed_for("CM", "st")), "C_STATE_PROV")
-    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("C_ID"), seed_for("CM", "em1")), "_mp1")
-    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("C_ID"), seed_for("CM", "em2")), "_mp2")
-    all_df = dict_join(all_df, "taxrate_ids", hash_key(F.col("C_ID"), seed_for("CM", "lt")), "C_LCL_TX_ID")
-    all_df = dict_join(all_df, "taxrate_ids", hash_key(F.col("C_ID"), seed_for("CM", "nt")), "C_NAT_TX_ID")
+    # Dictionary-based attribute lookups: batch all lookups into fewer joins.
+    # Using dict_join_batch computes all join keys in one pass, then performs one
+    # join per unique dictionary instead of 10 sequential broadcast joins.
+    all_df = dict_join_batch(all_df, [
+        ("hr_family_names", hash_key(F.col("C_ID"), seed_for("CM", "ln")), "C_L_NAME"),
+        ("hr_given_names",  hash_key(F.col("C_ID"), seed_for("CM", "fn")), "C_F_NAME"),
+        ("address_lines",   hash_key(F.col("C_ID"), seed_for("CM", "a1")), "C_ADLINE1"),
+        ("zip_codes",       hash_key(F.col("C_ID"), seed_for("CM", "zip")), "C_ZIPCODE"),
+        ("cities",          hash_key(F.col("C_ID"), seed_for("CM", "city")), "C_CITY"),
+        ("provinces",       hash_key(F.col("C_ID"), seed_for("CM", "st")), "C_STATE_PROV"),
+        ("mail_providers",  hash_key(F.col("C_ID"), seed_for("CM", "em1")), "_mp1"),
+        ("mail_providers",  hash_key(F.col("C_ID"), seed_for("CM", "em2")), "_mp2"),
+        ("taxrate_ids",     hash_key(F.col("C_ID"), seed_for("CM", "lt")), "C_LCL_TX_ID"),
+        ("taxrate_ids",     hash_key(F.col("C_ID"), seed_for("CM", "nt")), "C_NAT_TX_ID"),
+    ])
 
     # Broker assignment: each account is assigned a broker deterministically from the CA_ID.
     all_df = all_df.withColumn("_broker_idx", hash_key(F.col("CA_ID"), seed_for("CM", "br")) % broker_count)
@@ -489,20 +492,21 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     # Generate different values using global_seq (unique per action) instead of C_ID
     # (same for all actions on the same customer). This ensures that when a field is
     # populated in UPDCUST, the value differs from the customer's current attributes.
-    all_df = dict_join(all_df, "address_lines", hash_key(F.col("global_seq"), seed_for("CM", "upd_a1v")), "_upd_ADLINE1")
+    all_df = dict_join_batch(all_df, [
+        ("address_lines",  hash_key(F.col("global_seq"), seed_for("CM", "upd_a1v")), "_upd_ADLINE1"),
+        ("zip_codes",      hash_key(F.col("global_seq"), seed_for("CM", "upd_zipv")), "_upd_ZIPCODE"),
+        ("cities",         hash_key(F.col("global_seq"), seed_for("CM", "upd_cityv")), "_upd_CITY"),
+        ("provinces",      hash_key(F.col("global_seq"), seed_for("CM", "upd_stv")), "_upd_STATE_PROV"),
+        ("mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em1v")), "_upd_mp1"),
+        ("mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em2v")), "_upd_mp2"),
+    ])
     all_df = all_df.withColumn("_upd_ADLINE2",
         F.when(hash_key(F.col("global_seq"), seed_for("CM", "upd_a2v")) % 100 < 90, F.lit(None).cast("string"))
         .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("global_seq"), seed_for("CM", "upd_aptv")) % 999 + 1).cast("string"))))
-    all_df = dict_join(all_df, "zip_codes", hash_key(F.col("global_seq"), seed_for("CM", "upd_zipv")), "_upd_ZIPCODE")
-    all_df = dict_join(all_df, "cities", hash_key(F.col("global_seq"), seed_for("CM", "upd_cityv")), "_upd_CITY")
-    all_df = dict_join(all_df, "provinces", hash_key(F.col("global_seq"), seed_for("CM", "upd_stv")), "_upd_STATE_PROV")
     # Country: toggle from original to guarantee a change
     all_df = all_df.withColumn("_upd_CTRY",
         F.when(F.col("C_CTRY") == "United States of America", F.lit("Canada"))
          .otherwise(F.lit("United States of America")))
-    # Email: use different mail providers so the email address changes
-    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em1v")), "_upd_mp1")
-    all_df = dict_join(all_df, "mail_providers", hash_key(F.col("global_seq"), seed_for("CM", "upd_em2v")), "_upd_mp2")
     all_df = (all_df
         .withColumn("_upd_PRIM_EMAIL", F.concat(F.col("C_F_NAME"), F.lit("."),
             F.when(F.length(F.col("C_M_NAME")) > 0, F.concat(F.col("C_M_NAME"), F.lit("."))).otherwise(F.lit("")),
@@ -730,22 +734,18 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     # INACT filtering and dedup). Consumed by trade.py to build the valid account pool.
     # Without this, trade.py assumes a contiguous range of account IDs, but INACT
     # filtering creates gaps where allocated CA_IDs never appear in the XML output.
-    created_accts = (all_df
-        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-        .select(F.col("CA_ID").alias("created_ca_id"))
-        .distinct())
+    # _created_accounts and _account_owners share the same source filter.
+    # No .distinct() needed — CA_IDs are unique after dedup (one NEW/ADDACCT per CA_ID).
+    _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+
+    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()
     print(f"  CustomerMgmt: {n_created} created accounts -> _created_accounts view")
 
-    # === Create _account_owners temp view ===
-    # Maps each account (CA_ID) to its owning customer (C_ID). Used by incremental
-    # generation to close all accounts when a customer becomes INAC in Batch2/3.
-    acct_owners = (all_df
-        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-        .select(F.col("CA_ID").cast("string").alias("ca_id"),
-                F.col("C_ID").cast("string").alias("owner_cid"))
-        .distinct())
+    acct_owners = _acct_creating.select(
+        F.col("CA_ID").cast("string").alias("ca_id"),
+        F.col("C_ID").cast("string").alias("owner_cid"))
     acct_owners.createOrReplaceTempView("_account_owners")
     print(f"  CustomerMgmt: {n_created} account owners -> _account_owners view")
 

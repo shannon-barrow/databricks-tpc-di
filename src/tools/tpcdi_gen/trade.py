@@ -160,21 +160,23 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
     created_df = spark.table("_created_accounts")
     closed_df = spark.table("_closed_accounts")
 
-    # Filter to accounts that existed by TRADE_BEGIN_DATE (time-proportional estimate)
+    # Filter to accounts that existed by TRADE_BEGIN_DATE (time-proportional estimate).
+    # Use limit() instead of row_number() to avoid a global sort.
     n_total_created = created_df.count()
     trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
     n_available = max(hist_size, int(n_total_created * trade_fraction))
 
-    # Take only accounts up to the estimated cutoff, then exclude closed ones
     all_accts = (created_df
-        .withColumn("_rank", F.row_number().over(Window.orderBy("created_ca_id")) - 1)
-        .filter(F.col("_rank") < n_available)
-        .select(F.col("created_ca_id").alias("ca_id"))
-        .drop("_rank"))
+        .orderBy("created_ca_id")
+        .limit(n_available)
+        .select(F.col("created_ca_id").alias("ca_id")))
 
+    # Exclude closed accounts, then assign sequential index for hash-based lookup.
+    # Use monotonically_increasing_id() (distributed, no global sort) instead of
+    # row_number().over(Window.orderBy()) which forces a single-partition shuffle.
     valid_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti")
-        .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
+        .withColumn("_va_idx", F.monotonically_increasing_id())
         .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
 
     n_valid = valid_accts.count()

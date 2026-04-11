@@ -105,6 +105,54 @@ def dict_count(name: str) -> int:
     return _dict_counts.get(name, 1)
 
 
+def dict_join_batch(df: DataFrame, lookups: list) -> DataFrame:
+    """Batch multiple dictionary lookups into fewer joins.
+
+    Groups lookups by dictionary name, computes all join keys in one pass,
+    then performs one join per unique dictionary (instead of one per lookup).
+    This reduces the number of broadcast joins from N to the number of unique
+    dictionaries, significantly improving Catalyst plan efficiency.
+
+    Args:
+        df: Input DataFrame to enrich.
+        lookups: List of (dict_name, hash_col_expr, alias) tuples.
+            Example: [("cities", hash_key(F.col("C_ID"), seed), "C_CITY"), ...]
+
+    Returns:
+        DataFrame with all alias columns added.
+    """
+    spark = df.sparkSession
+
+    # Step 1: compute all join keys in one pass
+    key_exprs = {}
+    for dict_name, hash_col, alias in lookups:
+        n = _dict_counts[dict_name]
+        jk = f"__jk_{alias}"
+        if isinstance(hash_col, str):
+            key_exprs[jk] = F.col(hash_col) % F.lit(n)
+        else:
+            key_exprs[jk] = hash_col % F.lit(n)
+    df = df.select("*", *[v.alias(k) for k, v in key_exprs.items()])
+
+    # Step 2: group lookups by dictionary name
+    from collections import defaultdict
+    by_dict = defaultdict(list)
+    for dict_name, hash_col, alias in lookups:
+        jk = f"__jk_{alias}"
+        by_dict[dict_name].append((jk, alias))
+
+    # Step 3: one join per unique dictionary
+    for dict_name, jk_aliases in by_dict.items():
+        dict_df = spark.table(f"_dict_{dict_name}")
+        for jk, alias in jk_aliases:
+            renamed = (dict_df
+                .withColumnRenamed("_idx", jk)
+                .withColumnRenamed("value", alias))
+            df = df.join(F.broadcast(renamed), on=jk, how="left").drop(jk)
+
+    return df
+
+
 def dict_join(df: DataFrame, dict_name: str, hash_col, alias: str) -> DataFrame:
     """Broadcast-join a dictionary view onto a DataFrame using a hash-based index.
 
