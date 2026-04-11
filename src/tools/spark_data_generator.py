@@ -44,43 +44,26 @@ def spark_generate():
       return
 
   # Import tpcdi_gen module.
-  # On SINGLE_USER clusters, workspace files are directly accessible.
-  # On USER_ISOLATION/SHARED clusters, we copy modules to a UC Volume first.
-  _tools_dir = f"{workspace_src_path}/tools"
+  # Always copy modules to a UC Volume via dbutils.fs.cp to ensure fresh files.
+  # This avoids stale NFS/workspace file cache issues when the cluster is started
+  # (not restarted) after code changes are pushed — the workspace file mounts may
+  # serve cached versions of the .py files from before the git pull.
   _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
   _vol_tools_dir = f"{_vol_module_dir}/tools"
-  _cleanup_vol_modules = False
 
   for _m in list(sys.modules.keys()):
     if _m.startswith("tpcdi_gen"):
       del sys.modules[_m]
 
-  # Detect if workspace files are accessible
-  _ws_accessible = False
+  _ws_tpcdi_gen = f"{workspace_src_path}/tools/tpcdi_gen"
+  _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
   try:
-    _ws_accessible = os.path.isdir(f"{_tools_dir}/tpcdi_gen")
-  except OSError:
+    dbutils.fs.rm(_vol_tpcdi_gen, recurse=True)
+  except:
     pass
-
-  if _ws_accessible:
-    sys.path.insert(0, _tools_dir)
-    print(f"Module path (workspace): {_tools_dir}/tpcdi_gen")
-  else:
-    # Copy modules to UC Volume for clusters that can't read /Workspace
-    print(f"Workspace files not accessible. Copying modules to Volume: {_vol_module_dir}")
-    import shutil
-    _src_local = os.path.dirname(os.path.abspath(__file__)) if '__file__' in dir() else None
-    # Use dbutils.fs.cp from workspace path (notebooks can still read workspace via dbutils)
-    _ws_tpcdi_gen = f"{workspace_src_path}/tools/tpcdi_gen"
-    _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
-    try:
-      dbutils.fs.rm(_vol_tpcdi_gen, recurse=True)
-    except:
-      pass
-    dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
-    sys.path.insert(0, _vol_tools_dir)
-    _cleanup_vol_modules = True
-    print(f"Module path (volume): {_vol_tools_dir}/tpcdi_gen")
+  dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
+  sys.path.insert(0, _vol_tools_dir)
+  print(f"Module path (volume, fresh copy): {_vol_tools_dir}/tpcdi_gen")
 
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
   from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging
@@ -169,13 +152,12 @@ def spark_generate():
   print(f"  Output: {cfg.volume_path}")
   print(f"{'=' * 60}")
 
-  # Clean up Volume modules if we copied them there for non-SINGLE_USER clusters
-  if _cleanup_vol_modules:
-    try:
-      dbutils.fs.rm(_vol_module_dir, recurse=True)
-      print(f"Cleaned up temporary modules from {_vol_module_dir}")
-    except:
-      pass
+  # Clean up temporary Volume module copies
+  try:
+    dbutils.fs.rm(_vol_module_dir, recurse=True)
+    print(f"Cleaned up temporary modules from {_vol_module_dir}")
+  except:
+    pass
 
 
 def _path_exists(path):
