@@ -70,8 +70,6 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # P_MATCH_PCT of rows match a customer. The actual match rate in DIGen is ~30.6%,
     # which is PMatchPct applied to the FULL prospect set including incremental overlap.
     # For simplicity, we target matching ~30.6% of rows to match DIGen's audit output.
-    n_match = int(prospect_total * 0.306)
-
     # --- Derive historical customer count ---
     # We need to know how many customers exist so matching prospect rows can
     # reference valid C_IDs. This replicates the CustomerMgmt formula to
@@ -84,6 +82,12 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     update_last_id = (cfg.cm_final_row_count - new_accts) // rows_per_update
     hist_size = cfg.cm_final_row_count - update_last_id * rows_per_update
     n_hist_customers = hist_size + update_last_id * new_custs
+
+    # Cap matches at n_hist_customers so each customer maps to at most one prospect.
+    # Without this cap, n_match > n_hist_customers causes multiple prospects to share
+    # the same (lastname, firstname, address, postalcode), which duplicates DimCustomer
+    # SCD2 records when the pipeline joins DimCustomer to Prospect.
+    n_match = min(int(prospect_total * 0.306), n_hist_customers)
 
     print(f"  Prospect: {prospect_total} rows, {n_match} matches ({n_match*100//prospect_total}%), {n_hist_customers} historical customers")
 
