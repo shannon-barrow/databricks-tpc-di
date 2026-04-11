@@ -738,6 +738,17 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     n_created = created_accts.count()
     print(f"  CustomerMgmt: {n_created} created accounts -> _created_accounts view")
 
+    # === Create _account_owners temp view ===
+    # Maps each account (CA_ID) to its owning customer (C_ID). Used by incremental
+    # generation to close all accounts when a customer becomes INAC in Batch2/3.
+    acct_owners = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("CA_ID").cast("string").alias("ca_id"),
+                F.col("C_ID").cast("string").alias("owner_cid"))
+        .distinct())
+    acct_owners.createOrReplaceTempView("_account_owners")
+    print(f"  CustomerMgmt: {n_created} account owners -> _account_owners view")
+
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
     # were inactivated (INACT, if ever). This is used by watch_history.py to ensure
@@ -1030,9 +1041,28 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         acct_df = acct_df.join(
             F.broadcast(brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("ca_b_id"))),
             on="_broker_idx", how="left")
-        # Select columns in the exact order expected by the TPC-DI Account.txt schema.
-        acct_df = acct_df.select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id")
-        write_file(acct_df, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
+        # --- Add INAC account rows for customers deactivated in this batch ---
+        # When a customer's c_st_id becomes INAC, their accounts must also be closed.
+        # Use the _account_owners temp view (created by historical generation) to find
+        # all accounts belonging to INAC'd customers.
+        inac_custs = (cust_df
+            .filter(F.col("c_st_id") == "INAC")
+            .select(F.col("c_id").alias("_inac_cid")))
+        acct_owners = spark.table("_account_owners")
+        inac_acct_rows = (inac_custs
+            .join(F.broadcast(acct_owners), F.col("_inac_cid") == F.col("owner_cid"), "inner")
+            .withColumn("cdc_flag", F.lit("U"))
+            .withColumn("cdc_dsn", F.lit("0"))
+            .withColumn("ca_b_id", F.lit(""))
+            .withColumn("ca_c_id", F.col("_inac_cid"))
+            .withColumn("ca_name", F.lit(""))
+            .withColumn("ca_tax_st", F.lit(""))
+            .withColumn("ca_st_id", F.lit("INAC"))
+            .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id"))
+
+        acct_final = acct_df.select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id") \
+            .union(inac_acct_rows)
+        write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
 
         print(f"  Batch{batch_id}: {cust_per_update} customers ({n_cust_insert}I/{n_cust_update}U), "
               f"{acct_per_update} accounts ({n_acct_insert}I/{n_acct_update}U)")
