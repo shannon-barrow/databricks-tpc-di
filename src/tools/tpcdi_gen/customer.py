@@ -650,49 +650,11 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.concat(ah, F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('">\n'), ac, F.lit("\t\t</Customer>\n"), ft))
     )
 
-    # === Deduplicate: max 1 update per C_ID per day, max 1 action per CA_ID per day ===
-    # The TPC-DI specification requires that each entity (customer or account) has at
-    # most one CDC event per calendar day. This reflects real-world CDC systems that
-    # typically batch changes at daily granularity.
-    # NEW + ADDACCT on same day/C_ID is OK. Multiple updates for same entity on same day is not.
-    all_df = all_df.withColumn("_day", F.substring(F.col("ActionTS"), 1, 10))
-
-    # --- Customer-level dedup: (C_ID, day) ---
-    # Among non-ADDACCT actions for the same C_ID on the same day, keep only the first
-    # by _sort_key (which respects the NEW > UPDCUST > INACT ordering).
-    # ADDACCT is excluded from customer-level dedup because it operates on accounts,
-    # not customer profiles — an ADDACCT and a NEW for the same C_ID on the same day
-    # is valid (the NEW creates the customer, the ADDACCT adds a second account).
-    all_df = all_df.withColumn("_cust_dedup_key",
-        F.when(F.col("ActionType") != "ADDACCT",
-            F.concat(F.col("C_ID").cast("string"), F.lit("_"), F.col("_day")))
-         .otherwise(F.lit(None)))
-    all_df = all_df.withColumn("_cust_dedup_rank",
-        F.when(F.col("_cust_dedup_key").isNotNull(),
-            F.row_number().over(Window.partitionBy("_cust_dedup_key").orderBy("_sort_key")))
-         .otherwise(F.lit(1)))
-
-    # --- Account-level dedup: (CA_ID, day) ---
-    # Among UPDACCT/CLOSEACCT for the same CA_ID on the same day, keep only the first.
-    # NEW and ADDACCT are excluded because they CREATE the CA_ID (no prior CA_ID to conflict with).
-    all_df = all_df.withColumn("_acct_dedup_key",
-        F.when((F.col("CA_ID") >= 0) & F.col("ActionType").isin("UPDACCT", "CLOSEACCT"),
-            F.concat(F.col("CA_ID").cast("string"), F.lit("_"), F.col("_day")))
-         .otherwise(F.lit(None)))
-    all_df = all_df.withColumn("_acct_dedup_rank",
-        F.when(F.col("_acct_dedup_key").isNotNull(),
-            F.row_number().over(Window.partitionBy("_acct_dedup_key").orderBy("_sort_key")))
-         .otherwise(F.lit(1)))
-
-    # Keep only first occurrence per dedup key (both customer-level and account-level
-    # dedup must pass for a row to be retained).
-    all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
-
     # === Generate CLOSEACCT for INACT'd customers' accounts ===
     # When a customer is deactivated (INACT), their accounts must also become inactive.
     # DIGen's state machine handles this implicitly. We generate explicit CLOSEACCT
     # actions for each INACT'd customer's first account (the one created by NEW).
-    # The CLOSEACCT timestamp is the same as the INACT timestamp.
+    # Must be added BEFORE dedup so same-day conflicts are resolved.
     inact_rows = all_df.filter(F.col("ActionType") == "INACT")
     _cid_hist = F.col("C_ID") < F.lit(hist_size)
     _upd_k = ((F.col("C_ID") - F.lit(hist_size)) / F.lit(new_custs)).cast("int")
@@ -704,10 +666,46 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .withColumn("ActionType", F.lit("CLOSEACCT"))
         .withColumn("CA_ID", _acct_for_cust)
         .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
-        .withColumn("status", F.lit("Inactive")))
-
-    # Add the synthetic CLOSEACCT rows — xml_body expression already handles CLOSEACCT
+        .withColumn("status", F.lit("Inactive"))
+        # Sort key: CLOSEACCT (action_order=3) after UPDACCT (2) but before UPDCUST (4)
+        .withColumn("_sort_key",
+            F.col("update_id").cast("long") * 1000000 + 3 * 100000 + F.col("pos_in_update")))
     all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
+
+    # === Deduplicate: max 1 event per entity per calendar day ===
+    # The TPC-DI spec requires at most one CDC event per entity per day. The source
+    # system extracts only the end-of-day state, so two events on the same day for
+    # the same customer or account should never occur. This prevents duplicate SKs
+    # in DimCustomer/DimAccount (SK = concat(yyyyMMdd, entityid)).
+    all_df = all_df.withColumn("_day", F.substring(F.col("ActionTS"), 1, 10))
+
+    # --- Customer-level dedup: (C_ID, day) ---
+    # Customer-modifying actions: NEW, UPDCUST, INACT. At most one per (C_ID, day).
+    # ADDACCT/UPDACCT/CLOSEACCT don't modify the customer entity, so they're excluded.
+    all_df = all_df.withColumn("_cust_dedup_key",
+        F.when(F.col("ActionType").isin("NEW", "UPDCUST", "INACT"),
+            F.concat(F.col("C_ID").cast("string"), F.lit("_"), F.col("_day")))
+         .otherwise(F.lit(None)))
+    all_df = all_df.withColumn("_cust_dedup_rank",
+        F.when(F.col("_cust_dedup_key").isNotNull(),
+            F.row_number().over(Window.partitionBy("_cust_dedup_key").orderBy("_sort_key")))
+         .otherwise(F.lit(1)))
+
+    # --- Account-level dedup: (CA_ID, day) ---
+    # Account-modifying actions: NEW, ADDACCT, UPDACCT, CLOSEACCT. At most one per (CA_ID, day).
+    # UPDCUST/INACT don't have a CA_ID (CA_ID=-1), so they're excluded.
+    all_df = all_df.withColumn("_acct_dedup_key",
+        F.when(F.col("CA_ID") >= 0,
+            F.concat(F.col("CA_ID").cast("string"), F.lit("_"), F.col("_day")))
+         .otherwise(F.lit(None)))
+    all_df = all_df.withColumn("_acct_dedup_rank",
+        F.when(F.col("_acct_dedup_key").isNotNull(),
+            F.row_number().over(Window.partitionBy("_acct_dedup_key").orderBy("_sort_key")))
+         .otherwise(F.lit(1)))
+
+    # Keep only first occurrence per dedup key (both customer-level and account-level
+    # dedup must pass for a row to be retained).
+    all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
 
     # === Create _closed_accounts temp view ===
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
