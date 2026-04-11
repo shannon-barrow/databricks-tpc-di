@@ -650,26 +650,24 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.concat(ah, F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('">\n'), ac, F.lit("\t\t</Customer>\n"), ft))
     )
 
-    # === Generate CLOSEACCT for INACT'd customers' accounts ===
-    # When a customer is deactivated (INACT), their accounts must also become inactive.
-    # DIGen's state machine handles this implicitly. We generate explicit CLOSEACCT
-    # actions for each INACT'd customer's first account (the one created by NEW).
-    # Must be added BEFORE dedup so same-day conflicts are resolved.
+    # === Generate CLOSEACCT for ALL accounts of INACT'd customers ===
+    # When a customer is deactivated (INACT), ALL their accounts must also become
+    # inactive. This includes the first account (from NEW) and any additional accounts
+    # (from ADDACCT). Join INACT rows to all account-creating actions for the same C_ID.
     inact_rows = all_df.filter(F.col("ActionType") == "INACT")
-    _cid_hist = F.col("C_ID") < F.lit(hist_size)
-    _upd_k = ((F.col("C_ID") - F.lit(hist_size)) / F.lit(new_custs)).cast("int")
-    _off_k = (F.col("C_ID") - F.lit(hist_size)) % F.lit(new_custs)
-    _acct_for_cust = F.when(_cid_hist, F.col("C_ID")).otherwise(
-        F.lit(hist_size) + _upd_k * F.lit(new_accts) + _off_k)
+    acct_owners = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("C_ID").alias("_owner_cid"), F.col("CA_ID").alias("_acct_caid")))
 
     close_for_inact = (inact_rows
+        .join(F.broadcast(acct_owners), F.col("C_ID") == F.col("_owner_cid"), "inner")
         .withColumn("ActionType", F.lit("CLOSEACCT"))
-        .withColumn("CA_ID", _acct_for_cust)
+        .withColumn("CA_ID", F.col("_acct_caid"))
         .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
         .withColumn("status", F.lit("Inactive"))
-        # Sort key: CLOSEACCT (action_order=3) after UPDACCT (2) but before UPDCUST (4)
         .withColumn("_sort_key",
-            F.col("update_id").cast("long") * 1000000 + 3 * 100000 + F.col("pos_in_update")))
+            F.col("update_id").cast("long") * 1000000 + 3 * 100000 + F.col("pos_in_update"))
+        .drop("_owner_cid", "_acct_caid"))
     all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
     # === Deduplicate: max 1 event per entity per calendar day ===
