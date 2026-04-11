@@ -594,11 +594,15 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.lit("-"),
             (hash_key(gs, seed_for("CM", f"upd_ph{n}_loc2")) % 9000 + 1000).cast("string"))
         ext = F.lpad((hash_key(gs, seed_for("CM", f"upd_ph{n}_ext")) % 99999 + 1).cast("string"), 5, "0")
+        # Area code must be present when country code is present, otherwise the
+        # pipeline produces "+1 NNN-NNNN" which fails phone format validation.
+        _has_area = has_data & (hash_key(gs, seed_for("CM", f"upd_ph{n}a")) % 100 < 50)
+        _has_ctry = _has_area & (hash_key(gs, seed_for("CM", f"upd_ph{n}c")) % 100 < 50)
         return F.concat(
             F.lit(f"\t\t\t\t<C_PHONE_{n}>\n"),
-            F.when(has_data & (hash_key(gs, seed_for("CM", f"upd_ph{n}c")) % 100 < 50),
+            F.when(_has_ctry,
                 F.lit("\t\t\t\t\t<C_CTRY_CODE>1</C_CTRY_CODE>\n")).otherwise(F.lit("\t\t\t\t\t<C_CTRY_CODE/>\n")),
-            F.when(has_data & (hash_key(gs, seed_for("CM", f"upd_ph{n}a")) % 100 < 50),
+            F.when(_has_area,
                 F.concat(F.lit("\t\t\t\t\t<C_AREA_CODE>"), area, F.lit("</C_AREA_CODE>\n"))).otherwise(F.lit("\t\t\t\t\t<C_AREA_CODE/>\n")),
             F.when(has_data,
                 F.concat(F.lit("\t\t\t\t\t<C_LOCAL>"), local, F.lit("</C_LOCAL>\n"))).otherwise(F.lit("\t\t\t\t\t<C_LOCAL/>\n")),
@@ -683,6 +687,27 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     # Keep only first occurrence per dedup key (both customer-level and account-level
     # dedup must pass for a row to be retained).
     all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
+
+    # === Generate CLOSEACCT for INACT'd customers' accounts ===
+    # When a customer is deactivated (INACT), their accounts must also become inactive.
+    # DIGen's state machine handles this implicitly. We generate explicit CLOSEACCT
+    # actions for each INACT'd customer's first account (the one created by NEW).
+    # The CLOSEACCT timestamp is the same as the INACT timestamp.
+    inact_rows = all_df.filter(F.col("ActionType") == "INACT")
+    _cid_hist = F.col("C_ID") < F.lit(hist_size)
+    _upd_k = ((F.col("C_ID") - F.lit(hist_size)) / F.lit(new_custs)).cast("int")
+    _off_k = (F.col("C_ID") - F.lit(hist_size)) % F.lit(new_custs)
+    _acct_for_cust = F.when(_cid_hist, F.col("C_ID")).otherwise(
+        F.lit(hist_size) + _upd_k * F.lit(new_accts) + _off_k)
+
+    close_for_inact = (inact_rows
+        .withColumn("ActionType", F.lit("CLOSEACCT"))
+        .withColumn("CA_ID", _acct_for_cust)
+        .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
+        .withColumn("status", F.lit("Inactive")))
+
+    # Add the synthetic CLOSEACCT rows — xml_body expression already handles CLOSEACCT
+    all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
     # === Create _closed_accounts temp view ===
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
