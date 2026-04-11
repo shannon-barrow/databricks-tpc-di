@@ -172,14 +172,24 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
         .select(F.col("created_ca_id").alias("ca_id")))
 
     # Exclude closed accounts, then assign sequential index for hash-based lookup.
-    # Use monotonically_increasing_id() (distributed, no global sort) instead of
-    # row_number().over(Window.orderBy()) which forces a single-partition shuffle.
-    valid_accts = (all_accts
-        .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti")
-        .withColumn("_va_idx", F.monotonically_increasing_id())
-        .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+    # Must be sequential (0, 1, 2, ...) since trades use hash % n_valid to index.
+    # monotonically_increasing_id() has gaps and would cause missed lookups.
+    filtered_accts = (all_accts
+        .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
 
-    n_valid = valid_accts.count()
+    if n_available < 1_000_000:
+        # Small pool: collect and zip with sequential index (avoids global sort)
+        valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
+        valid_accts = spark.createDataFrame(
+            [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
+            ["_va_idx", "_valid_ca_id"])
+    else:
+        # Large pool: use row_number (global sort) — unavoidable for correctness
+        valid_accts = (filtered_accts
+            .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
+            .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+
+    n_valid = len(valid_ca_ids) if n_available < 1_000_000 else valid_accts.count()
     print(f"  Trade account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
 
