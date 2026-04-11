@@ -43,44 +43,16 @@ def spark_generate():
       print(f"Data generation skipped since {blob_out_path} already exists. Set Regenerate Data to YES to overwrite.")
       return
 
-  # Import tpcdi_gen module.
-  # Always copy modules to a UC Volume via dbutils.fs.cp to ensure fresh files.
-  # This avoids stale NFS/workspace file cache issues when the cluster is started
-  # (not restarted) after code changes are pushed — the workspace file mounts may
-  # serve cached versions of the .py files from before the git pull.
+  # Import tpcdi_gen module from workspace path.
+  # Clear any previously cached module imports to pick up code changes.
   _tools_dir = f"{workspace_src_path}/tools"
-  _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
-  _vol_tools_dir = f"{_vol_module_dir}/tools"
 
   for _m in list(sys.modules.keys()):
     if _m.startswith("tpcdi_gen"):
       del sys.modules[_m]
 
-  # dbutils.fs.cp needs "file:" prefix for workspace paths
-  _ws_tpcdi_gen = f"file:{workspace_src_path}/tools/tpcdi_gen"
-  _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
-  try:
-    dbutils.fs.rm(_vol_tpcdi_gen, recurse=True)
-  except:
-    pass
-  try:
-    dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
-    # Explicitly copy static_files — dbutils.fs.cp from file: workspace paths
-    # doesn't recurse into nested subdirectories, so copy each file individually.
-    _ws_static = f"file:{workspace_src_path}/tools/tpcdi_gen/static_files"
-    _vol_static = f"{_vol_tpcdi_gen}/static_files"
-    for _sf in ["StatusType.txt", "TaxRate.txt", "Date.txt", "Time.txt", "Industry.txt", "TradeType.txt"]:
-      try:
-        dbutils.fs.cp(f"{_ws_static}/{_sf}", f"{_vol_static}/{_sf}")
-      except:
-        pass
-    sys.path.insert(0, _vol_tools_dir)
-    print(f"Module path (volume, fresh copy): {_vol_tools_dir}/tpcdi_gen")
-  except Exception as e:
-    # Fallback: use workspace path directly (works on SINGLE_USER clusters)
-    print(f"Volume copy failed ({e}), using workspace path directly")
-    sys.path.insert(0, _tools_dir)
-    print(f"Module path (workspace): {_tools_dir}/tpcdi_gen")
+  sys.path.insert(0, _tools_dir)
+  print(f"Module path: {_tools_dir}/tpcdi_gen")
 
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
   from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging
@@ -169,12 +141,6 @@ def spark_generate():
   print(f"  Output: {cfg.volume_path}")
   print(f"{'=' * 60}")
 
-  # Clean up temporary Volume module copies
-  try:
-    dbutils.fs.rm(_vol_module_dir, recurse=True)
-    print(f"Cleaned up temporary modules from {_vol_module_dir}")
-  except:
-    pass
 
 
 def _path_exists(path):
