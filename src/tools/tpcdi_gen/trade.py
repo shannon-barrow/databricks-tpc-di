@@ -463,8 +463,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         - _cash_ts > cutoff → incremental batch based on calcBatch(ct_dts)
         This produces the incremental CT files that the pipeline reads.
         """
-        completed = trade_df.filter(F.col("t_st_id") == "CMPT")
-        ct_base = (completed
+        # All non-canceled submitted trades will eventually complete and settle.
+        # Includes CMPT (settled before cutoff) and SBMT (completing after cutoff).
+        will_complete = trade_df.filter(~F.col("_is_canceled"))
+        ct_base = (will_complete
             .withColumn("ct_ca_id", F.col("t_ca_id"))
             .withColumn("ct_dts", F.date_format(F.col("_cash_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
             .withColumn("ct_amt", F.format_string("%.2f",
@@ -505,8 +507,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         guaranteed to be less than the current trade, simulating a reference to
         the original buy trade that created the holding.
         """
-        completed = trade_df.filter(F.col("t_st_id") == "CMPT")
-        hh_base = (completed
+        # All non-canceled, submitted trades (will eventually complete).
+        # Includes trades marked CMPT at cutoff AND trades marked SBMT at cutoff
+        # (submitted before cutoff but completing after — these route to Batch2/3).
+        will_complete = trade_df.filter(~F.col("_is_canceled"))
+        hh_base = (will_complete
             .withColumn("hh_t_id", F.col("t_id").cast("string"))
             .withColumn("hh_h_t_id",
                 F.when(F.col("_is_buy"), F.col("t_id").cast("string"))
