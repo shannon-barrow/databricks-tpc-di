@@ -52,18 +52,10 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     counts = {}
 
     # --- Resolve static file source path ---
-    # Static files: read from workspace-relative path using Python open(),
-    # then write to UC Volume using dbutils.fs.put().
-    # dbutils.fs.cp doesn't support /Workspace paths on serverless.
-    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-    ws_base = f"/Workspace{os.path.dirname(_nb_path)}/tpcdi_gen/static_files"
-    vol_base = "/Volumes/main/tpcdi_raw_data/tpcdi_volume/spark_datagen/_module/tpcdi_gen/static_files"
-    # Use workspace path if accessible, else fall back to volume
-    try:
-        if not os.path.isdir(ws_base):
-            ws_base = vol_base
-    except OSError:
-        ws_base = vol_base
+    # Static files live in tpcdi_gen/static_files/ relative to this module.
+    # Use __file__ to resolve the path regardless of how the module was imported.
+    _this_dir = os.path.dirname(os.path.abspath(__file__))
+    ws_base = os.path.join(_this_dir, "static_files")
 
     # Static reference files with their known row counts (fixed by TPC-DI spec).
     # These counts are used for audit file generation.
