@@ -535,3 +535,259 @@ FROM (
   SELECT 'FactMarketHistory.sk_securityid',
     (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory') WHERE sk_securityid IS NULL)
 );
+
+-- COMMAND ----------
+
+-- =============================================================================
+-- 14. SCD2 INTEGRITY: EndDate alignment, no overlaps, end-of-time, consolidation
+--     Applied to DimCustomer, DimAccount, DimSecurity, DimCompany
+-- =============================================================================
+
+SELECT test_name, fail_count,
+  CASE WHEN fail_count = 0 THEN 'PASS' ELSE 'FAIL (' || fail_count || ')' END as status
+FROM (
+  -- EndDate alignment: every record's EndDate matches the next record's EffectiveDate, or is 9999-12-31
+  SELECT 'DimCustomer EndDate alignment' as test_name,
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') b
+       ON a.CustomerID = b.CustomerID AND a.EndDate = b.EffectiveDate)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE EndDate = '9999-12-31')
+    as fail_count
+  UNION ALL
+  SELECT 'DimAccount EndDate alignment',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') b
+       ON a.AccountID = b.AccountID AND a.EndDate = b.EffectiveDate)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE EndDate = '9999-12-31')
+  UNION ALL
+  SELECT 'DimSecurity EndDate alignment',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') b
+       ON a.Symbol = b.Symbol AND a.EndDate = b.EffectiveDate)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE EndDate = '9999-12-31')
+  UNION ALL
+  SELECT 'DimCompany EndDate alignment',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') b
+       ON a.CompanyID = b.CompanyID AND a.EndDate = b.EffectiveDate)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') WHERE EndDate = '9999-12-31')
+
+  -- No overlapping date ranges
+  UNION ALL
+  SELECT 'DimCustomer no overlap',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') a
+     JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') b
+     ON a.CustomerID = b.CustomerID AND a.SK_CustomerID <> b.SK_CustomerID
+     AND a.EffectiveDate >= b.EffectiveDate AND a.EffectiveDate < b.EndDate)
+  UNION ALL
+  SELECT 'DimAccount no overlap',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
+     JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') b
+     ON a.AccountID = b.AccountID AND a.SK_AccountID <> b.SK_AccountID
+     AND a.EffectiveDate >= b.EffectiveDate AND a.EffectiveDate < b.EndDate)
+  UNION ALL
+  SELECT 'DimSecurity no overlap',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') a
+     JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') b
+     ON a.Symbol = b.Symbol AND a.SK_SecurityID <> b.SK_SecurityID
+     AND a.EffectiveDate >= b.EffectiveDate AND a.EffectiveDate < b.EndDate)
+  UNION ALL
+  SELECT 'DimCompany no overlap',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') a
+     JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') b
+     ON a.CompanyID = b.CompanyID AND a.SK_CompanyID <> b.SK_CompanyID
+     AND a.EffectiveDate >= b.EffectiveDate AND a.EffectiveDate < b.EndDate)
+
+  -- End of time: every entity has exactly one record with EndDate = 9999-12-31
+  UNION ALL
+  SELECT 'DimCustomer end of time',
+    (SELECT count(distinct CustomerID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE EndDate = '9999-12-31')
+  UNION ALL
+  SELECT 'DimAccount end of time',
+    (SELECT count(distinct AccountID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE EndDate = '9999-12-31')
+  UNION ALL
+  SELECT 'DimSecurity end of time',
+    (SELECT count(distinct Symbol) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE EndDate = '9999-12-31')
+  UNION ALL
+  SELECT 'DimCompany end of time',
+    (SELECT count(distinct CompanyID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') WHERE EndDate = '9999-12-31')
+
+  -- Consolidation: no zero-length records (EffectiveDate = EndDate)
+  UNION ALL
+  SELECT 'DimCustomer no zero-length',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE EffectiveDate = EndDate)
+  UNION ALL
+  SELECT 'DimAccount no zero-length',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE EffectiveDate = EndDate)
+  UNION ALL
+  SELECT 'DimSecurity no zero-length',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE EffectiveDate = EndDate)
+  UNION ALL
+  SELECT 'DimCompany no zero-length',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') WHERE EffectiveDate = EndDate)
+
+  -- IsCurrent consistency: IsCurrent=true iff EndDate = 9999-12-31
+  UNION ALL
+  SELECT 'DimCustomer IsCurrent',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE EndDate = '9999-12-31' AND IsCurrent)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE EndDate < '9999-12-31' AND NOT IsCurrent)
+  UNION ALL
+  SELECT 'DimAccount IsCurrent',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE EndDate = '9999-12-31' AND IsCurrent)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE EndDate < '9999-12-31' AND NOT IsCurrent)
+  UNION ALL
+  SELECT 'DimSecurity IsCurrent',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE EndDate = '9999-12-31' AND IsCurrent)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE EndDate < '9999-12-31' AND NOT IsCurrent)
+
+  -- Distinct surrogate keys
+  UNION ALL
+  SELECT 'DimCustomer distinct SKs',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(distinct SK_CustomerID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+  UNION ALL
+  SELECT 'DimAccount distinct SKs',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(distinct SK_AccountID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+  UNION ALL
+  SELECT 'DimSecurity distinct SKs',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+    - (SELECT count(distinct SK_SecurityID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+  UNION ALL
+  SELECT 'DimCompany distinct SKs',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany'))
+    - (SELECT count(distinct SK_CompanyID) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany'))
+);
+
+-- COMMAND ----------
+
+-- =============================================================================
+-- 15. SK DATE RANGE CONTAINMENT: FK surrogate keys map to records with valid date ranges
+-- =============================================================================
+
+SELECT test_name, fail_count,
+  CASE WHEN fail_count = 0 THEN 'PASS' ELSE 'FAIL (' || fail_count || ')' END as status
+FROM (
+  -- DimAccount.SK_CustomerID must map to a DimCustomer record whose dates contain the account's dates
+  SELECT 'DimAccount SK_CustomerID containment' as test_name,
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
+       ON a.SK_CustomerID = c.SK_CustomerID AND c.EffectiveDate <= a.EffectiveDate AND a.EndDate <= c.EndDate)
+    as fail_count
+  UNION ALL
+  -- DimAccount.SK_BrokerID must map to a valid DimBroker record
+  SELECT 'DimAccount SK_BrokerID containment',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimBroker') b
+       ON a.SK_BrokerID = b.SK_BrokerID AND b.EffectiveDate <= a.EffectiveDate AND a.EndDate <= b.EndDate)
+  UNION ALL
+  -- DimSecurity.SK_CompanyID must map to a DimCompany record whose dates contain the security's dates
+  SELECT 'DimSecurity SK_CompanyID containment',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') s
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCompany') c
+       ON s.SK_CompanyID = c.SK_CompanyID AND c.EffectiveDate <= s.EffectiveDate AND s.EndDate <= c.EndDate)
+);
+
+-- COMMAND ----------
+
+-- =============================================================================
+-- 16. DATA QUALITY: Valid values for enumerated fields
+-- =============================================================================
+
+SELECT test_name, fail_count,
+  CASE WHEN fail_count = 0 THEN 'PASS' ELSE 'FAIL (' || fail_count || ')' END as status
+FROM (
+  SELECT 'DimCustomer valid Status' as test_name,
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE Status NOT IN ('Active', 'Inactive')) as fail_count
+  UNION ALL
+  SELECT 'DimCustomer valid Gender',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE Gender NOT IN ('M', 'F', 'U'))
+  UNION ALL
+  SELECT 'DimCustomer TaxID format',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') WHERE TaxID NOT LIKE '___-__-____')
+  UNION ALL
+  SELECT 'DimCustomer Phone1 format',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
+     WHERE Phone1 NOT LIKE '+1 (___) ___-____%' AND Phone1 NOT LIKE '(___) ___-____%'
+       AND Phone1 NOT LIKE '___-____%' AND Phone1 <> '' AND Phone1 IS NOT NULL)
+  UNION ALL
+  SELECT 'DimCustomer Email1 format',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
+     WHERE Email1 NOT LIKE '_%.%@%.%' AND Email1 IS NOT NULL)
+  UNION ALL
+  SELECT 'DimAccount valid Status',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE Status NOT IN ('Active', 'Inactive'))
+  UNION ALL
+  SELECT 'DimAccount valid TaxStatus',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') WHERE BatchID = 1 AND TaxStatus NOT IN (0, 1, 2))
+  UNION ALL
+  SELECT 'DimSecurity valid Status',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE Status NOT IN ('Active', 'Inactive'))
+  UNION ALL
+  SELECT 'DimSecurity valid ExchangeID',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE ExchangeID NOT IN ('NYSE', 'NASDAQ', 'AMEX', 'PCX'))
+  UNION ALL
+  SELECT 'DimSecurity valid Issue',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimSecurity') WHERE Issue NOT IN ('COMMON', 'PREF_A', 'PREF_B', 'PREF_C', 'PREF_D'))
+  UNION ALL
+  SELECT 'DimCustomer LocalTaxRate valid',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') t
+       ON c.LocalTaxRateDesc = t.TX_NAME AND c.LocalTaxRate = t.TX_RATE)
+  UNION ALL
+  SELECT 'DimCustomer NationalTaxRate valid',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer'))
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') t
+       ON c.NationalTaxRateDesc = t.TX_NAME AND c.NationalTaxRate = t.TX_RATE)
+);
+
+-- COMMAND ----------
+
+-- =============================================================================
+-- 17. CROSS-TABLE BUSINESS RULES
+-- =============================================================================
+
+SELECT test_name, fail_count,
+  CASE WHEN fail_count = 0 THEN 'PASS' ELSE 'FAIL (' || fail_count || ')' END as status
+FROM (
+  -- If a customer is inactive, their accounts should also be inactive
+  SELECT 'Inactive customer -> inactive accounts' as test_name,
+    (SELECT count(*) FROM (
+      SELECT c.SK_CustomerID
+      FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
+      LEFT JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
+        ON a.SK_CustomerID = c.SK_CustomerID AND a.Status = 'Inactive'
+      WHERE c.Status = 'Inactive'
+      GROUP BY c.SK_CustomerID
+      HAVING count(a.SK_AccountID) < 1
+    )) as fail_count
+  UNION ALL
+  -- Prospect demographic fields match for current customers with AgencyID
+  SELECT 'Prospect demographic match',
+    (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
+     WHERE AgencyID IS NOT NULL AND IsCurrent)
+    - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
+       JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.Prospect') p
+       ON upper(c.FirstName || c.LastName || c.AddressLine1 || coalesce(c.AddressLine2,'') || c.PostalCode)
+        = upper(p.FirstName || p.LastName || p.AddressLine1 || coalesce(p.AddressLine2,'') || p.PostalCode)
+       AND coalesce(c.CreditRating, 0) = coalesce(p.CreditRating, 0)
+       AND coalesce(c.NetWorth, 0) = coalesce(p.NetWorth, 0)
+       AND coalesce(c.MarketingNameplate, '') = coalesce(p.MarketingNameplate, '')
+       WHERE c.IsCurrent)
+);
