@@ -699,23 +699,40 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
 
     # === Generate CLOSEACCT for ALL accounts of INACT'd customers ===
     # When a customer is deactivated (INACT), ALL their accounts must also become
-    # inactive. Added AFTER dedup so they bypass the account-level dedup. If the
-    # CLOSEACCT is on the same day as the ADDACCT that created the account, the
-    # pipeline handles it correctly: the ADDACCT produces a zero-length SCD2 record
-    # (filtered by WHERE effectivedate < enddate) and the CLOSEACCT becomes the
-    # surviving record with Inactive status.
+    # inactive. Generated AFTER dedup. If a CLOSEACCT would land on the same day as
+    # an existing account action (e.g., ADDACCT from a prior update), we remove the
+    # conflicting action — the account is being closed so the creation is moot.
+    # This preserves the invariant: at most one account event per (CA_ID, day).
     inact_rows = all_df.filter(F.col("ActionType") == "INACT")
     acct_owners = (all_df
         .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
         .select(F.col("C_ID").alias("_owner_cid"), F.col("CA_ID").alias("_acct_caid")))
     close_for_inact = (inact_rows
+        .withColumn("_close_day", F.substring(F.col("ActionTS"), 1, 10))
         .join(F.broadcast(acct_owners), F.col("C_ID") == F.col("_owner_cid"), "inner")
         .withColumn("ActionType", F.lit("CLOSEACCT"))
         .withColumn("CA_ID", F.col("_acct_caid"))
         .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
         .withColumn("status", F.lit("Inactive"))
         .drop("_owner_cid", "_acct_caid"))
-    all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
+
+    # Remove existing account actions that conflict with synthetic CLOSEACCTs
+    # (same CA_ID on the same day). This handles cross-update same-day collisions
+    # where an ADDACCT and INACT happen to fall on the same calendar day.
+    close_keys = (close_for_inact
+        .select(F.col("CA_ID").alias("_ck_caid"), F.col("_close_day").alias("_ck_day")))
+    all_df = all_df.withColumn("_day_tmp", F.substring(F.col("ActionTS"), 1, 10))
+    all_df = (all_df
+        .join(F.broadcast(close_keys),
+              (F.col("CA_ID") >= 0) &
+              (F.col("CA_ID") == F.col("_ck_caid")) &
+              (F.col("_day_tmp") == F.col("_ck_day")),
+              "left_anti")
+        .drop("_day_tmp"))
+
+    all_df = all_df.unionByName(
+        close_for_inact.drop("_close_day"),
+        allowMissingColumns=True)
 
     # === Create _closed_accounts temp view ===
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
