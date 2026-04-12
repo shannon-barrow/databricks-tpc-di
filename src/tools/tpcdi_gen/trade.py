@@ -609,12 +609,19 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     filtered_accts = (created_df
         .select(F.col("created_ca_id").alias("ca_id"))
         .join(F.broadcast(closed_df), F.col("ca_id") == closed_df["closed_ca_id"], "left_anti"))
-    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
-    valid_accts = spark.createDataFrame(
-        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-        ["_va_idx", "_valid_ca_id"])
 
-    n_valid = len(valid_ca_ids)
+    n_accts = filtered_accts.count()
+    if n_accts < 1_000_000:
+        valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
+        valid_accts = spark.createDataFrame(
+            [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
+            ["_va_idx", "_valid_ca_id"])
+        n_valid = len(valid_ca_ids)
+    else:
+        valid_accts = (filtered_accts
+            .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
+            .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+        n_valid = n_accts
 
     # Broker names for t_exec_name
     brokers = spark.table("_brokers")
