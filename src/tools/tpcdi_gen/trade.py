@@ -742,49 +742,19 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
 
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    # Generate CashTransaction and HoldingHistory for trades completing in this batch:
-    # 1. New insert market orders (SBMT → complete immediately)
-    # 2. Update rows moving to CMPT status (93% of updates)
-    # These supplement the historical trade completions routed by write_cash_transaction/
-    # write_holding_history in _gen_historical_trades.
-    completed_inc = inc_df.filter(F.col("t_st_id") == "CMPT")
-    ct_inc = (completed_inc
-        .withColumn("_trade_val", F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double"))
-        .withColumn("ct_ca_id", F.col("t_ca_id"))
-        .withColumn("ct_dts", F.col("t_dts"))
-        .withColumn("ct_amt", F.format_string("%.2f",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), -F.col("_trade_val"))
-            .otherwise(F.col("_trade_val"))))
-        .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
-        .withColumn("cdc_flag", F.lit("I"))
-        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
-        .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+    # Write CashTransaction and HoldingHistory from historical routing only.
+    # The temp views contain historical trades whose completion/settlement timestamps
+    # fall after the Batch1 cutoff, routed to this batch by day offset.
+    # Incremental trade inserts start as PNDG/SBMT (not yet completed), and update
+    # rows are CDC status changes on existing Batch1 trades whose CT/HH was already
+    # generated in the historical batch.
+    ct_batch = spark.table(f"_ct_hist_batch{batch_id}")
+    hh_batch = spark.table(f"_hh_hist_batch{batch_id}")
 
-    hh_inc = (completed_inc
-        .withColumn("hh_h_t_id",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_id"))
-             .otherwise((hash_key(F.col("t_id").cast("long"), seed_for("T", "hh_ref")) %
-                F.greatest(F.lit(1), F.col("t_id").cast("long"))).cast("string")))
-        .withColumn("hh_t_id", F.col("t_id"))
-        .withColumn("hh_before_qty",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.lit("0")).otherwise(F.col("t_qty")))
-        .withColumn("hh_after_qty",
-            F.when(F.col("t_tt_id").isin("TLB", "TMB"), F.col("t_qty")).otherwise(F.lit("0")))
-        .withColumn("cdc_flag", F.lit("I"))
-        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
-        .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
-
-    # Union historical-routed CT/HH (from temp views) with incremental CT/HH,
-    # then write as a single file per table per batch.
-    ct_hist = spark.table(f"_ct_hist_batch{batch_id}")
-    hh_hist = spark.table(f"_hh_hist_batch{batch_id}")
-    ct_all = ct_hist.union(ct_inc)
-    hh_all = hh_hist.union(hh_inc)
-
-    ct_count = ct_all.count()
-    hh_count = hh_all.count()
-    write_file(ct_all, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
-    write_file(hh_all, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+    ct_count = ct_batch.count()
+    hh_count = hh_batch.count()
+    write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+    write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
     return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
