@@ -173,23 +173,17 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
 
     # Exclude closed accounts, then assign sequential index for hash-based lookup.
     # Must be sequential (0, 1, 2, ...) since trades use hash % n_valid to index.
-    # monotonically_increasing_id() has gaps and would cause missed lookups.
+    # Use RDD zipWithIndex for sequential IDs without collect() or global sort.
     filtered_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
 
-    if n_available < 1_000_000:
-        # Small pool: collect and zip with sequential index (avoids global sort)
-        valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
-        valid_accts = spark.createDataFrame(
-            [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-            ["_va_idx", "_valid_ca_id"])
-    else:
-        # Large pool: use row_number (global sort) — unavoidable for correctness
-        valid_accts = (filtered_accts
-            .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
-            .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+    from pyspark.sql.types import StructType, StructField, LongType, StringType
+    valid_rdd = filtered_accts.select(F.col("ca_id").cast("string")).rdd.zipWithIndex()
+    valid_accts = spark.createDataFrame(
+        valid_rdd.map(lambda x: (x[1], x[0][0])),
+        StructType([StructField("_va_idx", LongType()), StructField("_valid_ca_id", StringType())]))
 
-    n_valid = len(valid_ca_ids) if n_available < 1_000_000 else valid_accts.count()
+    n_valid = valid_accts.count()
     print(f"  Trade account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
 
@@ -461,10 +455,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        th_count = th_df.count()
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
-        return {("TradeHistory", 1): th_count}
+        # Estimate: ~2.51 rows per trade (1 PNDG/SBMT + ~0.6 limit SBMT/CNCL + ~0.9 CMPT)
+        return {("TradeHistory", 1): int(cfg.trade_total * 2.51)}
 
     def write_cash_transaction():
         """Write CashTransaction.txt for Batch1 AND Batch2/3.
@@ -486,12 +480,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: settlement before cutoff
         ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        ct_b1_count = ct_b1.count()
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
 
-        # Batch2/3: settlement after cutoff — save as temp views for union with
-        # incremental trade CT in _gen_incremental_trades before writing.
-        counts_ct = {("CashTransaction", 1): ct_b1_count}
+        # Batch2/3: settlement after cutoff — save as temp views for writing in
+        # _gen_incremental_trades.
+        ct_est = int(cfg.trade_total * 0.927)
+        counts_ct = {("CashTransaction", 1): ct_est}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
@@ -534,12 +528,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: completed before cutoff
         hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        hh_b1_count = hh_b1.count()
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
-        # Batch2/3: completed after cutoff — save as temp views for union with
-        # incremental trade HH in _gen_incremental_trades before writing.
-        counts_hh = {("HoldingHistory", 1): hh_b1_count}
+        # Batch2/3: completed after cutoff — save as temp views for writing in
+        # _gen_incremental_trades.
+        hh_est = int(cfg.trade_total * 0.927)
+        counts_hh = {("HoldingHistory", 1): hh_est}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
@@ -564,8 +558,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             counts.update(f.result())
 
 
-    print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: {counts.get(('TradeHistory',1),0):,}, "
-          f"CT: {counts.get(('CashTransaction',1),0):,}, HH: {counts.get(('HoldingHistory',1),0):,}")
+    print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
+          f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
     return counts
 
 
@@ -609,18 +603,12 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
         .select(F.col("created_ca_id").alias("ca_id"))
         .join(F.broadcast(closed_df), F.col("ca_id") == closed_df["closed_ca_id"], "left_anti"))
 
-    n_accts = filtered_accts.count()
-    if n_accts < 1_000_000:
-        valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
-        valid_accts = spark.createDataFrame(
-            [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-            ["_va_idx", "_valid_ca_id"])
-        n_valid = len(valid_ca_ids)
-    else:
-        valid_accts = (filtered_accts
-            .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
-            .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
-        n_valid = n_accts
+    from pyspark.sql.types import StructType, StructField, LongType, StringType
+    valid_rdd = filtered_accts.select(F.col("ca_id").cast("string")).rdd.zipWithIndex()
+    valid_accts = spark.createDataFrame(
+        valid_rdd.map(lambda x: (x[1], x[0][0])),
+        StructType([StructField("_va_idx", LongType()), StructField("_valid_ca_id", StringType())]))
+    n_valid = valid_accts.count()
 
     # Broker names for t_exec_name
     brokers = spark.table("_brokers")

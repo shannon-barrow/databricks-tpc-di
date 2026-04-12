@@ -153,11 +153,11 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # Write batch 1 (historical): pipe-delimited flat file
-    dm_count = dm_df.count()
     write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-    counts = {("DailyMarket", 1): dm_count}
-    print(f"  DailyMarket: {dm_count:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
+    dm_est = cfg.dm_days * num_sec  # upper bound; actual is slightly less due to deactivations
+    counts = {("DailyMarket", 1): dm_est}
+    print(f"  DailyMarket: ~{dm_est:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
 
     # --- Incremental batches (batch 2, 3, ...) ---
     # Each incremental batch covers a single calendar day. Only securities whose
