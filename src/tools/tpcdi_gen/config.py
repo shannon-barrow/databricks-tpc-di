@@ -71,9 +71,12 @@ ONE_QUARTER_MS = 7889400000
 # DIGen: TradeBeginDate = computeDate(FIRST_BATCH_DATE, Calendar.DATE, -1826)
 # This gives approximately 5 years of historical trade activity.
 # ---------------------------------------------------------------------------
-# DIGen: THistBeginDate = FIRST_BATCH_DATE_START - 5 years, THistEndDate = FIRST_BATCH_DATE_END
-# Trades are placed in [THistBeginDate, THistEndDate), which includes the batch date itself.
-TRADE_BEGIN_DATE = FIRST_BATCH_DATE - timedelta(days=1826)
+# DIGen: THistBeginDate = computeDate(FIRST_BATCH_DATE_START, Calendar.DATE, -1826)
+# Java Calendar.DATE subtraction includes the start day, giving 2012-07-06 (not 2012-07-07).
+# Python timedelta(1827) matches Java's computeDate(..., -1826).
+# THistEndDate = FIRST_BATCH_DATE_END = midnight after the batch date.
+# trade_days = 1828 matches DIGen's TSUpdateCount.
+TRADE_BEGIN_DATE = FIRST_BATCH_DATE - timedelta(days=1827)
 TRADE_END_DATE = FIRST_BATCH_DATE_END
 
 # ---------------------------------------------------------------------------
