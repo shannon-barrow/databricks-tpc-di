@@ -601,24 +601,20 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     inc_trades = cfg.trade_inc
     bp = cfg.batch_path(batch_id)
 
-    # --- Account pool (same closed-account exclusion as historical) ---
-    cust_pu = int(0.005 * cfg.internal_sf)
-    acct_pu = int(0.01 * cfg.internal_sf)
-    new_accts = int(acct_pu * 0.7)
-    rpu = new_accts + int(acct_pu * 0.2) + int(acct_pu * 0.1) + int(cust_pu * 0.2) + int(cust_pu * 0.1)
-    update_last_id = (cfg.cm_final_row_count - new_accts) // rpu
-    hist_size = cfg.cm_final_row_count - update_last_id * rpu
-    n_hist_accounts = hist_size + update_last_id * new_accts
-
-    all_accts = spark.range(0, n_hist_accounts).withColumnRenamed("id", "ca_id")
-    # Exclude closed accounts — same logic as _build_valid_accounts but inlined
+    # --- Account pool: use actual created accounts (same as historical trades) ---
+    # Must use _created_accounts, not spark.range(), because INACT filtering
+    # creates gaps in the account ID space where some IDs don't exist in DimAccount.
+    created_df = spark.table("_created_accounts")
     closed_df = spark.table("_closed_accounts")
-    valid_accts = (all_accts
-        .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti")
-        .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
-        .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+    filtered_accts = (created_df
+        .select(F.col("created_ca_id").alias("ca_id"))
+        .join(F.broadcast(closed_df), F.col("ca_id") == closed_df["closed_ca_id"], "left_anti"))
+    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
+    valid_accts = spark.createDataFrame(
+        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
+        ["_va_idx", "_valid_ca_id"])
 
-    n_valid = valid_accts.count()
+    n_valid = len(valid_ca_ids)
 
     # Broker names for t_exec_name
     brokers = spark.table("_brokers")
