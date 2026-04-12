@@ -71,8 +71,10 @@ ONE_QUARTER_MS = 7889400000
 # DIGen: TradeBeginDate = computeDate(FIRST_BATCH_DATE, Calendar.DATE, -1826)
 # This gives approximately 5 years of historical trade activity.
 # ---------------------------------------------------------------------------
+# DIGen: THistBeginDate = FIRST_BATCH_DATE_START - 5 years, THistEndDate = FIRST_BATCH_DATE_END
+# Trades are placed in [THistBeginDate, THistEndDate), which includes the batch date itself.
 TRADE_BEGIN_DATE = FIRST_BATCH_DATE - timedelta(days=1826)
-TRADE_END_DATE = FIRST_BATCH_DATE
+TRADE_END_DATE = FIRST_BATCH_DATE_END
 
 # ---------------------------------------------------------------------------
 # DailyMarket dates.

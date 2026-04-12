@@ -247,9 +247,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     num_sec = symbols_df.count()
     trade_begin_s = int(TRADE_BEGIN_DATE.timestamp())
     trade_range_s = int((TRADE_END_DATE - TRADE_BEGIN_DATE).total_seconds())
-    # batch_cutoff_s is the unix timestamp of FIRST_BATCH_DATE — the snapshot boundary.
-    # Any trade transition after this timestamp is invisible to Batch 1.
-    batch_cutoff_s = int(FIRST_BATCH_DATE.timestamp())
+    # batch_cutoff_s = THistEndDate = FIRST_BATCH_DATE_END (midnight after batch date).
+    # DIGen routes all trade transitions up to this point to Batch 1.
+    batch_cutoff_s = int(FIRST_BATCH_DATE_END.timestamp())
 
     # Compute historical account count using the same per-unit math as CustomerMgmt.
     # This determines the size of the account pool available for trade assignment.
