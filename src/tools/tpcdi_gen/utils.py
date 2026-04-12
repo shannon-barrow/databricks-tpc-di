@@ -372,15 +372,22 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # At SF=10, coalesce to reduce file count since data is small.
-    # DailyMarket is the only file over 128MB at SF=10, so split to 3 files.
-    # At SF>10, write directly from existing partitions (no shuffle overhead).
-    if scale_factor == 10:
-        filename = os.path.basename(path)
+    # Coalesce small outputs to 1 file, let large outputs use natural partitioning.
+    # Batch2/3 incremental files are always small (< 100MB) except DailyMarket at
+    # very large scale factors. Batch1 files at SF=10 are also small enough for 1 file
+    # (except DailyMarket). At SF>10, Batch1 files are large and benefit from
+    # multi-partition writes.
+    filename = os.path.basename(path)
+    is_batch1 = "/Batch1/" in path
+    if scale_factor <= 10:
+        # SF=10: everything fits in 1 file except DailyMarket
         if "DailyMarket" in filename:
             df = df.coalesce(3)
         else:
             df = df.coalesce(1)
+    elif not is_batch1:
+        # Incremental batches: coalesce to 1 file (small data, < 100MB)
+        df = df.coalesce(1)
 
     (df
         .write
