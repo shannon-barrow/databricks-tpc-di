@@ -742,19 +742,48 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
 
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    # Write CashTransaction and HoldingHistory from historical routing only.
-    # The temp views contain historical trades whose completion/settlement timestamps
-    # fall after the Batch1 cutoff, routed to this batch by day offset.
-    # Incremental trade inserts start as PNDG/SBMT (not yet completed), and update
-    # rows are CDC status changes on existing Batch1 trades whose CT/HH was already
-    # generated in the historical batch.
-    ct_batch = spark.table(f"_ct_hist_batch{batch_id}")
-    hh_batch = spark.table(f"_hh_hist_batch{batch_id}")
+    # CashTransaction and HoldingHistory from two sources:
+    # 1. Historical trades completing/settling after cutoff (from temp views)
+    # 2. New insert market orders (SBMT) that complete immediately in this batch
+    #    (limit orders start as PNDG and don't complete yet; update rows are CDC
+    #    status changes on existing Batch1 trades whose CT/HH was already generated)
+    ct_hist = spark.table(f"_ct_hist_batch{batch_id}")
+    hh_hist = spark.table(f"_hh_hist_batch{batch_id}")
 
-    ct_count = ct_batch.count()
-    hh_count = hh_batch.count()
-    write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
-    write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+    # New insert market orders that complete in this batch
+    insert_mkt_completed = inc_df.filter(
+        (F.col("cdc_flag") == "I") & F.col("t_tt_id").isin("TMB", "TMS"))
+
+    ct_from_inserts = (insert_mkt_completed
+        .withColumn("_trade_val", F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double"))
+        .withColumn("ct_ca_id", F.col("t_ca_id"))
+        .withColumn("ct_dts", F.col("t_dts"))
+        .withColumn("ct_amt", F.format_string("%.2f",
+            F.when(F.col("t_tt_id") == "TMB", -F.col("_trade_val"))
+            .otherwise(F.col("_trade_val"))))
+        .withColumn("ct_name", F.substring(F.md5(F.concat(F.col("t_id"), F.lit("ct"))), 1, 20))
+        .withColumn("cdc_flag", F.lit("I"))
+        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+        .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+
+    hh_from_inserts = (insert_mkt_completed
+        .withColumn("hh_h_t_id", F.col("t_id"))  # market buys create new holdings
+        .withColumn("hh_t_id", F.col("t_id"))
+        .withColumn("hh_before_qty",
+            F.when(F.col("t_tt_id") == "TMB", F.lit("0")).otherwise(F.col("t_qty")))
+        .withColumn("hh_after_qty",
+            F.when(F.col("t_tt_id") == "TMB", F.col("t_qty")).otherwise(F.lit("0")))
+        .withColumn("cdc_flag", F.lit("I"))
+        .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
+        .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+
+    ct_all = ct_hist.union(ct_from_inserts)
+    hh_all = hh_hist.union(hh_from_inserts)
+
+    ct_count = ct_all.count()
+    hh_count = hh_all.count()
+    write_file(ct_all, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+    write_file(hh_all, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
     return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
