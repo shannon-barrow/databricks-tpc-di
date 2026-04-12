@@ -697,42 +697,61 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     # dedup must pass for a row to be retained).
     all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
 
+    # === Filter out ADDACCTs on the same day as their customer's INACT ===
+    # An ADDACCT and INACT for the same customer on the same day would create
+    # a same-day conflict when we generate the synthetic CLOSEACCT. Remove the
+    # ADDACCT — no point creating an account for a customer being deactivated.
+    inact_days = (all_df
+        .filter(F.col("ActionType") == "INACT")
+        .select(F.col("C_ID").alias("_inact_cid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_inact_day")))
+    all_df = all_df.withColumn("_day_tmp", F.substring(F.col("ActionTS"), 1, 10))
+    all_df = (all_df
+        .join(F.broadcast(inact_days),
+              (F.col("ActionType") == "ADDACCT") &
+              (F.col("C_ID") == F.col("_inact_cid")) &
+              (F.col("_day_tmp") == F.col("_inact_day")),
+              "left_anti")
+        .drop("_day_tmp", "_inact_cid", "_inact_day"))
+
     # === Generate CLOSEACCT for ALL accounts of INACT'd customers ===
     # When a customer is deactivated (INACT), ALL their accounts must also become
-    # inactive. Generated AFTER dedup. If a CLOSEACCT would land on the same day as
-    # an existing account action (e.g., ADDACCT from a prior update), we remove the
-    # conflicting action — the account is being closed so the creation is moot.
-    # This preserves the invariant: at most one account event per (CA_ID, day).
+    # inactive. If the CLOSEACCT would land on the same day as an existing account
+    # action (e.g., a NEW from a prior update), shift it +1 day. The INACT's
+    # DimCustomer record extends to 9999-12-31, so the +1 day is always within
+    # the inactive window.
     inact_rows = all_df.filter(F.col("ActionType") == "INACT")
     acct_owners = (all_df
         .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
         .select(F.col("C_ID").alias("_owner_cid"), F.col("CA_ID").alias("_acct_caid")))
+
     close_for_inact = (inact_rows
-        .withColumn("_close_day", F.substring(F.col("ActionTS"), 1, 10))
         .join(F.broadcast(acct_owners), F.col("C_ID") == F.col("_owner_cid"), "inner")
         .withColumn("ActionType", F.lit("CLOSEACCT"))
         .withColumn("CA_ID", F.col("_acct_caid"))
         .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
         .withColumn("status", F.lit("Inactive"))
+        .withColumn("_close_day", F.substring(F.col("ActionTS"), 1, 10))
         .drop("_owner_cid", "_acct_caid"))
 
-    # Remove existing account actions that conflict with synthetic CLOSEACCTs
-    # (same CA_ID on the same day). This handles cross-update same-day collisions
-    # where an ADDACCT and INACT happen to fall on the same calendar day.
-    close_keys = (close_for_inact
-        .select(F.col("CA_ID").alias("_ck_caid"), F.col("_close_day").alias("_ck_day")))
-    all_df = all_df.withColumn("_day_tmp", F.substring(F.col("ActionTS"), 1, 10))
-    all_df = (all_df
-        .join(F.broadcast(close_keys),
-              (F.col("CA_ID") >= 0) &
-              (F.col("CA_ID") == F.col("_ck_caid")) &
-              (F.col("_day_tmp") == F.col("_ck_day")),
-              "left_anti")
-        .drop("_day_tmp"))
+    # Check for same-day conflicts with existing account actions (e.g., NEW)
+    existing_acct_days = (all_df
+        .filter(F.col("CA_ID") >= 0)
+        .select(F.col("CA_ID").alias("_ea_caid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_ea_day")))
+    close_for_inact = (close_for_inact
+        .join(F.broadcast(existing_acct_days),
+              (F.col("CA_ID") == F.col("_ea_caid")) &
+              (F.col("_close_day") == F.col("_ea_day")),
+              "left")
+        # Shift +1 day if there's a conflict; INACT DimCustomer enddate=9999-12-31
+        .withColumn("ActionTS",
+            F.when(F.col("_ea_caid").isNotNull(),
+                F.date_format(F.date_add(F.to_timestamp(F.col("ActionTS")), 1), "yyyy-MM-dd'T'HH:mm:ss"))
+             .otherwise(F.col("ActionTS")))
+        .drop("_close_day", "_ea_caid", "_ea_day"))
 
-    all_df = all_df.unionByName(
-        close_for_inact.drop("_close_day"),
-        allowMissingColumns=True)
+    all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
     # === Create _closed_accounts temp view ===
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
