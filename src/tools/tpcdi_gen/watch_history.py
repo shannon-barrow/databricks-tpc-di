@@ -419,26 +419,22 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("_actv_idx", F.monotonically_increasing_id())
         .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
 
-    # Estimate n_actv from formula (avoids expensive .count() action).
-    # ~1% dedup loss from hash collisions within each generation.
-    n_actv_est = int(new_pu * total_updates * 0.99)
-    print(f"  WatchHistory: estimated {n_actv_est:,} ACTV pairs")
+    # Get actual ACTV count (needed to compute exact CNCL count for target total).
+    n_actv = actv_df.count()
+    print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
 
-    # === Step 6: Generate CNCL records from ACTV pool ===
-    # Rather than using the cross-product CNCL pair_ids (which would require a
-    # complex join back to ACTV), we sample directly from the ACTV DataFrame.
-    # This guarantees every CNCL has a valid ACTV pair and avoids the expensive
-    # join. Fraction-based sampling is shuffle-free (per-partition Bernoulli).
-    #
-    # Temporal ordering guarantee: each CNCL timestamp = ACTV_ts + random_offset + 1,
-    # where random_offset is in [0, wh_end_ts - actv_ts). The "+1" ensures strict
-    # ordering (CNCL always after ACTV). The modulo bounds the offset to not exceed
-    # the end of the historical window.
-    # Take a sample of ACTV records for cancellation. Using fraction-based sampling
-    # is efficient (no shuffle) and guarantees every CNCL has a valid ACTV pair.
-    cncl_fraction = min(0.99, n_cncl / max(1, n_actv_est) * 1.1)  # slight oversample
+    # === Step 6: Generate CNCL records to hit target total ===
+    # DIGen produces exactly wh_total rows (ACTV + CNCL). We match this by computing
+    # the CNCL count as target_total - actual_actv. This maintains close to the 80/20
+    # ACTV/CNCL split while guaranteeing the exact total row count.
+    # Sample from the ACTV pool — every CNCL references a valid ACTV pair.
+    target_total = cfg.wh_total
+    target_cncl = target_total - n_actv
+    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
+
     cncl_df = (actv_df
         .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
+        .limit(target_cncl)  # exact count
         .withColumn("w_action", F.lit("CNCL"))
         # Compute a random time offset between the ACTV timestamp and wh_end,
         # ensuring the CNCL always comes after the ACTV (+1 second minimum).
@@ -454,12 +450,11 @@ def _gen_historical(spark, cfg, dbutils):
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
-    total_est = n_actv_est + int(n_cncl * 0.9)
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf)
 
-    print(f"  WatchHistory Batch1: ~{total_est:,} rows (~{n_actv_est:,} ACTV)")
-    return {("WatchHistory", 1): total_est}
+    print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
+    return {("WatchHistory", 1): target_total}
 
 
 def _gen_incremental(spark, cfg, batch_id, dbutils):
