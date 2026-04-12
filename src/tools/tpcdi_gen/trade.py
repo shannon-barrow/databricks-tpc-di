@@ -489,7 +489,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         ct_b1_count = ct_b1.count()
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
 
-        # Batch2/3: settlement after cutoff, routed by day offset from cutoff
+        # Batch2/3: settlement after cutoff — save as temp views for union with
+        # incremental trade CT in _gen_incremental_trades before writing.
         counts_ct = {("CashTransaction", 1): ct_b1_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
@@ -500,9 +501,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
-            ct_inc_count = ct_inc.count()
-            write_file(ct_inc, f"{cfg.batch_path(b)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
-            counts_ct[("CashTransaction", b)] = ct_inc_count
+            ct_inc.createOrReplaceTempView(f"_ct_hist_batch{b}")
         return counts_ct
 
     def write_holding_history():
@@ -538,7 +537,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         hh_b1_count = hh_b1.count()
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
-        # Batch2/3: completed after cutoff, routed by day offset
+        # Batch2/3: completed after cutoff — save as temp views for union with
+        # incremental trade HH in _gen_incremental_trades before writing.
         counts_hh = {("HoldingHistory", 1): hh_b1_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
@@ -549,9 +549,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
-            hh_inc_count = hh_inc.count()
-            write_file(hh_inc, f"{cfg.batch_path(b)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-            counts_hh[("HoldingHistory", b)] = hh_inc_count
+            hh_inc.createOrReplaceTempView(f"_hh_hist_batch{b}")
         return counts_hh
 
     counts = {}
@@ -776,16 +774,17 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
         .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
         .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
 
-    # Write as separate files with numeric suffix to avoid overwriting the
-    # historical-routed files already staged by _gen_historical_trades.
-    # Pipeline readers use fileNamePattern "CashTransaction_[0-9]*.txt" which
-    # matches both historical (_1.txt) and these (_99.txt) part files.
-    ct_inc_count = ct_inc.count()
-    hh_inc_count = hh_inc.count()
-    if ct_inc_count > 0:
-        write_file(ct_inc, f"{bp}/CashTransaction_99.txt", "|", dbutils, scale_factor=cfg.sf)
-    if hh_inc_count > 0:
-        write_file(hh_inc, f"{bp}/HoldingHistory_99.txt", "|", dbutils, scale_factor=cfg.sf)
+    # Union historical-routed CT/HH (from temp views) with incremental CT/HH,
+    # then write as a single file per table per batch.
+    ct_hist = spark.table(f"_ct_hist_batch{batch_id}")
+    hh_hist = spark.table(f"_hh_hist_batch{batch_id}")
+    ct_all = ct_hist.union(ct_inc)
+    hh_all = hh_hist.union(hh_inc)
 
-    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_inc_count}, HH: {hh_inc_count}")
-    return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_inc_count, ("HoldingHistory", batch_id): hh_inc_count}
+    ct_count = ct_all.count()
+    hh_count = hh_all.count()
+    write_file(ct_all, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+    write_file(hh_all, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+
+    print(f"  Batch{batch_id} Trade: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
+    return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
