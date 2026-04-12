@@ -677,6 +677,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .withColumn("CA_ID", F.col("_acct_caid"))
         .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
         .withColumn("status", F.lit("Inactive"))
+        # Offset ActionTS by +1 day so the CLOSEACCT is never on the same day as the
+        # ADDACCT that created this account. Without this, cross-update same-day
+        # collisions cause the account-level dedup to keep the ADDACCT and remove
+        # the CLOSEACCT, leaving the account active when the customer is inactive.
+        .withColumn("ActionTS", F.date_format(
+            F.date_add(F.to_timestamp(F.col("ActionTS")), 1), "yyyy-MM-dd'T'HH:mm:ss"))
         .withColumn("_sort_key",
             F.col("update_id").cast("long") * 1000000 + 3 * 100000 + F.col("pos_in_update"))
         .drop("_owner_cid", "_acct_caid"))
