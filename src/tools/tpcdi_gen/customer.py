@@ -662,32 +662,6 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
             F.concat(ah, F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('">\n'), ac, F.lit("\t\t</Customer>\n"), ft))
     )
 
-    # === Generate CLOSEACCT for ALL accounts of INACT'd customers ===
-    # When a customer is deactivated (INACT), ALL their accounts must also become
-    # inactive. This includes the first account (from NEW) and any additional accounts
-    # (from ADDACCT). Join INACT rows to all account-creating actions for the same C_ID.
-    inact_rows = all_df.filter(F.col("ActionType") == "INACT")
-    acct_owners = (all_df
-        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-        .select(F.col("C_ID").alias("_owner_cid"), F.col("CA_ID").alias("_acct_caid")))
-
-    close_for_inact = (inact_rows
-        .join(F.broadcast(acct_owners), F.col("C_ID") == F.col("_owner_cid"), "inner")
-        .withColumn("ActionType", F.lit("CLOSEACCT"))
-        .withColumn("CA_ID", F.col("_acct_caid"))
-        .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
-        .withColumn("status", F.lit("Inactive"))
-        # Offset ActionTS by +1 day so the CLOSEACCT is never on the same day as the
-        # ADDACCT that created this account. Without this, cross-update same-day
-        # collisions cause the account-level dedup to keep the ADDACCT and remove
-        # the CLOSEACCT, leaving the account active when the customer is inactive.
-        .withColumn("ActionTS", F.date_format(
-            F.date_add(F.to_timestamp(F.col("ActionTS")), 1), "yyyy-MM-dd'T'HH:mm:ss"))
-        .withColumn("_sort_key",
-            F.col("update_id").cast("long") * 1000000 + 3 * 100000 + F.col("pos_in_update"))
-        .drop("_owner_cid", "_acct_caid"))
-    all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
-
     # === Deduplicate: max 1 event per entity per calendar day ===
     # The TPC-DI spec requires at most one CDC event per entity per day. The source
     # system extracts only the end-of-day state, so two events on the same day for
@@ -722,6 +696,26 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     # Keep only first occurrence per dedup key (both customer-level and account-level
     # dedup must pass for a row to be retained).
     all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
+
+    # === Generate CLOSEACCT for ALL accounts of INACT'd customers ===
+    # When a customer is deactivated (INACT), ALL their accounts must also become
+    # inactive. Added AFTER dedup so they bypass the account-level dedup. If the
+    # CLOSEACCT is on the same day as the ADDACCT that created the account, the
+    # pipeline handles it correctly: the ADDACCT produces a zero-length SCD2 record
+    # (filtered by WHERE effectivedate < enddate) and the CLOSEACCT becomes the
+    # surviving record with Inactive status.
+    inact_rows = all_df.filter(F.col("ActionType") == "INACT")
+    acct_owners = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("C_ID").alias("_owner_cid"), F.col("CA_ID").alias("_acct_caid")))
+    close_for_inact = (inact_rows
+        .join(F.broadcast(acct_owners), F.col("C_ID") == F.col("_owner_cid"), "inner")
+        .withColumn("ActionType", F.lit("CLOSEACCT"))
+        .withColumn("CA_ID", F.col("_acct_caid"))
+        .withColumn("CA_ID_str", F.col("CA_ID").cast("string"))
+        .withColumn("status", F.lit("Inactive"))
+        .drop("_owner_cid", "_acct_caid"))
+    all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
     # === Create _closed_accounts temp view ===
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
