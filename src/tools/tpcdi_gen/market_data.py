@@ -107,9 +107,11 @@ def _gen_daily_market(spark, cfg, dbutils):
             F.col("deactivation_quarter"))
         .withColumn("_create_date", _quarter_to_date_expr(F.col("creation_quarter")))
         .withColumn("_deact_date", _quarter_to_date_expr(F.col("deactivation_quarter")))
-        # Clamp to DM date range: symbol only active within [DM_BEGIN, DM_END]
+        # Clamp to DM date range: symbol active on [max(create, DM_BEGIN), min(deact-1, DM_END)]
+        # Deactivation date is exclusive — the security is NOT active on the deactivation day.
+        # Use date_sub to get the last active day before deactivation.
         .withColumn("_start_date", F.greatest(F.col("_create_date"), F.lit(dm_begin_date).cast("date")))
-        .withColumn("_end_date", F.least(F.col("_deact_date"), F.lit(dm_end_date).cast("date")))
+        .withColumn("_end_date", F.least(F.date_sub(F.col("_deact_date"), 1), F.lit(dm_end_date).cast("date")))
         # Only include symbols that have at least one valid day
         .filter(F.col("_start_date") <= F.col("_end_date"))
     )
