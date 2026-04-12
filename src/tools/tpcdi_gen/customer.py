@@ -1079,8 +1079,8 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             on="_broker_idx", how="left")
         # --- Add INAC account rows for customers deactivated in this batch ---
         # When a customer's c_st_id becomes INAC, their accounts must also be closed.
-        # Use the _account_owners temp view (created by historical generation) to find
-        # all accounts belonging to INAC'd customers.
+        # Use _account_owners (historical + prior incremental inserts) to find all
+        # accounts belonging to INAC'd customers.
         inac_custs = (cust_df
             .filter(F.col("c_st_id") == "INAC")
             .select(F.col("c_id").alias("_inac_cid")))
@@ -1099,6 +1099,13 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         acct_final = acct_df.select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id") \
             .union(inac_acct_rows)
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
+
+        # Update _account_owners with this batch's insert accounts so the next batch
+        # can close them if the customer becomes INAC later.
+        new_owners = (acct_df
+            .filter(F.col("_is_insert"))
+            .select(F.col("ca_id"), F.col("ca_c_id").alias("owner_cid")))
+        acct_owners.union(new_owners).createOrReplaceTempView("_account_owners")
 
         print(f"  Batch{batch_id}: {cust_per_update} customers ({n_cust_insert}I/{n_cust_update}U), "
               f"{acct_per_update} accounts ({n_acct_insert}I/{n_acct_update}U)")
