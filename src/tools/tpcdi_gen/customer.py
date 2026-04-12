@@ -941,9 +941,14 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             # c_st_id: inserts=ACTV, updates use the UpdateActionType pattern
             # In DIGen: NEW/CHANGE->ACTV, DELETE->INAC. For incremental updates,
             # ~67% remain ACTV and ~33% become INAC (matching DIGen's observed 90%/10% overall
-            # since 70% inserts are all ACTV + 30% updates with 67%/33% split)
-            .withColumn("c_st_id", F.when(F.col("_is_insert"), F.lit("ACTV")).otherwise(
-                F.when(hash_key(F.col("rid"), bs+4) % 100 < 67, F.lit("ACTV")).otherwise(F.lit("INAC"))))
+            # since 70% inserts are all ACTV + 30% updates with 67%/33% split).
+            # _candidate_inac marks updates that WOULD be INAC — actual INAC assignment
+            # is deferred until after c_id is computed, so we can verify the customer has accounts.
+            .withColumn("_candidate_inac",
+                (~F.col("_is_insert")) & (hash_key(F.col("rid"), bs+4) % 100 >= 67))
+            .withColumn("c_st_id", F.when(F.col("_is_insert"), F.lit("ACTV"))
+                .when(F.col("_candidate_inac"), F.lit("INAC"))
+                .otherwise(F.lit("ACTV")))
             .withColumn("c_m_name", F.when(hash_key(F.col("rid"), bs+7) % 100 < 25, F.lit("")).otherwise(
                 F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), (hash_key(F.col("rid"), bs+70) % 26 + 1).cast("int"), 1)))
             # c_gndr: DIGen overall ~52.6% empty across inserts+updates.
@@ -1027,6 +1032,18 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             F.when(hash_key(F.col("rid"), bs+42) % 100 < 50,
                 F.concat(F.col("c_l_name"), F.lit("."), F.col("c_f_name"), F.lit("@"), F.col("_mp2")))
              .otherwise(F.lit("")))
+
+        # Force INAC candidates back to ACTV if they have no accounts in _account_owners.
+        # This prevents the audit failure where an inactive customer has zero accounts.
+        # (Incremental insert customers don't automatically get accounts like historical NEWs.)
+        _owners = spark.table("_account_owners")
+        cust_df = (cust_df
+            .join(F.broadcast(_owners.select(F.col("owner_cid").alias("_has_acct_cid")).distinct()),
+                  F.col("c_id") == F.col("_has_acct_cid"), "left")
+            .withColumn("c_st_id",
+                F.when((F.col("c_st_id") == "INAC") & F.col("_has_acct_cid").isNull(), F.lit("ACTV"))
+                 .otherwise(F.col("c_st_id")))
+            .drop("_has_acct_cid"))
 
         # Select columns in the exact order expected by the TPC-DI Customer.txt schema.
         cust_df = cust_df.select("cdc_flag","cdc_dsn","c_id","c_tax_id","c_st_id",
