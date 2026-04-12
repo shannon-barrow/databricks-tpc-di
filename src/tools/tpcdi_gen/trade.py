@@ -401,8 +401,16 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Note: without cache/persist (serverless-compatible), each write re-evaluates the plan.
-    # This is acceptable — the plan is column expressions on spark.range(), not expensive I/O.
+    # Cache trade_df if not on serverless — it's evaluated 4+ times (Trade, TradeHistory,
+    # CashTransaction, HoldingHistory). Caching avoids re-evaluating the entire plan.
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    if not _is_serverless:
+        trade_df = trade_df.cache()
+        trade_df.count()  # materialize the cache
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -557,6 +565,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
+
+    # Release cache if we used it
+    if not _is_serverless:
+        trade_df.unpersist()
 
     print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
