@@ -177,11 +177,11 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
     filtered_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
 
-    from pyspark.sql.types import StructType, StructField, LongType, StringType
-    valid_rdd = filtered_accts.select(F.col("ca_id").cast("string")).rdd.zipWithIndex()
-    valid_accts = spark.createDataFrame(
-        valid_rdd.map(lambda x: (x[1], x[0][0])),
-        StructType([StructField("_va_idx", LongType()), StructField("_valid_ca_id", StringType())]))
+    # Sequential index via row_number — works on both serverless and classic.
+    # The global sort is a one-time cost on a small DataFrame (~100K accounts at SF=100).
+    valid_accts = (filtered_accts
+        .withColumn("_va_idx", F.row_number().over(Window.orderBy("ca_id")) - 1)
+        .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
 
     n_valid = valid_accts.count()
     print(f"  Trade account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
