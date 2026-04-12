@@ -74,10 +74,12 @@ ONE_QUARTER_MS = 7889400000
 # DIGen: THistBeginDate = computeDate(FIRST_BATCH_DATE_START, Calendar.DATE, -1826)
 # Java Calendar.DATE subtraction includes the start day, giving 2012-07-06 (not 2012-07-07).
 # Python timedelta(1827) matches Java's computeDate(..., -1826).
-# THistEndDate = FIRST_BATCH_DATE_END = midnight after the batch date.
-# trade_days = 1828 matches DIGen's TSUpdateCount.
+# Trade placement range extends through incremental batch dates — DIGen generates trades
+# for ALL days including the incremental period. The batch cutoff determines which go
+# to Batch1 vs Batch2/3. Trades placed on incremental batch dates produce incremental
+# Trade entries + CT/HH in those batches.
 TRADE_BEGIN_DATE = FIRST_BATCH_DATE - timedelta(days=1827)
-TRADE_END_DATE = FIRST_BATCH_DATE_END
+TRADE_END_DATE = FIRST_BATCH_DATE_END + timedelta(days=NUM_INCREMENTAL_BATCHES)
 
 # ---------------------------------------------------------------------------
 # DailyMarket dates.
