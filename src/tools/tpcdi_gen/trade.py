@@ -461,11 +461,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        # Estimate: ~2.5 rows per trade (1 per trade + ~0.6 limit submit + ~0.93 completion)
-        th_est = int(cfg.trade_total * 2.51)
+        th_count = th_df.count()
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
-        return {("TradeHistory", 1): th_est}
+        return {("TradeHistory", 1): th_count}
 
     def write_cash_transaction():
         """Write CashTransaction.txt for Batch1 AND Batch2/3.
@@ -487,11 +486,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: settlement before cutoff
         ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        ct_est = int(cfg.trade_total * 0.927)
+        ct_b1_count = ct_b1.count()
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # Batch2/3: settlement after cutoff, routed by day offset from cutoff
-        counts_ct = {("CashTransaction", 1): ct_est}
+        counts_ct = {("CashTransaction", 1): ct_b1_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
@@ -501,8 +500,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
+            ct_inc_count = ct_inc.count()
             write_file(ct_inc, f"{cfg.batch_path(b)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
-            counts_ct[("CashTransaction", b)] = 0  # estimate not critical
+            counts_ct[("CashTransaction", b)] = ct_inc_count
         return counts_ct
 
     def write_holding_history():
@@ -535,11 +535,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: completed before cutoff
         hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        hh_est = int(cfg.trade_total * 0.927)
+        hh_b1_count = hh_b1.count()
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # Batch2/3: completed after cutoff, routed by day offset
-        counts_hh = {("HoldingHistory", 1): hh_est}
+        counts_hh = {("HoldingHistory", 1): hh_b1_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
@@ -549,8 +549,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
+            hh_inc_count = hh_inc.count()
             write_file(hh_inc, f"{cfg.batch_path(b)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-            counts_hh[("HoldingHistory", b)] = 0
+            counts_hh[("HoldingHistory", b)] = hh_inc_count
         return counts_hh
 
     counts = {}
@@ -565,8 +566,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             counts.update(f.result())
 
 
-    print(f"  Trade: {counts.get(('Trade',1),0):,} (exact), TH: ~{counts.get(('TradeHistory',1),0):,} (est), "
-          f"CT: ~{counts.get(('CashTransaction',1),0):,} (est), HH: ~{counts.get(('HoldingHistory',1),0):,} (est)")
+    print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: {counts.get(('TradeHistory',1),0):,}, "
+          f"CT: {counts.get(('CashTransaction',1),0):,}, HH: {counts.get(('HoldingHistory',1),0):,}")
     return counts
 
 
