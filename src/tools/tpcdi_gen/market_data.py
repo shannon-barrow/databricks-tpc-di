@@ -153,10 +153,11 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # Write batch 1 (historical): pipe-delimited flat file
-    estimated_total = cfg.dm_days * num_sec
+    estimated_total = cfg.dm_days * num_sec  # upper bound before deactivation filtering
     write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
     counts = {("DailyMarket", 1): estimated_total}
+    print(f"  DailyMarket: estimated ~{estimated_total:,} historical ({cfg.dm_days} days × ~{num_sec} syms, actual may be lower due to deactivations)")
 
     # --- Incremental batches (batch 2, 3, ...) ---
     # Each incremental batch covers a single calendar day. Only securities whose
@@ -199,5 +200,4 @@ def _gen_daily_market(spark, cfg, dbutils):
                scale_factor=cfg.sf)
         counts[("DailyMarket", batch_id)] = num_sec
 
-    print(f"  DailyMarket: ~{estimated_total:,} historical ({cfg.dm_days} days × ~{num_sec} syms)")
     return counts

@@ -565,8 +565,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             counts.update(f.result())
 
 
-    print(f"  Trade: {counts.get(('Trade',1),0)}, TH: {counts.get(('TradeHistory',1),0)}, "
-          f"CT: {counts.get(('CashTransaction',1),0)}, HH: {counts.get(('HoldingHistory',1),0)}")
+    print(f"  Trade: {counts.get(('Trade',1),0):,} (exact), TH: ~{counts.get(('TradeHistory',1),0):,} (est), "
+          f"CT: ~{counts.get(('CashTransaction',1),0):,} (est), HH: ~{counts.get(('HoldingHistory',1),0):,} (est)")
     return counts
 
 
