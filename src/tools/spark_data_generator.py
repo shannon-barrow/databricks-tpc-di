@@ -43,16 +43,47 @@ def spark_generate():
       print(f"Data generation skipped since {blob_out_path} already exists. Set Regenerate Data to YES to overwrite.")
       return
 
-  # Import tpcdi_gen module from workspace path.
+  # Import tpcdi_gen module.
   # Clear any previously cached module imports to pick up code changes.
   _tools_dir = f"{workspace_src_path}/tools"
+  _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
+  _vol_tools_dir = f"{_vol_module_dir}/tools"
 
   for _m in list(sys.modules.keys()):
     if _m.startswith("tpcdi_gen"):
       del sys.modules[_m]
 
-  sys.path.insert(0, _tools_dir)
-  print(f"Module path: {_tools_dir}/tpcdi_gen")
+  # Try workspace path first (works on SINGLE_USER clusters).
+  # Fall back to Volume copy for USER_ISOLATION/SHARED clusters where
+  # /Workspace paths aren't accessible via Python file I/O.
+  _ws_accessible = False
+  try:
+    _ws_accessible = os.path.isdir(f"{_tools_dir}/tpcdi_gen")
+  except OSError:
+    pass
+
+  if _ws_accessible:
+    sys.path.insert(0, _tools_dir)
+    print(f"Module path (workspace): {_tools_dir}/tpcdi_gen")
+  else:
+    print(f"Workspace not accessible. Copying modules to Volume...")
+    _ws_tpcdi_gen = f"file:{workspace_src_path}/tools/tpcdi_gen"
+    _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
+    try:
+      dbutils.fs.rm(_vol_tpcdi_gen, recurse=True)
+    except:
+      pass
+    dbutils.fs.cp(_ws_tpcdi_gen, _vol_tpcdi_gen, recurse=True)
+    # Copy static_files individually (directory cp may not recurse for file: paths)
+    _ws_static = f"file:{workspace_src_path}/tools/tpcdi_gen/static_files"
+    _vol_static = f"{_vol_tpcdi_gen}/static_files"
+    for _sf in ["StatusType.txt", "TaxRate.txt", "Date.txt", "Time.txt", "Industry.txt", "TradeType.txt"]:
+      try:
+        dbutils.fs.cp(f"{_ws_static}/{_sf}", f"{_vol_static}/{_sf}")
+      except:
+        pass
+    sys.path.insert(0, _vol_tools_dir)
+    print(f"Module path (volume): {_vol_tools_dir}/tpcdi_gen")
 
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
   from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging
@@ -141,6 +172,13 @@ def spark_generate():
   print(f"  Output: {cfg.volume_path}")
   print(f"{'=' * 60}")
 
+  # Clean up Volume module copies if we used the fallback path
+  if not _ws_accessible:
+    try:
+      dbutils.fs.rm(_vol_module_dir, recurse=True)
+      print(f"Cleaned up temporary modules from {_vol_module_dir}")
+    except:
+      pass
 
 
 def _path_exists(path):
