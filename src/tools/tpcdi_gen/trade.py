@@ -401,18 +401,19 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Materialize trade_df at SF<=1000 to avoid 4x plan re-evaluation.
-    # At SF>1000, all materialization approaches (cache, Parquet checkpoint, Delta
-    # table) cause OOM or page cache pressure on 186GB machines. Pure re-evaluation
-    # is slower (4x plan eval) but memory-safe and proven at SF=20000.
+    # Cache trade_df to avoid 4x plan re-evaluation (Trade, TradeHistory,
+    # CashTransaction, HoldingHistory). At SF=5000 this is ~97GB cached, at
+    # SF=10000 ~195GB. Requires a memory-optimized machine (672GB+) at large SF.
+    # At SF>10000 or on serverless, fall back to re-evaluation.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
-    if not _is_serverless and cfg.sf <= 1000:
+    if not _is_serverless and cfg.sf <= 10000:
         trade_df = trade_df.cache()
         trade_df.count()
+        print(f"  [Trade] Cached trade_df ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -573,8 +574,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
-    # Cleanup materialization
-    if not _is_serverless and cfg.sf <= 1000:
+    if not _is_serverless and cfg.sf <= 10000:
         trade_df.unpersist()
 
     print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
