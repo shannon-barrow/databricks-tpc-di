@@ -123,30 +123,34 @@ def spark_generate():
     all_counts.update(f_fw.result()["counts"])
   print(f"\nWave 1 complete.")
 
-  # Wave 2: Customer/Account + DailyMarket + copy Wave 1 files
-  from tpcdi_gen import customer, market_data
+  # Wave 2: Customer/Account only + copy Wave 1 files
+  # DailyMarket moved to Wave 3 — it only needs _symbols from Wave 1 and has
+  # zero dependency on CustomerMgmt. This lets Wave 2 finish ~2 min faster,
+  # starting Wave 3 sooner. DailyMarket (I/O heavy) overlaps with Trade
+  # (compute heavy) in Wave 3 for better resource utilization.
+  from tpcdi_gen import customer
   print("=" * 60)
-  print("WAVE 2: Customer/Account + DailyMarket")
+  print("WAVE 2: Customer/Account")
   print("=" * 60)
-  with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
     f_cust = executor.submit(customer.generate, spark, cfg, dicts, dbutils)
-    f_market = executor.submit(market_data.generate, spark, cfg, dbutils)
     f_copy1 = executor.submit(bulk_copy_all, dbutils, 64)
     all_counts.update(f_cust.result()["counts"])
-    all_counts.update(f_market.result())
     f_copy1.result()
   print("\nWave 2 complete.")
 
-  # Wave 3: Trades + Prospect + WatchHistory + copy Wave 2 files
-  from tpcdi_gen import trade, prospect, watch_history
+  # Wave 3: DailyMarket + Trades + Prospect + WatchHistory + copy Wave 2 files
+  from tpcdi_gen import market_data, trade, prospect, watch_history
   print("=" * 60)
-  print("WAVE 3: Trades + Prospect + WatchHistory")
+  print("WAVE 3: DailyMarket + Trades + Prospect + WatchHistory")
   print("=" * 60)
-  with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+  with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+    f_market = executor.submit(market_data.generate, spark, cfg, dbutils)
     f_trade = executor.submit(trade.generate, spark, cfg, dicts, dbutils)
     f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
     f_wh = executor.submit(watch_history.generate, spark, cfg, dicts, dbutils)
     f_copy2 = executor.submit(bulk_copy_all, dbutils, 64)
+    all_counts.update(f_market.result())
     all_counts.update(f_trade.result())
     all_counts.update(f_prospect.result())
     all_counts.update(f_wh.result())
