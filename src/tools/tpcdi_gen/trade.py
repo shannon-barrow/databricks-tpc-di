@@ -116,6 +116,7 @@ import concurrent.futures
 import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
+from pyspark import StorageLevel
 from .config import *
 from .utils import write_file, seed_for, hash_key, dict_join
 
@@ -401,16 +402,20 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Cache trade_df if not on serverless — it's evaluated 4+ times (Trade, TradeHistory,
-    # CashTransaction, HoldingHistory). Caching avoids re-evaluating the entire plan.
+    # Persist trade_df to DISK_ONLY if not on serverless — it's evaluated 4+ times
+    # (Trade, TradeHistory, CashTransaction, HoldingHistory). Persistence avoids
+    # re-evaluating the entire plan. We use DISK_ONLY instead of MEMORY because
+    # trade_df runs concurrently with WatchHistory in Wave 3; at SF=5000+ both
+    # caches in memory exceed physical RAM. SSD persistence avoids re-evaluation
+    # without competing for heap memory.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
     if not _is_serverless:
-        trade_df = trade_df.cache()
-        trade_df.count()  # materialize the cache
+        trade_df = trade_df.persist(StorageLevel.DISK_ONLY)
+        trade_df.count()  # materialize the persistence
 
     # === Write all 4 output tables ===
     def write_trade():
