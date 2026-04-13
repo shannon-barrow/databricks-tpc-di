@@ -301,21 +301,30 @@ def bulk_copy_all(dbutils, max_workers: int = 64):
     if not copies:
         return
 
-    print(f"  Bulk copying {len(copies)} files with {max_workers} threads...")
-
     def copy_file(src_tgt):
         src, tgt = src_tgt
         dbutils.fs.cp(src, tgt)
         return tgt
 
-    completed = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(copy_file, pair) for pair in copies]
         for future in concurrent.futures.as_completed(futures):
             future.result()  # raises if failed
-            completed += 1
 
-    print(f"  Bulk copy complete: {completed} files")
+    # Log per-dataset completion: group by (dataset, batch directory)
+    from collections import defaultdict
+    by_dataset = defaultdict(lambda: {"count": 0, "dir": ""})
+    for _, tgt in copies:
+        # Extract dataset name from filename (e.g., "Trade_1.txt" → "Trade")
+        fname = os.path.basename(tgt)
+        dataset = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
+        # Extract batch dir (e.g., ".../Batch1/")
+        batch_dir = os.path.dirname(tgt)
+        key = (dataset, batch_dir)
+        by_dataset[key]["count"] += 1
+        by_dataset[key]["dir"] = batch_dir
+    for (dataset, _), info in sorted(by_dataset.items()):
+        print(f"  {dataset} completed copying {info['count']} file(s) to {info['dir']}")
 
 
 # ---------------------------------------------------------------------------
