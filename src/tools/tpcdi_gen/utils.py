@@ -347,17 +347,41 @@ def estimate_row_bytes(df: DataFrame, sample_size: int = 1000) -> int:
     return int(avg_len + 2) if avg_len else 100
 
 
+def _target_partitions(df: DataFrame, estimated_rows: int) -> int:
+    """Compute the ideal partition count targeting ~100MB per output file.
+
+    Samples up to 1000 rows to estimate average row size, multiplies by the
+    estimated total row count, and divides by the target file size (100MB).
+    The result is clamped to at least 1 partition.
+
+    Args:
+        df: The DataFrame about to be written (used for row-size sampling).
+        estimated_rows: Approximate number of rows in the DataFrame.
+
+    Returns:
+        Target number of partitions (>= 1).
+    """
+    target_file_bytes = 100 * 1024 * 1024  # 100MB
+    avg_bytes = estimate_row_bytes(df)
+    total_bytes = avg_bytes * estimated_rows
+    return max(1, -(-total_bytes // target_file_bytes))  # ceil division
+
+
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
-               dbutils=None, scale_factor: int = 0):
+               dbutils=None, scale_factor: int = 0, estimated_rows: int = 0):
     """Write a DataFrame to a staging directory and register deferred copies to the final path.
 
     Follows the deferred copy pattern:
     1. Write the DataFrame as CSV to a temporary staging directory.
     2. Register the part file(s) for later bulk copy via ``bulk_copy_all()``.
 
-    At SF=10, coalesces output to minimize file count (single file for most tables,
-    3 files for DailyMarket which exceeds 128MB). At SF>10, writes directly from
-    existing partitions to avoid shuffle overhead.
+    Coalescing strategy (controls output file count):
+    - SF<=10: Single file for most tables, 3 files for DailyMarket.
+    - SF>10 Batch1: If estimated_rows is provided, dynamically targets ~100MB per
+      file by sampling avg row size and computing ideal partition count. If the
+      DataFrame already has fewer partitions, coalesce is a no-op.
+    - SF>10 Batch2/3: Single file (data is small), except Prospect at SF>100
+      which uses natural partitioning since it exceeds 100MB.
 
     Args:
         df: DataFrame to write.
@@ -365,6 +389,8 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         delimiter: Field delimiter for the CSV output. Defaults to ``|`` per TPC-DI spec.
         dbutils: Databricks dbutils object for filesystem operations.
         scale_factor: TPC-DI scale factor, used to control file coalescing at SF=10.
+        estimated_rows: Approximate row count for dynamic partition sizing. When > 0
+            and SF > 10 for Batch1, the output is coalesced to ~100MB per file.
 
     Returns:
         List of final target file paths.
@@ -372,11 +398,6 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # Coalesce small outputs to 1 file, let large outputs use natural partitioning.
-    # Batch2/3 incremental files are always small (< 100MB) except DailyMarket at
-    # very large scale factors. Batch1 files at SF=10 are also small enough for 1 file
-    # (except DailyMarket). At SF>10, Batch1 files are large and benefit from
-    # multi-partition writes.
     filename = os.path.basename(path)
     is_batch1 = "/Batch1/" in path
     if scale_factor <= 10:
@@ -386,8 +407,19 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         else:
             df = df.coalesce(1)
     elif not is_batch1:
-        # Incremental batches: coalesce to 1 file (small data, < 100MB)
-        df = df.coalesce(1)
+        # Incremental batches: coalesce to 1 file (small data, < 100MB).
+        # Exception: Prospect files exceed 100MB at SF>100 (~1GB at SF=1000),
+        # so let them use natural partitioning for efficient parallel writes.
+        if "Prospect" in filename and scale_factor > 100:
+            pass  # keep natural partitioning
+        else:
+            df = df.coalesce(1)
+    elif estimated_rows > 0:
+        # Batch1 at SF>10: dynamically size partitions to ~100MB per file.
+        # coalesce() only reduces partition count (never increases), so this is
+        # safe even if the DataFrame already has fewer partitions than the target.
+        target = int(_target_partitions(df, estimated_rows))
+        df = df.coalesce(target)
 
     (df
         .write

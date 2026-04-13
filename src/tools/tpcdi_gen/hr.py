@@ -123,7 +123,8 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         "managerid", "employeefirstname", "employeelastname", "employeemi",
         "employeejobcode", "employeebranch", "employeeoffice", "employeephone")
 
-    write_file(final, f"{cfg.batch_path(1)}/HR.csv", ",", dbutils, scale_factor=cfg.sf)
+    write_file(final, f"{cfg.batch_path(1)}/HR.csv", ",", dbutils,
+               scale_factor=cfg.sf, estimated_rows=cfg.hr_rows)
 
     # --- Persist _brokers temp view ---
     # Extracts all employees with jobcode=314 (brokers) and assigns a sequential

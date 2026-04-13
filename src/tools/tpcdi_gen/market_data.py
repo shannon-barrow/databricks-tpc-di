@@ -153,9 +153,9 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # Write batch 1 (historical): pipe-delimited flat file
-    write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
-               scale_factor=cfg.sf)
     dm_est = cfg.dm_days * num_sec  # upper bound; actual is slightly less due to deactivations
+    write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
+               scale_factor=cfg.sf, estimated_rows=dm_est)
     counts = {("DailyMarket", 1): dm_est}
     print(f"  DailyMarket: ~{dm_est:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
 

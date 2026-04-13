@@ -195,19 +195,20 @@ def _gen_historical(spark, cfg, dbutils):
 
     Distributes ACTV records across all generations (new_per_update each).
     Within each generation, picks unique pairs from the NEW cross-product entries.
-    CNCL records reference pairs from earlier generations.
+    CNCL records are sampled from the deduped ACTV pool.
 
     The algorithm has 7 steps:
-      1. Create a sequential range of all WH record IDs and assign each to a
-         generation (update_id) and position within that generation.
-      2. For ACTV records, hash into the NEW cross-product pairs for that generation.
-         For CNCL records, hash into ALL previously-created pairs.
+      1. Generate ONLY ACTV record slots (skip CNCL — they're regenerated in Step 6).
+         This saves ~20% of compute by avoiding pair decomposition, symbol joins,
+         and timestamps for 300M+ CNCL rows that would be discarded anyway.
+      2. Hash each ACTV row into the NEW cross-product pairs for its generation.
       3. Decompose each flat pair_id into (cust_idx, sec_idx) using the
          GrowingCrossProduct geometry (two rectangular regions per generation).
       4. Assign timestamps spread across the historical date range.
-      5. Deduplicate ACTV pairs and index them for CNCL lookup.
+      5. Deduplicate ACTV pairs, cache (non-serverless), and index for CNCL lookup.
+         Caching prevents re-evaluating the dedup shuffle 3x (count, write, sample).
       6. Sample from ACTV pool to create CNCL records with later timestamps.
-      7. Union ACTV + CNCL and write to file.
+      7. Union ACTV + CNCL, write to file, and release cache.
     """
     symbols_df = spark.table("_symbols")
     num_sec = symbols_df.count()
@@ -272,51 +273,44 @@ def _gen_historical(spark, cfg, dbutils):
         ["gen_id", "left_size", "right_size", "prev_left_size", "prev_right_size",
          "prev_total_cp", "total_cp", "new_cp_size"])
 
-    # === Step 1: Generate all WH records with generation assignment ===
-    # Sequential range [0, wh_total_hist). Each record's generation (update_id) is
-    # determined by integer division: records 0..wh_rpu-1 are gen 0, etc.
-    # Within a generation, the first new_pu positions are ACTV, the rest are CNCL.
-    all_df = (spark.range(0, wh_total_hist).withColumnRenamed("id", "wh_id")
-        .withColumn("update_id", (F.col("wh_id") / F.lit(wh_rpu)).cast("int"))
-        .withColumn("pos_in_update", (F.col("wh_id") % F.lit(wh_rpu)).cast("long"))
-        .withColumn("w_action",
-            F.when(F.col("pos_in_update") < F.lit(new_pu), F.lit("ACTV"))
-             .otherwise(F.lit("CNCL")))
+    # === Step 1: Generate ONLY ACTV records ===
+    # Optimization: CNCL records are regenerated from sampling ACTV in Step 6, so
+    # generating all wh_total_hist rows (including CNCL slots) wastes ~20% of compute
+    # on pair decomposition, symbol joins, and timestamps for rows that are discarded.
+    # Instead, generate only the ACTV slots: new_pu per generation × total_updates.
+    n_actv_slots = new_pu * total_updates
+    all_df = (spark.range(0, n_actv_slots).withColumnRenamed("id", "actv_id")
+        .withColumn("update_id", (F.col("actv_id") / F.lit(new_pu)).cast("int"))
+        .withColumn("pos_in_update", (F.col("actv_id") % F.lit(new_pu)).cast("long"))
+        # Reconstruct the original wh_id (as if CNCL slots existed) for hash compatibility
+        .withColumn("wh_id", F.col("update_id").cast("long") * F.lit(wh_rpu) + F.col("pos_in_update"))
+        .withColumn("w_action", F.lit("ACTV"))
     )
 
     # Join generation info so each record has its generation's cross-product dimensions.
     all_df = all_df.join(F.broadcast(gen_df), all_df["update_id"] == gen_df["gen_id"], "left")
 
     # === Step 2: Assign unique pair within generation ===
-    # ACTV records: hash wh_id into the NEW pairs added in this generation.
+    # Hash wh_id into the NEW pairs added in this generation.
     #   For gen 0: hash into the full initial cross-product [0, start_left * start_right).
     #   For gen g>0: hash into [0, new_cp_size) then offset by prev_total_cp to get a
     #   globally unique pair_id. This ensures ACTV pairs never collide across generations
     #   because each generation's pair_ids occupy a non-overlapping range.
-    #
-    # CNCL records: hash wh_id into ALL pairs from prior generations [0, prev_total_cp).
-    #   This means CNCL can only reference pairs that were already created (by earlier
-    #   ACTV records), which is necessary for the "activate then cancel" invariant.
     #
     # The hash function (hash_key) acts as a pseudo-random permutation, analogous to
     # DIGen's BijectivePermutation — it spreads selections across both the
     # "existing custs x new secs" and "new custs x all secs" regions of new pairs.
     all_df = (all_df
         .withColumn("_pair_id",
-            F.when(F.col("w_action") == "ACTV",
-                F.when(F.col("update_id") == 0,
-                    # Gen 0: hash into full initial cross-product
-                    hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
-                        F.greatest(F.lit(1), F.col("total_cp").cast("long")))
-                .otherwise(
-                    # Gen g>0: hash into new pairs, offset to global pair space
-                    F.col("prev_total_cp").cast("long") +
-                    hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
-                        F.greatest(F.lit(1), F.col("new_cp_size").cast("long"))))
+            F.when(F.col("update_id") == 0,
+                # Gen 0: hash into full initial cross-product
+                hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
+                    F.greatest(F.lit(1), F.col("total_cp").cast("long")))
             .otherwise(
-                # CNCL: hash into all previously-created pairs
-                hash_key(F.col("wh_id"), seed_for("WH", "cncl")) %
-                    F.greatest(F.lit(1), F.col("prev_total_cp").cast("long"))))
+                # Gen g>0: hash into new pairs, offset to global pair space
+                F.col("prev_total_cp").cast("long") +
+                hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
+                    F.greatest(F.lit(1), F.col("new_cp_size").cast("long"))))
     )
 
     # === Step 3: Decompose pair_id into (cust_idx, sec_idx) ===
@@ -408,19 +402,29 @@ def _gen_historical(spark, cfg, dbutils):
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
 
-    # === Step 5: Extract ACTV records, deduplicate, index for CNCL lookup ===
-    actv_df = all_df.filter(F.col("w_action") == "ACTV")
-    # Deduplicate ACTV (hash collisions within generation) — dropDuplicates is
-    # more efficient than row_number window (one shuffle vs TopK+Window)
-    actv_df = actv_df.dropDuplicates(["w_c_id", "w_s_symb"])
+    # === Step 5: Deduplicate ACTV, cache, and index for CNCL lookup ===
+    # All rows are already ACTV (CNCL slots were not generated — see Step 1).
+    # Deduplicate on (w_c_id, w_s_symb) to remove hash collisions from sec_idx % num_sec.
+    actv_df = all_df.dropDuplicates(["w_c_id", "w_s_symb"])
     # Index ACTV pairs for CNCL to reference — monotonically_increasing_id avoids
     # the single-partition global sort that row_number(orderBy) requires
     actv_df = (actv_df
         .withColumn("_actv_idx", F.monotonically_increasing_id())
         .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
 
-    # Get actual ACTV count (needed to compute exact CNCL count for target total).
-    n_actv = actv_df.count()
+    # Cache actv_df if not on serverless — it's evaluated 3 times (count, ACTV write,
+    # CNCL sampling). Without caching, each evaluation re-triggers the full dedup shuffle
+    # over 1.2B+ rows. At SF=5000 this was causing 16+ minute stalls and driver death.
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    if not _is_serverless:
+        actv_df = actv_df.cache()
+        n_actv = actv_df.count()  # materializes cache + gives exact count
+    else:
+        n_actv = actv_df.count()
     print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
 
     # === Step 6: Generate CNCL records to hit target total ===
@@ -451,7 +455,11 @@ def _gen_historical(spark, cfg, dbutils):
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
-               scale_factor=cfg.sf)
+               scale_factor=cfg.sf, estimated_rows=target_total)
+
+    # Release cache after write completes
+    if not _is_serverless:
+        actv_df.unpersist()
 
     print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}

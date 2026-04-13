@@ -419,7 +419,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
-        write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
+        write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
+                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total)
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -463,10 +464,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
         # Estimate: ~2.51 rows per trade (1 PNDG/SBMT + ~0.6 limit SBMT/CNCL + ~0.9 CMPT)
-        return {("TradeHistory", 1): int(cfg.trade_total * 2.51)}
+        th_est = int(cfg.trade_total * 2.51)
+        write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
+                   scale_factor=cfg.sf, estimated_rows=th_est)
+        return {("TradeHistory", 1): th_est}
 
     def write_cash_transaction():
         """Write CashTransaction.txt for Batch1 AND Batch2/3.
@@ -488,7 +490,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: settlement before cutoff
         ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+        ct_est = int(cfg.trade_total * 0.927)
+        write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
+                   scale_factor=cfg.sf, estimated_rows=ct_est)
 
         # Batch2/3: settlement after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
@@ -536,7 +540,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
 
         # Batch1: completed before cutoff
         hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+        hh_est = int(cfg.trade_total * 0.927)
+        write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
+                   scale_factor=cfg.sf, estimated_rows=hh_est)
 
         # Batch2/3: completed after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
