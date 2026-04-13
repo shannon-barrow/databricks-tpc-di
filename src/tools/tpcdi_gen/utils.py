@@ -312,20 +312,23 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
             future.result()  # raises if failed
 
     # Log per-dataset completion: group by (dataset, batch directory)
+    import re
     from collections import defaultdict
     by_dataset = defaultdict(lambda: {"count": 0, "dir": ""})
     for _, tgt in copies:
-        # Extract dataset name from filename (e.g., "Trade_1.txt" → "Trade")
         fname = os.path.basename(tgt)
-        dataset = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
-        # Extract batch dir (e.g., ".../Batch1/")
+        # Extract dataset name: strip numeric suffix (e.g., "Trade_1.txt" → "Trade")
+        # and strip year/quarter from FINWIRE (e.g., "FINWIRE1967Q1_1" → "FINWIRE")
+        base = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
+        dataset = re.sub(r'\d{4}Q\d$', '', base)  # FINWIRE1967Q1 → FINWIRE
         batch_dir = os.path.dirname(tgt)
+        batch_name = os.path.basename(batch_dir)  # "Batch1", "Batch2", etc.
         key = (dataset, batch_dir)
         by_dataset[key]["count"] += 1
-        by_dataset[key]["dir"] = batch_dir
+        by_dataset[key]["dir"] = batch_name
     label_suffix = f" ({label})" if label else ""
     for (dataset, _), info in sorted(by_dataset.items()):
-        print(f"  {dataset} completed copying {info['count']} file(s) to {info['dir']}{label_suffix}")
+        print(f"  [Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}")
 
 
 # ---------------------------------------------------------------------------
