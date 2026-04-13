@@ -347,28 +347,31 @@ def estimate_row_bytes(df: DataFrame, sample_size: int = 1000) -> int:
     return int(avg_len + 2) if avg_len else 100
 
 
-def _target_partitions(df: DataFrame, estimated_rows: int) -> int:
+def _target_partitions(df: DataFrame, estimated_rows: int,
+                       avg_row_bytes: int = 0) -> int:
     """Compute the ideal partition count targeting ~100MB per output file.
 
-    Samples up to 1000 rows to estimate average row size, multiplies by the
-    estimated total row count, and divides by the target file size (100MB).
-    The result is clamped to at least 1 partition.
+    If avg_row_bytes is provided, uses it directly (avoids a Spark job).
+    Otherwise samples up to 1000 rows to estimate average row size.
 
     Args:
-        df: The DataFrame about to be written (used for row-size sampling).
+        df: The DataFrame about to be written (used for row-size sampling if needed).
         estimated_rows: Approximate number of rows in the DataFrame.
+        avg_row_bytes: Optional pre-computed average bytes per row. If 0, will sample.
 
     Returns:
         Target number of partitions (>= 1).
     """
     target_file_bytes = 100 * 1024 * 1024  # 100MB
-    avg_bytes = estimate_row_bytes(df)
-    total_bytes = avg_bytes * estimated_rows
+    if avg_row_bytes <= 0:
+        avg_row_bytes = estimate_row_bytes(df)
+    total_bytes = avg_row_bytes * estimated_rows
     return max(1, -(-total_bytes // target_file_bytes))  # ceil division
 
 
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
-               dbutils=None, scale_factor: int = 0, estimated_rows: int = 0):
+               dbutils=None, scale_factor: int = 0, estimated_rows: int = 0,
+               avg_row_bytes: int = 0):
     """Write a DataFrame to a staging directory and register deferred copies to the final path.
 
     Follows the deferred copy pattern:
@@ -418,7 +421,7 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         # Batch1 at SF>10: dynamically size partitions to ~100MB per file.
         # coalesce() only reduces partition count (never increases), so this is
         # safe even if the DataFrame already has fewer partitions than the target.
-        target = int(_target_partitions(df, estimated_rows))
+        target = int(_target_partitions(df, estimated_rows, avg_row_bytes))
         df = df.coalesce(target)
 
     (df

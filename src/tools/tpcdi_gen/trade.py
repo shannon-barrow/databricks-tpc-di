@@ -401,29 +401,20 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Materialize trade_df to avoid 4x plan re-evaluation. Strategy depends on SF:
-    # - SF<=1000: cache in memory (~19GB at SF=1000, fits comfortably)
-    # - SF>1000: checkpoint to temp Parquet on the output volume, then read back.
-    #   One Parquet write + 4 reads is far cheaper than re-evaluating the full
-    #   hash/join/timestamp plan 4 times (~650M rows at SF=5000).
-    # - Serverless: no caching (memory constraints), accept re-evaluation.
+    # Cache trade_df at SF<=1000 on non-serverless clusters — it's evaluated 4x
+    # (Trade, TradeHistory, CashTransaction, HoldingHistory). At SF<=1000 the cached
+    # data fits in memory (~19GB). At SF>1000, accept re-evaluation — lazy streaming
+    # has a lower memory footprint than any materialization approach (cache, persist,
+    # or Parquet checkpoint). This same cluster generated SF=20000 with re-evaluation.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
-
-    _trade_checkpoint = None
-    if _is_serverless:
-        pass  # no caching on serverless
-    elif cfg.sf <= 1000:
+    _use_cache = not _is_serverless and cfg.sf <= 1000
+    if _use_cache:
         trade_df = trade_df.cache()
         trade_df.count()
-    else:
-        # Checkpoint to Parquet: materialize once, read 4x
-        _trade_checkpoint = f"{cfg.volume_path}/_trade_checkpoint"
-        trade_df.write.mode("overwrite").parquet(_trade_checkpoint)
-        trade_df = spark.read.parquet(_trade_checkpoint)
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -433,7 +424,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
         write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total)
+                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total, avg_row_bytes=180)
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -480,7 +471,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         # Estimate: ~2.51 rows per trade (1 PNDG/SBMT + ~0.6 limit SBMT/CNCL + ~0.9 CMPT)
         th_est = int(cfg.trade_total * 2.51)
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=th_est)
+                   scale_factor=cfg.sf, estimated_rows=th_est, avg_row_bytes=35)
         return {("TradeHistory", 1): th_est}
 
     def write_cash_transaction():
@@ -505,7 +496,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         ct_est = int(cfg.trade_total * 0.927)
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=ct_est)
+                   scale_factor=cfg.sf, estimated_rows=ct_est, avg_row_bytes=65)
 
         # Batch2/3: settlement after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
@@ -555,7 +546,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
         hh_est = int(cfg.trade_total * 0.927)
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=hh_est)
+                   scale_factor=cfg.sf, estimated_rows=hh_est, avg_row_bytes=30)
 
         # Batch2/3: completed after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
@@ -584,14 +575,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
-    # Cleanup materialization
-    if not _is_serverless and cfg.sf <= 1000:
+    if _use_cache:
         trade_df.unpersist()
-    elif _trade_checkpoint:
-        try:
-            dbutils.fs.rm(_trade_checkpoint, recurse=True)
-        except:
-            pass
 
     print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
