@@ -401,20 +401,32 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Cache trade_df at SF<=1000 on non-serverless clusters — it's evaluated 4x
-    # (Trade, TradeHistory, CashTransaction, HoldingHistory). At SF<=1000 the cached
-    # data fits in memory (~19GB). At SF>1000, accept re-evaluation — lazy streaming
-    # has a lower memory footprint than any materialization approach (cache, persist,
-    # or Parquet checkpoint). This same cluster generated SF=20000 with re-evaluation.
+    # Materialize trade_df to avoid 4x plan re-evaluation (Trade, TradeHistory,
+    # CashTransaction, HoldingHistory each re-evaluate the full plan).
+    # Strategy:
+    #   SF<=1000: cache in memory (~19GB, fits comfortably)
+    #   SF>1000:  checkpoint to LOCAL SSD as compressed Parquet, then read back.
+    #             Local NVMe (/local_disk0/) avoids the FUSE/cloud page cache bloat
+    #             that caused OOM when checkpointing to Volumes. Compressed Parquet
+    #             is ~30-40GB vs ~100GB raw. Each of 4 readers only scans needed cols.
+    #   Serverless: no materialization (no local disk), accept re-evaluation.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
-    _use_cache = not _is_serverless and cfg.sf <= 1000
-    if _use_cache:
+
+    _trade_local_path = None
+    if _is_serverless:
+        pass
+    elif cfg.sf <= 1000:
         trade_df = trade_df.cache()
         trade_df.count()
+    else:
+        _trade_local_path = "file:/local_disk0/tmp/trade_checkpoint"
+        trade_df.write.mode("overwrite").parquet(_trade_local_path)
+        trade_df = spark.read.parquet(_trade_local_path)
+        print(f"  [Trade] Checkpointed to local SSD")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -575,8 +587,15 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
-    if _use_cache:
+    # Cleanup materialization
+    if not _is_serverless and cfg.sf <= 1000:
         trade_df.unpersist()
+    if _trade_local_path:
+        import shutil
+        try:
+            shutil.rmtree("/local_disk0/tmp/trade_checkpoint", ignore_errors=True)
+        except:
+            pass
 
     print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
