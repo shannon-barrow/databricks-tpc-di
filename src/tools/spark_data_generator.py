@@ -136,7 +136,7 @@ def spark_generate():
   print("DEPENDENCY-GRAPH SCHEDULING")
   print("=" * 60)
 
-  with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+  with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
     # --- Tier 0: No dependencies (start immediately) ---
     f_ref = executor.submit(reference_tables.generate_all, spark, cfg, dicts, dbutils)
     f_hr = executor.submit(hr.generate, spark, cfg, dicts, dbutils)
@@ -144,9 +144,10 @@ def spark_generate():
     f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
 
     # --- Tier 1: Depends on HR (_brokers) ---
+    # When HR finishes, launch CustomerMgmt AND a bulk copy in parallel
     def run_customer():
       f_hr.result()  # wait for _brokers
-      bulk_copy_all(dbutils, 64)  # copy Tier 0 files that are ready
+      executor.submit(bulk_copy_all, dbutils, 64)  # copy completed files (non-blocking)
       return customer.generate(spark, cfg, dicts, dbutils)
     f_cust = executor.submit(run_customer)
 
@@ -162,10 +163,11 @@ def spark_generate():
     f_wh = executor.submit(run_watch_history)
 
     # --- Tier 2: Depends on CustomerMgmt + FINWIRE ---
+    # When CustomerMgmt finishes, launch Trade AND a bulk copy in parallel
     def run_trade():
       f_cust.result()  # wait for _created_accounts, _closed_accounts
       f_fw.result()    # wait for _symbols (likely already done)
-      bulk_copy_all(dbutils, 64)  # copy Tier 1 files that are ready
+      executor.submit(bulk_copy_all, dbutils, 64)  # copy completed files (non-blocking)
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 
