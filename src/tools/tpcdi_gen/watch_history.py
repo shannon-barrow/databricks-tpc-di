@@ -411,33 +411,16 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("w_dts", F.date_format(F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
     )
 
-    # === Step 6: ACTV output + CNCL generation via count → sample → union ===
-    # The deduped DataFrame becomes our ACTV set. We need the exact count to compute
-    # the CNCL target (wh_total - n_actv). At SF>1000 without caching, this means
-    # the dedup re-evaluates for count, ACTV write, and CNCL sample — 3 shuffles total.
-    # But this is simpler and faster than array/struct/explode approaches which add
-    # per-row overhead on 900M+ rows.
+    # === Step 6: ACTV + CNCL generation — no .count() needed ===
+    # The CNCL fraction is derived from WH_ACTIVE_PCT (80/20 split). For every
+    # ACTV row, we want ~0.25 CNCL rows. We don't need the exact post-dedup count
+    # because sample(fraction) + the union produces approximately the right ratio.
+    # The dedup result is deterministic per SF, so the output is reproducible.
     actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
-
-    # Cache at SF<=1000 to avoid 3x dedup re-evaluation
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-    _use_cache = not _is_serverless and cfg.sf <= 10000
-    if _use_cache:
-        actv_df = actv_df.cache()
-    n_actv = actv_df.count()
-    print(f"  [WatchHistory] {n_actv:,} ACTV pairs (after dedup)")
-
-    target_total = cfg.wh_total
-    target_cncl = target_total - n_actv
-    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
+    cncl_frac = (1.0 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT  # 0.25 for 80/20
 
     cncl_df = (actv_df
-        .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
-        .limit(target_cncl)
+        .sample(fraction=cncl_frac, seed=seed_for("WH", "cncl_sample"))
         .withColumn("w_action", F.lit("CNCL"))
         .withColumn("_cncl_offset",
             hash_key(F.monotonically_increasing_id(), seed_for("WH", "cncl_ts")) %
@@ -448,16 +431,16 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # === Step 7: Combine ACTV + CNCL and write ===
+    # No caching needed — actv_df is now evaluated only 2x (ACTV write + CNCL sample)
+    # instead of 3x (the .count() was the third evaluation).
+    target_total = cfg.wh_total
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total, avg_row_bytes=45)
 
-    if _use_cache:
-        actv_df.unpersist()
-
-    print(f"  [WatchHistory] Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
+    print(f"  [WatchHistory] Batch1: ~{target_total:,} rows (ACTV + ~25% CNCL)")
     return {("WatchHistory", 1): target_total}
 
 
