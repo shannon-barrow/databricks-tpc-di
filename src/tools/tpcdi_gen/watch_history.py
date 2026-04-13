@@ -86,6 +86,7 @@ cdc_dsn) for downstream incremental processing.
 import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
+from pyspark import StorageLevel
 from .config import *
 from .utils import write_file, seed_for, hash_key
 
@@ -412,19 +413,20 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("_actv_idx", F.monotonically_increasing_id())
         .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
 
-    # Cache actv_df if not on serverless — it's evaluated 3 times (count, ACTV write,
-    # CNCL sampling). Without caching, each evaluation re-triggers the full dedup shuffle
-    # over 1.2B+ rows. At SF=5000 this was causing 16+ minute stalls and driver death.
+    # Persist actv_df to DISK_ONLY — it's evaluated 3 times (count, ACTV write,
+    # CNCL sampling). Without persistence, each evaluation re-triggers the full dedup
+    # shuffle over 1.2B+ rows. We use DISK_ONLY instead of MEMORY because WatchHistory
+    # runs concurrently with Trade (which caches trade_df in memory). At SF=5000,
+    # both caches in memory (~97GB trade + ~54GB WH) exceeded the 186GB machine limit.
+    # DISK_ONLY spills to local SSD — still avoids 3x shuffle re-evaluation.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
     if not _is_serverless:
-        actv_df = actv_df.cache()
-        n_actv = actv_df.count()  # materializes cache + gives exact count
-    else:
-        n_actv = actv_df.count()
+        actv_df = actv_df.persist(StorageLevel.DISK_ONLY)
+    n_actv = actv_df.count()  # materializes persistence + gives exact count
     print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
 
     # === Step 6: Generate CNCL records to hit target total ===
