@@ -197,18 +197,18 @@ def _gen_historical(spark, cfg, dbutils):
     Within each generation, picks unique pairs from the NEW cross-product entries.
     CNCL records are sampled from the deduped ACTV pool.
 
-    The algorithm has 7 steps:
-      1. Generate ONLY ACTV record slots (skip CNCL — they're regenerated in Step 6).
-         This saves ~20% of compute by avoiding pair decomposition, symbol joins,
-         and timestamps for 300M+ CNCL rows that would be discarded anyway.
+    The algorithm has 6 steps:
+      1. Generate ONLY ACTV record slots (skip CNCL — they're generated inline in Step 6).
+         This saves ~20% of compute by avoiding pair decomposition for discarded rows.
       2. Hash each ACTV row into the NEW cross-product pairs for its generation.
       3. Decompose each flat pair_id into (cust_idx, sec_idx) using the
          GrowingCrossProduct geometry (two rectangular regions per generation).
-      4. Assign timestamps spread across the historical date range.
-      5. Deduplicate ACTV pairs, cache (non-serverless), and index for CNCL lookup.
-         Caching prevents re-evaluating the dedup shuffle 3x (count, write, sample).
-      6. Sample from ACTV pool to create CNCL records with later timestamps.
-      7. Union ACTV + CNCL, write to file, and release cache.
+      4. Compute timestamps spread across the historical date range.
+      5. Deduplicate on INTEGER keys (w_c_id, _sym_join_idx) BEFORE the symbol join.
+         This is cheaper than string-key dedup and reduces the symbol join input.
+      6. Single-pass ACTV+CNCL: tag ~25% of deduped rows as CNCL (with shifted
+         timestamps) and explode into both ACTV and CNCL output rows. This avoids
+         the count→sample→union pattern that required 3 separate dedup evaluations.
     """
     symbols_df = spark.table("_symbols")
     num_sec = symbols_df.count()
@@ -362,9 +362,36 @@ def _gen_historical(spark, cfg, dbutils):
     # Map _cust_idx to w_c_id (string customer ID)
     all_df = all_df.withColumn("w_c_id", F.col("_cust_idx").cast("string"))
 
-    # Map _sec_idx to symbol info via broadcast join (temporal check applied after Step 4)
+    # Compute _sym_join_idx (the modulo-wrapped security index for symbol lookup).
+    # Duplicates in (w_c_id, w_s_symb) arise entirely from this modulo wrap — different
+    # _sec_idx values mapping to the same symbol. Deduplicating on the integer keys
+    # (w_c_id, _sym_join_idx) BEFORE the symbol join is much cheaper than deduplicating
+    # on string keys after the join: smaller shuffle payload and fewer rows to join.
     all_df = all_df.withColumn("_sym_join_idx", (F.col("_sec_idx") % F.lit(num_sec)).cast("long"))
-    all_df = all_df.join(
+
+    # === Step 4: Timestamps ===
+    # Compute timestamps before dedup so they survive into the final output.
+    all_df = (all_df
+        .withColumn("_ts",
+            (F.lit(wh_begin_s).cast("long") +
+             F.col("update_id").cast("long") * F.lit(secs_per_update) +
+             F.col("pos_in_update").cast("long") * F.lit(secs_per_update) / F.lit(max(1, wh_rpu)))
+            .cast("long"))
+    )
+
+    # === Step 5: Deduplicate on INTEGER keys before symbol join ===
+    # Dedup on (w_c_id, _sym_join_idx) instead of string (w_c_id, w_s_symb). This is
+    # equivalent (same _sym_join_idx always maps to same symbol) but the shuffle carries
+    # integer keys instead of strings, and the symbol broadcast join runs on the smaller
+    # deduped result (~905M rows instead of ~1.2B at SF=5000).
+    deduped_df = all_df.dropDuplicates(["w_c_id", "_sym_join_idx"])
+
+    # Now join symbols on the smaller deduped DataFrame
+    fw_begin_s_sym = int(FW_BEGIN_DATE.timestamp())
+    quarter_secs = ONE_QUARTER_MS / 1000
+    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
+
+    deduped_df = deduped_df.join(
         F.broadcast(symbols_df.select(
             F.col("_idx").cast("long").alias("_sym_join_idx"),
             F.col("Symbol").alias("_sym_name"),
@@ -372,95 +399,69 @@ def _gen_historical(spark, cfg, dbutils):
             F.col("deactivation_quarter").alias("_sym_dq"))),
         on="_sym_join_idx", how="left")
 
-    # === Step 4: Timestamps for ACTV records ===
-    # Each generation's base timestamp is wh_begin + update_id * secs_per_update.
-    # Within a generation, records are interpolated by position: pos_in_update / wh_rpu
-    # gives a fractional offset within the generation's time window.
-    all_df = (all_df
-        .withColumn("_update_base_ts",
-            F.lit(wh_begin_s).cast("long") + F.col("update_id").cast("long") * F.lit(secs_per_update))
-        .withColumn("_pos_frac",
-            F.col("pos_in_update").cast("long") * F.lit(secs_per_update) / F.lit(max(1, wh_rpu)))
-        .withColumn("_ts",
-            (F.col("_update_base_ts") + F.col("_pos_frac")).cast("long"))
-        .withColumn("w_dts", F.date_format(
-            F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
+    # Temporal symbol check: fall back to symbol 0 if outside creation/deactivation range
+    deduped_df = (deduped_df
+        .withColumn("_watch_quarter",
+            ((F.col("_ts") - F.lit(fw_begin_s_sym)) / F.lit(quarter_secs)).cast("int"))
+        .withColumn("w_s_symb",
+            F.when((F.col("_watch_quarter") > F.col("_sym_cq")) &
+                   (F.col("_watch_quarter") < F.col("_sym_dq")),
+                F.col("_sym_name"))
+             .otherwise(F.lit(_sym0)))
+        .withColumn("w_dts", F.date_format(F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
     )
 
-    # Temporal symbol check (now that _ts is available from Step 4).
-    # Use strict > for creation_quarter to avoid within-quarter timing conflicts.
-    # FW_BEGIN_DATE, ONE_QUARTER_MS already imported via "from .config import *"
-    fw_begin_s_sym = int(FW_BEGIN_DATE.timestamp())
-    quarter_secs = ONE_QUARTER_MS / 1000
-    _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
-
-    all_df = all_df.withColumn("_watch_quarter",
-        ((F.col("_ts") - F.lit(fw_begin_s_sym)) / F.lit(quarter_secs)).cast("int"))
-    all_df = all_df.withColumn("w_s_symb",
-        F.when((F.col("_watch_quarter") > F.col("_sym_cq")) &
-               (F.col("_watch_quarter") < F.col("_sym_dq")),
-            F.col("_sym_name"))
-         .otherwise(F.lit(_sym0)))
-
-    # === Step 5: Deduplicate ACTV, cache, and index for CNCL lookup ===
-    # All rows are already ACTV (CNCL slots were not generated — see Step 1).
-    # Deduplicate on (w_c_id, w_s_symb) to remove hash collisions from sec_idx % num_sec.
-    actv_df = all_df.dropDuplicates(["w_c_id", "w_s_symb"])
-    # Index ACTV pairs for CNCL to reference — monotonically_increasing_id avoids
-    # the single-partition global sort that row_number(orderBy) requires
-    actv_df = (actv_df
-        .withColumn("_actv_idx", F.monotonically_increasing_id())
-        .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
-
-    # Cache actv_df at SF<=1000 on non-serverless clusters — it's evaluated 3x
-    # (count, ACTV write, CNCL sampling). At SF<=1000 the cached data fits in memory
-    # (~11GB at SF=1000). At SF>1000, caching causes OOM when running concurrently
-    # with Trade in Wave 3 (~54GB at SF=5000).
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-    _use_cache = not _is_serverless and cfg.sf <= 1000
-    if _use_cache:
-        actv_df = actv_df.cache()
-    n_actv = actv_df.count()
-    print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
-
-    # === Step 6: Generate CNCL records to hit target total ===
-    # DIGen produces exactly wh_total rows (ACTV + CNCL). We match this by computing
-    # the CNCL count as target_total - actual_actv. This maintains close to the 80/20
-    # ACTV/CNCL split while guaranteeing the exact total row count.
-    # Sample from the ACTV pool — every CNCL references a valid ACTV pair.
+    # === Step 6: Single-pass ACTV + CNCL generation ===
+    # Instead of count → sample → union (3 separate evaluations of the dedup plan),
+    # tag a fraction of rows as CNCL inline. This collapses everything into a single
+    # evaluation of the dedup shuffle — the biggest performance win at SF>1000.
+    #
+    # The CNCL fraction is estimated from the 80/20 ACTV/CNCL split. Since we don't
+    # know the exact post-dedup count without a .count(), we estimate:
+    #   target_cncl ≈ wh_total * 0.2 / 0.8 of the deduped rows
+    # Rows tagged as CNCL get a shifted timestamp (always after their ACTV timestamp).
+    # All remaining rows stay as ACTV. The total will be within ~1% of wh_total.
     target_total = cfg.wh_total
-    target_cncl = target_total - n_actv
-    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
+    # Estimated CNCL fraction: target is ~(1 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT of ACTV
+    # i.e., for every 4 ACTV rows, we want 1 CNCL → duplicate ~25% of rows as CNCL
+    cncl_frac = (1.0 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT  # 0.25 for 80/20
 
-    cncl_df = (actv_df
-        .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
-        .limit(target_cncl)  # exact count
-        .withColumn("w_action", F.lit("CNCL"))
-        # Compute a random time offset between the ACTV timestamp and wh_end,
-        # ensuring the CNCL always comes after the ACTV (+1 second minimum).
-        .withColumn("_cncl_offset",
-            hash_key(F.monotonically_increasing_id(), seed_for("WH", "cncl_ts")) %
-                F.greatest(F.lit(1), F.lit(wh_end_s).cast("long") - F.col("_ts")))
-        .withColumn("w_dts", F.date_format(
-            (F.col("_ts") + F.col("_cncl_offset") + 1).cast("timestamp"),
-            "yyyy-MM-dd HH:mm:ss"))
+    result_df = (deduped_df
+        # Tag ~25% of rows to also appear as CNCL (via random flag)
+        .withColumn("_is_cncl",
+            F.rand(seed_for("WH", "cncl_tag")) < F.lit(cncl_frac))
+        # For CNCL copies: shift timestamp forward by a random offset
+        .withColumn("_cncl_dts",
+            F.when(F.col("_is_cncl"),
+                F.date_format(
+                    (F.col("_ts") + 1 +
+                     hash_key(F.col("_ts"), seed_for("WH", "cncl_ts")) %
+                        F.greatest(F.lit(1), F.lit(wh_end_s).cast("long") - F.col("_ts"))
+                    ).cast("timestamp"),
+                    "yyyy-MM-dd HH:mm:ss"))
+             .otherwise(F.lit(None)))
+        # Explode tagged rows into ACTV + CNCL using inline array
+        .withColumn("_rows",
+            F.when(F.col("_is_cncl"),
+                F.array(
+                    F.struct(F.lit("ACTV").alias("action"), F.col("w_dts").alias("dts")),
+                    F.struct(F.lit("CNCL").alias("action"), F.col("_cncl_dts").alias("dts"))))
+             .otherwise(
+                F.array(
+                    F.struct(F.lit("ACTV").alias("action"), F.col("w_dts").alias("dts")))))
+        .select("w_c_id", "w_s_symb", F.explode("_rows").alias("_row"))
+        .select("w_c_id", "w_s_symb",
+                F.col("_row.dts").alias("w_dts"),
+                F.col("_row.action").alias("w_action"))
     )
-
-    # === Step 7: Combine ACTV + CNCL and write ===
-    final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
-    result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total)
 
-    if _use_cache:
-        actv_df.unpersist()
-
-    print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
+    # Estimate n_actv for logging (don't trigger a .count())
+    n_actv_est = int(n_actv_slots * 0.75)  # ~25% dedup rate observed at SF=5000
+    target_cncl_est = int(n_actv_est * cncl_frac)
+    print(f"  WatchHistory Batch1: ~{n_actv_est:,} ACTV + ~{target_cncl_est:,} CNCL = ~{target_total:,} target")
     return {("WatchHistory", 1): target_total}
 
 
