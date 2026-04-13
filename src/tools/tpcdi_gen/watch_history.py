@@ -411,16 +411,18 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("w_dts", F.date_format(F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
     )
 
-    # === Step 6: ACTV + CNCL generation — no .count() needed ===
-    # The CNCL fraction is derived from WH_ACTIVE_PCT (80/20 split). For every
-    # ACTV row, we want ~0.25 CNCL rows. We don't need the exact post-dedup count
-    # because sample(fraction) + the union produces approximately the right ratio.
-    # The dedup result is deterministic per SF, so the output is reproducible.
+    # === Step 6: ACTV + CNCL generation using known/estimated ACTV count ===
+    # The post-dedup ACTV count is deterministic per SF and stored in cfg.wh_actv_count
+    # (hardcoded for standard SFs, estimated for others). No .count() needed.
     actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
-    cncl_frac = (1.0 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT  # 0.25 for 80/20
+    n_actv = cfg.wh_actv_count
+    target_total = cfg.wh_total
+    target_cncl = target_total - n_actv
+    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
 
     cncl_df = (actv_df
-        .sample(fraction=cncl_frac, seed=seed_for("WH", "cncl_sample"))
+        .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
+        .limit(target_cncl)
         .withColumn("w_action", F.lit("CNCL"))
         .withColumn("_cncl_offset",
             hash_key(F.monotonically_increasing_id(), seed_for("WH", "cncl_ts")) %
@@ -431,16 +433,14 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # === Step 7: Combine ACTV + CNCL and write ===
-    # No caching needed — actv_df is now evaluated only 2x (ACTV write + CNCL sample)
-    # instead of 3x (the .count() was the third evaluation).
-    target_total = cfg.wh_total
+    # No caching needed — actv_df evaluates 2x (ACTV write + CNCL sample).
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total, avg_row_bytes=45)
 
-    print(f"  [WatchHistory] Batch1: ~{target_total:,} rows (ACTV + ~25% CNCL)")
+    print(f"  [WatchHistory] Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}
 
 
