@@ -401,38 +401,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Materialize trade_df to avoid 4x plan re-evaluation (Trade, TradeHistory,
-    # CashTransaction, HoldingHistory each re-evaluate the full plan).
-    # Strategy:
-    #   SF<=1000: cache in memory (~19GB, fits comfortably)
-    #   SF>1000:  checkpoint to LOCAL SSD as compressed Parquet, then read back.
-    #             Local NVMe (/local_disk0/) avoids the FUSE/cloud page cache bloat
-    #             that caused OOM when checkpointing to Volumes. Compressed Parquet
-    #             is ~30-40GB vs ~100GB raw. Each of 4 readers only scans needed cols.
-    #   Serverless: no materialization (no local disk), accept re-evaluation.
+    # Materialize trade_df at SF<=1000 to avoid 4x plan re-evaluation.
+    # At SF>1000, all materialization approaches (cache, Parquet checkpoint, Delta
+    # table) cause OOM or page cache pressure on 186GB machines. Pure re-evaluation
+    # is slower (4x plan eval) but memory-safe and proven at SF=20000.
     try:
         _is_serverless = "serverless" in spark.conf.get(
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
-
-    # Materialize trade_df once so the 4 output writers don't each re-evaluate
-    # the full plan (spark.range → hash → 3 joins → timestamps → status).
-    #   SF<=1000: cache in memory (~19GB, fits comfortably)
-    #   SF>1000:  write as temp Delta table. Databricks Delta cache automatically
-    #             caches the Parquet files on local SSD. Subsequent reads are
-    #             columnar — each writer only reads the columns it needs.
-    #             Drop the table after all writers finish.
-    #   Serverless: accept re-evaluation (Delta cache still helps with reads).
-    _trade_delta_table = None
     if not _is_serverless and cfg.sf <= 1000:
         trade_df = trade_df.cache()
         trade_df.count()
-    elif cfg.sf > 1000:
-        _trade_delta_table = f"{cfg.catalog}.tpcdi_raw_data._trade_tmp_{cfg.sf}"
-        trade_df.write.format("delta").mode("overwrite").saveAsTable(_trade_delta_table)
-        trade_df = spark.table(_trade_delta_table)
-        print(f"  [Trade] Materialized to temp Delta table ({_trade_delta_table})")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -596,8 +576,6 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     # Cleanup materialization
     if not _is_serverless and cfg.sf <= 1000:
         trade_df.unpersist()
-    if _trade_delta_table:
-        spark.sql(f"DROP TABLE IF EXISTS {_trade_delta_table}")
 
     print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
