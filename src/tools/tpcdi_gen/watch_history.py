@@ -412,10 +412,18 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("_actv_idx", F.monotonically_increasing_id())
         .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
 
-    # No caching/persistence — actv_df is re-evaluated for count, ACTV write, and
-    # CNCL sampling. While this means 3x dedup shuffle re-evaluation, it avoids the
-    # memory overhead that caused OOM at SF=5000+ (even DISK_ONLY serialization
-    # consumed too much memory when running concurrently with Trade in Wave 3).
+    # Cache actv_df at SF<=1000 on non-serverless clusters — it's evaluated 3x
+    # (count, ACTV write, CNCL sampling). At SF<=1000 the cached data fits in memory
+    # (~11GB at SF=1000). At SF>1000, caching causes OOM when running concurrently
+    # with Trade in Wave 3 (~54GB at SF=5000).
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    _use_cache = not _is_serverless and cfg.sf <= 1000
+    if _use_cache:
+        actv_df = actv_df.cache()
     n_actv = actv_df.count()
     print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
 
@@ -448,6 +456,9 @@ def _gen_historical(spark, cfg, dbutils):
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total)
+
+    if _use_cache:
+        actv_df.unpersist()
 
     print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}

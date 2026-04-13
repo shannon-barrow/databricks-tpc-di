@@ -401,11 +401,19 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # No caching/persistence — trade_df is re-evaluated for each of the 4 output
-    # tables (Trade, TradeHistory, CashTransaction, HoldingHistory). While this means
-    # 4x plan re-evaluation, it avoids the memory overhead of persistence which caused
-    # OOM at SF=5000+ (even DISK_ONLY requires serialization memory). This approach
-    # successfully generated SF=20000 on a 186GB single-node cluster.
+    # Cache trade_df at SF<=1000 on non-serverless clusters — it's evaluated 4x
+    # (Trade, TradeHistory, CashTransaction, HoldingHistory). At SF<=1000 the cached
+    # data fits comfortably in memory (~19GB at SF=1000). At SF>1000, caching causes
+    # OOM when running concurrently with WatchHistory in Wave 3 (~97GB at SF=5000).
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    _use_cache = not _is_serverless and cfg.sf <= 1000
+    if _use_cache:
+        trade_df = trade_df.cache()
+        trade_df.count()
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -566,6 +574,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
+    if _use_cache:
+        trade_df.unpersist()
 
     print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
