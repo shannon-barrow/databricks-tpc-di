@@ -284,7 +284,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # Batch 1: full historical load (all prospect_total rows)
     counts = {}
     write_file(final, f"{cfg.batch_path(1)}/Prospect.csv", ",", dbutils,
-               scale_factor=cfg.sf, estimated_rows=prospect_total)
+               scale_factor=cfg.sf, estimated_rows=prospect_total, avg_row_bytes=200)
     counts[("Prospect", 1)] = prospect_total
 
     # --- Churn model for incremental batches ---

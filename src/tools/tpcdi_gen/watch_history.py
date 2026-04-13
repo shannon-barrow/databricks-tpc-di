@@ -197,8 +197,8 @@ def _gen_historical(spark, cfg, dbutils):
     Within each generation, picks unique pairs from the NEW cross-product entries.
     CNCL records are sampled from the deduped ACTV pool.
 
-    The algorithm has 6 steps:
-      1. Generate ONLY ACTV record slots (skip CNCL — they're generated inline in Step 6).
+    The algorithm has 7 steps:
+      1. Generate ONLY ACTV record slots (skip CNCL — they're sampled in Step 6).
          This saves ~20% of compute by avoiding pair decomposition for discarded rows.
       2. Hash each ACTV row into the NEW cross-product pairs for its generation.
       3. Decompose each flat pair_id into (cust_idx, sec_idx) using the
@@ -206,9 +206,9 @@ def _gen_historical(spark, cfg, dbutils):
       4. Compute timestamps spread across the historical date range.
       5. Deduplicate on INTEGER keys (w_c_id, _sym_join_idx) BEFORE the symbol join.
          This is cheaper than string-key dedup and reduces the symbol join input.
-      6. Single-pass ACTV+CNCL: tag ~25% of deduped rows as CNCL (with shifted
-         timestamps) and explode into both ACTV and CNCL output rows. This avoids
-         the count→sample→union pattern that required 3 separate dedup evaluations.
+      6. Join symbols on the smaller deduped result, count ACTV, sample CNCL records
+         with shifted timestamps from the ACTV pool.
+      7. Union ACTV + CNCL and write to file.
     """
     symbols_df = spark.table("_symbols")
     num_sec = symbols_df.count()
@@ -411,57 +411,53 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("w_dts", F.date_format(F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
     )
 
-    # === Step 6: Single-pass ACTV + CNCL generation ===
-    # Instead of count → sample → union (3 separate evaluations of the dedup plan),
-    # tag a fraction of rows as CNCL inline. This collapses everything into a single
-    # evaluation of the dedup shuffle — the biggest performance win at SF>1000.
-    #
-    # The CNCL fraction is estimated from the 80/20 ACTV/CNCL split. Since we don't
-    # know the exact post-dedup count without a .count(), we estimate:
-    #   target_cncl ≈ wh_total * 0.2 / 0.8 of the deduped rows
-    # Rows tagged as CNCL get a shifted timestamp (always after their ACTV timestamp).
-    # All remaining rows stay as ACTV. The total will be within ~1% of wh_total.
-    target_total = cfg.wh_total
-    # Estimated CNCL fraction: target is ~(1 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT of ACTV
-    # i.e., for every 4 ACTV rows, we want 1 CNCL → duplicate ~25% of rows as CNCL
-    cncl_frac = (1.0 - WH_ACTIVE_PCT) / WH_ACTIVE_PCT  # 0.25 for 80/20
+    # === Step 6: ACTV output + CNCL generation via count → sample → union ===
+    # The deduped DataFrame becomes our ACTV set. We need the exact count to compute
+    # the CNCL target (wh_total - n_actv). At SF>1000 without caching, this means
+    # the dedup re-evaluates for count, ACTV write, and CNCL sample — 3 shuffles total.
+    # But this is simpler and faster than array/struct/explode approaches which add
+    # per-row overhead on 900M+ rows.
+    actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
 
-    result_df = (deduped_df
-        # Tag ~25% of rows to also appear as CNCL (via random flag)
-        .withColumn("_is_cncl",
-            F.rand(seed_for("WH", "cncl_tag")) < F.lit(cncl_frac))
-        # For CNCL copies: shift timestamp forward by a random offset
-        .withColumn("_cncl_dts",
-            F.when(F.col("_is_cncl"),
-                F.date_format(
-                    (F.col("_ts") + 1 +
-                     hash_key(F.col("_ts"), seed_for("WH", "cncl_ts")) %
-                        F.greatest(F.lit(1), F.lit(wh_end_s).cast("long") - F.col("_ts"))
-                    ).cast("timestamp"),
-                    "yyyy-MM-dd HH:mm:ss"))
-             .otherwise(F.lit(None)))
-        # Explode tagged rows into ACTV + CNCL using inline array
-        .withColumn("_rows",
-            F.when(F.col("_is_cncl"),
-                F.array(
-                    F.struct(F.lit("ACTV").alias("action"), F.col("w_dts").alias("dts")),
-                    F.struct(F.lit("CNCL").alias("action"), F.col("_cncl_dts").alias("dts"))))
-             .otherwise(
-                F.array(
-                    F.struct(F.lit("ACTV").alias("action"), F.col("w_dts").alias("dts")))))
-        .select("w_c_id", "w_s_symb", F.explode("_rows").alias("_row"))
-        .select("w_c_id", "w_s_symb",
-                F.col("_row.dts").alias("w_dts"),
-                F.col("_row.action").alias("w_action"))
+    # Cache at SF<=1000 to avoid 3x dedup re-evaluation
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    _use_cache = not _is_serverless and cfg.sf <= 1000
+    if _use_cache:
+        actv_df = actv_df.cache()
+    n_actv = actv_df.count()
+    print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
+
+    target_total = cfg.wh_total
+    target_cncl = target_total - n_actv
+    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
+
+    cncl_df = (actv_df
+        .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
+        .limit(target_cncl)
+        .withColumn("w_action", F.lit("CNCL"))
+        .withColumn("_cncl_offset",
+            hash_key(F.monotonically_increasing_id(), seed_for("WH", "cncl_ts")) %
+                F.greatest(F.lit(1), F.lit(wh_end_s).cast("long") - F.col("_ts")))
+        .withColumn("w_dts", F.date_format(
+            (F.col("_ts") + F.col("_cncl_offset") + 1).cast("timestamp"),
+            "yyyy-MM-dd HH:mm:ss"))
     )
 
-    write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
-               scale_factor=cfg.sf, estimated_rows=target_total)
+    # === Step 7: Combine ACTV + CNCL and write ===
+    final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
+    result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
-    # Estimate n_actv for logging (don't trigger a .count())
-    n_actv_est = int(n_actv_slots * 0.75)  # ~25% dedup rate observed at SF=5000
-    target_cncl_est = int(n_actv_est * cncl_frac)
-    print(f"  WatchHistory Batch1: ~{n_actv_est:,} ACTV + ~{target_cncl_est:,} CNCL = ~{target_total:,} target")
+    write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
+               scale_factor=cfg.sf, estimated_rows=target_total, avg_row_bytes=45)
+
+    if _use_cache:
+        actv_df.unpersist()
+
+    print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}
 
 
