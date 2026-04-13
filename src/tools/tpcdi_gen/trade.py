@@ -423,10 +423,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         trade_df = trade_df.cache()
         trade_df.count()
     else:
-        _trade_local_path = "file:/local_disk0/tmp/trade_checkpoint"
+        # Checkpoint to local NVMe SSD. Use /local_disk0/ directly (not file: URI)
+        # and ensure the directory exists. Disable file source caching to prevent
+        # Spark from returning stale metadata for the freshly-written files.
+        import os
+        _trade_local_dir = "/local_disk0/tmp/tpcdi_trade_ckpt"
+        _trade_local_path = f"file:{_trade_local_dir}"
+        os.makedirs(_trade_local_dir, exist_ok=True)
+        spark.conf.set("spark.sql.hive.manageFilesourcePartitions", "false")
         trade_df.write.mode("overwrite").parquet(_trade_local_path)
+        spark.catalog.refreshByPath(_trade_local_path)
         trade_df = spark.read.parquet(_trade_local_path)
-        print(f"  [Trade] Checkpointed to local SSD")
+        print(f"  [Trade] Checkpointed to local SSD ({_trade_local_dir})")
 
     # === Write all 4 output tables ===
     def write_trade():
