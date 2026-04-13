@@ -116,7 +116,6 @@ import concurrent.futures
 import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
-from pyspark import StorageLevel
 from .config import *
 from .utils import write_file, seed_for, hash_key, dict_join
 
@@ -402,20 +401,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
             "ABCDEFGHIJKabcde"))
 
 
-    # Persist trade_df to DISK_ONLY if not on serverless — it's evaluated 4+ times
-    # (Trade, TradeHistory, CashTransaction, HoldingHistory). Persistence avoids
-    # re-evaluating the entire plan. We use DISK_ONLY instead of MEMORY because
-    # trade_df runs concurrently with WatchHistory in Wave 3; at SF=5000+ both
-    # caches in memory exceed physical RAM. SSD persistence avoids re-evaluation
-    # without competing for heap memory.
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-    if not _is_serverless:
-        trade_df = trade_df.persist(StorageLevel.DISK_ONLY)
-        trade_df.count()  # materialize the persistence
+    # No caching/persistence — trade_df is re-evaluated for each of the 4 output
+    # tables (Trade, TradeHistory, CashTransaction, HoldingHistory). While this means
+    # 4x plan re-evaluation, it avoids the memory overhead of persistence which caused
+    # OOM at SF=5000+ (even DISK_ONLY requires serialization memory). This approach
+    # successfully generated SF=20000 on a 186GB single-node cluster.
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -576,10 +566,6 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
         for f in futures:
             counts.update(f.result())
 
-
-    # Release cache if we used it
-    if not _is_serverless:
-        trade_df.unpersist()
 
     print(f"  Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")

@@ -86,7 +86,6 @@ cdc_dsn) for downstream incremental processing.
 import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
-from pyspark import StorageLevel
 from .config import *
 from .utils import write_file, seed_for, hash_key
 
@@ -413,20 +412,11 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("_actv_idx", F.monotonically_increasing_id())
         .select("w_c_id", "w_s_symb", "w_dts", "w_action", "_ts", "_actv_idx"))
 
-    # Persist actv_df to DISK_ONLY — it's evaluated 3 times (count, ACTV write,
-    # CNCL sampling). Without persistence, each evaluation re-triggers the full dedup
-    # shuffle over 1.2B+ rows. We use DISK_ONLY instead of MEMORY because WatchHistory
-    # runs concurrently with Trade (which caches trade_df in memory). At SF=5000,
-    # both caches in memory (~97GB trade + ~54GB WH) exceeded the 186GB machine limit.
-    # DISK_ONLY spills to local SSD — still avoids 3x shuffle re-evaluation.
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-    if not _is_serverless:
-        actv_df = actv_df.persist(StorageLevel.DISK_ONLY)
-    n_actv = actv_df.count()  # materializes persistence + gives exact count
+    # No caching/persistence — actv_df is re-evaluated for count, ACTV write, and
+    # CNCL sampling. While this means 3x dedup shuffle re-evaluation, it avoids the
+    # memory overhead that caused OOM at SF=5000+ (even DISK_ONLY serialization
+    # consumed too much memory when running concurrently with Trade in Wave 3).
+    n_actv = actv_df.count()
     print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
 
     # === Step 6: Generate CNCL records to hit target total ===
@@ -458,10 +448,6 @@ def _gen_historical(spark, cfg, dbutils):
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total)
-
-    # Release cache after write completes
-    if not _is_serverless:
-        actv_df.unpersist()
 
     print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}
