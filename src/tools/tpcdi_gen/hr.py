@@ -138,5 +138,5 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     brokers.createOrReplaceTempView("_brokers")
     broker_count = brokers.count()
 
-    print(f"  HR: {cfg.hr_rows} rows ({broker_count} brokers -> _brokers view)")
+    print(f"  [HR] {cfg.hr_rows} rows ({broker_count} brokers -> _brokers view)")
     return {"counts": {("HR", 1): cfg.hr_rows, ("HR_BROKERS", 1): broker_count}}

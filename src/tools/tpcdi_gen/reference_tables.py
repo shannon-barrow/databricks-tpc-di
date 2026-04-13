@@ -77,9 +77,9 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                 content = f.read()
             dbutils.fs.put(dst, content, overwrite=True)
             counts[(filename.replace(".txt", ""), 1)] = row_count
-            print(f"  {filename}: {row_count} rows (copied)")
+            print(f"  [Reference] {filename}: {row_count} rows (copied)")
         except Exception as e:
-            print(f"  WARNING: failed to copy {filename}: {e}")
+            print(f"  [Reference] WARNING: failed to copy {filename}: {e}")
 
     # --- BatchDate: one row per batch with the batch date ---
     # Each batch directory gets a BatchDate.txt containing a single date string.
@@ -94,5 +94,5 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             write_text(bd + "\n", f"{cfg.batch_path(batch_id)}/BatchDate.txt", dbutils)
             counts[("BatchDate", batch_id)] = 1
 
-    print(f"  BatchDate: {NUM_INCREMENTAL_BATCHES + 1} batches")
+    print(f"  [Reference] BatchDate: {NUM_INCREMENTAL_BATCHES + 1} batches")
     return counts

@@ -250,11 +250,11 @@ def _gen_historical(spark, cfg, dbutils):
         new_cp = total_cp - prev_cp
         gen_info.append((g, ls, rs, prev_ls, prev_rs, prev_cp, total_cp, new_cp))
 
-    print(f"  WatchHistory: start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}")
-    print(f"  Per update: {new_pu} ACTV + {del_pu} CNCL = {wh_rpu}, total={wh_total_hist}")
+    print(f"  [WatchHistory] start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}")
+    print(f"  [WatchHistory] Per update: {new_pu} ACTV + {del_pu} CNCL = {wh_rpu}, total={wh_total_hist}")
     total_left = sl + gl * max_gen
     total_right = sr + gr * max_gen
-    print(f"  Final dimensions: {total_left} custs x {total_right} secs = {total_left * total_right} total CP space")
+    print(f"  [WatchHistory] Final dimensions: {total_left} custs x {total_right} secs = {total_left * total_right} total CP space")
 
     # Timestamp range: spread evenly across WH_BEGIN_DATE to WH_END_DATE.
     # Each generation gets a secs_per_update-wide time window, and records within
@@ -429,7 +429,7 @@ def _gen_historical(spark, cfg, dbutils):
     if _use_cache:
         actv_df = actv_df.cache()
     n_actv = actv_df.count()
-    print(f"  WatchHistory: {n_actv:,} ACTV pairs (after dedup)")
+    print(f"  [WatchHistory] {n_actv:,} ACTV pairs (after dedup)")
 
     target_total = cfg.wh_total
     target_cncl = target_total - n_actv
@@ -457,7 +457,7 @@ def _gen_historical(spark, cfg, dbutils):
     if _use_cache:
         actv_df.unpersist()
 
-    print(f"  WatchHistory Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
+    print(f"  [WatchHistory] Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}
 
 
@@ -541,5 +541,5 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
     write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-    print(f"  WatchHistory Batch{batch_id}: {inc_rows} rows ({new_pu} ACTV, {del_pu} CNCL)")
+    print(f"  [WatchHistory] Batch{batch_id}: {inc_rows} rows ({new_pu} ACTV, {del_pu} CNCL)")
     return {("WatchHistory", batch_id): inc_rows}

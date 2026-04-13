@@ -199,8 +199,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     hist_size = cm_final - update_last_id * rows_per_update
     total = hist_size + update_last_id * rows_per_update
 
-    print(f"  CustomerMgmt params: hist={hist_size}, updates=1..{update_last_id}, rows/update={rows_per_update}")
-    print(f"  Per update: NEW={new_custs}, ADDACCT={addaccts_per_update}, UPDACCT={change_accts}, "
+    print(f"  [CustomerMgmt] params: hist={hist_size}, updates=1..{update_last_id}, rows/update={rows_per_update}")
+    print(f"  [CustomerMgmt] Per update: NEW={new_custs}, ADDACCT={addaccts_per_update}, UPDACCT={change_accts}, "
           f"CLOSEACCT={del_accts}, UPDCUST={change_custs}, INACT={del_custs}")
 
     # Timestamp range: the entire CustomerMgmt timeline is divided into equal-width
@@ -763,7 +763,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
         .distinct())
     closed_accts.createOrReplaceTempView("_closed_accounts")
     n_closed = closed_accts.count()
-    print(f"  CustomerMgmt: {n_closed} closed accounts -> _closed_accounts view")
+    print(f"  [CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
 
     # === Create _created_accounts temp view ===
     # All CA_IDs that were actually created (by NEW or ADDACCT actions that survived
@@ -777,13 +777,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()
-    print(f"  CustomerMgmt: {n_created} created accounts -> _created_accounts view")
+    print(f"  [CustomerMgmt] {n_created} created accounts -> _created_accounts view")
 
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
     acct_owners.createOrReplaceTempView("_account_owners")
-    print(f"  CustomerMgmt: {n_created} account owners -> _account_owners view")
+    print(f"  [CustomerMgmt] {n_created} account owners -> _account_owners view")
 
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
@@ -803,7 +803,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     cust_dates = cust_new.join(cust_inact, on="cust_id", how="left")
     cust_dates.createOrReplaceTempView("_customer_dates")
     n_cust = cust_dates.count()
-    print(f"  CustomerMgmt: {n_cust} customers -> _customer_dates view")
+    print(f"  [CustomerMgmt] {n_cust} customers -> _customer_dates view")
 
     # === Write XML as compact text with per-partition header/footer ===
     # Uses the pre-built xml_body strings (compact, no indentation) and wraps
@@ -845,7 +845,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     total_new = hist_size + update_last_id * new_custs
     total_caids = hist_size + update_last_id * new_accts
     n_parts = len(part_files)
-    print(f"  CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
+    print(f"  [CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
     return {("CustomerMgmt", 1): total}
 
 
@@ -1124,10 +1124,10 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .select(F.col("ca_id"), F.col("ca_c_id").alias("owner_cid")))
         acct_owners.union(new_owners).createOrReplaceTempView("_account_owners")
 
-        print(f"  Batch{batch_id}: {cust_per_update} customers ({n_cust_insert}I/{n_cust_update}U), "
+        print(f"  [CustomerMgmt] Batch{batch_id}: {cust_per_update} customers ({n_cust_insert}I/{n_cust_update}U), "
               f"{acct_per_update} accounts ({n_acct_insert}I/{n_acct_update}U)")
-        print(f"    Customer DSN: {cust_dsn_base + batch_offset * cust_per_update}-{cust_dsn_base + batch_offset * cust_per_update + cust_per_update - 1}")
-        print(f"    Account DSN: {acct_dsn_base + batch_offset * acct_per_update}-{acct_dsn_base + batch_offset * acct_per_update + acct_per_update - 1}")
+        print(f"  [CustomerMgmt]   Customer DSN: {cust_dsn_base + batch_offset * cust_per_update}-{cust_dsn_base + batch_offset * cust_per_update + cust_per_update - 1}")
+        print(f"  [CustomerMgmt]   Account DSN: {acct_dsn_base + batch_offset * acct_per_update}-{acct_dsn_base + batch_offset * acct_per_update + acct_per_update - 1}")
         counts[("Customer", batch_id)] = cust_per_update
         counts[("Account", batch_id)] = acct_per_update
 

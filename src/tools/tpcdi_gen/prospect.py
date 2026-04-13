@@ -89,7 +89,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # SCD2 records when the pipeline joins DimCustomer to Prospect.
     n_match = min(int(prospect_total * 0.306), n_hist_customers)
 
-    print(f"  Prospect: {prospect_total} rows, {n_match} matches ({n_match*100//prospect_total}%), {n_hist_customers} historical customers")
+    print(f"  [Prospect] {prospect_total} rows, {n_match} matches ({n_match*100//prospect_total}%), {n_hist_customers} historical customers")
 
     # =====================================================================
     # Build Prospect DataFrame
@@ -357,9 +357,9 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         batch_df = batch_base.union(new_prospects)
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
-        print(f"  Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)")
+        print(f"  [Prospect] Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)")
 
-    print(f"  Prospect: {prospect_total} rows, {n_match} matching customers ({n_match*100//prospect_total}%)")
+    print(f"  [Prospect] {prospect_total} rows, {n_match} matching customers ({n_match*100//prospect_total}%)")
     return counts
 
 

@@ -444,6 +444,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             register_copy(part_file[0].path, f"{cfg.batch_path(1)}/{fname}")
 
     total = cfg.cmp_total + cfg.sec_total + fin_count_approx
-    print(f"  FINWIRE: ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
-    print(f"  Active symbols: {sym_count} -> _symbols view")
+    print(f"  [FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
+    print(f"  [FINWIRE] Active symbols: {sym_count} -> _symbols view")
     return {"counts": {("FINWIRE", 1): total}}
