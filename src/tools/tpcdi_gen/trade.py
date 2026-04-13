@@ -419,22 +419,20 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     # Materialize trade_df once so the 4 output writers don't each re-evaluate
     # the full plan (spark.range → hash → 3 joins → timestamps → status).
     #   SF<=1000: cache in memory (~19GB, fits comfortably)
-    #   SF>1000 + local disk: Spark native checkpoint to local NVMe SSD.
-    #     checkpoint() evaluates the plan once, writes serialized partitions to
-    #     disk, and truncates the lineage. Subsequent actions read from disk.
-    #     Spark manages the file lifecycle internally (no file-not-found issues).
-    #   Serverless/shared (no local disk): accept 4x re-evaluation.
-    import os
-    _has_local_disk = os.path.isdir("/local_disk0/tmp")
-    _use_checkpoint = not _is_serverless and _has_local_disk and cfg.sf > 1000
-
-    if _use_checkpoint:
-        spark.sparkContext.setCheckpointDir("file:/local_disk0/tmp/tpcdi_spark_ckpt")
-        trade_df = trade_df.checkpoint()
-        print(f"  [Trade] Checkpointed to local SSD")
-    elif not _is_serverless and cfg.sf <= 1000:
+    #   SF>1000:  write as temp Delta table. Databricks Delta cache automatically
+    #             caches the Parquet files on local SSD. Subsequent reads are
+    #             columnar — each writer only reads the columns it needs.
+    #             Drop the table after all writers finish.
+    #   Serverless: accept re-evaluation (Delta cache still helps with reads).
+    _trade_delta_table = None
+    if not _is_serverless and cfg.sf <= 1000:
         trade_df = trade_df.cache()
         trade_df.count()
+    elif cfg.sf > 1000:
+        _trade_delta_table = f"{cfg.catalog}.tpcdi_raw_data._trade_tmp_{cfg.sf}"
+        trade_df.write.format("delta").mode("overwrite").saveAsTable(_trade_delta_table)
+        trade_df = spark.table(_trade_delta_table)
+        print(f"  [Trade] Materialized to temp Delta table ({_trade_delta_table})")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -598,9 +596,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     # Cleanup materialization
     if not _is_serverless and cfg.sf <= 1000:
         trade_df.unpersist()
-    if _use_checkpoint:
-        import shutil
-        shutil.rmtree("/local_disk0/tmp/tpcdi_spark_ckpt", ignore_errors=True)
+    if _trade_delta_table:
+        spark.sql(f"DROP TABLE IF EXISTS {_trade_delta_table}")
 
     print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
