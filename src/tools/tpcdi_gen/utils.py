@@ -282,17 +282,17 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
     return targets
 
 
-def bulk_copy_all(dbutils, max_workers: int = 64):
+def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
     """Execute all registered file copies in parallel, then clear the registry.
 
-    Uses a thread pool to copy files concurrently. This is the final step of the
-    deferred copy pattern -- called once after all generators have finished writing
-    their staging files.
+    Uses a thread pool to copy files concurrently. Called at dependency boundaries
+    to copy files from all generators that have completed since the last call.
 
     Args:
         dbutils: Databricks dbutils object for filesystem operations.
         max_workers: Maximum number of concurrent copy threads. Defaults to 64,
             which provides good throughput for cloud storage backends.
+        label: Optional context label for log messages (e.g., "after HR").
     """
     global _pending_copies
     copies = list(_pending_copies)
@@ -323,8 +323,9 @@ def bulk_copy_all(dbutils, max_workers: int = 64):
         key = (dataset, batch_dir)
         by_dataset[key]["count"] += 1
         by_dataset[key]["dir"] = batch_dir
+    label_suffix = f" ({label})" if label else ""
     for (dataset, _), info in sorted(by_dataset.items()):
-        print(f"  {dataset} completed copying {info['count']} file(s) to {info['dir']}")
+        print(f"  {dataset} completed copying {info['count']} file(s) to {info['dir']}{label_suffix}")
 
 
 # ---------------------------------------------------------------------------
