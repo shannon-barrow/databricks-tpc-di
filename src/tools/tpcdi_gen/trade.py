@@ -416,28 +416,25 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     except:
         _is_serverless = False
 
-    _trade_local_path = None
-    # Check if local disk is available (single-user classic clusters only).
-    # Shared/serverless clusters don't have /local_disk0/ access.
+    # Materialize trade_df once so the 4 output writers don't each re-evaluate
+    # the full plan (spark.range → hash → 3 joins → timestamps → status).
+    #   SF<=1000: cache in memory (~19GB, fits comfortably)
+    #   SF>1000 + local disk: Spark native checkpoint to local NVMe SSD.
+    #     checkpoint() evaluates the plan once, writes serialized partitions to
+    #     disk, and truncates the lineage. Subsequent actions read from disk.
+    #     Spark manages the file lifecycle internally (no file-not-found issues).
+    #   Serverless/shared (no local disk): accept 4x re-evaluation.
     import os
     _has_local_disk = os.path.isdir("/local_disk0/tmp")
-    if _is_serverless or not _has_local_disk:
-        if cfg.sf <= 1000:
-            trade_df = trade_df.cache()
-            trade_df.count()
-        # else: accept re-evaluation (no local disk, no cache at large SF)
-    elif cfg.sf <= 1000:
+    _use_checkpoint = not _is_serverless and _has_local_disk and cfg.sf > 1000
+
+    if _use_checkpoint:
+        spark.sparkContext.setCheckpointDir("file:/local_disk0/tmp/tpcdi_spark_ckpt")
+        trade_df = trade_df.checkpoint()
+        print(f"  [Trade] Checkpointed to local SSD")
+    elif not _is_serverless and cfg.sf <= 1000:
         trade_df = trade_df.cache()
         trade_df.count()
-    else:
-        # Checkpoint to local NVMe SSD — 1 write + 4 columnar reads.
-        _trade_local_dir = "/local_disk0/tmp/tpcdi_trade_ckpt"
-        _trade_local_path = f"file:{_trade_local_dir}"
-        os.makedirs(_trade_local_dir, exist_ok=True)
-        trade_df.write.mode("overwrite").parquet(_trade_local_path)
-        spark.catalog.refreshByPath(_trade_local_path)
-        trade_df = spark.read.parquet(_trade_local_path)
-        print(f"  [Trade] Checkpointed to local SSD ({_trade_local_dir})")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -601,12 +598,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     # Cleanup materialization
     if not _is_serverless and cfg.sf <= 1000:
         trade_df.unpersist()
-    if _trade_local_path:
+    if _use_checkpoint:
         import shutil
-        try:
-            shutil.rmtree("/local_disk0/tmp/trade_checkpoint", ignore_errors=True)
-        except:
-            pass
+        shutil.rmtree("/local_disk0/tmp/tpcdi_spark_ckpt", ignore_errors=True)
 
     print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
           f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
