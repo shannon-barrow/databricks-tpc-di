@@ -152,15 +152,21 @@ def spark_generate():
     f_cust = executor.submit(run_customer)
 
     # --- Tier 1: Depends on FINWIRE (_symbols) ---
-    def run_daily_market():
-      f_fw.result()  # wait for _symbols
-      return market_data.generate(spark, cfg, dbutils)
-    f_dm = executor.submit(run_daily_market)
-
     def run_watch_history():
       f_fw.result()  # wait for _symbols
       return watch_history.generate(spark, cfg, dicts, dbutils)
     f_wh = executor.submit(run_watch_history)
+
+    # --- Tier 2: DailyMarket after WatchHistory (memory staggering) ---
+    # DailyMarket only needs _symbols, but its 2.84B-row working memory overlaps
+    # with Trade+WatchHistory caches causing OOM. Stagger it after WatchHistory
+    # so WH cache is released before DM's peak memory phase.
+    def run_daily_market():
+      f_wh.result()  # wait for WatchHistory to finish + release cache
+      f_fw.result()   # _symbols (already done)
+      executor.submit(bulk_copy_all, dbutils, 64, "after WatchHistory")  # non-blocking
+      return market_data.generate(spark, cfg, dbutils)
+    f_dm = executor.submit(run_daily_market)
 
     # --- Tier 2: Depends on CustomerMgmt + FINWIRE ---
     # When CustomerMgmt finishes, launch Trade AND a bulk copy in parallel

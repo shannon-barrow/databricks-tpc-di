@@ -425,7 +425,7 @@ def _gen_historical(spark, cfg, dbutils):
             "spark.databricks.clusterUsageTags.clusterType", "").lower()
     except:
         _is_serverless = False
-    _use_cache = not _is_serverless and cfg.sf <= 1000
+    _use_cache = not _is_serverless and cfg.sf <= 10000
     if _use_cache:
         actv_df = actv_df.cache()
     n_actv = actv_df.count()
