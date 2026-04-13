@@ -109,53 +109,77 @@ def spark_generate():
   dicts = dictionaries.load_all()
   register_dict_views(spark, dicts)
 
-  # Wave 1: Reference Tables + HR + FINWIRE (parallel)
-  from tpcdi_gen import reference_tables, hr, finwire
+  # ================================================================
+  # Dependency-graph scheduling: each dataset starts as soon as its
+  # specific dependencies are met, maximizing parallelism.
+  #
+  # Dependency graph:
+  #   Reference Tables: no deps
+  #   HR:               no deps              → creates _brokers
+  #   FINWIRE:          no deps              → creates _symbols
+  #   Prospect:         no deps (cfg formulas only)
+  #   DailyMarket:      _symbols (FINWIRE)
+  #   WatchHistory:     _symbols (FINWIRE)
+  #   CustomerMgmt:     _brokers (HR)        → creates _created/_closed_accounts
+  #   Trade:            _symbols + _brokers + _created/_closed_accounts
+  #
+  # Optimal timeline:
+  #   t=0: Reference, HR, FINWIRE, Prospect all start
+  #   HR done → CustomerMgmt starts (doesn't wait for FINWIRE)
+  #   FINWIRE done → DailyMarket, WatchHistory start (don't wait for CustMgmt)
+  #   CustomerMgmt done → Trade starts (DM+WH already running)
+  # ================================================================
+  from tpcdi_gen import reference_tables, hr, finwire, customer
+  from tpcdi_gen import market_data, trade, prospect, watch_history
+
   print("=" * 60)
-  print("WAVE 1: Reference Tables + HR + FINWIRE")
+  print("DEPENDENCY-GRAPH SCHEDULING")
   print("=" * 60)
-  with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+
+  with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+    # --- Tier 0: No dependencies (start immediately) ---
     f_ref = executor.submit(reference_tables.generate_all, spark, cfg, dicts, dbutils)
     f_hr = executor.submit(hr.generate, spark, cfg, dicts, dbutils)
     f_fw = executor.submit(finwire.generate, spark, cfg, dicts, dbutils)
+    f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
+
+    # --- Tier 1: Depends on HR (_brokers) ---
+    def run_customer():
+      f_hr.result()  # wait for _brokers
+      bulk_copy_all(dbutils, 64)  # copy Tier 0 files that are ready
+      return customer.generate(spark, cfg, dicts, dbutils)
+    f_cust = executor.submit(run_customer)
+
+    # --- Tier 1: Depends on FINWIRE (_symbols) ---
+    def run_daily_market():
+      f_fw.result()  # wait for _symbols
+      return market_data.generate(spark, cfg, dbutils)
+    f_dm = executor.submit(run_daily_market)
+
+    def run_watch_history():
+      f_fw.result()  # wait for _symbols
+      return watch_history.generate(spark, cfg, dicts, dbutils)
+    f_wh = executor.submit(run_watch_history)
+
+    # --- Tier 2: Depends on CustomerMgmt + FINWIRE ---
+    def run_trade():
+      f_cust.result()  # wait for _created_accounts, _closed_accounts
+      f_fw.result()    # wait for _symbols (likely already done)
+      bulk_copy_all(dbutils, 64)  # copy Tier 1 files that are ready
+      return trade.generate(spark, cfg, dicts, dbutils)
+    f_trade = executor.submit(run_trade)
+
+    # --- Collect all results ---
     all_counts.update(f_ref.result())
     all_counts.update(f_hr.result()["counts"])
     all_counts.update(f_fw.result()["counts"])
-  print(f"\nWave 1 complete.")
-
-  # Wave 2: Customer/Account only + copy Wave 1 files
-  # DailyMarket moved to Wave 3 — it only needs _symbols from Wave 1 and has
-  # zero dependency on CustomerMgmt. This lets Wave 2 finish ~2 min faster,
-  # starting Wave 3 sooner. DailyMarket (I/O heavy) overlaps with Trade
-  # (compute heavy) in Wave 3 for better resource utilization.
-  from tpcdi_gen import customer
-  print("=" * 60)
-  print("WAVE 2: Customer/Account")
-  print("=" * 60)
-  with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-    f_cust = executor.submit(customer.generate, spark, cfg, dicts, dbutils)
-    f_copy1 = executor.submit(bulk_copy_all, dbutils, 64)
-    all_counts.update(f_cust.result()["counts"])
-    f_copy1.result()
-  print("\nWave 2 complete.")
-
-  # Wave 3: DailyMarket + Trades + Prospect + WatchHistory + copy Wave 2 files
-  from tpcdi_gen import market_data, trade, prospect, watch_history
-  print("=" * 60)
-  print("WAVE 3: DailyMarket + Trades + Prospect + WatchHistory")
-  print("=" * 60)
-  with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-    f_market = executor.submit(market_data.generate, spark, cfg, dbutils)
-    f_trade = executor.submit(trade.generate, spark, cfg, dicts, dbutils)
-    f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
-    f_wh = executor.submit(watch_history.generate, spark, cfg, dicts, dbutils)
-    f_copy2 = executor.submit(bulk_copy_all, dbutils, 64)
-    all_counts.update(f_market.result())
-    all_counts.update(f_trade.result())
     all_counts.update(f_prospect.result())
+    all_counts.update(f_cust.result()["counts"])
+    all_counts.update(f_dm.result())
     all_counts.update(f_wh.result())
-    f_copy2.result()
-  print("\nWave 3 complete.")
+    all_counts.update(f_trade.result())
+
+  print("\nAll generation complete.")
 
   # Final copy + cleanup
   bulk_copy_all(dbutils, max_workers=64)
