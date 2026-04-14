@@ -757,12 +757,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # All downstream operations (4 views + XML write) benefit from balanced partitions.
     # Target ~128MB per partition: ~15GB XML at SF=5000 → ~120 partitions.
     n_parts = max(1, int(cfg.cm_final_row_count * 600 / (128 * 1024 * 1024)))
+    log(f"[CustomerMgmt] Repartitioning all_df to {n_parts} partitions (~128MB each)")
     all_df = all_df.repartition(n_parts)
 
-    # Cache all_df — it's used to derive 4 views + the XML write. Without caching,
-    # each view's materialization re-evaluates the full plan (Windows, dedup, INACT
-    # filtering, dictionary joins) from scratch. Caching once lets all downstream
-    # operations read from memory.
+    # Cache all_df — it's used to derive 4 views + the XML write.
     all_df = all_df.cache()
     all_df.count()  # materialize
     log(f"[CustomerMgmt] all_df cached ({n_parts} partitions)")
