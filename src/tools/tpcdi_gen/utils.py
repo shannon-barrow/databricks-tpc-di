@@ -430,12 +430,8 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
             pass  # keep natural partitioning
         else:
             df = df.coalesce(1)
-    elif estimated_rows > 0:
-        # Batch1 at SF>10: dynamically size partitions to ~100MB per file.
-        # coalesce() only reduces partition count (never increases), so this is
-        # safe even if the DataFrame already has fewer partitions than the target.
-        target = int(_target_partitions(df, estimated_rows, avg_row_bytes))
-        df = df.coalesce(target)
+    # Batch1 at SF>10: use Spark's natural partitioning for maximum write parallelism.
+    # No coalescing — let all partitions write concurrently.
 
     (df
         .write
