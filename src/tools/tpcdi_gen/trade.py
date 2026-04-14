@@ -413,23 +413,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
 
     # === Write Trade as Parquet (the final output format) ===
-    # Trade is written once as Parquet — this evaluates the plan once and the files
-    # become the actual Trade output. Delta cache automatically caches these on local
-    # SSD. The 3 other tables (TradeHistory, CashTransaction, HoldingHistory) then
-    # read from this Parquet data with column pruning — no re-evaluation needed.
-    trade_parquet_path = f"{cfg.batch_path(1)}/Trade"
-    trade_out = trade_df.select(
-        F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
-        "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
-        "t_trade_price", "t_chrg", "t_comm", "t_tax",
-        # Keep internal columns needed by TH/CT/HH — they'll be ignored by the pipeline
-        "_is_limit", "_is_canceled", "_is_buy", "_base_ts", "_submit_ts",
-        "_complete_ts", "_cash_ts", "_trade_val", "_ct_name_raw", "_ct_name_len")
-    trade_out.write.mode("overwrite").parquet(trade_parquet_path)
+    # Evaluates the plan ONCE. Writes to staging dir, registers copies to
+    # Batch1/Trade_1.parquet, Trade_2.parquet, etc. The 3 other tables read
+    # from the staging Parquet (Delta cache on local SSD) with column pruning.
+    trade_staging = f"{cfg.batch_path(1)}/Trade.parquet__staging"
+    from .utils import _cleanup, register_copies_from_staging
+    _cleanup(trade_staging, dbutils)
+    trade_df.write.mode("overwrite").parquet(trade_staging)
+    register_copies_from_staging(trade_staging, f"{cfg.batch_path(1)}/Trade.parquet", dbutils)
     log(f"[Trade] Written as Parquet ({cfg.trade_total:,} rows)")
 
-    # Read back from Parquet — Delta cache kicks in, column pruning for each writer
-    trade_df = spark.read.parquet(trade_parquet_path)
+    # Read back from staging Parquet — Delta cache kicks in, column pruning
+    trade_df = spark.read.parquet(trade_staging)
 
     # === Write remaining 3 tables as CSV ===
     def write_trade_counts():
