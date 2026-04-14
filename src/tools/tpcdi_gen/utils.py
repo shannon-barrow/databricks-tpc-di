@@ -355,77 +355,20 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
 # ---------------------------------------------------------------------------
 
 
-def estimate_row_bytes(df: DataFrame, sample_size: int = 1000) -> int:
-    """Estimate the average byte size of a single row when written as delimited text.
-
-    Samples up to ``sample_size`` rows, concatenates all columns as pipe-delimited
-    strings, and computes the average length. Adds 2 bytes for the newline and
-    potential delimiter overhead.
-
-    Args:
-        df: DataFrame to estimate row size for.
-        sample_size: Number of rows to sample. Larger samples are more accurate
-            but slower. Default of 1000 is usually sufficient.
-
-    Returns:
-        Estimated bytes per row as an integer. Returns 100 as a fallback if the
-        DataFrame is empty or the average cannot be computed.
-    """
-    sample = df.limit(sample_size)
-    str_cols = [F.coalesce(F.col(c).cast("string"), F.lit("")) for c in df.columns]
-    avg_len = sample.select(
-        F.avg(F.length(F.concat_ws("|", *str_cols)))
-    ).collect()[0][0]
-    return int(avg_len + 2) if avg_len else 100
-
-
-def _target_partitions(df: DataFrame, estimated_rows: int,
-                       avg_row_bytes: int = 0) -> int:
-    """Compute the ideal partition count targeting ~100MB per output file.
-
-    If avg_row_bytes is provided, uses it directly (avoids a Spark job).
-    Otherwise samples up to 1000 rows to estimate average row size.
-
-    Args:
-        df: The DataFrame about to be written (used for row-size sampling if needed).
-        estimated_rows: Approximate number of rows in the DataFrame.
-        avg_row_bytes: Optional pre-computed average bytes per row. If 0, will sample.
-
-    Returns:
-        Target number of partitions (>= 1).
-    """
-    target_file_bytes = 100 * 1024 * 1024  # 100MB
-    if avg_row_bytes <= 0:
-        avg_row_bytes = estimate_row_bytes(df)
-    total_bytes = avg_row_bytes * estimated_rows
-    return max(1, -(-total_bytes // target_file_bytes))  # ceil division
-
 
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
-               dbutils=None, scale_factor: int = 0, estimated_rows: int = 0,
-               avg_row_bytes: int = 0):
+               dbutils=None, scale_factor: int = 0):
     """Write a DataFrame to a staging directory and register deferred copies to the final path.
 
-    Follows the deferred copy pattern:
-    1. Write the DataFrame as CSV to a temporary staging directory.
-    2. Register the part file(s) for later bulk copy via ``bulk_copy_all()``.
-
-    Coalescing strategy (controls output file count):
-    - SF<=10: Single file for most tables, 3 files for DailyMarket.
-    - SF>10 Batch1: If estimated_rows is provided, dynamically targets ~100MB per
-      file by sampling avg row size and computing ideal partition count. If the
-      DataFrame already has fewer partitions, coalesce is a no-op.
-    - SF>10 Batch2/3: Single file (data is small), except Prospect at SF>100
-      which uses natural partitioning since it exceeds 100MB.
+    Uses maxRecordsPerFile to cap output files at ~128MB based on hardcoded per-dataset
+    row sizes. This splits skewed partitions without a shuffle.
 
     Args:
         df: DataFrame to write.
         path: Final output file path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
         delimiter: Field delimiter for the CSV output. Defaults to ``|`` per TPC-DI spec.
         dbutils: Databricks dbutils object for filesystem operations.
-        scale_factor: TPC-DI scale factor, used to control file coalescing at SF=10.
-        estimated_rows: Approximate row count for dynamic partition sizing. When > 0
-            and SF > 10 for Batch1, the output is coalesced to ~100MB per file.
+        scale_factor: TPC-DI scale factor.
 
     Returns:
         List of final target file paths.
@@ -433,11 +376,18 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # Cap file size at ~128MB using maxRecordsPerFile. This splits large partitions
+    # Cap file size at ~128MB using maxRecordsPerFile. Splits large partitions
     # into multiple files without a shuffle — handles skew cheaply.
-    max_records = 0  # 0 = no limit (Spark default)
-    if avg_row_bytes > 0:
-        max_records = int(128 * 1024 * 1024 / avg_row_bytes)
+    # Row sizes are deterministic per dataset (verified at SF=5000).
+    _BYTES_PER_ROW = {
+        "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
+        "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
+        "HR": 80, "Prospect": 196,
+    }
+    filename = os.path.basename(path)
+    dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
+    row_bytes = _BYTES_PER_ROW.get(dataset, 0)
+    max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
     writer = (df
         .write

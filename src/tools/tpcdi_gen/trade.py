@@ -432,7 +432,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
         write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total, avg_row_bytes=180)
+                   scale_factor=cfg.sf)
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -479,7 +479,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # Estimate: ~2.51 rows per trade (1 PNDG/SBMT + ~0.6 limit SBMT/CNCL + ~0.9 CMPT)
         th_est = int(cfg.trade_total * 2.51)
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=th_est, avg_row_bytes=35)
+                   scale_factor=cfg.sf)
         return {("TradeHistory", 1): th_est}
 
     def write_cash_transaction():
@@ -504,7 +504,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         ct_est = int(cfg.trade_total * 0.927)
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=ct_est, avg_row_bytes=65)
+                   scale_factor=cfg.sf)
 
         # Batch2/3: settlement after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
@@ -554,7 +554,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
         hh_est = int(cfg.trade_total * 0.927)
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=hh_est, avg_row_bytes=30)
+                   scale_factor=cfg.sf)
 
         # Batch2/3: completed after cutoff — save as temp views for writing in
         # _gen_incremental_trades.

@@ -439,7 +439,7 @@ def _gen_historical(spark, cfg, dbutils):
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
-               scale_factor=cfg.sf, estimated_rows=target_total, avg_row_bytes=45)
+               scale_factor=cfg.sf)
 
     log(f"[WatchHistory] Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
     return {("WatchHistory", 1): target_total}
