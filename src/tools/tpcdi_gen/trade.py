@@ -412,23 +412,28 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "ABCDEFGHIJKabcde"))
 
 
-    # === Write Trade as Parquet (the final output format) ===
-    # Evaluates the plan ONCE. Writes to staging dir, registers copies to
-    # Batch1/Trade_1.parquet, Trade_2.parquet, etc. The 3 other tables read
-    # from the staging Parquet (Delta cache on local SSD) with column pruning.
-    trade_staging = f"{cfg.batch_path(1)}/Trade.parquet__staging"
-    from .utils import _cleanup, register_copies_from_staging
-    _cleanup(trade_staging, dbutils)
-    trade_df.write.mode("overwrite").parquet(trade_staging)
-    register_copies_from_staging(trade_staging, f"{cfg.batch_path(1)}/Trade.parquet", dbutils)
-    log(f"[Trade] Written as Parquet ({cfg.trade_total:,} rows)")
+    # Cache trade_df — evaluated 4x (Trade, TradeHistory, CashTransaction,
+    # HoldingHistory). Without Photon, cache stores in row format natively
+    # (no columnar↔row conversion overhead). On non-serverless clusters only.
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+    if not _is_serverless:
+        trade_df = trade_df.cache()
+        trade_df.count()
+        log(f"[Trade] Cached trade_df ({cfg.trade_total:,} rows)")
 
-    # Read back from staging Parquet — Delta cache kicks in, column pruning
-    trade_df = spark.read.parquet(trade_staging)
-
-    # === Write remaining 3 tables as CSV ===
-    def write_trade_counts():
-        """Trade is already written as Parquet above."""
+    # === Write all 4 output tables ===
+    def write_trade():
+        """Write Trade.txt — one row per trade with status at batch cutoff."""
+        out = trade_df.select(
+            F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
+            "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
+            "t_trade_price", "t_chrg", "t_comm", "t_tax")
+        write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
+                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total, avg_row_bytes=180)
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -569,15 +574,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         return counts_hh
 
     counts = {}
-    counts.update(write_trade_counts())  # just records the count (already written)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         futures = [
+            executor.submit(write_trade),
             executor.submit(write_trade_history),
             executor.submit(write_cash_transaction),
             executor.submit(write_holding_history),
         ]
         for f in futures:
             counts.update(f.result())
+
+    if not _is_serverless:
+        trade_df.unpersist()
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
