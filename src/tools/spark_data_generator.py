@@ -13,9 +13,10 @@
 
 # COMMAND ----------
 
-import sys, os
+import sys, os, warnings
 import concurrent.futures
 from datetime import datetime, timezone
+warnings.filterwarnings("ignore", message=".*No Partition Defined for Window operation.*")
 
 # COMMAND ----------
 
