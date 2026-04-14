@@ -13,7 +13,7 @@
 
 # COMMAND ----------
 
-import sys, os, warnings
+import sys, os, warnings, threading
 import concurrent.futures
 from datetime import datetime, timezone
 warnings.filterwarnings("ignore", message=".*No Partition Defined for Window operation.*")
@@ -144,12 +144,15 @@ def spark_generate():
     f_fw = executor.submit(finwire.generate, spark, cfg, dicts, dbutils)
     f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
 
-    # --- Tier 1: Depends on HR (_brokers) ---
-    # When HR finishes, launch CustomerMgmt AND a bulk copy in parallel
+    # --- Tier 1: CustomerMgmt (depends on HR) ---
+    # Uses a threading.Event to signal when temp views are ready.
+    # Trade waits on the event (not the full CustomerMgmt completion).
+    # XML writing + incremental batches continue in parallel with Trade.
+    cust_views_ready = threading.Event()
     def run_customer():
       f_hr.result()  # wait for _brokers
       executor.submit(bulk_copy_all, dbutils, 8, "after HR+Reference")  # non-blocking
-      return customer.generate(spark, cfg, dicts, dbutils)
+      return customer.generate(spark, cfg, dicts, dbutils, views_ready_event=cust_views_ready)
     f_cust = executor.submit(run_customer)
 
     # --- Tier 1: Depends on FINWIRE (_symbols) ---
@@ -163,12 +166,11 @@ def spark_generate():
       return market_data.generate(spark, cfg, dbutils)
     f_dm = executor.submit(run_daily_market)
 
-    # --- Tier 2: Depends on CustomerMgmt + FINWIRE ---
-    # When CustomerMgmt finishes, launch Trade AND a bulk copy in parallel
+    # --- Tier 2: Trade starts when views are ready (not full CustomerMgmt) ---
     def run_trade():
-      f_cust.result()  # wait for _created_accounts, _closed_accounts
-      f_fw.result()    # wait for _symbols (likely already done)
-      executor.submit(bulk_copy_all, dbutils, 8, "after CustomerMgmt")  # non-blocking
+      cust_views_ready.wait()  # wait for views only (~4 min into CustomerMgmt)
+      f_fw.result()            # wait for _symbols (likely already done)
+      executor.submit(bulk_copy_all, dbutils, 8, "after CustMgmt views")  # non-blocking
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 

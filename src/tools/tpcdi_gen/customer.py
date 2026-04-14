@@ -128,7 +128,7 @@ from .config import *
 from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy, log
 
 
-def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
+def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=None) -> dict:
     """Generate CustomerMgmt.xml with exact DIGen action distribution and ID allocation.
 
     This function implements the full state machine that produces the TPC-DI
@@ -805,6 +805,11 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils) -> dic
     n_cust = cust_dates.count()
     log(f"[CustomerMgmt] {n_cust} customers -> _customer_dates view")
 
+    # Signal that views are ready — Trade can now start while we continue
+    # writing XML and incremental files.
+    if views_ready_event is not None:
+        views_ready_event.set()
+
     # === Write XML as compact text with per-partition header/footer ===
     # Uses the pre-built xml_body strings (compact, no indentation) and wraps
     # each partition with XML root tags via mapInPandas. This produces valid XML
@@ -1134,17 +1139,14 @@ def generate_incremental(spark, cfg, dicts, dbutils):
     return counts
 
 
-def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
-    """Top-level entry point matching the old customer.py interface.
+def generate(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=None) -> dict:
+    """Top-level entry point — generates all customer/account data.
 
-    Generates all customer and account data across all batches:
-      - Batch 1: CustomerMgmt.xml (historical + CDC state machine)
-      - Batch 2+: Customer.txt and Account.txt (incremental CDC extracts)
-
-    Also creates temp views (_closed_accounts, _customer_dates) consumed by
-    downstream generators (trade.py, watch_history.py).
+    If views_ready_event is provided (a threading.Event), signals it as soon as
+    temp views (_created_accounts, _closed_accounts, etc.) are created. This lets
+    Trade start ~5 min earlier while XML writing + incremental batches continue.
     """
     counts = {}
-    counts.update(generate_customermgmt(spark, cfg, dicts, dbutils))
+    counts.update(generate_customermgmt(spark, cfg, dicts, dbutils, views_ready_event))
     counts.update(generate_incremental(spark, cfg, dicts, dbutils))
     return {"counts": counts}
