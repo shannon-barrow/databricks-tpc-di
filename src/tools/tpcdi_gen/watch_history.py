@@ -97,10 +97,12 @@ WH_ACTIVE_PCT = 0.8
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     """Generate WatchHistory for all batches. Returns counts dict."""
+    log("[WatchHistory] Starting generation")
     counts = {}
     counts.update(_gen_historical(spark, cfg, dbutils))
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
         counts.update(_gen_incremental(spark, cfg, batch_id, dbutils))
+    log("[WatchHistory] Generation complete")
     return counts
 
 
@@ -250,11 +252,11 @@ def _gen_historical(spark, cfg, dbutils):
         new_cp = total_cp - prev_cp
         gen_info.append((g, ls, rs, prev_ls, prev_rs, prev_cp, total_cp, new_cp))
 
-    log(f"[WatchHistory] start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}")
-    log(f"[WatchHistory] Per update: {new_pu} ACTV + {del_pu} CNCL = {wh_rpu}, total={wh_total_hist}")
+    log(f"[WatchHistory] start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}", "DEBUG")
+    log(f"[WatchHistory] Per update: {new_pu} ACTV + {del_pu} CNCL = {wh_rpu}, total={wh_total_hist}", "DEBUG")
     total_left = sl + gl * max_gen
     total_right = sr + gr * max_gen
-    log(f"[WatchHistory] Final dimensions: {total_left} custs x {total_right} secs = {total_left * total_right} total CP space")
+    log(f"[WatchHistory] Final dimensions: {total_left} custs x {total_right} secs = {total_left * total_right} total CP space", "DEBUG")
 
     # Timestamp range: spread evenly across WH_BEGIN_DATE to WH_END_DATE.
     # Each generation gets a secs_per_update-wide time window, and records within

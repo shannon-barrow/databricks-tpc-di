@@ -199,9 +199,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     hist_size = cm_final - update_last_id * rows_per_update
     total = hist_size + update_last_id * rows_per_update
 
-    log(f"[CustomerMgmt] params: hist={hist_size}, updates=1..{update_last_id}, rows/update={rows_per_update}")
+    log(f"[CustomerMgmt] params: hist={hist_size}, updates=1..{update_last_id}, rows/update={rows_per_update}", "DEBUG")
     log(f"[CustomerMgmt] Per update: NEW={new_custs}, ADDACCT={addaccts_per_update}, UPDACCT={change_accts}, "
-        f"CLOSEACCT={del_accts}, UPDCUST={change_custs}, INACT={del_custs}")
+        f"CLOSEACCT={del_accts}, UPDCUST={change_custs}, INACT={del_custs}", "DEBUG")
 
     # Timestamp range: the entire CustomerMgmt timeline is divided into equal-width
     # windows, one per update. Within each window, actions are spaced evenly.
@@ -783,7 +783,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
     acct_owners.createOrReplaceTempView("_account_owners")
-    log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view")
+    log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")
 
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
@@ -803,7 +803,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     cust_dates = cust_new.join(cust_inact, on="cust_id", how="left")
     cust_dates.createOrReplaceTempView("_customer_dates")
     n_cust = cust_dates.count()
-    log(f"[CustomerMgmt] {n_cust} customers -> _customer_dates view")
+    log(f"[CustomerMgmt] {n_cust} customers -> _customer_dates view", "DEBUG")
 
     # Signal that views are ready — Trade can now start while we continue
     # writing XML and incremental files.
@@ -1131,8 +1131,8 @@ def generate_incremental(spark, cfg, dicts, dbutils):
 
         log(f"[CustomerMgmt] Batch{batch_id}: {cust_per_update} customers ({n_cust_insert}I/{n_cust_update}U), "
             f"{acct_per_update} accounts ({n_acct_insert}I/{n_acct_update}U)")
-        log(f"[CustomerMgmt]   Customer DSN: {cust_dsn_base + batch_offset * cust_per_update}-{cust_dsn_base + batch_offset * cust_per_update + cust_per_update - 1}")
-        log(f"[CustomerMgmt]   Account DSN: {acct_dsn_base + batch_offset * acct_per_update}-{acct_dsn_base + batch_offset * acct_per_update + acct_per_update - 1}")
+        log(f"[CustomerMgmt]   Customer DSN: {cust_dsn_base + batch_offset * cust_per_update}-{cust_dsn_base + batch_offset * cust_per_update + cust_per_update - 1}", "DEBUG")
+        log(f"[CustomerMgmt]   Account DSN: {acct_dsn_base + batch_offset * acct_per_update}-{acct_dsn_base + batch_offset * acct_per_update + acct_per_update - 1}", "DEBUG")
         counts[("Customer", batch_id)] = cust_per_update
         counts[("Account", batch_id)] = acct_per_update
 
@@ -1146,7 +1146,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=N
     temp views (_created_accounts, _closed_accounts, etc.) are created. This lets
     Trade start ~5 min earlier while XML writing + incremental batches continue.
     """
+    log("[CustomerMgmt] Starting generation")
     counts = {}
     counts.update(generate_customermgmt(spark, cfg, dicts, dbutils, views_ready_event))
     counts.update(generate_incremental(spark, cfg, dicts, dbutils))
+    log("[CustomerMgmt] Generation complete")
     return {"counts": counts}

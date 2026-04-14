@@ -30,10 +30,22 @@ from pyspark.sql.types import StringType, StructType, StructField, LongType
 from .config import MAX_FILE_BYTES
 
 
-def log(msg: str):
-    """Print a timestamped log message."""
-    ts = datetime.now().strftime("%H:%M:%S")
-    print(f"  {ts} {msg}")
+# Module-level log level setting
+_LOG_LEVEL = "INFO"  # default
+_LOG_LEVELS = {"VERBOSE": 0, "DEBUG": 1, "INFO": 2, "WARN": 3}
+
+
+def set_log_level(level: str):
+    """Set the global log level. Called from the orchestrator."""
+    global _LOG_LEVEL
+    _LOG_LEVEL = level.upper()
+
+
+def log(msg: str, level: str = "INFO"):
+    """Print a timestamped log message if the level meets the threshold."""
+    if _LOG_LEVELS.get(level.upper(), 2) >= _LOG_LEVELS.get(_LOG_LEVEL, 2):
+        ts = datetime.now().strftime("%H:%M:%S")
+        print(f"  {ts} {msg}")
 
 
 def seed_for(table_name: str, col_name: str = "", base_seed: int = 1234567890) -> int:
@@ -335,7 +347,7 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
         by_dataset[key]["dir"] = batch_name
     label_suffix = f" ({label})" if label else ""
     for (dataset, _), info in sorted(by_dataset.items()):
-        log(f"[Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}")
+        log(f"[Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}", "DEBUG")
 
 
 # ---------------------------------------------------------------------------

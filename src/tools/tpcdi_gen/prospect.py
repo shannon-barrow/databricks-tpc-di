@@ -62,6 +62,8 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         dict mapping (table_name, batch_id) to row counts for audit reporting.
     """
 
+    log("[Prospect] Starting generation")
+
     # Row count: PHistScaling * SF * 0.9988 (matches DIGen's excludeDeletedIDs behavior)
     # Verified: SF=10 -> 49940, SF=100 -> 499400, SF=1000 -> 4994000
     prospect_total = int(5 * cfg.internal_sf * 0.9988)
@@ -357,9 +359,10 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         batch_df = batch_base.union(new_prospects)
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
-        log(f"[Prospect] Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)")
+        log(f"[Prospect] Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)", "DEBUG")
 
     log(f"[Prospect] {prospect_total} rows, {n_match} matching customers ({n_match*100//prospect_total}%)")
+    log("[Prospect] Generation complete")
     return counts
 
 

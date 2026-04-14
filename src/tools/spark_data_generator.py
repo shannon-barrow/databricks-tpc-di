@@ -87,8 +87,14 @@ def spark_generate():
     print(f"Module path (volume): {_vol_tools_dir}/tpcdi_gen")
 
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
-  from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging
+  from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging, set_log_level
   from tpcdi_gen import dictionaries
+
+  # Set log level from widget (defined in Driver notebook), default to INFO
+  try:
+      set_log_level(dbutils.widgets.get("log_level"))
+  except:
+      set_log_level("INFO")
 
   cfg = ScaleConfig(int(scale_factor), catalog)
   gen_start_time = datetime.now(tz=timezone.utc)

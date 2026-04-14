@@ -49,6 +49,7 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     Returns:
         dict mapping (table_name, batch_id) to row counts for audit reporting.
     """
+    log("[Reference] Starting generation")
     counts = {}
 
     # --- Resolve static file source path ---
@@ -77,7 +78,7 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                 content = f.read()
             dbutils.fs.put(dst, content, overwrite=True)
             counts[(filename.replace(".txt", ""), 1)] = row_count
-            log(f"[Reference] {filename}: {row_count} rows (copied)")
+            log(f"[Reference] {filename}: {row_count} rows (copied)", "DEBUG")
         except Exception as e:
             log(f"[Reference] WARNING: failed to copy {filename}: {e}")
 
@@ -95,4 +96,5 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             counts[("BatchDate", batch_id)] = 1
 
     log(f"[Reference] BatchDate: {NUM_INCREMENTAL_BATCHES + 1} batches")
+    log("[Reference] Generation complete")
     return counts

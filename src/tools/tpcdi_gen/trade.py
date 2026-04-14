@@ -131,6 +131,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     passes them to both historical and incremental generators to avoid redundant
     .collect()/.count() calls that were adding ~4 min per invocation.
     """
+    log("[Trade] Starting generation")
     # Build shared lookups ONCE — used by both historical and incremental.
     # Compute account pool params from CustomerMgmt formulas.
     cust_pu = int(0.005 * cfg.internal_sf)
@@ -166,6 +167,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     valid_accts.unpersist()
     broker_names.unpersist()
 
+    log("[Trade] Generation complete")
     return counts
 
 
@@ -246,7 +248,7 @@ def _build_broker_names(spark):
         .select(F.col("_idx").alias("_broker_idx"), "broker_name"))
 
     n_brokers = broker_names.count()
-    log(f"[Trade] Broker names: {n_brokers} brokers")
+    log(f"[Trade] Broker names: {n_brokers} brokers", "DEBUG")
     return broker_names, n_brokers
 
 

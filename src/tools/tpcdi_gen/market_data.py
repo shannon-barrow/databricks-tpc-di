@@ -63,7 +63,10 @@ def generate(spark: SparkSession, cfg, dbutils) -> dict:
     Returns:
         dict mapping (table_name, batch_id) to row counts for audit reporting.
     """
-    return _gen_daily_market(spark, cfg, dbutils)
+    log("[DailyMarket] Starting generation")
+    result = _gen_daily_market(spark, cfg, dbutils)
+    log("[DailyMarket] Generation complete")
+    return result
 
 
 def _quarter_to_date_expr(quarter_col):

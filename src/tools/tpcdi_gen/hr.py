@@ -51,6 +51,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         dict with key "counts" mapping (table_name, batch_id) to row counts,
         including the broker count under ("HR_BROKERS", 1).
     """
+    log("[HR] Starting generation")
     hr_df = spark.range(0, cfg.hr_rows).withColumnRenamed("id", "employeeid")
 
     # ManagerID: range 1 to 0.1*tableSize (DIGen starts manager IDs at 1, not 0)
@@ -139,4 +140,5 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     broker_count = brokers.count()
 
     log(f"[HR] {cfg.hr_rows} rows ({broker_count} brokers -> _brokers view)")
+    log("[HR] Generation complete")
     return {"counts": {("HR", 1): cfg.hr_rows, ("HR_BROKERS", 1): broker_count}}

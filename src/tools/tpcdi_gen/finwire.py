@@ -84,6 +84,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     Returns:
         dict with key "counts" mapping (table_name, batch_id) to row counts.
     """
+    log("[FINWIRE] Starting generation")
     fw_begin_ms = int(FW_BEGIN_DATE.timestamp() * 1000)
 
     # =====================================================================
@@ -446,4 +447,5 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     total = cfg.cmp_total + cfg.sec_total + fin_count_approx
     log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
     log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
+    log("[FINWIRE] Generation complete")
     return {"counts": {("FINWIRE", 1): total}}
