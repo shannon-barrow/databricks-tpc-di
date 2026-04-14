@@ -434,10 +434,12 @@ def _gen_historical(spark, cfg, dbutils):
             "yyyy-MM-dd HH:mm:ss"))
     )
 
-    # === Step 7: Combine ACTV + CNCL and write ===
-    # No caching needed — actv_df evaluates 2x (ACTV write + CNCL sample).
+    # === Step 7: Combine ACTV + CNCL, repartition for balanced files, and write ===
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
+    # Repartition to fix skew from dropDuplicates — target ~128MB per file
+    n_wh_parts = max(1, int(target_total * 45 / (128 * 1024 * 1024)))
+    result_df = result_df.repartition(n_wh_parts)
 
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf, estimated_rows=target_total, avg_row_bytes=45)

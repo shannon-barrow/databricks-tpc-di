@@ -433,14 +433,9 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # Repartition to target ~128MB per file. Uses repartition() (not coalesce) to
-    # handle skewed partitions — coalesce can't break up a large partition.
-    # Only applies when estimated_rows and avg_row_bytes are provided.
-    if estimated_rows > 0 and avg_row_bytes > 0:
-        target_file_bytes = 128 * 1024 * 1024  # 128MB
-        total_bytes = avg_row_bytes * estimated_rows
-        target_parts = max(1, -(-total_bytes // target_file_bytes))  # ceil division
-        df = df.repartition(int(target_parts))
+    # No automatic repartitioning in write_file — callers handle their own
+    # partitioning based on their specific needs. Adding repartition here for
+    # ALL writes caused OOM when multiple large datasets shuffled concurrently.
 
     (df
         .write
