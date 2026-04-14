@@ -412,9 +412,14 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "ABCDEFGHIJKabcde"))
 
 
-    # No caching — let the 4 writers re-evaluate the plan concurrently.
-    # Caching adds a synchronous ~4 min materialization step that may not
-    # be faster than 4 concurrent re-evaluations on a high-core machine.
+    # Materialize trade_df as a temp Parquet table. Evaluates the plan ONCE,
+    # then the 4 CSV writers read from Parquet with column pruning.
+    # Much faster than 4x concurrent re-evaluation (which took 15+ min)
+    # or memory cache (which had row-format serialization overhead on Photon).
+    _trade_table = f"{cfg.catalog}.tpcdi_raw_data._trade_tmp_{cfg.sf}"
+    trade_df.write.format("parquet").mode("overwrite").saveAsTable(_trade_table)
+    trade_df = spark.table(_trade_table)
+    log(f"[Trade] Materialized as Parquet table ({_trade_table})")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -574,6 +579,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         ]
         for f in futures:
             counts.update(f.result())
+
+    # Drop temp Parquet table
+    spark.sql(f"DROP TABLE IF EXISTS {_trade_table}")
+    log(f"[Trade] Dropped temp table {_trade_table}")
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
