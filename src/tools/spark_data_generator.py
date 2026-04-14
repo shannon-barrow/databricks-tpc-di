@@ -147,7 +147,7 @@ def spark_generate():
     # When HR finishes, launch CustomerMgmt AND a bulk copy in parallel
     def run_customer():
       f_hr.result()  # wait for _brokers
-      executor.submit(bulk_copy_all, dbutils, 64, "after HR+Reference")  # non-blocking
+      executor.submit(bulk_copy_all, dbutils, 8, "after HR+Reference")  # non-blocking
       return customer.generate(spark, cfg, dicts, dbutils)
     f_cust = executor.submit(run_customer)
 
@@ -167,7 +167,7 @@ def spark_generate():
     def run_trade():
       f_cust.result()  # wait for _created_accounts, _closed_accounts
       f_fw.result()    # wait for _symbols (likely already done)
-      executor.submit(bulk_copy_all, dbutils, 64, "after CustomerMgmt")  # non-blocking
+      executor.submit(bulk_copy_all, dbutils, 8, "after CustomerMgmt")  # non-blocking
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 
@@ -184,7 +184,7 @@ def spark_generate():
   print("\nAll generation complete.")
 
   # Final copy + cleanup
-  bulk_copy_all(dbutils, max_workers=64, label="final")
+  bulk_copy_all(dbutils, max_workers=8, label="final")
   cleanup_staging(cfg.volume_path, dbutils)
 
   # Audit files
