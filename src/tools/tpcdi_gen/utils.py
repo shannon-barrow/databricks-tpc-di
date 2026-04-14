@@ -24,9 +24,16 @@ This module provides four key capabilities used across all TPC-DI generators:
 import hashlib
 import os
 import concurrent.futures
+from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession, functions as F
 from pyspark.sql.types import StringType, StructType, StructField, LongType
 from .config import MAX_FILE_BYTES
+
+
+def log(msg: str):
+    """Print a timestamped log message."""
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"  {ts} {msg}")
 
 
 def seed_for(table_name: str, col_name: str = "", base_seed: int = 1234567890) -> int:
@@ -328,7 +335,7 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
         by_dataset[key]["dir"] = batch_name
     label_suffix = f" ({label})" if label else ""
     for (dataset, _), info in sorted(by_dataset.items()):
-        print(f"  [Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}")
+        log(f"[Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}")
 
 
 # ---------------------------------------------------------------------------
@@ -414,24 +421,8 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    filename = os.path.basename(path)
-    is_batch1 = "/Batch1/" in path
-    if scale_factor <= 10:
-        # SF=10: everything fits in 1 file except DailyMarket
-        if "DailyMarket" in filename:
-            df = df.coalesce(3)
-        else:
-            df = df.coalesce(1)
-    elif not is_batch1:
-        # Incremental batches: coalesce to 1 file (small data, < 100MB).
-        # Exception: Prospect files exceed 100MB at SF>100 (~1GB at SF=1000),
-        # so let them use natural partitioning for efficient parallel writes.
-        if "Prospect" in filename and scale_factor > 100:
-            pass  # keep natural partitioning
-        else:
-            df = df.coalesce(1)
-    # Batch1 at SF>10: use Spark's natural partitioning for maximum write parallelism.
-    # No coalescing — let all partitions write concurrently.
+    # No coalescing — use Spark's natural partitioning for maximum write parallelism.
+    # TODO: re-add coalescing for small files / SF<=10 once perf baseline is established.
 
     (df
         .write

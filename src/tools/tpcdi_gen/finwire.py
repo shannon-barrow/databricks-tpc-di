@@ -62,7 +62,7 @@ deactivation_quarter = fw_quarters + 1 (effectively "never deactivated").
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copy
+from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copy, log
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -444,6 +444,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             register_copy(part_file[0].path, f"{cfg.batch_path(1)}/{fname}")
 
     total = cfg.cmp_total + cfg.sec_total + fin_count_approx
-    print(f"  [FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
-    print(f"  [FINWIRE] Active symbols: {sym_count} -> _symbols view")
+    log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
+    log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
     return {"counts": {("FINWIRE", 1): total}}

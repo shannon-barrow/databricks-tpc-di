@@ -117,7 +117,7 @@ import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join
+from .utils import write_file, seed_for, hash_key, dict_join, log
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -184,7 +184,7 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
         [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
         ["_va_idx", "_valid_ca_id"])
     n_valid = len(valid_ca_ids)
-    print(f"  [Trade] account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
+    log(f"[Trade] account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
 
 
@@ -217,7 +217,7 @@ def _build_broker_names(spark):
         .select(F.col("_idx").alias("_broker_idx"), "broker_name"))
 
     n_brokers = broker_names.count()
-    print(f"  [Trade] Broker names: {n_brokers} brokers, {broker_names.select('broker_name').distinct().count()} distinct names")
+    log(f"[Trade] Broker names: {n_brokers} brokers, {broker_names.select('broker_name').distinct().count()} distinct names")
     return broker_names, n_brokers
 
 
@@ -413,7 +413,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     if not _is_serverless and cfg.sf <= 10000:
         trade_df = trade_df.cache()
         trade_df.count()
-        print(f"  [Trade] Cached trade_df ({cfg.trade_total:,} rows)")
+        log(f"[Trade] Cached trade_df ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -577,8 +577,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     if not _is_serverless and cfg.sf <= 10000:
         trade_df.unpersist()
 
-    print(f"  [Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
-          f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
+    log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
+        f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
     return counts
 
 
@@ -760,5 +760,5 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
     write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    print(f"  [Trade] Batch{batch_id}: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
+    log(f"[Trade] Batch{batch_id}: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
     return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
