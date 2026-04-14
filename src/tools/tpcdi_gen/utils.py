@@ -433,11 +433,13 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # No automatic repartitioning in write_file — callers handle their own
-    # partitioning based on their specific needs. Adding repartition here for
-    # ALL writes caused OOM when multiple large datasets shuffled concurrently.
+    # Cap file size at ~128MB using maxRecordsPerFile. This splits large partitions
+    # into multiple files without a shuffle — handles skew cheaply.
+    max_records = 0  # 0 = no limit (Spark default)
+    if avg_row_bytes > 0:
+        max_records = int(128 * 1024 * 1024 / avg_row_bytes)
 
-    (df
+    writer = (df
         .write
         .mode("overwrite")
         .option("header", "false")
@@ -445,8 +447,10 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("quote", "")       # No quoting -- TPC-DI spec uses raw delimiters
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
-        .option("emptyValue", "")  # Empty strings stay empty (no quotes)
-        .csv(staging_dir))
+        .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
+    if max_records > 0:
+        writer = writer.option("maxRecordsPerFile", max_records)
+    writer.csv(staging_dir)
 
     # Register staging part files for deferred bulk copy to final path(s)
     return register_copies_from_staging(staging_dir, path, dbutils)
