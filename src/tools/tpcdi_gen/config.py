@@ -321,11 +321,11 @@ class ScaleConfig:
         self.trade_inc = int(self.trades_per_day / 0.394)  # total rows matching DIGen ratio
 
         # ----- WatchHistory ACTV count estimate (post-dedup) -----
-        # Estimated as ~75% of the pre-dedup ACTV slot count. The dedup on
-        # (w_c_id, _sym_join_idx) removes ~25% due to sec_idx % num_sec collisions.
-        # Used to compute CNCL target without a .count(). The .limit() on CNCL
-        # ensures the total never overshoots wh_total regardless of estimate accuracy.
-        self.wh_actv_count = int(self.wh_total * 0.8 * 0.75)
+        # The integer dedup on (w_c_id, _sym_join_idx) removes <0.1% of rows —
+        # the cross-product space is vastly larger than num_sec, so collisions
+        # are rare. At SF=5000: 1,199,999,700 pre-dedup → 1,199,613,974 post = 99.97%.
+        # Use 0.9997 as the survival rate. The .limit() on CNCL prevents overshoot.
+        self.wh_actv_count = int(self.wh_total * 0.8 * 0.9997)
 
         # ----- DailyMarket parameters -----
         # dm_days: Number of days in the DailyMarket date range (732 days for
