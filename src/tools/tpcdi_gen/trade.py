@@ -126,16 +126,45 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     Orchestrates historical (Batch 1) and incremental (Batch 2+) trade generation.
     Historical trades produce four files (Trade, TradeHistory, CashTransaction,
     HoldingHistory). Incremental batches produce only Trade.txt in CDC format.
-    Incremental batches run in parallel via ThreadPoolExecutor.
+
+    Builds shared lookups (valid accounts, broker names, symbol count) once and
+    passes them to both historical and incremental generators to avoid redundant
+    .collect()/.count() calls that were adding ~4 min per invocation.
     """
+    # Build shared lookups ONCE — used by both historical and incremental.
+    # Compute account pool params from CustomerMgmt formulas.
+    cust_pu = int(0.005 * cfg.internal_sf)
+    acct_pu = int(0.01 * cfg.internal_sf)
+    new_accts = int(acct_pu * 0.7)
+    rpu = new_accts + int(acct_pu * 0.2) + int(acct_pu * 0.1) + int(cust_pu * 0.2) + int(cust_pu * 0.1)
+    update_last_id = (cfg.cm_final_row_count - new_accts) // rpu
+    hist_size = cfg.cm_final_row_count - update_last_id * rpu
+    n_hist_accounts = hist_size + update_last_id * new_accts
+
+    valid_accts, n_valid = _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size)
+    broker_names, n_brokers = _build_broker_names(spark)
+    num_sec = spark.table("_symbols").count()
+
+    # Cache these small lookups — they're used by historical + each incremental batch
+    valid_accts = valid_accts.cache()
+    valid_accts.count()
+    broker_names = broker_names.cache()
+    broker_names.count()
+
+    shared = {"valid_accts": valid_accts, "n_valid": n_valid,
+              "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
+
     counts = {}
-    counts.update(_gen_historical_trades(spark, cfg, dicts, dbutils))
+    counts.update(_gen_historical_trades(spark, cfg, dicts, dbutils, shared))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_INCREMENTAL_BATCHES) as executor:
-        futures = [executor.submit(_gen_incremental_trades, spark, cfg, dicts, batch_id, dbutils)
+        futures = [executor.submit(_gen_incremental_trades, spark, cfg, dicts, batch_id, dbutils, shared)
                    for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2)]
         for f in futures:
             counts.update(f.result())
+
+    valid_accts.unpersist()
+    broker_names.unpersist()
 
     return counts
 
@@ -217,46 +246,26 @@ def _build_broker_names(spark):
         .select(F.col("_idx").alias("_broker_idx"), "broker_name"))
 
     n_brokers = broker_names.count()
-    log(f"[Trade] Broker names: {n_brokers} brokers, {broker_names.select('broker_name').distinct().count()} distinct names")
+    log(f"[Trade] Broker names: {n_brokers} brokers")
     return broker_names, n_brokers
 
 
-def _gen_historical_trades(spark, cfg, dicts, dbutils):
+def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     """Generate Batch 1 (historical) trade data: Trade, TradeHistory, CashTransaction, HoldingHistory.
 
-    This function builds a single wide DataFrame (trade_df) containing all trade attributes,
-    then writes four output files in parallel. Each trade gets:
-      - A random type (TLB/TLS/TMB/TMS) with 30/30/20/20 distribution
-      - A random timestamp within the historical trade date range
-      - Status determined by the temporal cutoff (FIRST_BATCH_DATE)
-      - A valid (non-closed) account, security symbol, and broker name
-
-    The four output files are:
-      Trade.txt         - One row per trade, showing final status at batch cutoff
-      TradeHistory.txt  - 1-3 rows per trade, one per status transition before cutoff
-      CashTransaction.txt - One row per completed trade (cash settlement)
-      HoldingHistory.txt  - One row per completed trade (holding position change)
+    Uses pre-built shared lookups (valid_accts, broker_names, num_sec) from generate()
+    to avoid redundant .collect()/.count() calls.
     """
+    valid_accts = shared["valid_accts"]
+    n_valid = shared["n_valid"]
+    broker_names = shared["broker_names"]
+    n_brokers = shared["n_brokers"]
+    num_sec = shared["num_sec"]
+
     symbols_df = spark.table("_symbols")
-    num_sec = symbols_df.count()
     trade_begin_s = int(TRADE_BEGIN_DATE.timestamp())
     trade_range_s = int((TRADE_END_DATE - TRADE_BEGIN_DATE).total_seconds())
-    # batch_cutoff_s = THistEndDate = FIRST_BATCH_DATE_END (midnight after batch date).
-    # DIGen routes all trade transitions up to this point to Batch 1.
     batch_cutoff_s = int(FIRST_BATCH_DATE_END.timestamp())
-
-    # Compute historical account count using the same per-unit math as CustomerMgmt.
-    # This determines the size of the account pool available for trade assignment.
-    cust_pu = int(0.005 * cfg.internal_sf)
-    acct_pu = int(0.01 * cfg.internal_sf)
-    new_accts = int(acct_pu * 0.7)
-    rpu = new_accts + int(acct_pu * 0.2) + int(acct_pu * 0.1) + int(cust_pu * 0.2) + int(cust_pu * 0.1)
-    update_last_id = (cfg.cm_final_row_count - new_accts) // rpu
-    hist_size = cfg.cm_final_row_count - update_last_id * rpu
-    n_hist_accounts = hist_size + update_last_id * new_accts
-
-    valid_accts, n_valid = _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size)
-    broker_names, n_brokers = _build_broker_names(spark)
 
     # Build base trade DataFrame — one row per trade with all computed attributes.
     # All randomness is deterministic via hash_key(t_id, seed).
@@ -569,55 +578,20 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils):
     return counts
 
 
-def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
-    """Generate incremental Trade.txt for Batch 2+ with CDC (Change Data Capture) format.
+def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
+    """Generate incremental Trade.txt for Batch 2+ with CDC format.
 
-    Unlike Batch 1 which produces four files, incremental batches produce only Trade.txt
-    with two extra leading columns:
-      - cdc_flag: "I" for new trade inserts, "U" for status updates on existing trades
-      - cdc_dsn:  Data sequence number for ordering within the batch
-
-    The split is approximately 55% inserts (cfg.trade_inc_new) and 45% updates.
-
-    Insert rows ("I"):
-      - Represent brand-new trades not seen in Batch 1.
-      - t_id is offset past the historical range (trade_total + batch offset).
-      - Limit orders start as PNDG, market orders as SBMT.
-      - DSNs are 1 through n_new.
-
-    Update rows ("U"):
-      - Represent status transitions on existing historical trades.
-      - t_id is hashed into the historical trade range (0 to trade_total).
-      - ~93% move to CMPT (completed), ~7% move to CNCL (canceled).
-      - DSNs are n_new+1 through inc_trades.
-
-    Each batch uses a unique base seed derived from batch_id for deterministic generation.
+    Uses pre-built shared lookups (valid_accts, broker_names, num_sec) from generate().
     """
+    valid_accts = shared["valid_accts"]
+    n_valid = shared["n_valid"]
+    n_brokers = shared["n_brokers"]
+    num_sec = shared["num_sec"]
+
     symbols_df = spark.table("_symbols")
-    num_sec = symbols_df.count()
-    # Unique base seed per batch ensures different but deterministic trades
     bs = seed_for(f"T_B{batch_id}", "base")
     inc_trades = cfg.trade_inc
     bp = cfg.batch_path(batch_id)
-
-    # --- Account pool: use actual created accounts (same as historical trades) ---
-    # Must use _created_accounts, not spark.range(), because INACT filtering
-    # creates gaps in the account ID space where some IDs don't exist in DimAccount.
-    created_df = spark.table("_created_accounts")
-    closed_df = spark.table("_closed_accounts")
-    filtered_accts = (created_df
-        .select(F.col("created_ca_id").alias("ca_id"))
-        .join(F.broadcast(closed_df), F.col("ca_id") == closed_df["closed_ca_id"], "left_anti"))
-
-    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
-    valid_accts = spark.createDataFrame(
-        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-        ["_va_idx", "_valid_ca_id"])
-    n_valid = len(valid_ca_ids)
-
-    # Broker names for t_exec_name
-    brokers = spark.table("_brokers")
-    n_brokers = brokers.count()
 
     # DIGen incremental: ~55% new (I), ~45% updates (U)
     n_new = cfg.trade_inc_new
@@ -716,16 +690,9 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils):
     # Join valid (non-closed) account
     inc_df = inc_df.join(F.broadcast(valid_accts), on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
 
-    # Join broker name — reconstruct from HR dictionaries (same as _build_broker_names)
-    broker_names_df = (brokers
-        .withColumn("_fn_hash", hash_key(F.col("broker_id").cast("long"), seed_for("HR", "fn")))
-        .withColumn("_ln_hash", hash_key(F.col("broker_id").cast("long"), seed_for("HR", "ln"))))
-    broker_names_df = dict_join(broker_names_df, "hr_family_names", F.col("_fn_hash"), "_first")
-    broker_names_df = dict_join(broker_names_df, "hr_given_names", F.col("_ln_hash"), "_last")
-    broker_names_df = (broker_names_df
-        .withColumn("broker_name", F.concat(F.col("_first"), F.lit(" "), F.col("_last")))
-        .select(F.col("_idx").alias("_broker_idx"), "broker_name"))
-    inc_df = inc_df.join(F.broadcast(broker_names_df), on="_broker_idx", how="left").withColumn("t_exec_name", F.col("broker_name"))
+    # Join broker name from shared cached lookup
+    broker_names = shared["broker_names"]
+    inc_df = inc_df.join(F.broadcast(broker_names), on="_broker_idx", how="left").withColumn("t_exec_name", F.col("broker_name"))
 
     # Final column selection: CDC columns first, then standard trade columns
     inc_df = inc_df.select(
