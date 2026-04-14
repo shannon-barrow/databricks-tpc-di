@@ -816,7 +816,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # each partition with XML root tags via mapInPandas. This produces valid XML
     # files that are ~3x smaller than the native XML writer's indented output,
     # while keeping writes fully distributed (no coalesce).
-    xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line")
+    # Repartition to target ~128MB per XML file. At SF=5000, ~15GB XML → ~120 files.
+    # CustomerMgmt XML is not splittable on read, so file size matters.
+    n_xml_parts = max(1, int(cfg.cm_final_row_count * 600 / (128 * 1024 * 1024)))  # ~600 bytes/row avg
+    xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line").repartition(n_xml_parts)
 
     xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">'
     xml_footer = '</TPCDI:Actions>'
