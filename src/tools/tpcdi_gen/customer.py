@@ -757,32 +757,29 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
     # by trade.py to ensure no trades reference closed accounts — a trade for a closed
     # account would violate TPC-DI referential integrity rules.
+    # Cache and materialize views that Trade depends on. Without caching, Trade
+    # re-evaluates the entire CustomerMgmt plan (Windows, dedup, INACT filtering)
+    # when it reads these views — essentially re-running CustomerMgmt.
     closed_accts = (all_df
         .filter(F.col("ActionType") == "CLOSEACCT")
         .select(F.col("CA_ID").alias("closed_ca_id"))
-        .distinct())
+        .distinct()).cache()
     closed_accts.createOrReplaceTempView("_closed_accounts")
-    n_closed = closed_accts.count()
+    n_closed = closed_accts.count()  # materializes cache
     log(f"[CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
 
-    # === Create _created_accounts temp view ===
-    # All CA_IDs that were actually created (by NEW or ADDACCT actions that survived
-    # INACT filtering and dedup). Consumed by trade.py to build the valid account pool.
-    # Without this, trade.py assumes a contiguous range of account IDs, but INACT
-    # filtering creates gaps where allocated CA_IDs never appear in the XML output.
-    # _created_accounts and _account_owners share the same source filter.
-    # No .distinct() needed — CA_IDs are unique after dedup (one NEW/ADDACCT per CA_ID).
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
 
-    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
+    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id")).cache()
     created_accts.createOrReplaceTempView("_created_accounts")
-    n_created = created_accts.count()
+    n_created = created_accts.count()  # materializes cache
     log(f"[CustomerMgmt] {n_created} created accounts -> _created_accounts view")
 
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
-        F.col("C_ID").cast("string").alias("owner_cid"))
+        F.col("C_ID").cast("string").alias("owner_cid")).cache()
     acct_owners.createOrReplaceTempView("_account_owners")
+    acct_owners.count()  # materializes cache
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")
 
     # === Create _customer_dates temp view ===
