@@ -203,18 +203,17 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
         .select(F.col("created_ca_id").alias("ca_id")))
 
     # Exclude closed accounts, then assign sequential index for hash-based lookup.
-    # Must be sequential (0, 1, 2, ...) since trades use hash % n_valid to index.
+    # Trades use hash % n_valid to pick an account, so _va_idx must be 0..n_valid-1.
     filtered_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
 
-    # Collect + enumerate for sequential IDs. Fast for account pools up to ~1M.
-    # At SF=10000 (~9.6M accounts) this takes a few seconds; at SF=20000 (~19M)
-    # it may need row_number fallback, but collect avoids plan re-evaluation.
-    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
-    valid_accts = spark.createDataFrame(
-        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-        ["_va_idx", "_valid_ca_id"])
-    n_valid = len(valid_ca_ids)
+    # Stay in Spark — no collect to Python. Use row_number for sequential IDs.
+    # The orderBy("ca_id") here is the same sort we had before but stays distributed.
+    valid_accts = (filtered_accts
+        .withColumn("_va_idx",
+            F.row_number().over(Window.orderBy("ca_id")) - 1)
+        .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+    n_valid = valid_accts.count()
     log(f"[Trade] account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
 
