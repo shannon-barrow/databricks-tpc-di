@@ -412,24 +412,28 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "ABCDEFGHIJKabcde"))
 
 
-    # Materialize trade_df as a temp Parquet table. Evaluates the plan ONCE,
-    # then the 4 CSV writers read from Parquet with column pruning.
-    # Much faster than 4x concurrent re-evaluation (which took 15+ min)
-    # or memory cache (which had row-format serialization overhead on Photon).
-    _trade_table = f"{cfg.catalog}.tpcdi_raw_data._trade_tmp_{cfg.sf}"
-    trade_df.write.format("parquet").mode("overwrite").saveAsTable(_trade_table)
-    trade_df = spark.table(_trade_table)
-    log(f"[Trade] Materialized as Parquet table ({_trade_table})")
+    # === Write Trade as Parquet (the final output format) ===
+    # Trade is written once as Parquet — this evaluates the plan once and the files
+    # become the actual Trade output. Delta cache automatically caches these on local
+    # SSD. The 3 other tables (TradeHistory, CashTransaction, HoldingHistory) then
+    # read from this Parquet data with column pruning — no re-evaluation needed.
+    trade_parquet_path = f"{cfg.batch_path(1)}/Trade"
+    trade_out = trade_df.select(
+        F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
+        "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
+        "t_trade_price", "t_chrg", "t_comm", "t_tax",
+        # Keep internal columns needed by TH/CT/HH — they'll be ignored by the pipeline
+        "_is_limit", "_is_canceled", "_is_buy", "_base_ts", "_submit_ts",
+        "_complete_ts", "_cash_ts", "_trade_val", "_ct_name_raw", "_ct_name_len")
+    trade_out.write.mode("overwrite").parquet(trade_parquet_path)
+    log(f"[Trade] Written as Parquet ({cfg.trade_total:,} rows)")
 
-    # === Write all 4 output tables ===
-    def write_trade():
-        """Write Trade.txt — one row per trade with status at batch cutoff."""
-        out = trade_df.select(
-            F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
-            "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
-            "t_trade_price", "t_chrg", "t_comm", "t_tax")
-        write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
-                   scale_factor=cfg.sf, estimated_rows=cfg.trade_total, avg_row_bytes=180)
+    # Read back from Parquet — Delta cache kicks in, column pruning for each writer
+    trade_df = spark.read.parquet(trade_parquet_path)
+
+    # === Write remaining 3 tables as CSV ===
+    def write_trade_counts():
+        """Trade is already written as Parquet above."""
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -570,19 +574,15 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         return counts_hh
 
     counts = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    counts.update(write_trade_counts())  # just records the count (already written)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = [
-            executor.submit(write_trade),
             executor.submit(write_trade_history),
             executor.submit(write_cash_transaction),
             executor.submit(write_holding_history),
         ]
         for f in futures:
             counts.update(f.result())
-
-    # Drop temp Parquet table
-    spark.sql(f"DROP TABLE IF EXISTS {_trade_table}")
-    log(f"[Trade] Dropped temp table {_trade_table}")
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
