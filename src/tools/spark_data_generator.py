@@ -185,7 +185,7 @@ def spark_generate():
   print("\nAll generation complete.")
 
   # Final copy + cleanup
-  bulk_copy_all(dbutils, max_workers=8, label="final")
+  bulk_copy_all(dbutils, max_workers=64, label="final")
   cleanup_staging(cfg.volume_path, dbutils)
 
   # Audit files
