@@ -753,12 +753,16 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
+    # Cache all_df — it's used to derive 4 views + the XML write. Without caching,
+    # each view's materialization re-evaluates the full plan (Windows, dedup, INACT
+    # filtering, dictionary joins) from scratch. Caching once lets all downstream
+    # operations read from memory.
+    all_df = all_df.cache()
+    all_df.count()  # materialize
+    log(f"[CustomerMgmt] all_df cached")
+
     # === Create _closed_accounts temp view ===
-    # Collect all CA_IDs that were closed via CLOSEACCT actions. This view is consumed
-    # by trade.py to ensure no trades reference closed accounts — a trade for a closed
-    # account would violate TPC-DI referential integrity rules.
-    # Cache and materialize views that Trade depends on. Without caching, Trade
-    # re-evaluates the entire CustomerMgmt plan (Windows, dedup, INACT filtering)
+    # Cache and materialize views that Trade depends on so Trade reads instantly.
     # when it reads these views — essentially re-running CustomerMgmt.
     closed_accts = (all_df
         .filter(F.col("ActionType") == "CLOSEACCT")
@@ -848,6 +852,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     total_caids = hist_size + update_last_id * new_accts
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
+
+    # Release all_df cache — views are cached independently and XML is written
+    all_df.unpersist()
+
     return {("CustomerMgmt", 1): total}
 
 
