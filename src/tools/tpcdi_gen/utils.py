@@ -69,10 +69,19 @@ def smart_cache(df, spark, scale_factor: int, label: str = ""):
         log(f"[Cache] {label}: skipped (serverless)")
         return df, False
 
-    heap_gb = get_cluster_memory_gb(spark)
-    min_memory_gb = 0.1 * scale_factor  # SF=5000 → 500GB, SF=10000 → 1000GB
+    # Check if multi-worker cluster — cache is distributed across executors
+    try:
+        num_executors = int(spark.conf.get("spark.executor.instances", "0"))
+    except:
+        num_executors = 0
+    is_multi_worker = num_executors > 0
 
-    if heap_gb >= min_memory_gb:
+    heap_gb = get_cluster_memory_gb(spark)  # driver heap only
+    min_memory_gb = 0.1 * scale_factor
+
+    # Multi-worker: always cache in memory (distributed across workers)
+    # Single-node: check driver heap against threshold
+    if is_multi_worker or heap_gb >= min_memory_gb:
         df = df.cache()
         df.count()
         log(f"[Cache] {label}: cached in memory (heap={heap_gb:.0f}GB, min={min_memory_gb:.0f}GB)")
