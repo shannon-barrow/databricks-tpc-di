@@ -1148,8 +1148,16 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .withColumn("ca_st_id", F.lit("INAC"))
             .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id"))
 
-        acct_final = acct_df.select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id") \
-            .union(inac_acct_rows)
+        # Remove random account updates that conflict with INAC closures.
+        # A random update might pick the same ca_id that an INAC closure targets,
+        # producing two rows for the same account with different customers.
+        # The INAC closure takes priority.
+        inac_ca_ids = inac_acct_rows.select("ca_id").distinct()
+        acct_no_conflict = (acct_df
+            .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id")
+            .join(inac_ca_ids, on="ca_id", how="left_anti"))
+
+        acct_final = acct_no_conflict.union(inac_acct_rows)
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # Update _account_owners with this batch's insert accounts so the next batch
