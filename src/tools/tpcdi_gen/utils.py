@@ -32,10 +32,9 @@ from .config import MAX_FILE_BYTES
 
 
 def get_cluster_memory_gb(spark) -> float:
-    """Get total cluster memory in GB from JVM runtime."""
+    """Get total physical memory of the machine in GB."""
     try:
-        runtime = spark._jvm.java.lang.Runtime.getRuntime()
-        return runtime.maxMemory() / (1024 ** 3)
+        return os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') / (1024 ** 3)
     except:
         return 0
 
