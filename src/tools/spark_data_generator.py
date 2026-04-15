@@ -190,13 +190,16 @@ def spark_generate():
     all_counts.update(f_wh.result())
     all_counts.update(f_trade.result())
 
-  print("\nAll generation complete.")
+  from tpcdi_gen.utils import log as _log
+  _log("[Orchestrator] All data generation complete. Copying files to final locations...")
 
   # Final copy + cleanup
   bulk_copy_all(dbutils, max_workers=64, label="final")
+  _log("[Orchestrator] File copy complete. Cleaning up staging directories...")
   cleanup_staging(cfg.volume_path, dbutils)
 
   # Audit files
+  _log("[Orchestrator] Generating audit files...")
   from tpcdi_gen import audit
   audit.generate(cfg, all_counts, gen_start_time, dbutils)
 
