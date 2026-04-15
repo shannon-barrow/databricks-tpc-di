@@ -848,15 +848,18 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")],
         key=lambda f: f.name)
 
-    # Convert dbfs paths to FUSE paths for cat
-    def to_fuse(dbfs_path):
-        return dbfs_path.replace("dbfs:", "/dbfs")
+    # Convert dbfs/volume paths to local FUSE paths for cat
+    def to_local(path):
+        # UC Volumes: /Volumes/... is directly accessible (not via /dbfs/)
+        if "/Volumes/" in path:
+            return path.replace("dbfs:", "")
+        return path.replace("dbfs:", "/dbfs")
 
     import concurrent.futures
     def wrap_xml(args):
         i, pf = args
-        src = to_fuse(pf.path)
-        dst = to_fuse(f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
+        src = to_local(pf.path)
+        dst = to_local(f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
         subprocess.run(["bash", "-c", f"cat {header_file.name} {src} {footer_file.name} > {dst}"],
                        check=True)
 
