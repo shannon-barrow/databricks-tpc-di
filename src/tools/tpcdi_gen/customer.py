@@ -798,7 +798,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .join(F.broadcast(closed_accts),
               created_accts["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
         .withColumn("_va_idx",
-            F.row_number().over(Window.orderBy(F.monotonically_increasing_id())) - 1)
+            F.row_number().over(Window.orderBy("created_ca_id")) - 1)
         .select("_va_idx", F.col("created_ca_id").cast("string").alias("_valid_ca_id"))
         .persist(StorageLevel.DISK_ONLY))
     valid_acct_pool.createOrReplaceTempView("_valid_acct_pool")
