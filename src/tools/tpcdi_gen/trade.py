@@ -166,7 +166,13 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     valid_accts.unpersist()
     broker_names.unpersist()
-    log("[Trade] Unpersisted account pool + broker names cache")
+    # Also release the CustomerMgmt view caches — Trade was the last consumer
+    for view_name in ["_closed_accounts", "_created_accounts", "_account_owners"]:
+        try:
+            spark.catalog.uncacheTable(view_name)
+        except:
+            pass
+    log("[Trade] Unpersisted all Trade + CustomerMgmt view caches")
 
     log("[Trade] Generation complete")
     return counts
