@@ -116,8 +116,9 @@ import concurrent.futures
 import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
+from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log, smart_cache
+from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -147,9 +148,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     num_sec = spark.table("_symbols").count()
 
     # Cache these small lookups — they're used by historical + each incremental batch
-    valid_accts = valid_accts.cache()
+    valid_accts = valid_accts.persist(StorageLevel.DISK_ONLY)
     valid_accts.count()
-    broker_names = broker_names.cache()
+    broker_names = broker_names.persist(StorageLevel.DISK_ONLY)
     broker_names.count()
 
     shared = {"valid_accts": valid_accts, "n_valid": n_valid,
@@ -418,10 +419,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "ABCDEFGHIJKabcde"))
 
 
-    # Cache trade_df — evaluated 4x (Trade, TradeHistory, CashTransaction,
-    # HoldingHistory). smart_cache checks cluster memory vs scale factor
-    # and falls back to disk or no-cache if insufficient.
-    trade_df, _trade_cached = smart_cache(trade_df, spark, cfg.sf,
+    # Cache trade_df to disk — evaluated 4x (Trade, TradeHistory, CashTransaction,
+    # HoldingHistory). DISK_ONLY avoids memory pressure while preventing re-evaluation.
+    trade_df, _trade_cached = disk_cache(trade_df, spark,
         f"Trade source data ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===

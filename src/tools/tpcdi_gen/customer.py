@@ -124,6 +124,7 @@ the temporal window when the customer was active (created and not yet inactivate
 """
 
 from pyspark.sql import SparkSession, functions as F, Window
+from pyspark import StorageLevel
 from .config import *
 from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy, log
 
@@ -760,10 +761,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     log(f"[CustomerMgmt] Repartitioning to {n_parts} partitions")
     all_df = all_df.repartition(n_parts)
 
-    # Cache all_df — it's used to derive 4 views + the XML write.
-    all_df = all_df.cache()
+    # Cache all_df to disk — it's used to derive 4 views + the XML write.
+    all_df = all_df.persist(StorageLevel.DISK_ONLY)
     all_df.count()  # materialize
-    log(f"[CustomerMgmt] Cached CustomerMgmt actions ({n_parts} partitions)")
+    log(f"[CustomerMgmt] Cached CustomerMgmt actions to disk ({n_parts} partitions)")
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
@@ -771,21 +772,21 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     closed_accts = (all_df
         .filter(F.col("ActionType") == "CLOSEACCT")
         .select(F.col("CA_ID").alias("closed_ca_id"))
-        .distinct()).cache()
+        .distinct()).persist(StorageLevel.DISK_ONLY)
     closed_accts.createOrReplaceTempView("_closed_accounts")
     n_closed = closed_accts.count()  # materializes cache
     log(f"[CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
 
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
 
-    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id")).cache()
+    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id")).persist(StorageLevel.DISK_ONLY)
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()  # materializes cache
     log(f"[CustomerMgmt] {n_created} created accounts -> _created_accounts view")
 
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
-        F.col("C_ID").cast("string").alias("owner_cid")).cache()
+        F.col("C_ID").cast("string").alias("owner_cid")).persist(StorageLevel.DISK_ONLY)
     acct_owners.createOrReplaceTempView("_account_owners")
     acct_owners.count()  # materializes cache
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")

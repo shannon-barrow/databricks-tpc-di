@@ -31,43 +31,15 @@ from pyspark import StorageLevel
 from .config import MAX_FILE_BYTES
 
 
-def get_cluster_memory_gb(spark) -> float:
-    """Get total executor memory in GB (excludes driver)."""
-    try:
-        sc = spark.sparkContext._jsc.sc()
-        driver_host = sc.getConf().get("spark.driver.host")
-        status = sc.getExecutorMemoryStatus()
-        total_bytes = 0
-        for entry in status.toSeq():
-            # Executor IDs contain host:port — skip the driver
-            if not str(entry._1()).startswith(driver_host):
-                total_bytes += entry._2()._1()
-        # Single-node clusters: all memory is on the driver, count it
-        if total_bytes == 0:
-            total_bytes = sum(entry._2()._1() for entry in status.toSeq())
-        return total_bytes / (1024 ** 3)
-    except:
-        try:
-            runtime = spark._jvm.java.lang.Runtime.getRuntime()
-            return runtime.maxMemory() / (1024 ** 3)
-        except:
-            return 0
+def disk_cache(df, spark, label: str = ""):
+    """Cache a DataFrame to disk (DISK_ONLY). Skips on serverless.
 
-
-def smart_cache(df, spark, scale_factor: int, label: str = ""):
-    """Cache a DataFrame in memory if enough cluster memory, else disk, else skip.
-
-    Decision logic:
-      - Serverless: no caching
-      - Cluster memory (GB) >= 0.1 × scale_factor: cache in memory
-        (e.g., SF=5000 needs 500GB, SF=10000 needs 1000GB)
-      - Local disk available: cache on disk (DISK_ONLY)
-      - Otherwise: no caching (accept re-evaluation)
+    DISK_ONLY avoids memory pressure while still preventing plan re-evaluation.
+    On distributed clusters, each worker caches its partitions to local NVMe SSD.
 
     Args:
-        df: DataFrame to potentially cache.
+        df: DataFrame to cache.
         spark: Active SparkSession.
-        scale_factor: TPC-DI scale factor.
         label: Description for logging.
 
     Returns:
@@ -83,24 +55,10 @@ def smart_cache(df, spark, scale_factor: int, label: str = ""):
         log(f"[Cache] {label}: skipped (serverless)")
         return df, False
 
-    cluster_gb = get_cluster_memory_gb(spark)
-    min_memory_gb = 0.1 * scale_factor
-
-    if cluster_gb >= min_memory_gb:
-        df = df.cache()
-        df.count()
-        log(f"[Cache] {label}: cached in memory (cluster={cluster_gb:.0f}GB, min={min_memory_gb:.0f}GB)")
-        return df, True
-
-    # Fall back to disk cache if local disk is available
-    if os.path.isdir("/local_disk0/tmp"):
-        df = df.persist(StorageLevel.DISK_ONLY)
-        df.count()
-        log(f"[Cache] {label}: cached on disk (cluster={cluster_gb:.0f}GB < {min_memory_gb:.0f}GB)")
-        return df, True
-
-    log(f"[Cache] {label}: skipped (cluster={cluster_gb:.0f}GB < {min_memory_gb:.0f}GB, no local disk)")
-    return df, False
+    df = df.persist(StorageLevel.DISK_ONLY)
+    df.count()
+    log(f"[Cache] {label}: cached to disk")
+    return df, True
 
 
 # Module-level log level setting
