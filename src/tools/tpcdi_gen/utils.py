@@ -376,16 +376,34 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # Cap file size at ~128MB using maxRecordsPerFile. Splits large partitions
-    # into multiple files without a shuffle — handles skew cheaply.
-    # Row sizes are deterministic per dataset (verified at SF=5000).
+    # --- Incremental batches: coalesce to minimize file count ---
+    # Incremental data is small. Compute target file count from known sizes.
+    # At SF=5000: Trade=94MB, CT=33MB, HH=13MB, WH=174MB, DM=242MB, Prospect=5GB
+    # Sizes scale linearly with SF. Target max ~128MB per file.
+    is_batch1 = "/Batch1/" in path
+    if not is_batch1:
+        # Per-batch incremental sizes in MB at SF=1000 (base reference)
+        _INC_MB_PER_1K = {
+            "Trade": 19, "CashTransaction": 7, "HoldingHistory": 3,
+            "WatchHistory": 35, "DailyMarket": 48, "Prospect": 1013,
+            "Customer": 1, "Account": 1,
+        }
+        filename = os.path.basename(path)
+        dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
+        inc_mb = _INC_MB_PER_1K.get(dataset, 1) * (scale_factor / 1000)
+        n_files = max(1, int(inc_mb / 128) + (1 if inc_mb % 128 > 0 else 0))
+        df = df.coalesce(n_files)
+
+    # --- Batch1: cap file size at ~128MB using maxRecordsPerFile ---
+    # Splits large partitions without a shuffle. Row sizes are deterministic.
     _BYTES_PER_ROW = {
         "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
         "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
         "HR": 80, "Prospect": 196,
     }
-    filename = os.path.basename(path)
-    dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
+    if is_batch1:
+        filename = os.path.basename(path)
+        dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
     row_bytes = _BYTES_PER_ROW.get(dataset, 0)
     max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
