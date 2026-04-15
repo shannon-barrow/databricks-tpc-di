@@ -754,10 +754,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     all_df = all_df.unionByName(close_for_inact, allowMissingColumns=True)
 
     # Repartition before caching so the cached data is evenly distributed.
-    # All downstream operations (4 views + XML write) benefit from balanced partitions.
-    # Target ~128MB per partition: ~15GB XML at SF=5000 → ~120 partitions.
-    n_parts = max(1, int(cfg.cm_final_row_count * 600 / (128 * 1024 * 1024)))
-    log(f"[CustomerMgmt] Repartitioning all_df to {n_parts} partitions (~128MB each)")
+    # 30 partitions per 1000 SF → ~100MB per file at each scale factor.
+    # SF=1000→30, SF=5000→150, SF=10000→300, SF=20000→600
+    n_parts = max(1, int(cfg.sf / 1000 * 30))
+    log(f"[CustomerMgmt] Repartitioning to {n_parts} partitions")
     all_df = all_df.repartition(n_parts)
 
     # Cache all_df — it's used to derive 4 views + the XML write.
