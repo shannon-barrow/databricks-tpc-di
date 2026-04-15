@@ -166,6 +166,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     valid_accts.unpersist()
     broker_names.unpersist()
+    log("[Trade] Unpersisted valid_accts + broker_names")
 
     log("[Trade] Generation complete")
     return counts
@@ -585,6 +586,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     if not _is_serverless:
         trade_df.unpersist()
+        log("[Trade] Unpersisted trade_df")
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")

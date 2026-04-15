@@ -860,6 +860,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Release all_df cache — views are cached independently and XML is written
     all_df.unpersist()
+    log("[CustomerMgmt] Unpersisted all_df")
 
     return {("CustomerMgmt", 1): total}
 
