@@ -133,23 +133,16 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     .collect()/.count() calls that were adding ~4 min per invocation.
     """
     log("[Trade] Starting generation")
-    # Build shared lookups ONCE — used by both historical and incremental.
-    # Compute account pool params from CustomerMgmt formulas.
-    cust_pu = int(0.005 * cfg.internal_sf)
-    acct_pu = int(0.01 * cfg.internal_sf)
-    new_accts = int(acct_pu * 0.7)
-    rpu = new_accts + int(acct_pu * 0.2) + int(acct_pu * 0.1) + int(cust_pu * 0.2) + int(cust_pu * 0.1)
-    update_last_id = (cfg.cm_final_row_count - new_accts) // rpu
-    hist_size = cfg.cm_final_row_count - update_last_id * rpu
-    n_hist_accounts = hist_size + update_last_id * new_accts
+    # Read pre-built valid account pool from CustomerMgmt (already cached with sequential IDs).
+    # This avoids collecting millions of rows to the driver.
+    valid_accts = spark.table("_valid_acct_pool")
+    n_valid = valid_accts.count()
+    log(f"[Trade] account pool: {n_valid} valid accounts (from _valid_acct_pool)")
 
-    valid_accts, n_valid = _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size)
     broker_names, n_brokers = _build_broker_names(spark)
     num_sec = spark.table("_symbols").count()
 
-    # Cache these small lookups — they're used by historical + each incremental batch
-    valid_accts = valid_accts.persist(StorageLevel.DISK_ONLY)
-    valid_accts.count()
+    # Cache broker names — used by historical + each incremental batch
     broker_names = broker_names.persist(StorageLevel.DISK_ONLY)
     broker_names.count()
 
@@ -165,10 +158,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         for f in futures:
             counts.update(f.result())
 
-    valid_accts.unpersist()
     broker_names.unpersist()
-    # Also release the CustomerMgmt view caches — Trade was the last consumer
-    for view_name in ["_closed_accounts", "_created_accounts", "_account_owners"]:
+    # Release CustomerMgmt view caches — Trade was the last consumer
+    for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
         try:
             spark.catalog.uncacheTable(view_name)
         except:
@@ -178,52 +170,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     log("[Trade] Generation complete")
     return counts
 
-
-def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
-    """Build the valid (non-closed) account pool for trade assignment.
-
-    Uses the _created_accounts temp view from CustomerMgmt generation, which
-    contains only accounts that were actually written to the XML output. This
-    is critical because INACT filtering removes some ADDACCT actions, creating
-    gaps in the account ID space. Using a synthetic range(0, N) would include
-    account IDs that don't exist in DimAccount, causing trade-to-account join
-    failures downstream.
-
-    Closed accounts (from _closed_accounts temp view) are further excluded so
-    trades only reference active accounts.
-
-    Returns:
-        (valid_accts DataFrame with [_va_idx, _valid_ca_id], count of valid accounts)
-    """
-    # Use actual accounts from CustomerMgmt (not a synthetic range)
-    created_df = spark.table("_created_accounts")
-    closed_df = spark.table("_closed_accounts")
-
-    # Filter to accounts that existed by TRADE_BEGIN_DATE (time-proportional estimate).
-    # Use limit() instead of row_number() to avoid a global sort.
-    n_total_created = created_df.count()
-    trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
-    n_available = max(hist_size, int(n_total_created * trade_fraction))
-
-    all_accts = (created_df
-        .orderBy("created_ca_id")
-        .limit(n_available)
-        .select(F.col("created_ca_id").alias("ca_id")))
-
-    # Exclude closed accounts, then assign sequential index for hash-based lookup.
-    # Trades use hash % n_valid to pick an account, so _va_idx must be 0..n_valid-1.
-    filtered_accts = (all_accts
-        .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
-
-    # Collect + enumerate: reads ~4.8M rows (~38MB) from cached _created_accounts.
-    # Much faster than row_number() Window which forces a single-partition sort (2.5 min).
-    valid_ca_ids = [row.ca_id for row in filtered_accts.collect()]
-    valid_accts = spark.createDataFrame(
-        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-        ["_va_idx", "_valid_ca_id"])
-    n_valid = valid_accts.count()
-    log(f"[Trade] account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
-    return valid_accts, n_valid
 
 
 def _build_broker_names(spark):

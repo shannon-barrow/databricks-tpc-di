@@ -791,6 +791,20 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     acct_owners.count()  # materializes cache
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")
 
+    # Build valid account pool with sequential IDs for Trade.
+    # Trade uses hash % n_valid to assign accounts, so _va_idx must be 0..n_valid-1.
+    # Computing this here (while all_df is cached) avoids a 12-min collect in Trade.
+    valid_acct_pool = (created_accts
+        .join(F.broadcast(closed_accts),
+              created_accts["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
+        .withColumn("_va_idx",
+            F.row_number().over(Window.orderBy(F.monotonically_increasing_id())) - 1)
+        .select("_va_idx", F.col("created_ca_id").cast("string").alias("_valid_ca_id"))
+        .persist(StorageLevel.DISK_ONLY))
+    valid_acct_pool.createOrReplaceTempView("_valid_acct_pool")
+    n_valid = valid_acct_pool.count()
+    log(f"[CustomerMgmt] {n_valid} valid accounts -> _valid_acct_pool view")
+
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
     # were inactivated (INACT, if ever). This is used by watch_history.py to ensure
