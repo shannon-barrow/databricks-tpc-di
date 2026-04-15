@@ -40,20 +40,21 @@ def get_cluster_memory_gb(spark) -> float:
         return 0
 
 
-def smart_cache(df, spark, estimated_gb: float, label: str = ""):
-    """Cache a DataFrame in memory if enough heap is available, else disk, else skip.
+def smart_cache(df, spark, scale_factor: int, label: str = ""):
+    """Cache a DataFrame in memory if enough cluster memory, else disk, else skip.
 
     Decision logic:
-      - Serverless: no caching (return uncached df)
-      - Memory available > 2x estimated size: cache in memory
+      - Serverless: no caching
+      - Cluster memory (GB) >= 0.1 × scale_factor: cache in memory
+        (e.g., SF=5000 needs 500GB, SF=10000 needs 1000GB)
       - Local disk available: cache on disk (DISK_ONLY)
       - Otherwise: no caching (accept re-evaluation)
 
     Args:
         df: DataFrame to potentially cache.
         spark: Active SparkSession.
-        estimated_gb: Estimated cache size in GB.
-        label: Description for logging (e.g., "Trade source data").
+        scale_factor: TPC-DI scale factor.
+        label: Description for logging.
 
     Returns:
         (cached_df, was_cached: bool)
@@ -69,22 +70,22 @@ def smart_cache(df, spark, estimated_gb: float, label: str = ""):
         return df, False
 
     heap_gb = get_cluster_memory_gb(spark)
-    # Use memory cache if heap is at least 2x the estimated cache size
-    # (leaves room for working memory of other concurrent operations)
-    if heap_gb > 0 and estimated_gb * 2 < heap_gb:
+    min_memory_gb = 0.1 * scale_factor  # SF=5000 → 500GB, SF=10000 → 1000GB
+
+    if heap_gb >= min_memory_gb:
         df = df.cache()
         df.count()
-        log(f"[Cache] {label}: cached in memory ({estimated_gb:.0f}GB, heap={heap_gb:.0f}GB)")
+        log(f"[Cache] {label}: cached in memory (heap={heap_gb:.0f}GB, min={min_memory_gb:.0f}GB)")
         return df, True
 
     # Fall back to disk cache if local disk is available
     if os.path.isdir("/local_disk0/tmp"):
         df = df.persist(StorageLevel.DISK_ONLY)
         df.count()
-        log(f"[Cache] {label}: cached on disk ({estimated_gb:.0f}GB, heap={heap_gb:.0f}GB)")
+        log(f"[Cache] {label}: cached on disk (heap={heap_gb:.0f}GB < {min_memory_gb:.0f}GB)")
         return df, True
 
-    log(f"[Cache] {label}: skipped (insufficient memory, heap={heap_gb:.0f}GB)")
+    log(f"[Cache] {label}: skipped (heap={heap_gb:.0f}GB < {min_memory_gb:.0f}GB, no local disk)")
     return df, False
 
 

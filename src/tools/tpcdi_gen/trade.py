@@ -419,10 +419,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
 
     # Cache trade_df — evaluated 4x (Trade, TradeHistory, CashTransaction,
-    # HoldingHistory). smart_cache checks available memory and falls back
-    # to disk or no-cache if insufficient.
-    estimated_trade_gb = cfg.trade_total * 150 / (1024 ** 3)  # ~150 bytes/row in memory
-    trade_df, _trade_cached = smart_cache(trade_df, spark, estimated_trade_gb,
+    # HoldingHistory). smart_cache checks cluster memory vs scale factor
+    # and falls back to disk or no-cache if insufficient.
+    trade_df, _trade_cached = smart_cache(trade_df, spark, cfg.sf,
         f"Trade source data ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===
