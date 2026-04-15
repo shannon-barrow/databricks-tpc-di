@@ -62,7 +62,7 @@ deactivation_quarter = fw_quarters + 1 (effectively "never deactivated").
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copy, log
+from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -406,46 +406,20 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     all_fw = (cmp_lines
         .union(sec_lines.select("line", "quarter_id", "PTS"))
         .union(fin_lines.select("line", "quarter_id", "PTS"))
-        # Convert quarter_id to calendar year/quarter:
-        # quarter_id 0 -> 1967 Q1, quarter_id 4 -> 1968 Q1, etc.
-        .withColumn("_year", F.lit(1967) + ((F.col("quarter_id") - (F.col("quarter_id") % 4)) / 4).cast("int"))
-        .withColumn("_qtr", (F.col("quarter_id") % 4) + 1)
-        .withColumn("_filename", F.concat(F.lit("FINWIRE"), F.col("_year"), F.lit("Q"), F.col("_qtr")))
     )
 
-    # Write to a temp staging directory, partitioned by _filename.
-    # sortWithinPartitions("line") sorts by PTS within each quarterly file
-    # (since PTS is the first field, lexicographic sort = chronological sort).
-    tmp_path = f"{cfg.batch_path(1)}/FINWIRE__tmp"
-    try:
-        dbutils.fs.rm(tmp_path, recurse=True)
-    except:
-        pass
-
-    # Partitioned write — all quarters written in parallel by Spark.
-    # repartition("_filename") ensures all records for a quarter land in one partition.
-    # No sortWithinPartitions needed — downstream parsers don't require ordering within files.
-    (all_fw
-        .select("line", "_filename")
-        .repartition("_filename")
-        .write
-        .mode("overwrite")
-        .partitionBy("_filename")
-        .text(tmp_path))
-
-    # Register deferred copies: each partition directory contains a single part file
-    # that needs to be renamed to the final FINWIRE{YYYY}Q{N} filename.
-    # These copies are executed later by bulk_copy_all() for parallel I/O.
-    fw_dirs = [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("_filename=")]
-    for fd in fw_dirs:
-        fname = fd.name.replace("_filename=", "").rstrip("/")
-        parts = dbutils.fs.ls(fd.path)
-        part_file = [p for p in parts if p.name.startswith("part-")]
-        if part_file:
-            register_copy(part_file[0].path, f"{cfg.batch_path(1)}/{fname}")
+    # Write as flat text files — same staging+copy pattern as other datasets.
+    # FINWIRE is fixed-width text (~260 bytes/line). Use maxRecordsPerFile
+    # to cap at ~128MB per file. No quarterly grouping — just FINWIRE_1.txt, etc.
+    fw_out = all_fw.select("line")
+    staging_dir = f"{cfg.batch_path(1)}/FINWIRE.txt__staging"
+    _cleanup(staging_dir, dbutils)
+    max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
+    fw_out.write.mode("overwrite").option("maxRecordsPerFile", max_records).text(staging_dir)
+    register_copies_from_staging(staging_dir, f"{cfg.batch_path(1)}/FINWIRE.txt", dbutils)
 
     total = cfg.cmp_total + cfg.sec_total + fin_count_approx
-    log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx}) -> {len(fw_dirs)} quarterly files")
+    log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx})")
     log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
     log("[FINWIRE] Generation complete")
     return {"counts": {("FINWIRE", 1): total}}
