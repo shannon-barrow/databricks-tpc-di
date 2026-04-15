@@ -763,7 +763,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Cache all_df — it's used to derive 4 views + the XML write.
     all_df = all_df.cache()
     all_df.count()  # materialize
-    log(f"[CustomerMgmt] all_df cached ({n_parts} partitions)")
+    log(f"[CustomerMgmt] Cached CustomerMgmt actions ({n_parts} partitions)")
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
@@ -860,7 +860,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Release all_df cache — views are cached independently and XML is written
     all_df.unpersist()
-    log("[CustomerMgmt] Unpersisted all_df")
+    log("[CustomerMgmt] Unpersisted CustomerMgmt actions cache")
 
     return {("CustomerMgmt", 1): total}
 
