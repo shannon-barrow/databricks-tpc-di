@@ -32,12 +32,19 @@ from .config import MAX_FILE_BYTES
 
 
 def get_cluster_memory_gb(spark) -> float:
-    """Get JVM max heap memory in GB — this is what's available for Spark cache."""
+    """Get total cluster memory in GB (driver + all executors)."""
     try:
-        runtime = spark._jvm.java.lang.Runtime.getRuntime()
-        return runtime.maxMemory() / (1024 ** 3)
+        # getExecutorMemoryStatus returns a map of executor → (maxMem, remainingMem)
+        status = spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
+        total_bytes = sum(entry._2()._1() for entry in status.toSeq())
+        return total_bytes / (1024 ** 3)
     except:
-        return 0
+        try:
+            # Fallback: just driver heap
+            runtime = spark._jvm.java.lang.Runtime.getRuntime()
+            return runtime.maxMemory() / (1024 ** 3)
+        except:
+            return 0
 
 
 def smart_cache(df, spark, scale_factor: int, label: str = ""):
@@ -69,32 +76,23 @@ def smart_cache(df, spark, scale_factor: int, label: str = ""):
         log(f"[Cache] {label}: skipped (serverless)")
         return df, False
 
-    # Check if multi-worker cluster — cache is distributed across executors
-    try:
-        num_executors = int(spark.conf.get("spark.executor.instances", "0"))
-    except:
-        num_executors = 0
-    is_multi_worker = num_executors > 0
-
-    heap_gb = get_cluster_memory_gb(spark)  # driver heap only
+    cluster_gb = get_cluster_memory_gb(spark)
     min_memory_gb = 0.1 * scale_factor
 
-    # Multi-worker: always cache in memory (distributed across workers)
-    # Single-node: check driver heap against threshold
-    if is_multi_worker or heap_gb >= min_memory_gb:
+    if cluster_gb >= min_memory_gb:
         df = df.cache()
         df.count()
-        log(f"[Cache] {label}: cached in memory (heap={heap_gb:.0f}GB, min={min_memory_gb:.0f}GB)")
+        log(f"[Cache] {label}: cached in memory (cluster={cluster_gb:.0f}GB, min={min_memory_gb:.0f}GB)")
         return df, True
 
     # Fall back to disk cache if local disk is available
     if os.path.isdir("/local_disk0/tmp"):
         df = df.persist(StorageLevel.DISK_ONLY)
         df.count()
-        log(f"[Cache] {label}: cached on disk (heap={heap_gb:.0f}GB < {min_memory_gb:.0f}GB)")
+        log(f"[Cache] {label}: cached on disk (cluster={cluster_gb:.0f}GB < {min_memory_gb:.0f}GB)")
         return df, True
 
-    log(f"[Cache] {label}: skipped (heap={heap_gb:.0f}GB < {min_memory_gb:.0f}GB, no local disk)")
+    log(f"[Cache] {label}: skipped (cluster={cluster_gb:.0f}GB < {min_memory_gb:.0f}GB, no local disk)")
     return df, False
 
 
