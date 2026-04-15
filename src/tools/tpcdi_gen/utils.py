@@ -27,7 +27,65 @@ import concurrent.futures
 from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession, functions as F
 from pyspark.sql.types import StringType, StructType, StructField, LongType
+from pyspark import StorageLevel
 from .config import MAX_FILE_BYTES
+
+
+def get_cluster_memory_gb(spark) -> float:
+    """Get total cluster memory in GB from JVM runtime."""
+    try:
+        runtime = spark._jvm.java.lang.Runtime.getRuntime()
+        return runtime.maxMemory() / (1024 ** 3)
+    except:
+        return 0
+
+
+def smart_cache(df, spark, estimated_gb: float, label: str = ""):
+    """Cache a DataFrame in memory if enough heap is available, else disk, else skip.
+
+    Decision logic:
+      - Serverless: no caching (return uncached df)
+      - Memory available > 2x estimated size: cache in memory
+      - Local disk available: cache on disk (DISK_ONLY)
+      - Otherwise: no caching (accept re-evaluation)
+
+    Args:
+        df: DataFrame to potentially cache.
+        spark: Active SparkSession.
+        estimated_gb: Estimated cache size in GB.
+        label: Description for logging (e.g., "Trade source data").
+
+    Returns:
+        (cached_df, was_cached: bool)
+    """
+    try:
+        _is_serverless = "serverless" in spark.conf.get(
+            "spark.databricks.clusterUsageTags.clusterType", "").lower()
+    except:
+        _is_serverless = False
+
+    if _is_serverless:
+        log(f"[Cache] {label}: skipped (serverless)")
+        return df, False
+
+    heap_gb = get_cluster_memory_gb(spark)
+    # Use memory cache if heap is at least 2x the estimated cache size
+    # (leaves room for working memory of other concurrent operations)
+    if heap_gb > 0 and estimated_gb * 2 < heap_gb:
+        df = df.cache()
+        df.count()
+        log(f"[Cache] {label}: cached in memory ({estimated_gb:.0f}GB, heap={heap_gb:.0f}GB)")
+        return df, True
+
+    # Fall back to disk cache if local disk is available
+    if os.path.isdir("/local_disk0/tmp"):
+        df = df.persist(StorageLevel.DISK_ONLY)
+        df.count()
+        log(f"[Cache] {label}: cached on disk ({estimated_gb:.0f}GB, heap={heap_gb:.0f}GB)")
+        return df, True
+
+    log(f"[Cache] {label}: skipped (insufficient memory, heap={heap_gb:.0f}GB)")
+    return df, False
 
 
 # Module-level log level setting

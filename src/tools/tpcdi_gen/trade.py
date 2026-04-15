@@ -117,7 +117,7 @@ import math
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log
+from .utils import write_file, seed_for, hash_key, dict_join, log, smart_cache
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -419,17 +419,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
 
     # Cache trade_df — evaluated 4x (Trade, TradeHistory, CashTransaction,
-    # HoldingHistory). Without Photon, cache stores in row format natively
-    # (no columnar↔row conversion overhead). On non-serverless clusters only.
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-    if not _is_serverless:
-        trade_df = trade_df.cache()
-        trade_df.count()
-        log(f"[Trade] Cached Trade source data ({cfg.trade_total:,} rows)")
+    # HoldingHistory). smart_cache checks available memory and falls back
+    # to disk or no-cache if insufficient.
+    estimated_trade_gb = cfg.trade_total * 150 / (1024 ** 3)  # ~150 bytes/row in memory
+    trade_df, _trade_cached = smart_cache(trade_df, spark, estimated_trade_gb,
+        f"Trade source data ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -590,7 +584,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         for f in futures:
             counts.update(f.result())
 
-    if not _is_serverless:
+    if _trade_cached:
         trade_df.unpersist()
         log("[Trade] Unpersisted Trade source data cache")
 
