@@ -214,12 +214,12 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
     filtered_accts = (all_accts
         .join(F.broadcast(closed_df), all_accts["ca_id"] == closed_df["closed_ca_id"], "left_anti"))
 
-    # Stay in Spark — no collect to Python. Use row_number for sequential IDs.
-    # The orderBy("ca_id") here is the same sort we had before but stays distributed.
-    valid_accts = (filtered_accts
-        .withColumn("_va_idx",
-            F.row_number().over(Window.orderBy("ca_id")) - 1)
-        .select("_va_idx", F.col("ca_id").cast("string").alias("_valid_ca_id")))
+    # Collect + enumerate: reads ~4.8M rows (~38MB) from cached _created_accounts.
+    # Much faster than row_number() Window which forces a single-partition sort (2.5 min).
+    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
+    valid_accts = spark.createDataFrame(
+        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
+        ["_va_idx", "_valid_ca_id"])
     n_valid = valid_accts.count()
     log(f"[Trade] account pool: {n_total_created} created, {n_available} by trade date, {n_valid} valid (excl closed)")
     return valid_accts, n_valid
