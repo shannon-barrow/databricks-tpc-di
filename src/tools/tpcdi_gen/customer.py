@@ -815,29 +815,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     if views_ready_event is not None:
         views_ready_event.set()
 
-    # === Write XML as compact text with per-partition header/footer ===
-    # Uses the pre-built xml_body strings (compact, no indentation) and wraps
-    # each partition with XML root tags via mapInPandas. This produces valid XML
-    # files that are ~3x smaller than the native XML writer's indented output,
-    # while keeping writes fully distributed (no coalesce).
-    # Inherits balanced partitions from the repartitioned+cached all_df.
+    # === Write XML body as plain text, then concat header/footer via filesystem ===
+    # Avoids mapInPandas which caused 17 min overhead from Photon columnar↔row
+    # conversions + Python interpreter on multi-worker clusters.
+    # Step 1: Spark writes XML body lines as plain text (fast, no Python UDF)
+    # Step 2: Filesystem cat prepends header + appends footer per file (kernel I/O)
     xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line")
-
-    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">'
-    xml_footer = '</TPCDI:Actions>'
-
-    import pandas as pd
-    from pyspark.sql.types import StructType, StructField, StringType
-
-    def wrap_xml_partition(iterator):
-        """Wrap each partition's XML lines with root element tags."""
-        yield pd.DataFrame({"xml_line": [xml_header]})
-        for pdf in iterator:
-            yield pdf
-        yield pd.DataFrame({"xml_line": [xml_footer]})
-
-    out_schema = StructType([StructField("xml_line", StringType())])
-    wrapped_df = xml_df.mapInPandas(wrap_xml_partition, schema=out_schema)
 
     tmp_path = f"{cfg.batch_path(1)}/CustomerMgmt.xml__tmp"
     try:
@@ -845,13 +828,45 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     except:
         pass
 
-    wrapped_df.write.mode("overwrite").text(tmp_path)
+    xml_df.write.mode("overwrite").text(tmp_path)
+    log(f"[CustomerMgmt] XML body written to staging")
+
+    # Step 2: Concat header + body + footer per file using filesystem cat
+    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">\n'
+    xml_footer = '\n</TPCDI:Actions>\n'
+    import subprocess, tempfile
+
+    # Write header/footer to local temp files
+    header_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+    header_file.write(xml_header)
+    header_file.close()
+    footer_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+    footer_file.write(xml_footer)
+    footer_file.close()
 
     part_files = sorted(
         [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")],
         key=lambda f: f.name)
-    for i, pf in enumerate(part_files):
-        register_copy(pf.path, f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
+
+    # Convert dbfs paths to FUSE paths for cat
+    def to_fuse(dbfs_path):
+        return dbfs_path.replace("dbfs:", "/dbfs")
+
+    import concurrent.futures
+    def wrap_xml(args):
+        i, pf = args
+        src = to_fuse(pf.path)
+        dst = to_fuse(f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
+        subprocess.run(["bash", "-c", f"cat {header_file.name} {src} {footer_file.name} > {dst}"],
+                       check=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(wrap_xml, enumerate(part_files)))
+
+    # Cleanup temp files
+    import os as _os
+    _os.unlink(header_file.name)
+    _os.unlink(footer_file.name)
 
     total_new = hist_size + update_last_id * new_custs
     total_caids = hist_size + update_last_id * new_accts
