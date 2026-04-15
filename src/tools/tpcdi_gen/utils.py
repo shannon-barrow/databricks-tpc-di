@@ -32,15 +32,22 @@ from .config import MAX_FILE_BYTES
 
 
 def get_cluster_memory_gb(spark) -> float:
-    """Get total cluster memory in GB (driver + all executors)."""
+    """Get total executor memory in GB (excludes driver)."""
     try:
-        # getExecutorMemoryStatus returns a map of executor → (maxMem, remainingMem)
-        status = spark.sparkContext._jsc.sc().getExecutorMemoryStatus()
-        total_bytes = sum(entry._2()._1() for entry in status.toSeq())
+        sc = spark.sparkContext._jsc.sc()
+        driver_host = sc.getConf().get("spark.driver.host")
+        status = sc.getExecutorMemoryStatus()
+        total_bytes = 0
+        for entry in status.toSeq():
+            # Executor IDs contain host:port — skip the driver
+            if not str(entry._1()).startswith(driver_host):
+                total_bytes += entry._2()._1()
+        # Single-node clusters: all memory is on the driver, count it
+        if total_bytes == 0:
+            total_bytes = sum(entry._2()._1() for entry in status.toSeq())
         return total_bytes / (1024 ** 3)
     except:
         try:
-            # Fallback: just driver heap
             runtime = spark._jvm.java.lang.Runtime.getRuntime()
             return runtime.maxMemory() / (1024 ** 3)
         except:
