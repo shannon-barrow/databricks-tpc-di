@@ -216,7 +216,7 @@ def _build_valid_accounts(spark, cfg, n_hist_accounts, hist_size):
 
     # Collect + enumerate: reads ~4.8M rows (~38MB) from cached _created_accounts.
     # Much faster than row_number() Window which forces a single-partition sort (2.5 min).
-    valid_ca_ids = [row.ca_id for row in filtered_accts.orderBy("ca_id").collect()]
+    valid_ca_ids = [row.ca_id for row in filtered_accts.collect()]
     valid_accts = spark.createDataFrame(
         [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
         ["_va_idx", "_valid_ca_id"])
