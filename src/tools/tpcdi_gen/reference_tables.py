@@ -76,7 +76,13 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         try:
             with open(src, "r") as f:
                 content = f.read()
-            dbutils.fs.put(dst, content, overwrite=True)
+            import io, sys
+            _old = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                dbutils.fs.put(dst, content, overwrite=True)
+            finally:
+                sys.stdout = _old
             counts[(filename.replace(".txt", ""), 1)] = row_count
             log(f"[Reference] {filename}: {row_count} rows (copied)", "DEBUG")
         except Exception as e:

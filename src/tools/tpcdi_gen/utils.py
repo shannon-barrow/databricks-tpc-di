@@ -462,7 +462,13 @@ def write_text(content: str, path: str, dbutils=None):
         dbutils: Databricks dbutils object for filesystem operations.
     """
     if dbutils:
-        dbutils.fs.put(path, content, overwrite=True)
+        import io, sys
+        _old_stdout = sys.stdout
+        sys.stdout = io.StringIO()  # suppress "Wrote N bytes" output
+        try:
+            dbutils.fs.put(path, content, overwrite=True)
+        finally:
+            sys.stdout = _old_stdout
 
 
 def cleanup_staging(volume_path: str, dbutils):
