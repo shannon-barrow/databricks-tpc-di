@@ -698,6 +698,26 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # dedup must pass for a row to be retained).
     all_df = all_df.filter((F.col("_cust_dedup_rank") == 1) & (F.col("_acct_dedup_rank") == 1))
 
+    # === Global dedup: at most ONE INACT per customer, ONE CLOSEACCT per account ===
+    # The per-day dedup above allows the same customer to be INAC'd on different days
+    # (e.g., update 100 and update 200). A customer can only be deactivated once.
+    # Keep the FIRST INACT per C_ID and FIRST CLOSEACCT per CA_ID.
+    inact_rank = (F.when(F.col("ActionType") == "INACT",
+        F.row_number().over(Window.partitionBy("C_ID")
+            .orderBy("ActionTS")
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+        .otherwise(F.lit(1)))
+    all_df = all_df.withColumn("_inact_rank", inact_rank)
+
+    close_rank = (F.when(F.col("ActionType") == "CLOSEACCT",
+        F.row_number().over(Window.partitionBy("CA_ID")
+            .orderBy("ActionTS")
+            .rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+        .otherwise(F.lit(1)))
+    all_df = all_df.withColumn("_close_rank", close_rank)
+
+    all_df = all_df.filter((F.col("_inact_rank") == 1) & (F.col("_close_rank") == 1))
+
     # === Filter out ADDACCTs on the same day as their customer's INACT ===
     # An ADDACCT and INACT for the same customer on the same day would create
     # a same-day conflict when we generate the synthetic CLOSEACCT. Remove the
