@@ -793,17 +793,23 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Build valid account pool with sequential IDs for Trade.
     # Trade uses hash % n_valid to assign accounts, so _va_idx must be 0..n_valid-1.
+    # Only include accounts that existed by TRADE_BEGIN_DATE (time-proportional filter).
     # Computing this here (while all_df is cached) avoids a 12-min collect in Trade.
-    valid_acct_pool = (created_accts
+    trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
+    n_available = max(hist_size, int(n_created * trade_fraction))
+    time_filtered = (created_accts
+        .orderBy("created_ca_id")
+        .limit(n_available))
+    valid_acct_pool = (time_filtered
         .join(F.broadcast(closed_accts),
-              created_accts["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
+              time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
         .withColumn("_va_idx",
             F.row_number().over(Window.orderBy("created_ca_id")) - 1)
         .select("_va_idx", F.col("created_ca_id").cast("string").alias("_valid_ca_id"))
         .persist(StorageLevel.DISK_ONLY))
     valid_acct_pool.createOrReplaceTempView("_valid_acct_pool")
     n_valid = valid_acct_pool.count()
-    log(f"[CustomerMgmt] {n_valid} valid accounts -> _valid_acct_pool view")
+    log(f"[CustomerMgmt] {n_valid} valid accounts -> _valid_acct_pool view (from {n_available} by trade date)")
 
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they
