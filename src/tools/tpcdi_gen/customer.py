@@ -702,17 +702,16 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # The per-day dedup above allows the same customer to be INAC'd on different days
     # (e.g., update 100 and update 200). A customer can only be deactivated once.
     # Keep the FIRST INACT per C_ID and FIRST CLOSEACCT per CA_ID.
+    #
+    # Partition by (key, ActionType) so row_number ranks only within the same action
+    # type. Non-INACT/CLOSEACCT rows get rank 1 via the otherwise() branch.
     inact_rank = (F.when(F.col("ActionType") == "INACT",
-        F.row_number().over(Window.partitionBy("C_ID")
-            .orderBy("ActionTS")
-            .rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+        F.row_number().over(Window.partitionBy("C_ID", "ActionType").orderBy("ActionTS")))
         .otherwise(F.lit(1)))
     all_df = all_df.withColumn("_inact_rank", inact_rank)
 
     close_rank = (F.when(F.col("ActionType") == "CLOSEACCT",
-        F.row_number().over(Window.partitionBy("CA_ID")
-            .orderBy("ActionTS")
-            .rowsBetween(Window.unboundedPreceding, Window.currentRow)))
+        F.row_number().over(Window.partitionBy("CA_ID", "ActionType").orderBy("ActionTS")))
         .otherwise(F.lit(1)))
     all_df = all_df.withColumn("_close_rank", close_rank)
 
