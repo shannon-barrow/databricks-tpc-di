@@ -12,7 +12,7 @@ WITH Holdings as (
     sep => "|",
     fileNamePattern => "HoldingHistory_[0-9]*.txt",
     schemaEvolutionMode => 'none',
-    schema => "hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+    schema => "hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
   )
   UNION ALL
   SELECT
@@ -26,7 +26,7 @@ WITH Holdings as (
     sep => "|",
     fileNamePattern => "HoldingHistory_[0-9]*.txt",
     schemaEvolutionMode => 'none',
-    schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
   )
 )
 SELECT

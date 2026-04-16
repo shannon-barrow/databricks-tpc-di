@@ -119,8 +119,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.CashTransactio
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncremental (
-  hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row.',
-  hh_t_id INT COMMENT 'Trade Identifier of the current trade',
+  hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row.',
+  hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade',
   hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade.',
   hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade.',
   batchid INT COMMENT 'Batch ID when this record was inserted'
@@ -489,7 +489,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Financial (
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
-  tradeid INT NOT NULL COMMENT 'Trade identifier',
+  tradeid BIGINT NOT NULL COMMENT 'Trade identifier',
   sk_brokerid BIGINT COMMENT 'Surrogate key for BrokerID',
   sk_createdateid BIGINT COMMENT 'Surrogate key for date created',
   sk_createtimeid BIGINT COMMENT 'Surrogate key for time created',
@@ -527,8 +527,8 @@ PARTITIONED BY (closed);
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactHoldings (
-  tradeid INT COMMENT 'Key for Orignial Trade Indentifier',
-  currenttradeid INT NOT NULL COMMENT 'Key for the current trade',
+  tradeid BIGINT COMMENT 'Key for Orignial Trade Indentifier',
+  currenttradeid BIGINT NOT NULL COMMENT 'Key for the current trade',
   sk_customerid BIGINT COMMENT 'Surrogate key for Customer Identifier',
   sk_accountid BIGINT COMMENT 'Surrogate key for Account Identifier',
   sk_securityid BIGINT COMMENT 'Surrogate key for Security Identifier',
