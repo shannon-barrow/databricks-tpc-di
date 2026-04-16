@@ -71,7 +71,7 @@ min_dbr_version    = 14.1
 invalid_dbr_list   = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
 features_or_perf   = ['Feature-Rich', 'Fastest Performance']
 
-default_sf_options    = ['10', '100', '1000', '5000', '10000']
+default_sf_options    = ['10', '100', '1000', '5000', '10000', '20000']
 UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
 cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
 node_types            = get_node_types()
