@@ -294,11 +294,18 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     #     (first new_custs are for NEW actions, next addaccts_per_update are for ADDACCT)
     # UPDACCT and CLOSEACCT reference existing CA_IDs from prior updates via hash.
     # UPDCUST and INACT have CA_ID = -1 (no account involvement).
+    # Order NEWs before ADDACCTs so that NEW rows get _acct_idx 0..new_custs-1.
+    # This ensures _first_acct (used by UPDACCT/CLOSEACCT) correctly maps C_ID to
+    # the customer's NEW account CA_ID. Without this ordering, NEWs and ADDACCTs
+    # interleave by global_seq, causing _acct_idx != _new_idx and making _first_acct
+    # reference wrong CA_IDs (some of which are ADDACCT holes from INACT filtering).
     all_df = all_df.withColumn("_acct_idx_in_update",
         F.when(F.col("ActionType").isin("NEW", "ADDACCT"),
             F.row_number().over(
                 Window.partitionBy("update_id", F.when(F.col("ActionType").isin("NEW", "ADDACCT"), F.lit(True)))
-                .orderBy("global_seq")) - 1)
+                .orderBy(
+                    F.when(F.col("ActionType") == "NEW", F.lit(0)).otherwise(F.lit(1)),
+                    "global_seq")) - 1)
          .otherwise(F.lit(-1)))
 
     all_df = all_df.withColumn("CA_ID",
@@ -1177,11 +1184,15 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .filter(F.col("c_st_id") == "INAC")
             .select(F.col("c_id").alias("_inac_cid")))
         acct_owners = spark.table("_account_owners")
+        # Assign a valid broker to INAC closures so they survive the DimBroker
+        # INNER JOIN in the pipeline. The specific broker doesn't matter (account
+        # is being closed), but an empty broker causes the row to be dropped.
+        _first_broker = brokers_df.select("broker_id").first()[0]
         inac_acct_rows = (inac_custs
             .join(F.broadcast(acct_owners), F.col("_inac_cid") == F.col("owner_cid"), "inner")
             .withColumn("cdc_flag", F.lit("U"))
             .withColumn("cdc_dsn", F.lit("0"))
-            .withColumn("ca_b_id", F.lit(""))
+            .withColumn("ca_b_id", F.lit(str(_first_broker)))
             .withColumn("ca_c_id", F.col("_inac_cid"))
             .withColumn("ca_name", F.lit(""))
             .withColumn("ca_tax_st", F.lit(""))

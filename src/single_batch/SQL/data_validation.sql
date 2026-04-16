@@ -73,9 +73,8 @@ SELECT
   (SELECT cnt FROM all_custs) as source_customers,
   tgt.target_customers,
   CASE WHEN (SELECT cnt FROM all_custs) = tgt.target_customers THEN 'PASS'
-       WHEN (SELECT cnt FROM all_custs) <= tgt.target_customers THEN 'WARN (target has ' || (tgt.target_customers - (SELECT cnt FROM all_custs)) || ' extra)'
-       ELSE 'FAIL' END as status,
-  'Every distinct customer should appear in DimCustomer (exact match expected)' as description
+       ELSE 'FAIL (source=' || (SELECT cnt FROM all_custs) || ', target=' || tgt.target_customers || ', delta=' || (tgt.target_customers - (SELECT cnt FROM all_custs)) || ')' END as status,
+  'Every distinct customer should appear in DimCustomer (exact match required)' as description
 FROM
   (SELECT count(distinct customerid) as target_customers
    FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')) tgt;
@@ -122,9 +121,8 @@ SELECT
   (SELECT cnt FROM all_accts) as source_accounts,
   tgt.target_accounts,
   CASE WHEN (SELECT cnt FROM all_accts) = tgt.target_accounts THEN 'PASS'
-       WHEN (SELECT cnt FROM all_accts) <= tgt.target_accounts THEN 'WARN (target has ' || (tgt.target_accounts - (SELECT cnt FROM all_accts)) || ' extra)'
-       ELSE 'FAIL' END as status,
-  'Every distinct account should appear in DimAccount (exact match expected)' as description
+       ELSE 'FAIL (source=' || (SELECT cnt FROM all_accts) || ', target=' || tgt.target_accounts || ', delta=' || (tgt.target_accounts - (SELECT cnt FROM all_accts)) || ')' END as status,
+  'Every distinct account should appear in DimAccount (exact match required)' as description
 FROM
   (SELECT count(distinct accountid) as target_accounts
    FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount')) tgt;
@@ -233,14 +231,15 @@ SELECT
   'DimTrade' as target_table,
   (SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc) as source_trades,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade')) as target_rows,
-  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
-            - ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc)))
-            <= 0.01 * ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
+            = ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))
        THEN 'PASS'
-       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
+       ELSE 'FAIL (source=' || ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))
+            || ', target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
+            || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
             - ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))) || ')'
        END as status,
-  'DimTrade should be within 1% of source trades' as description;
+  'DimTrade should exactly match source trades' as description;
 
 -- COMMAND ----------
 
@@ -307,14 +306,15 @@ SELECT
   'FactCashBalances' as target_table,
   (SELECT cnt FROM all_cash) as source_daily_acct_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances')) as target_rows,
-  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
-            - (SELECT cnt FROM all_cash))
-            <= 0.001 * (SELECT cnt FROM all_cash)
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
+            = (SELECT cnt FROM all_cash)
        THEN 'PASS'
-       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
+       ELSE 'FAIL (source=' || (SELECT cnt FROM all_cash)
+            || ', target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
+            || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
             - (SELECT cnt FROM all_cash)) || ')'
        END as status,
-  'FactCashBalances should be within 0.1% of source (accountid,date) pairs' as description;
+  'FactCashBalances should exactly match source (accountid,date) pairs' as description;
 
 -- COMMAND ----------
 
@@ -346,14 +346,15 @@ SELECT
   'FactHoldings' as target_table,
   (SELECT cnt FROM all_hh) as source_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings')) as target_rows,
-  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
-            - (SELECT cnt FROM all_hh))
-            <= 0.001 * (SELECT cnt FROM all_hh)
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
+            = (SELECT cnt FROM all_hh)
        THEN 'PASS'
-       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
+       ELSE 'FAIL (source=' || (SELECT cnt FROM all_hh)
+            || ', target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
+            || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
             - (SELECT cnt FROM all_hh)) || ')'
        END as status,
-  'FactHoldings should be within 0.1% of source rows' as description;
+  'FactHoldings should exactly match source rows' as description;
 
 -- COMMAND ----------
 
@@ -390,12 +391,14 @@ SELECT
   (SELECT cnt FROM watch_all) as source_distinct_pairs,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')) as target_rows,
   CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
-            BETWEEN (SELECT cnt FROM watch_all) * 0.5 AND (SELECT cnt FROM watch_all)
+            = (SELECT cnt FROM watch_all)
        THEN 'PASS'
-       ELSE 'FAIL (target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
-            || ', source_pairs=' || (SELECT cnt FROM watch_all) || ')'
+       ELSE 'FAIL (source=' || (SELECT cnt FROM watch_all)
+            || ', target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
+            || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
+            - (SELECT cnt FROM watch_all)) || ')'
        END as status,
-  'FactWatches should be 50-100% of source distinct pairs (some drop from DimCustomer/DimSecurity join)' as description;
+  'FactWatches should exactly match source distinct pairs' as description;
 
 -- COMMAND ----------
 
@@ -476,13 +479,13 @@ SELECT
   (SELECT cnt FROM dm_source) as source_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')) as target_rows,
   CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory'))
-            BETWEEN (SELECT cnt FROM dm_source) AND (SELECT cnt FROM dm_source) * 1.05
+            = (SELECT cnt FROM dm_source)
        THEN 'PASS'
-       ELSE 'FAIL (target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory'))
-            || ', source=' || (SELECT cnt FROM dm_source)
+       ELSE 'FAIL (source=' || (SELECT cnt FROM dm_source)
+            || ', target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory'))
             || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')) - (SELECT cnt FROM dm_source)) || ')'
        END as status,
-  'FactMarketHistory should be within 0-5% above source (DimSecurity SCD2 can expand rows)' as description;
+  'FactMarketHistory should exactly match source DailyMarket rows (point-in-time DimSecurity join is 1:1)' as description;
 
 -- COMMAND ----------
 
