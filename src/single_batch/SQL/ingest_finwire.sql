@@ -22,4 +22,4 @@ SELECT
   ) rectype,
   to_date(substring(value, 1, 8), 'yyyyMMdd') AS recdate,
   substring(value, 19) value
-FROM text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE*`;
+FROM text.`${tpcdi_directory}sf=${scale_factor}/Batch1/FINWIRE_*.txt`;
