@@ -793,22 +793,23 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Build valid account pool with sequential IDs for Trade.
     # Trade uses hash % n_valid to assign accounts, so _va_idx must be 0..n_valid-1.
-    # Only include accounts that existed by TRADE_BEGIN_DATE (time-proportional filter).
-    # Computing this here (while all_df is cached) avoids a 12-min collect in Trade.
+    # Only include accounts that existed by TRADE_BEGIN_DATE (filter by ID range).
+    # ca_ids are allocated sequentially, so filtering by < n_available gives the
+    # same set as orderBy().limit() without a sort (partition-parallel filter).
     trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
     n_available = max(hist_size, int(n_created * trade_fraction))
-    time_filtered = (created_accts
-        .orderBy("created_ca_id")
-        .limit(n_available))
-    valid_acct_pool = (time_filtered
-        .join(F.broadcast(closed_accts),
-              time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
-        .withColumn("_va_idx",
-            F.row_number().over(Window.orderBy("created_ca_id")) - 1)
-        .select("_va_idx", F.col("created_ca_id").cast("string").alias("_valid_ca_id"))
-        .persist(StorageLevel.DISK_ONLY))
+    time_filtered = created_accts.filter(F.col("created_ca_id") < n_available)
+    # Remove closed accounts
+    filtered = time_filtered.join(
+        F.broadcast(closed_accts),
+        time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
+    # Collect from disk cache (~9.6M rows at SF=10000 = ~77MB, fast) + enumerate
+    valid_ca_ids = [row.created_ca_id for row in filtered.collect()]
+    valid_acct_pool = spark.createDataFrame(
+        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
+        ["_va_idx", "_valid_ca_id"])
     valid_acct_pool.createOrReplaceTempView("_valid_acct_pool")
-    n_valid = valid_acct_pool.count()
+    n_valid = len(valid_ca_ids)
     log(f"[CustomerMgmt] {n_valid} valid accounts -> _valid_acct_pool view (from {n_available} by trade date)")
 
     # === Create _customer_dates temp view ===
