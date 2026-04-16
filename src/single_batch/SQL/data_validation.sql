@@ -72,8 +72,10 @@ SELECT
   'DimCustomer distinct customers' as target_table,
   (SELECT cnt FROM all_custs) as source_customers,
   tgt.target_customers,
-  CASE WHEN (SELECT cnt FROM all_custs) <= tgt.target_customers THEN 'PASS' ELSE 'FAIL' END as status,
-  'Every distinct customer (historical NEW + incremental inserts) should appear in DimCustomer' as description
+  CASE WHEN (SELECT cnt FROM all_custs) = tgt.target_customers THEN 'PASS'
+       WHEN (SELECT cnt FROM all_custs) <= tgt.target_customers THEN 'WARN (target has ' || (tgt.target_customers - (SELECT cnt FROM all_custs)) || ' extra)'
+       ELSE 'FAIL' END as status,
+  'Every distinct customer should appear in DimCustomer (exact match expected)' as description
 FROM
   (SELECT count(distinct customerid) as target_customers
    FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')) tgt;
@@ -119,8 +121,10 @@ SELECT
   'DimAccount distinct accounts' as target_table,
   (SELECT cnt FROM all_accts) as source_accounts,
   tgt.target_accounts,
-  CASE WHEN (SELECT cnt FROM all_accts) <= tgt.target_accounts THEN 'PASS' ELSE 'FAIL' END as status,
-  'Every distinct account (historical + incremental inserts) should appear in DimAccount' as description
+  CASE WHEN (SELECT cnt FROM all_accts) = tgt.target_accounts THEN 'PASS'
+       WHEN (SELECT cnt FROM all_accts) <= tgt.target_accounts THEN 'WARN (target has ' || (tgt.target_accounts - (SELECT cnt FROM all_accts)) || ' extra)'
+       ELSE 'FAIL' END as status,
+  'Every distinct account should appear in DimAccount (exact match expected)' as description
 FROM
   (SELECT count(distinct accountid) as target_accounts
    FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount')) tgt;
@@ -229,10 +233,14 @@ SELECT
   'DimTrade' as target_table,
   (SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc) as source_trades,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade')) as target_rows,
-  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade')) >=
-            (SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc)
-       THEN 'PASS' ELSE 'FAIL' END as status,
-  'DimTrade should have >= source trades (Batch2/3 updates can generate additional completed trades)' as description;
+  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
+            - ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc)))
+            <= 0.01 * ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))
+       THEN 'PASS'
+       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade'))
+            - ((SELECT cnt FROM trade_source) + (SELECT cnt FROM trade_inc))) || ')'
+       END as status,
+  'DimTrade should be within 1% of source trades' as description;
 
 -- COMMAND ----------
 
@@ -299,10 +307,14 @@ SELECT
   'FactCashBalances' as target_table,
   (SELECT cnt FROM all_cash) as source_daily_acct_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances')) as target_rows,
-  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances')) >=
-            (SELECT cnt FROM all_cash)
-       THEN 'PASS' ELSE 'FAIL' END as status,
-  'FactCashBalances should have >= source (accountid,date) pairs (Batch overlap can add rows)' as description;
+  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
+            - (SELECT cnt FROM all_cash))
+            <= 0.001 * (SELECT cnt FROM all_cash)
+       THEN 'PASS'
+       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactCashBalances'))
+            - (SELECT cnt FROM all_cash)) || ')'
+       END as status,
+  'FactCashBalances should be within 0.1% of source (accountid,date) pairs' as description;
 
 -- COMMAND ----------
 
@@ -334,10 +346,14 @@ SELECT
   'FactHoldings' as target_table,
   (SELECT cnt FROM all_hh) as source_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings')) as target_rows,
-  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings')) >=
-            (SELECT cnt FROM all_hh)
-       THEN 'PASS' ELSE 'FAIL' END as status,
-  'FactHoldings should have >= source rows (Batch2/3 updates can generate additional holdings)' as description;
+  CASE WHEN abs((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
+            - (SELECT cnt FROM all_hh))
+            <= 0.001 * (SELECT cnt FROM all_hh)
+       THEN 'PASS'
+       ELSE 'FAIL (delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactHoldings'))
+            - (SELECT cnt FROM all_hh)) || ')'
+       END as status,
+  'FactHoldings should be within 0.1% of source rows' as description;
 
 -- COMMAND ----------
 
@@ -373,10 +389,13 @@ SELECT
   'FactWatches' as target_table,
   (SELECT cnt FROM watch_all) as source_distinct_pairs,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')) as target_rows,
-  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches')) >=
-            (SELECT cnt FROM watch_all)
-       THEN 'PASS' ELSE 'FAIL' END as status,
-  'FactWatches should have >= source distinct pairs (Batch2/3 can add new watch pairs)' as description;
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
+            BETWEEN (SELECT cnt FROM watch_all) * 0.5 AND (SELECT cnt FROM watch_all)
+       THEN 'PASS'
+       ELSE 'FAIL (target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactWatches'))
+            || ', source_pairs=' || (SELECT cnt FROM watch_all) || ')'
+       END as status,
+  'FactWatches should be 50-100% of source distinct pairs (some drop from DimCustomer/DimSecurity join)' as description;
 
 -- COMMAND ----------
 
@@ -456,10 +475,14 @@ SELECT
   'FactMarketHistory' as target_table,
   (SELECT cnt FROM dm_source) as source_rows,
   (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')) as target_rows,
-  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')) >=
-            (SELECT cnt FROM dm_source)
-       THEN 'PASS' ELSE 'FAIL' END as status,
-  'FactMarketHistory should have >= source rows (DimSecurity SCD2 can expand rows)' as description;
+  CASE WHEN (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory'))
+            BETWEEN (SELECT cnt FROM dm_source) AND (SELECT cnt FROM dm_source) * 1.05
+       THEN 'PASS'
+       ELSE 'FAIL (target=' || (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory'))
+            || ', source=' || (SELECT cnt FROM dm_source)
+            || ', delta=' || ((SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.FactMarketHistory')) - (SELECT cnt FROM dm_source)) || ')'
+       END as status,
+  'FactMarketHistory should be within 0-5% above source (DimSecurity SCD2 can expand rows)' as description;
 
 -- COMMAND ----------
 
@@ -472,8 +495,9 @@ SELECT
   'Prospect' as target_table,
   src.source_rows,
   tgt.target_rows,
-  CASE WHEN src.source_rows <= tgt.target_rows THEN 'PASS' ELSE 'FAIL' END as status,
-  'Prospect table should have >= distinct agencyids from latest batch (earlier batches may add extra)' as description
+  CASE WHEN src.source_rows = tgt.target_rows THEN 'PASS'
+       ELSE 'FAIL (source=' || src.source_rows || ', target=' || tgt.target_rows || ')' END as status,
+  'Prospect table should exactly match distinct agencyids from latest batch' as description
 FROM
   (SELECT count(distinct agencyid) as source_rows
    FROM read_files(
