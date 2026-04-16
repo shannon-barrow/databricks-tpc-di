@@ -804,7 +804,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         F.broadcast(closed_accts),
         time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
     # Collect from disk cache (~9.6M rows at SF=10000 = ~77MB, fast) + enumerate
-    valid_ca_ids = [row.created_ca_id for row in filtered.collect()]
+    valid_ca_ids = sorted([row.created_ca_id for row in filtered.collect()])
     valid_acct_pool = spark.createDataFrame(
         [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
         ["_va_idx", "_valid_ca_id"])
