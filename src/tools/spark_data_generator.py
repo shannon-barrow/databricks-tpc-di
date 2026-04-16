@@ -157,7 +157,7 @@ def spark_generate():
     cust_views_ready = threading.Event()
     def run_customer():
       f_hr.result()  # wait for _brokers
-      executor.submit(bulk_copy_all, dbutils, 16, "after HR+Reference")  # non-blocking
+      threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after HR+Reference"), daemon=True).start()
       return customer.generate(spark, cfg, dicts, dbutils, views_ready_event=cust_views_ready)
     f_cust = executor.submit(run_customer)
 
@@ -176,7 +176,7 @@ def spark_generate():
     def run_trade():
       cust_views_ready.wait()  # wait for views only (~4 min into CustomerMgmt)
       f_fw.result()            # wait for _symbols (likely already done)
-      executor.submit(bulk_copy_all, dbutils, 16, "after CustMgmt views")  # non-blocking
+      threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after CustMgmt views"), daemon=True).start()
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 

@@ -341,13 +341,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     # Join valid (non-closed) account IDs via the sequential index
     trade_df = trade_df.join(
-        F.broadcast(valid_accts), on="_va_idx", how="left"
+        valid_accts, on="_va_idx", how="left"
     ).withColumn("t_ca_id", F.col("_valid_ca_id"))
 
 
     # Join broker full names for t_exec_name (reconstructed from HR dictionaries)
     trade_df = trade_df.join(
-        F.broadcast(broker_names), on="_broker_idx", how="left"
+        broker_names, on="_broker_idx", how="left"
     ).withColumn("t_exec_name", F.col("broker_name"))
 
 
@@ -648,11 +648,11 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
     # Join valid (non-closed) account
-    inc_df = inc_df.join(F.broadcast(valid_accts), on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
+    inc_df = inc_df.join(valid_accts, on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
 
     # Join broker name from shared cached lookup
     broker_names = shared["broker_names"]
-    inc_df = inc_df.join(F.broadcast(broker_names), on="_broker_idx", how="left").withColumn("t_exec_name", F.col("broker_name"))
+    inc_df = inc_df.join(broker_names, on="_broker_idx", how="left").withColumn("t_exec_name", F.col("broker_name"))
 
     # Final column selection: CDC columns first, then standard trade columns
     inc_df = inc_df.select(
