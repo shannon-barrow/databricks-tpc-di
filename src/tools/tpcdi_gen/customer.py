@@ -354,19 +354,25 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     all_df = (all_df
         .join(F.broadcast(inact_map),
-              F.col("ActionType").isin("UPDACCT", "CLOSEACCT", "ADDACCT") &
+              F.col("ActionType").isin("UPDCUST", "UPDACCT", "CLOSEACCT", "ADDACCT") &
               (F.col("C_ID") == F.col("_inact_cid")),
               "left")
         # ADDACCT: filter if customer INACT'd in same or prior update (<=).
         # No point creating a new account for a customer being deactivated.
-        # UPDACCT/CLOSEACCT: filter only if INACT'd in prior update (<).
-        # Same-update UPDACCT is valid (happens before INACT in sort order).
+        # UPDCUST/UPDACCT/CLOSEACCT: filter only if INACT'd in prior update (<).
+        # Same-update actions are valid — UPDCUST (order 4), UPDACCT (2), CLOSEACCT (3)
+        # all happen BEFORE INACT (order 5) within an update's sort order.
+        # Without this UPDCUST filter, an UPDCUST in a LATER update creates a new
+        # Active DimCustomer version after INACT, which shrinks the Inactive version's
+        # enddate and causes the synthetic CLOSEACCT (at or shifted past INACT's date)
+        # to fall outside the Inactive version's range — breaking the "Inactive
+        # customer -> inactive accounts" business rule.
         .filter(~(
             (F.col("ActionType") == "ADDACCT") &
             F.col("_inact_at").isNotNull() &
             (F.col("_inact_at") <= F.col("update_id"))))
         .filter(~(
-            F.col("ActionType").isin("UPDACCT", "CLOSEACCT") &
+            F.col("ActionType").isin("UPDCUST", "UPDACCT", "CLOSEACCT") &
             F.col("_inact_at").isNotNull() &
             (F.col("_inact_at") < F.col("update_id"))))
         .drop("_inact_cid", "_inact_at"))
