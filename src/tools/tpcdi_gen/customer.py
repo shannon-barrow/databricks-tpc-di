@@ -377,6 +377,33 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             (F.col("_inact_at") < F.col("update_id"))))
         .drop("_inact_cid", "_inact_at"))
 
+    # === CLOSEACCT-based filter — Rule 3: no records after account CLOSEACCT ===
+    # Once an account is CLOSEACCT'd, no further UPDACCT should occur for it.
+    # Matches DIGen's observed behavior: after a CLOSEACCT for accountid X, no
+    # more CustomerMgmt rows reference X. Without this, DimAccount's
+    # last_value(status) window would pick up a post-CLOSEACCT UPDACCT's "Active"
+    # status and resurrect the account.
+    #
+    # Same-update UPDACCT (order 2) comes before CLOSEACCT (order 3) within an
+    # update, so those are always valid (UPDACCT first, then CLOSEACCT closes it).
+    # Only cross-update cases need filtering: use `<` (strict).
+    close_map = (all_df
+        .filter(F.col("ActionType") == "CLOSEACCT")
+        .groupBy("CA_ID")
+        .agg(F.min("update_id").alias("_close_at"))
+        .select(F.col("CA_ID").alias("_close_caid"), "_close_at"))
+
+    all_df = (all_df
+        .join(F.broadcast(close_map),
+              (F.col("ActionType") == "UPDACCT") &
+              (F.col("CA_ID") == F.col("_close_caid")),
+              "left")
+        .filter(~(
+            (F.col("ActionType") == "UPDACCT") &
+            F.col("_close_at").isNotNull() &
+            (F.col("_close_at") < F.col("update_id"))))
+        .drop("_close_caid", "_close_at"))
+
     # === Assign timestamp ===
     # Each update gets a time window of secs_per_update seconds. Within each update:
     #   1. NEWs come first (ordered by C_ID) — ensures Rule 1 and Rule 5
