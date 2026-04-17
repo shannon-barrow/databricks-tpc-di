@@ -446,8 +446,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
                 F.when(F.col("_is_buy"), -F.col("_trade_val")).otherwise(F.col("_trade_val"))))
             .withColumn("ct_name", F.substring(F.col("_ct_name_raw"), 1, F.col("_ct_name_len"))))
 
-        # Batch1: settlement before cutoff
-        ct_b1 = ct_base.filter(F.col("_cash_ts") <= F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
+        # Batch1: settlement strictly before cutoff. Half-open [begin, cutoff) so
+        # a timestamp of exactly batch_cutoff_s (2017-07-08 00:00:00) falls into
+        # Batch 2, never Batch 1 — otherwise the same (accountid, to_date(ct_dts))
+        # would appear in both batches and the FactCashBalances pipeline would
+        # emit two rows for one source pair.
+        ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         ct_est = int(cfg.trade_total * 0.927)
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
                    scale_factor=cfg.sf)
@@ -459,9 +463,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
+            # Half-open [b_start, b_end) — no boundary overlap with Batch 1 or adjacent batches.
             ct_inc = (ct_base
-                .filter((F.col("_cash_ts") > F.lit(b_start).cast("long")) &
-                        (F.col("_cash_ts") <= F.lit(b_end).cast("long")))
+                .filter((F.col("_cash_ts") >= F.lit(b_start).cast("long")) &
+                        (F.col("_cash_ts") < F.lit(b_end).cast("long")))
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
@@ -496,8 +501,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("hh_before_qty", F.when(F.col("_is_buy"), F.lit("0")).otherwise(F.col("t_qty")))
             .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0"))))
 
-        # Batch1: completed before cutoff
-        hh_b1 = hh_base.filter(F.col("_complete_ts") <= F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
+        # Batch1: completed strictly before cutoff (half-open — matches CT logic).
+        hh_b1 = hh_base.filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
         hh_est = int(cfg.trade_total * 0.927)
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
@@ -509,9 +514,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
+            # Half-open [b_start, b_end) — consistent with CT logic.
             hh_inc = (hh_base
-                .filter((F.col("_complete_ts") > F.lit(b_start).cast("long")) &
-                        (F.col("_complete_ts") <= F.lit(b_end).cast("long")))
+                .filter((F.col("_complete_ts") >= F.lit(b_start).cast("long")) &
+                        (F.col("_complete_ts") < F.lit(b_end).cast("long")))
                 .withColumn("cdc_flag", F.lit("I"))
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
