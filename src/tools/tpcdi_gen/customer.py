@@ -420,10 +420,16 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
          .when(F.col("ActionType") == "UPDCUST", F.lit(4))
          .otherwise(F.lit(5)))  # INACT
 
+    # Multipliers must exceed rows_per_update so action_order buckets never
+    # overlap. At SF=20000, rows_per_update = 230,000 — a 100K multiplier would
+    # let pos_in_update (up to 229,999) spill into the next action_order bucket,
+    # breaking the within-update ordering (e.g., UPDCUSTs landing AFTER INACTs).
+    # Use 10M for update_id and 1M for action_order (max update_id ~500, so
+    # 500 * 10M = 5*10^9 stays well within long range).
     all_df = all_df.withColumn("_sort_key",
-        F.col("update_id").cast("long") * 1000000 + action_order * 100000 +
-        F.when(F.col("ActionType") == "NEW", F.col("C_ID") % 100000)
-         .when(F.col("ActionType") == "ADDACCT", F.col("CA_ID") % 100000)
+        F.col("update_id").cast("long") * 10000000 + action_order * 1000000 +
+        F.when(F.col("ActionType") == "NEW", F.col("C_ID") % 1000000)
+         .when(F.col("ActionType") == "ADDACCT", F.col("CA_ID") % 1000000)
          .otherwise(F.col("pos_in_update")))
 
     # Compute sequential position within update based on the sort key.
