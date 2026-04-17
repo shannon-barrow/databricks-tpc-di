@@ -1176,6 +1176,19 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         acct_df = acct_df.join(
             F.broadcast(brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("ca_b_id"))),
             on="_broker_idx", how="left")
+
+        # --- Drop 'U' rows referencing non-existent CA_IDs (ADDACCT dedup holes) ---
+        # Update ca_ids are hash % total_existing_accounts which includes ~6% holes
+        # where the ADDACCT was filtered by INACT dedup in the historical batch.
+        # These rows would become phantom DimAccount entries (pipeline MERGE always
+        # INSERTs from all_incr_updates). Left-semi-join to _account_owners keeps
+        # only 'U' rows whose ca_id references a real account. 'I' rows are always
+        # kept (they reference brand-new CA_IDs not yet in _account_owners).
+        _valid_ca_ids = spark.table("_account_owners").select("ca_id").distinct()
+        acct_df = (acct_df.filter(F.col("_is_insert"))
+            .unionByName(acct_df.filter(~F.col("_is_insert"))
+                .join(_valid_ca_ids, on="ca_id", how="left_semi")))
+
         # --- Add INAC account rows for customers deactivated in this batch ---
         # When a customer's c_st_id becomes INAC, their accounts must also be closed.
         # Use _account_owners (historical + prior incremental inserts) to find all
