@@ -1203,12 +1203,15 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         # A random update might pick the same ca_id that an INAC closure targets,
         # producing two rows for the same account with different customers.
         # The INAC closure takes priority.
+        # Note: join(on="ca_id", ...) moves ca_id to position 0 — re-select to
+        # restore schema order, then unionByName to align columns by name.
         inac_ca_ids = inac_acct_rows.select("ca_id").distinct()
         acct_no_conflict = (acct_df
             .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id")
-            .join(inac_ca_ids, on="ca_id", how="left_anti"))
+            .join(inac_ca_ids, on="ca_id", how="left_anti")
+            .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id"))
 
-        acct_final = acct_no_conflict.union(inac_acct_rows)
+        acct_final = acct_no_conflict.unionByName(inac_acct_rows)
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # Update _account_owners with this batch's insert accounts so the next batch

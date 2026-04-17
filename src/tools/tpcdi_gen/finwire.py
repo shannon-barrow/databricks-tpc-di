@@ -65,6 +65,55 @@ from .config import *
 from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log
 
 
+def _add_calendar_quarter_timing(df, quarter_id_col="quarter_id"):
+    """Add calendar quarter timing columns derived from ``quarter_id``.
+
+    Matches DIGen's ``FinwirePTSGenerator``: each updateID maps to exactly one
+    calendar quarter (Jan-Mar / Apr-Jun / Jul-Sep / Oct-Dec of FW_BEGIN.year +
+    quarter_id // 4). PTS values for records in that updateID are constrained
+    to that calendar quarter's boundaries, so the downstream Year/Quarter/
+    QtrStartDate fields are always consistent — eliminating duplicate
+    (company, quarter, year) rows in the Financial table.
+
+    Adds columns:
+      _q_start_s   — unix timestamp (seconds) of 00:00:00 on quarter start day
+      _q_duration_s — seconds in the quarter (end 23:59:59 minus start, + 1)
+    """
+    begin_year = FW_BEGIN_DATE.year
+    df = df.withColumn("_cal_year", F.lit(begin_year) + (F.col(quarter_id_col) / 4).cast("int"))
+    df = df.withColumn("_cal_q_idx", F.col(quarter_id_col) % 4)
+    df = df.withColumn("_q_start_month",
+        F.when(F.col("_cal_q_idx") == 0, F.lit(1))
+         .when(F.col("_cal_q_idx") == 1, F.lit(4))
+         .when(F.col("_cal_q_idx") == 2, F.lit(7))
+         .otherwise(F.lit(10)))
+    df = df.withColumn("_q_end_month",
+        F.when(F.col("_cal_q_idx") == 0, F.lit(3))
+         .when(F.col("_cal_q_idx") == 1, F.lit(6))
+         .when(F.col("_cal_q_idx") == 2, F.lit(9))
+         .otherwise(F.lit(12)))
+    df = df.withColumn("_q_end_day",
+        F.when(F.col("_cal_q_idx").isin(0, 3), F.lit(31))
+         .otherwise(F.lit(30)))
+    df = df.withColumn("_q_start_s",
+        F.unix_timestamp(
+            F.concat(
+                F.lpad(F.col("_cal_year").cast("string"), 4, "0"), F.lit("-"),
+                F.lpad(F.col("_q_start_month").cast("string"), 2, "0"),
+                F.lit("-01 00:00:00")),
+            "yyyy-MM-dd HH:mm:ss"))
+    df = df.withColumn("_q_end_s",
+        F.unix_timestamp(
+            F.concat(
+                F.lpad(F.col("_cal_year").cast("string"), 4, "0"), F.lit("-"),
+                F.lpad(F.col("_q_end_month").cast("string"), 2, "0"), F.lit("-"),
+                F.lpad(F.col("_q_end_day").cast("string"), 2, "0"),
+                F.lit(" 23:59:59")),
+            "yyyy-MM-dd HH:mm:ss"))
+    df = df.withColumn("_q_duration_s", F.col("_q_end_s") - F.col("_q_start_s") + F.lit(1))
+    return df.drop("_cal_year", "_cal_q_idx", "_q_start_month", "_q_end_month", "_q_end_day", "_q_end_s")
+
+
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     """Generate all FINWIRE quarterly files.
 
@@ -85,7 +134,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         dict with key "counts" mapping (table_name, batch_id) to row counts.
     """
     log("[FINWIRE] Starting generation")
-    fw_begin_ms = int(FW_BEGIN_DATE.timestamp() * 1000)
 
     # =====================================================================
     # CMP: Company records
@@ -105,10 +153,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                     ((F.col("cmp_id") - F.lit(cfg.cmp_total - cfg.fw_quarters * cfg.cmp_per_quarter))
                         / F.lit(cfg.cmp_per_quarter) + 1).cast("int"),
                     F.lit(cfg.fw_quarters - 1))))
-        # PTS (posting timestamp): random offset within the assigned quarter
-        .withColumn("_q_start_ms", F.lit(fw_begin_ms).cast("long") + F.col("quarter_id").cast("long") * F.lit(ONE_QUARTER_MS))
-        .withColumn("_q_offset", hash_key(F.col("cmp_id"), seed_for("CMP", "pts")) % int(ONE_QUARTER_MS / 1000))
-        .withColumn("PTS", F.date_format(((F.col("_q_start_ms") / 1000) + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
         # CIK: zero-padded 10-digit company identifier (natural key)
         .withColumn("CIK", F.lpad(F.col("cmp_id").cast("string"), 10, "0"))
         # Prefix with "C" to ensure name is never all-numeric. If the name were all
@@ -118,6 +162,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         # Status: 97% ACTV (active), 3% INAC (inactive) — matches DIGen's distribution
         .withColumn("Status", F.when(hash_key(F.col("cmp_id"), seed_for("CMP", "st")) % 100 < 97, F.lit("ACTV")).otherwise(F.lit("INAC")))
     )
+
+    # PTS: uniformly distributed within the calendar quarter of quarter_id.
+    # See _add_calendar_quarter_timing for why this must be calendar-aligned.
+    cmp_df = _add_calendar_quarter_timing(cmp_df)
+    cmp_df = (cmp_df
+        .withColumn("_q_offset", hash_key(F.col("cmp_id"), seed_for("CMP", "pts")) % F.col("_q_duration_s"))
+        .withColumn("PTS", F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
+        .drop("_q_start_s", "_q_duration_s", "_q_offset"))
 
     # Dictionary columns via broadcast join: pick values from pre-loaded dictionaries
     # using hash-based indexing for deterministic, reproducible assignment.
@@ -146,6 +198,59 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .withColumn("Description", F.substring(F.md5(F.concat(F.col("cmp_id").cast("string"), F.lit("desc"))), 1, 20))
     )
 
+    # --- CMP CHANGE and DELETE records (matches DIGen's 97% new / 1% change / 2% delete) ---
+    # DIGen generates CHANGE records that modify an existing CIK's attributes (new PTS,
+    # possibly different IndustryID/SPrating) and DELETE records that deactivate a CIK
+    # (Status=INAC). These create multiple SCD2 versions per CIK in DimCompany.
+    # We sample 3% of cmp_ids (1% change + 2% delete) and emit additional rows with
+    # same CIK + later quarter_id. Attributes are regenerated with new seeds so the
+    # SCD2 versions have meaningfully different values.
+    _cmp_pct = hash_key(F.col("cmp_id"), seed_for("CMP", "action_pct")) % 100
+    _is_change = _cmp_pct < F.lit(1)
+    _is_delete = (_cmp_pct >= F.lit(1)) & (_cmp_pct < F.lit(3))
+    cmp_extras = (cmp_df
+        # Skip companies created in the last quarter — no later quarter available.
+        .filter((_is_change | _is_delete) & (F.col("quarter_id") < F.lit(cfg.fw_quarters - 1)))
+        .withColumn("_action",
+            F.when(_is_change, F.lit("CHANGE")).otherwise(F.lit("DELETE")))
+        # New quarter_id: uniformly random in (creation_quarter, fw_quarters-1]
+        .withColumn("_q_remaining",
+            F.greatest(F.lit(1), F.lit(cfg.fw_quarters - 1) - F.col("quarter_id")))
+        .withColumn("quarter_id",
+            F.col("quarter_id") + F.lit(1) +
+            (hash_key(F.col("cmp_id"), seed_for("CMP", "action_q")) % F.col("_q_remaining")).cast("int"))
+        # For DELETE: Status=INAC. For CHANGE: keep ACTV (attribute-only change).
+        .withColumn("Status",
+            F.when(F.col("_action") == "DELETE", F.lit("INAC")).otherwise(F.lit("ACTV")))
+        # Regenerate attributes with action-specific salt so CHANGE rows have
+        # different values from the original (otherwise SCD2 versions are identical).
+        .withColumn("_chg_salt",
+            F.when(F.col("_action") == "CHANGE",
+                hash_key(F.col("cmp_id"), seed_for("CMP", "change_salt"))).otherwise(F.lit(0)))
+        .drop("_q_remaining", "_action"))
+
+    # Regenerate time-dependent fields for the extras (PTS in new calendar quarter)
+    cmp_extras = _add_calendar_quarter_timing(cmp_extras)
+    cmp_extras = (cmp_extras
+        .withColumn("_q_offset",
+            hash_key(F.col("cmp_id"), seed_for("CMP", "extra_pts")) % F.col("_q_duration_s"))
+        .withColumn("PTS",
+            F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
+        .drop("_q_start_s", "_q_duration_s", "_q_offset", "_chg_salt"))
+
+    # --- Persist _cmp_refs temp view (BEFORE unioning extras) ---
+    # _cmp_refs must have one row per cmp_id (the creation event), not one per
+    # CMP record. SEC/FIN use this for temporal integrity checks on creation.
+    cmp_ref = cmp_df.select(
+        F.col("cmp_id").alias("_idx"),
+        "CIK", "CompanyName",
+        F.col("quarter_id").alias("creation_quarter"))
+    cmp_ref.createOrReplaceTempView("_cmp_refs")
+    cmp_count = cfg.cmp_total
+
+    # Union: original NEW records + CHANGE/DELETE extras, aligned by column name
+    cmp_df = cmp_df.unionByName(cmp_extras)
+
     # Format CMP as fixed-width line (TPC-DI FINWIRE spec field widths)
     cmp_lines = cmp_df.select(
         F.concat(
@@ -160,18 +265,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         ).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
     )
-
-    # --- Persist _cmp_refs temp view ---
-    # Used by SEC for CoNameOrCIK joins and by FIN for company references.
-    # Contains the minimal columns needed: _idx (cmp_id), CIK, CompanyName,
-    # and creation_quarter to enforce temporal integrity (SEC/FIN can only
-    # reference a CMP that was created in an earlier or same quarter).
-    cmp_ref = cmp_df.select(
-        F.col("cmp_id").alias("_idx"),
-        "CIK", "CompanyName",
-        F.col("quarter_id").alias("creation_quarter"))
-    cmp_ref.createOrReplaceTempView("_cmp_refs")
-    cmp_count = cfg.cmp_total
 
     # =====================================================================
     # SEC: Security records
@@ -208,10 +301,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                 F.least(
                     ((F.col("sec_id") - F.lit(sec_q1)) / F.lit(cfg.sec_per_quarter) + 2).cast("int"),
                     F.lit(cfg.fw_quarters - 1))))
-        # PTS: random offset within the assigned quarter
-        .withColumn("_q_start_ms", F.lit(fw_begin_ms).cast("long") + F.col("quarter_id").cast("long") * F.lit(ONE_QUARTER_MS))
-        .withColumn("_q_offset", hash_key(F.col("sec_id"), seed_for("SEC", "pts")) % int(ONE_QUARTER_MS / 1000))
-        .withColumn("PTS", F.date_format(((F.col("_q_start_ms") / 1000) + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
         # Symbol: deterministic 15-char base-26 ticker derived from sec_id
         .withColumn("Symbol", _id_to_symbol_expr(F.col("sec_id")))
         # Status: 97% ACTV, 3% INAC (initial status; deactivation handled separately below)
@@ -229,6 +318,13 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         # Map sec_id to a candidate cmp_id; the join below validates temporal ordering.
         .withColumn("_cmp_ref_idx", hash_key(F.col("sec_id"), seed_for("SEC", "ref")) % cmp_count)
     )
+
+    # PTS: uniformly distributed within the calendar quarter of quarter_id.
+    sec_df = _add_calendar_quarter_timing(sec_df)
+    sec_df = (sec_df
+        .withColumn("_q_offset", hash_key(F.col("sec_id"), seed_for("SEC", "pts")) % F.col("_q_duration_s"))
+        .withColumn("PTS", F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
+        .drop("_q_start_s", "_q_duration_s", "_q_offset"))
 
     # Join to _cmp_refs to resolve the company reference.
     # Broadcast join since _cmp_refs is small (one row per company).
@@ -252,6 +348,62 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             F.rpad(F.when(F.col("_ref_cq") <= F.col("quarter_id"), F.col("_ref_name")).otherwise(
                 _cmp0_name), 60, " ")))
 
+    # --- SEC CHANGE and DELETE records (matches DIGen's 97% new / 1% change / 2% delete) ---
+    # Creates multiple DimSecurity SCD2 versions per Symbol. CHANGE keeps Status=ACTV,
+    # DELETE sets Status=INAC. All extras have quarter_id > creation quarter_id.
+    # Note: the _symbols view filters to ACTV before groupBy, so DELETE records don't
+    # affect creation_quarter tracking — but they do produce Inactive DimSecurity versions.
+    _sec_pct = hash_key(F.col("sec_id"), seed_for("SEC", "action_pct")) % 100
+    _sec_is_change = _sec_pct < F.lit(1)
+    _sec_is_delete = (_sec_pct >= F.lit(1)) & (_sec_pct < F.lit(3))
+    sec_extras = (sec_df
+        # Skip securities created in the last quarter — no later quarter available.
+        .filter((_sec_is_change | _sec_is_delete) & (F.col("quarter_id") < F.lit(cfg.fw_quarters - 1)))
+        .withColumn("_action",
+            F.when(_sec_is_change, F.lit("CHANGE")).otherwise(F.lit("DELETE")))
+        .withColumn("_q_remaining",
+            F.greatest(F.lit(1), F.lit(cfg.fw_quarters - 1) - F.col("quarter_id")))
+        .withColumn("quarter_id",
+            F.col("quarter_id") + F.lit(1) +
+            (hash_key(F.col("sec_id"), seed_for("SEC", "action_q")) % F.col("_q_remaining")).cast("int"))
+        .withColumn("Status",
+            F.when(F.col("_action") == "DELETE", F.lit("INAC")).otherwise(F.lit("ACTV")))
+        .drop("_q_remaining", "_action"))
+
+    # Regenerate PTS for extras using calendar-quarter-aligned timing
+    sec_extras = _add_calendar_quarter_timing(sec_extras)
+    sec_extras = (sec_extras
+        .withColumn("_q_offset", hash_key(F.col("sec_id"), seed_for("SEC", "extra_pts")) % F.col("_q_duration_s"))
+        .withColumn("PTS", F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
+        .drop("_q_start_s", "_q_duration_s", "_q_offset"))
+
+    # --- Persist _symbols temp view (BEFORE unioning extras) ---
+    # Built from NEW sec_df only; creation_quarter = each symbol's NEW record's quarter_id.
+    # The deactivation model here is approximate — SEC DELETE records (added below) also
+    # deactivate symbols, but the hash-based model gives a deterministic total_deact count.
+    total_deact = int(0.02 * cfg.sec_per_quarter * cfg.fw_quarters)
+    symbols = (sec_df
+        .filter(F.col("Status") == "ACTV")
+        .select("Symbol", "quarter_id", "sec_id")
+        .groupBy("Symbol").agg(
+            F.min("quarter_id").alias("creation_quarter"),
+            F.min("sec_id").alias("_sec_id"))
+        .withColumn("_deact_draw", F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact"))))
+        .withColumn("deactivation_quarter",
+            F.when(F.col("_deact_draw") % F.lit(cfg.sec_total) < F.lit(total_deact),
+                F.col("creation_quarter") +
+                    (F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact_q"))) %
+                     F.greatest(F.lit(1), F.lit(cfg.fw_quarters) - F.col("creation_quarter"))))
+            .otherwise(F.lit(cfg.fw_quarters + 1)))
+        .withColumn("_idx", F.row_number().over(Window.orderBy("Symbol")) - 1)
+        .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
+    symbols.createOrReplaceTempView("_symbols")
+    sym_count = symbols.count()
+
+    # Union NEW + CHANGE/DELETE records, aligned by column name. Done AFTER _symbols
+    # is built so extras don't affect creation_quarter/deactivation_quarter tracking.
+    sec_df = sec_df.unionByName(sec_extras)
+
     # Format SEC as fixed-width line
     sec_lines = sec_df.select(
         F.concat(
@@ -264,41 +416,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         ).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
     )
-
-    # --- Persist _symbols temp view ---
-    # Contains active symbols for downstream modules (DailyMarket, WatchHistory, Trade).
-    # Includes creation_quarter and deactivation_quarter for temporal validity.
-    #
-    # Deactivation model:
-    # FINWIRE-sec update pattern: 97% new, 1% change, 2% delete per quarter.
-    # The 2% applies to the UPDATE BATCH SIZE (sec_per_quarter), not to all securities.
-    # Total deactivations over FINWIRE lifetime ≈ 0.02 × sec_per_quarter × fw_quarters.
-    # At SF=10: 0.02 × 39 × 202 ≈ 158 deactivations out of 8000 total = ~2% of total.
-    # But _symbols already excludes 3% initially-INAC, so effective deactivation rate among
-    # the ACTV pool is about total_deact / num_actv.
-    #
-    # Model: select ~total_deact securities for deactivation, spread across their lifetimes.
-    # Each deactivated security gets a random deactivation quarter after its creation.
-    total_deact = int(0.02 * cfg.sec_per_quarter * cfg.fw_quarters)
-    symbols = (sec_df
-        .filter(F.col("Status") == "ACTV")
-        .select("Symbol", "quarter_id", "sec_id")
-        .groupBy("Symbol").agg(
-            F.min("quarter_id").alias("creation_quarter"),
-            F.min("sec_id").alias("_sec_id"))
-        # Select which securities get deactivated: hash into [0, num_actv) < total_deact
-        .withColumn("_deact_draw", F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact"))))
-        .withColumn("deactivation_quarter",
-            F.when(F.col("_deact_draw") % F.lit(cfg.sec_total) < F.lit(total_deact),
-                # This security gets deactivated: random quarter after creation
-                F.col("creation_quarter") +
-                    (F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact_q"))) %
-                     F.greatest(F.lit(1), F.lit(cfg.fw_quarters) - F.col("creation_quarter"))))
-            .otherwise(F.lit(cfg.fw_quarters + 1)))  # stays active forever (beyond FINWIRE range)
-        .withColumn("_idx", F.row_number().over(Window.orderBy("Symbol")) - 1)
-        .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
-    symbols.createOrReplaceTempView("_symbols")
-    sym_count = symbols.count()
 
     # =====================================================================
     # FIN: Financial records
@@ -345,13 +462,16 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .withColumn("quarter_id", F.col("fin_quarter_id"))
     )
 
-    # Generate FIN fields: revenue, earnings, investment, assets, liabilities, shares
+    # PTS: uniformly distributed within the calendar quarter of quarter_id.
+    # Matches DIGen's FinwirePTSGenerator exactly — each quarter_id maps to one
+    # calendar quarter, so Year/Quarter/QtrStartDate derived from pts_ts are
+    # always consistent per (cmp_id, quarter_id) → Financial has unique
+    # (sk_companyid, quarter, year) keys (no FactMarketHistory fan-out).
+    fin_base = _add_calendar_quarter_timing(fin_base)
     fin_df = (fin_base
         .withColumn("_fin_seed", F.hash(F.col("cmp_id"), F.col("quarter_id")).cast("long"))
-        # PTS: random timestamp within the assigned quarter
-        .withColumn("_q_start_ms", F.lit(fw_begin_ms).cast("long") + F.col("quarter_id").cast("long") * F.lit(ONE_QUARTER_MS))
-        .withColumn("_q_offset", F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "pts"))).cast("long")) % int(ONE_QUARTER_MS / 1000))
-        .withColumn("pts_ts", ((F.col("_q_start_ms") / 1000) + F.col("_q_offset")).cast("timestamp"))
+        .withColumn("_q_offset", F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "pts"))).cast("long")) % F.col("_q_duration_s"))
+        .withColumn("pts_ts", (F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"))
         .withColumn("PTS", F.date_format("pts_ts", "yyyyMMdd-HHmmss"))
         # Revenue: random up to 10 billion
         .withColumn("_rev", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "rev"))).cast("long")) % 10000000000).cast("double") + 1.0)
