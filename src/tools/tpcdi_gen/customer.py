@@ -828,7 +828,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Cache all_df to disk — it's used to derive 4 views + the XML write.
     # Use disk_cache() helper so serverless skips the persist (which hangs there).
-    all_df, _ = disk_cache(all_df, spark, f"CustomerMgmt actions ({n_parts} partitions)")
+    all_df, _ = disk_cache(all_df, spark, f"CustomerMgmt actions ({n_parts} partitions)",
+                           volume_path=cfg.volume_path, dbutils=dbutils)
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
@@ -837,7 +838,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .filter(F.col("ActionType") == "CLOSEACCT")
         .select(F.col("CA_ID").alias("closed_ca_id"))
         .distinct())
-    closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts")
+    closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts",
+                                  volume_path=cfg.volume_path, dbutils=dbutils)
     closed_accts.createOrReplaceTempView("_closed_accounts")
     n_closed = closed_accts.count()
     log(f"[CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
@@ -845,7 +847,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
 
     created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
-    created_accts, _ = disk_cache(created_accts, spark, "_created_accounts")
+    created_accts, _ = disk_cache(created_accts, spark, "_created_accounts",
+                                   volume_path=cfg.volume_path, dbutils=dbutils)
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()
     log(f"[CustomerMgmt] {n_created} created accounts -> _created_accounts view")
@@ -853,7 +856,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
-    acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners")
+    acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners",
+                                 volume_path=cfg.volume_path, dbutils=dbutils)
     acct_owners.createOrReplaceTempView("_account_owners")
     acct_owners.count()
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")

@@ -23,6 +23,7 @@ This module provides four key capabilities used across all TPC-DI generators:
 
 import hashlib
 import os
+import re
 import concurrent.futures
 from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession, functions as F
@@ -59,27 +60,60 @@ def _detect_serverless(spark) -> bool:
         return True
 
 
-def disk_cache(df, spark, label: str = ""):
-    """Cache a DataFrame to disk (DISK_ONLY). Skips on serverless.
+# Counter for disambiguating staging directories across multiple materializations.
+_STAGING_COUNTER = [0]
 
-    DISK_ONLY avoids memory pressure while still preventing plan re-evaluation.
-    On distributed clusters, each worker caches its partitions to local NVMe SSD.
-    On serverless, PERSIST TABLE is not supported (raises AnalysisException), so
-    we detect upfront and skip. Also wraps the persist/count in try/except as a
-    defensive fallback — any error (AnalysisException, RuntimeError, etc.) just
-    returns the uncached DataFrame.
+
+def _sanitize_label(label: str) -> str:
+    """Turn a label into a safe filesystem path component."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_").lower()
+    return slug[:60] or "stage"
+
+
+def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None):
+    """Materialize a DataFrame so subsequent reads skip the upstream DAG.
+
+    On classic clusters: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local
+    NVMe on each worker.
+
+    On serverless (Spark Connect): PERSIST TABLE is not supported, so we fall
+    back to writing the DataFrame as Parquet under ``{volume_path}/_staging/``
+    and returning a new DataFrame that reads from there. Subsequent operations
+    on the returned DataFrame read the materialized Parquet instead of
+    re-executing the upstream plan.
+
+    If serverless and ``volume_path`` is not provided, the call is a no-op:
+    returns the input DataFrame uncached. Downstream reads will re-execute the
+    upstream DAG (potentially very slow at large scale factors).
 
     Args:
-        df: DataFrame to cache.
+        df: DataFrame to materialize.
         spark: Active SparkSession.
-        label: Description for logging.
+        label: Description for logging and (on serverless) path naming.
+        volume_path: Root volume path (e.g. ``cfg.volume_path``) for staging
+            writes. Required to enable the serverless write/read fallback.
+        dbutils: Databricks dbutils, used to clean any pre-existing staging dir.
 
     Returns:
-        (cached_df, was_cached: bool)
+        (materialized_df, was_materialized: bool)
     """
     if _detect_serverless(spark):
-        log(f"[Cache] {label}: skipped (serverless)")
-        return df, False
+        if volume_path is None:
+            log(f"[Cache] {label}: skipped (serverless, no volume_path)")
+            return df, False
+        _STAGING_COUNTER[0] += 1
+        slug = _sanitize_label(label)
+        staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
+        try:
+            if dbutils is not None:
+                _cleanup(staging_path, dbutils)
+            df.write.mode("overwrite").parquet(staging_path)
+            new_df = spark.read.parquet(staging_path)
+            log(f"[Cache] {label}: materialized to Parquet ({staging_path})")
+            return new_df, True
+        except Exception as e:
+            log(f"[Cache] {label}: materialize failed ({type(e).__name__}: {e})")
+            return df, False
 
     try:
         df = df.persist(StorageLevel.DISK_ONLY)
@@ -502,7 +536,11 @@ def write_text(content: str, path: str, dbutils=None):
 
 
 def cleanup_staging(volume_path: str, dbutils):
-    """Remove all temporary directories (__staging, __tmp) after bulk copy is complete.
+    """Remove all temporary directories (__staging, __tmp, _staging) after bulk copy.
+
+    Also removes the serverless materialize-staging directory at
+    ``{volume_path}/_staging/`` which holds intermediate Parquet written by
+    ``disk_cache()`` on serverless.
 
     Walks the output volume's batch directories and deletes any leftover staging
     or temp directories. This is a cleanup step run at the very end of generation
@@ -521,6 +559,9 @@ def cleanup_staging(volume_path: str, dbutils):
                     dbutils.fs.rm(f.path, recurse=True)
     except:
         pass
+
+    # Also remove serverless materialize-staging dir at the volume root.
+    _cleanup(f"{volume_path}/_staging", dbutils)
 
 
 def _cleanup(path: str, dbutils):
