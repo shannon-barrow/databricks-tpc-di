@@ -31,11 +31,30 @@ from pyspark import StorageLevel
 from .config import MAX_FILE_BYTES
 
 
+def _detect_serverless(spark) -> bool:
+    """Detect if running on Databricks Serverless (Spark Connect) compute.
+
+    Serverless misreports ``clusterUsageTags.clusterType`` as ``"ondemand"``, so
+    that check alone is unreliable. The authoritative signal: Spark Connect
+    sessions raise PySparkAttributeError on ``spark.sparkContext`` access
+    because no JVM SparkContext exists on the client.
+    """
+    try:
+        _ = spark.sparkContext
+        return False
+    except Exception:
+        return True
+
+
 def disk_cache(df, spark, label: str = ""):
     """Cache a DataFrame to disk (DISK_ONLY). Skips on serverless.
 
     DISK_ONLY avoids memory pressure while still preventing plan re-evaluation.
     On distributed clusters, each worker caches its partitions to local NVMe SSD.
+    On serverless, PERSIST TABLE is not supported (raises AnalysisException), so
+    we detect upfront and skip. Also wraps the persist/count in try/except as a
+    defensive fallback — any error (AnalysisException, RuntimeError, etc.) just
+    returns the uncached DataFrame.
 
     Args:
         df: DataFrame to cache.
@@ -45,20 +64,18 @@ def disk_cache(df, spark, label: str = ""):
     Returns:
         (cached_df, was_cached: bool)
     """
-    try:
-        _is_serverless = "serverless" in spark.conf.get(
-            "spark.databricks.clusterUsageTags.clusterType", "").lower()
-    except:
-        _is_serverless = False
-
-    if _is_serverless:
+    if _detect_serverless(spark):
         log(f"[Cache] {label}: skipped (serverless)")
         return df, False
 
-    df = df.persist(StorageLevel.DISK_ONLY)
-    df.count()
-    log(f"[Cache] {label}: cached to disk")
-    return df, True
+    try:
+        df = df.persist(StorageLevel.DISK_ONLY)
+        df.count()
+        log(f"[Cache] {label}: cached to disk")
+        return df, True
+    except Exception as e:
+        log(f"[Cache] {label}: skipped ({type(e).__name__})")
+        return df, False
 
 
 # Module-level log level setting
