@@ -31,6 +31,19 @@ from pyspark import StorageLevel
 from .config import MAX_FILE_BYTES
 
 
+def safe_unpersist(df):
+    """Unpersist a DataFrame if possible; swallow errors on serverless.
+
+    Serverless raises NOT_SUPPORTED_WITH_SERVERLESS on UNPERSIST TABLE.
+    If the df was never persisted (common on serverless via disk_cache skip),
+    unpersist is a no-op anyway.
+    """
+    try:
+        df.unpersist()
+    except Exception:
+        pass
+
+
 def _detect_serverless(spark) -> bool:
     """Detect if running on Databricks Serverless (Spark Connect) compute.
 

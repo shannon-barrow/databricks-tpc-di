@@ -126,7 +126,7 @@ the temporal window when the customer was active (created and not yet inactivate
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy, log, disk_cache
+from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy, log, disk_cache, safe_unpersist
 
 
 def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=None) -> dict:
@@ -965,8 +965,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Release all_df cache — views are cached independently and XML is written
-    all_df.unpersist()
+    # Release all_df cache — views are cached independently and XML is written.
+    # safe_unpersist no-ops on serverless (UNPERSIST TABLE not supported there).
+    safe_unpersist(all_df)
     log("[CustomerMgmt] Unpersisted CustomerMgmt actions cache")
 
     return {("CustomerMgmt", 1): total}

@@ -118,7 +118,7 @@ from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache
+from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -158,7 +158,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         for f in futures:
             counts.update(f.result())
 
-    broker_names.unpersist()
+    safe_unpersist(broker_names)
     # Release CustomerMgmt view caches — Trade was the last consumer
     for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
         try:
@@ -536,7 +536,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             counts.update(f.result())
 
     if _trade_cached:
-        trade_df.unpersist()
+        safe_unpersist(trade_df)
         log("[Trade] Unpersisted Trade source data cache")
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
