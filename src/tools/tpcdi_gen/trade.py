@@ -142,9 +142,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     broker_names, n_brokers = _build_broker_names(spark)
     num_sec = spark.table("_symbols").count()
 
-    # Cache broker names — used by historical + each incremental batch
-    broker_names = broker_names.persist(StorageLevel.DISK_ONLY)
-    broker_names.count()
+    # Cache broker names — used by historical + each incremental batch.
+    # disk_cache() skips on serverless (which doesn't support DISK_ONLY well).
+    broker_names, _ = disk_cache(broker_names, spark, "broker_names")
 
     shared = {"valid_accts": valid_accts, "n_valid": n_valid,
               "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
