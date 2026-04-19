@@ -385,16 +385,56 @@ def register_copy(source: str, target: str):
     _pending_copies.append((source, target))
 
 
+_LARGE_PART_MIN_BYTES = 100 * 1024 * 1024   # parts >= this bypass packing
+_PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
+
+
+def _pack_small_parts(small_parts, max_bytes: int):
+    """Greedy first-fit-decreasing bin-packing.
+
+    Given a list of part files (each an object with ``.path``, ``.name``, ``.size``),
+    group them into bins whose total size does not exceed ``max_bytes``.
+
+    Returns a list of bins, each a list of parts sorted by original part name
+    (so concat order is deterministic and matches Spark's partition order within
+    each bin).
+    """
+    sorted_parts = sorted(small_parts, key=lambda f: f.size, reverse=True)
+    bins = []  # list of {"files": [...], "size": int}
+    for f in sorted_parts:
+        placed = False
+        for b in bins:
+            if b["size"] + f.size <= max_bytes:
+                b["files"].append(f)
+                b["size"] += f.size
+                placed = True
+                break
+        if not placed:
+            bins.append({"files": [f], "size": f.size})
+    return [sorted(b["files"], key=lambda f: f.name) for b in bins]
+
+
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
-    """Register all part files from a Spark staging directory for deferred bulk copy.
+    """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
 
-    Spark writes output as a directory of ``part-NNNNN`` files. This function
-    discovers those part files and registers them for later copying:
+    Spark writes output as a directory of ``part-NNNNN`` files sized up to
+    ``maxRecordsPerFile`` (~128MB). Tail partitions and under-partitioned
+    datasets often produce many smaller parts, which are wasteful to copy
+    individually (RPC overhead per file, extra files for downstream readers).
 
-    - **Single part file**: The target is ``final_path`` directly (e.g., ``Customer.txt``).
-    - **Multiple part files**: Targets get numbered suffixes derived from the original
-      filename (e.g., ``Customer_1.txt``, ``Customer_2.txt``, ...). This matches the
-      TPC-DI specification for split output files.
+    This function splits parts into two paths:
+
+    - **Large parts** (``>= 100MB``): registered for deferred parallel
+      ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
+      bandwidth, ~64-thread parallelism.
+
+    - **Small parts** (``< 100MB``): bin-packed into groups summing to
+      ``<= 128MB``, then concatenated into single files via driver-side
+      ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
+      produces fewer downstream files.
+
+    Output files are numbered sequentially: ``Customer_1.txt``,
+    ``Customer_2.txt``, … — matching the TPC-DI ``fileNamePattern`` regex.
 
     Args:
         staging_dir: Path to the Spark output directory containing part files.
@@ -402,19 +442,49 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
         dbutils: Databricks dbutils object for filesystem operations.
 
     Returns:
-        List of final target paths that were registered.
+        List of final target paths.
     """
     files = dbutils.fs.ls(staging_dir)
-    part_files = sorted([f for f in files if f.name.startswith("part-")], key=lambda f: f.name)
+    part_files = [f for f in files if f.name.startswith("part-")]
+    if not part_files:
+        return []
 
-    targets = []
-    # Always use numbered suffix (e.g., file_1.txt, file_2.txt) even for single files.
-    # This ensures the fileNamePattern regex (_[0-9]+)? consistently matches all outputs.
+    large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
+                   key=lambda f: f.name)
+    small = [f for f in part_files if f.size < _LARGE_PART_MIN_BYTES]
+    bins = _pack_small_parts(small, _PACK_MAX_BYTES)
+
     base, ext = os.path.splitext(final_path)
-    for i, pf in enumerate(part_files):
-        target = f"{base}_{i+1}{ext}"
+    targets = []
+    idx = 1
+
+    # Large parts: queue for parallel dbutils.fs.cp (server-side copy).
+    for pf in large:
+        target = f"{base}_{idx}{ext}"
         register_copy(pf.path, target)
         targets.append(target)
+        idx += 1
+
+    # Small parts: cat-pack on driver into ~128MB chunks.
+    if bins:
+        import subprocess, tempfile
+        for bin_files in bins:
+            target = f"{base}_{idx}{ext}"
+            dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
+            list_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
+            try:
+                for pf in bin_files:
+                    src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
+                    list_file.write(src_local + "\n")
+                list_file.close()
+                subprocess.run(
+                    ["bash", "-c", f"xargs -a {list_file.name} cat > {dst_local}"],
+                    check=True)
+            finally:
+                os.unlink(list_file.name)
+            targets.append(target)
+            idx += 1
+
     return targets
 
 
