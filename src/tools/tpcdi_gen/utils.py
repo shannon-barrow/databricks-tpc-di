@@ -385,7 +385,7 @@ def register_copy(source: str, target: str):
     _pending_copies.append((source, target))
 
 
-_LARGE_PART_MIN_BYTES = 100 * 1024 * 1024   # parts >= this bypass packing
+_LARGE_PART_MIN_BYTES = 50 * 1024 * 1024    # parts >= this bypass packing
 _PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
 
 
@@ -424,11 +424,11 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
 
     This function splits parts into two paths:
 
-    - **Large parts** (``>= 100MB``): registered for deferred parallel
+    - **Large parts** (``>= 50MB``): registered for deferred parallel
       ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
       bandwidth, ~64-thread parallelism.
 
-    - **Small parts** (``< 100MB``): bin-packed into groups summing to
+    - **Small parts** (``< 50MB``): bin-packed into groups summing to
       ``<= 128MB``, then concatenated into single files via driver-side
       ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
       produces fewer downstream files.
@@ -551,9 +551,9 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     ``register_copies_from_staging`` produces final numbered files using the
     hybrid strategy:
 
-    - Parts ≥ 100MB are queued for deferred parallel ``dbutils.fs.cp`` (server-
+    - Parts ≥ 50MB are queued for deferred parallel ``dbutils.fs.cp`` (server-
       side copy, no driver bandwidth).
-    - Parts < 100MB are bin-packed into ≤128MB groups and merged with
+    - Parts < 50MB are bin-packed into ≤128MB groups and merged with
       ``xargs cat`` on the driver FUSE mount.
 
     Small datasets (most incrementals) trivially pack into a single bin, producing
