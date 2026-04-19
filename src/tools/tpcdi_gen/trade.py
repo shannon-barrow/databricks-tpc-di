@@ -118,7 +118,7 @@ from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist
+from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist, bulk_copy_all
 
 
 def _read_trade_and_derive_internals(spark, cfg, trade_begin_s, trade_range_s):
@@ -136,7 +136,10 @@ def _read_trade_and_derive_internals(spark, cfg, trade_begin_s, trade_range_s):
               "t_is_cash STRING, t_s_symb STRING, t_qty STRING, t_bid_price STRING, "
               "t_ca_id STRING, t_exec_name STRING, t_trade_price STRING, "
               "t_chrg STRING, t_comm STRING, t_tax STRING")
-    trade_df = spark.read.csv(f"{cfg.batch_path(1)}/Trade*.txt",
+    # Use an underscore-specific glob so we only match Trade_1.txt, Trade_2.txt,
+    # … — NOT TradeType.txt (5 reference rows) or TradeHistory_*.txt, which would
+    # silently poison the re-read with 5 rows of wrong-schema data.
+    trade_df = spark.read.csv(f"{cfg.batch_path(1)}/Trade_*.txt",
                                sep="|", header=False, schema=schema)
     return (trade_df
         # Type/flag re-derivations from public columns
@@ -587,6 +590,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     # Step 1: Write Trade.txt FIRST — triggers the full trade_df DAG once, and
     # the output file becomes our effective "cache" for the other 3 outputs.
     counts.update(write_trade())
+
+    # Step 1b: Drain pending copies so Trade_*.txt part files exist at the
+    # final path. Without this, the re-read below either matches the wrong
+    # files (e.g. TradeType.txt via a loose glob) or returns an empty frame,
+    # silently corrupting TH/CT/HH downstream.
+    bulk_copy_all(dbutils, max_workers=64, label="before Trade re-read")
     log(f"[Trade] Trade.txt written, re-reading as source for TH/CT/HH")
 
     # Step 2: Re-bind trade_df to a DataFrame that reads Trade.txt and
