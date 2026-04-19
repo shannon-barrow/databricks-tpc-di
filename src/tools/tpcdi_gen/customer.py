@@ -838,8 +838,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .filter(F.col("ActionType") == "CLOSEACCT")
         .select(F.col("CA_ID").alias("closed_ca_id"))
         .distinct())
+    # Derived view: filter+select on already-materialized all_df. On serverless
+    # this stays a logical view (re-reads all_df's Parquet with column pruning —
+    # cheap). On classic, persist() is nearly free memory-wise.
     closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts",
-                                  volume_path=cfg.volume_path, dbutils=dbutils)
+                                  volume_path=cfg.volume_path, dbutils=dbutils,
+                                  skip_on_serverless=True)
     closed_accts.createOrReplaceTempView("_closed_accounts")
     n_closed = closed_accts.count()
     log(f"[CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
@@ -847,8 +851,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
 
     created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
+    # Derived view — see comment on _closed_accounts above.
     created_accts, _ = disk_cache(created_accts, spark, "_created_accounts",
-                                   volume_path=cfg.volume_path, dbutils=dbutils)
+                                   volume_path=cfg.volume_path, dbutils=dbutils,
+                                   skip_on_serverless=True)
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()
     log(f"[CustomerMgmt] {n_created} created accounts -> _created_accounts view")
@@ -856,8 +862,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
+    # Derived view — see comment on _closed_accounts above.
     acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners",
-                                 volume_path=cfg.volume_path, dbutils=dbutils)
+                                 volume_path=cfg.volume_path, dbutils=dbutils,
+                                 skip_on_serverless=True)
     acct_owners.createOrReplaceTempView("_account_owners")
     acct_owners.count()
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")

@@ -70,7 +70,8 @@ def _sanitize_label(label: str) -> str:
     return slug[:60] or "stage"
 
 
-def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None):
+def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None,
+               skip_on_serverless: bool = False):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
     On classic clusters: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local
@@ -93,10 +94,20 @@ def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None
         volume_path: Root volume path (e.g. ``cfg.volume_path``) for staging
             writes. Required to enable the serverless write/read fallback.
         dbutils: Databricks dbutils, used to clean any pre-existing staging dir.
+        skip_on_serverless: If True and running on serverless, skip the Parquet
+            materialization even when volume_path is provided. Use this for
+            derived views whose parent DataFrame is already materialized —
+            re-reading a column-pruned subset of the parent Parquet is cheap
+            compared to writing a new Parquet. On classic clusters, persist()
+            still runs because it's nearly free.
 
     Returns:
         (materialized_df, was_materialized: bool)
     """
+    if skip_on_serverless and _detect_serverless(spark):
+        log(f"[Cache] {label}: skipped (serverless, derived view)")
+        return df, False
+
     if _detect_serverless(spark):
         if volume_path is None:
             log(f"[Cache] {label}: skipped (serverless, no volume_path)")
