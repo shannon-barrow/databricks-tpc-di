@@ -70,60 +70,34 @@ def _sanitize_label(label: str) -> str:
     return slug[:60] or "stage"
 
 
-def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None,
-               skip_on_serverless: bool = False):
+def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
-    On classic clusters: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local
-    NVMe on each worker.
-
-    On serverless (Spark Connect): PERSIST TABLE is not supported, so we fall
-    back to writing the DataFrame as Parquet under ``{volume_path}/_staging/``
-    and returning a new DataFrame that reads from there. Subsequent operations
-    on the returned DataFrame read the materialized Parquet instead of
-    re-executing the upstream plan.
-
-    If serverless and ``volume_path`` is not provided, the call is a no-op:
-    returns the input DataFrame uncached. Downstream reads will re-execute the
-    upstream DAG (potentially very slow at large scale factors).
-
-    Args:
-        df: DataFrame to materialize.
-        spark: Active SparkSession.
-        label: Description for logging and (on serverless) path naming.
-        volume_path: Root volume path (e.g. ``cfg.volume_path``) for staging
-            writes. Required to enable the serverless write/read fallback.
-        dbutils: Databricks dbutils, used to clean any pre-existing staging dir.
-        skip_on_serverless: If True and running on serverless, skip the Parquet
-            materialization even when volume_path is provided. Use this for
-            derived views whose parent DataFrame is already materialized —
-            re-reading a column-pruned subset of the parent Parquet is cheap
-            compared to writing a new Parquet. On classic clusters, persist()
-            still runs because it's nearly free.
+    Classic: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local NVMe.
+    Serverless: persist is unsupported, so when ``volume_path`` is provided we
+    write a Parquet staging file and return a DataFrame that reads it back.
+    Without ``volume_path`` on serverless, returns the input DataFrame unchanged
+    (useful for derived views whose parent is already materialized — pass no
+    volume_path to keep them as logical views on serverless while still
+    persisting on classic).
 
     Returns:
         (materialized_df, was_materialized: bool)
     """
-    serverless = _detect_serverless(spark)
-    if serverless:
-        if skip_on_serverless:
-            log(f"[Cache] {label}: skipped (serverless, derived view)")
-            return df, False
+    if _detect_serverless(spark):
         if volume_path is None:
-            log(f"[Cache] {label}: skipped (serverless, no volume_path)")
             return df, False
         _STAGING_COUNTER[0] += 1
         slug = _sanitize_label(label)
         staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
+        log(f"[Staging] {label}: writing temp table (serverless)")
         try:
             if dbutils is not None:
                 _cleanup(staging_path, dbutils)
             df.write.mode("overwrite").parquet(staging_path)
-            new_df = spark.read.parquet(staging_path)
-            log(f"[Cache] {label}: materialized to Parquet ({staging_path})")
-            return new_df, True
+            return spark.read.parquet(staging_path), True
         except Exception as e:
-            log(f"[Cache] {label}: materialize failed ({type(e).__name__}: {e})")
+            log(f"[Staging] {label}: failed ({type(e).__name__}: {e})")
             return df, False
 
     try:
