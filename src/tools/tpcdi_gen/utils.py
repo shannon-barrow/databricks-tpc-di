@@ -97,7 +97,9 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True):
         log(f"[Staging] {label}: cache is unavailable on serverless, staging with temp table")
         try:
             df.createOrReplaceTempView(temp_view)
-            spark.sql(f"CREATE OR REPLACE TEMPORARY TABLE {temp_table} AS SELECT * FROM {temp_view}")
+            # CREATE OR REPLACE TEMPORARY TABLE is unsupported — drop first then create.
+            spark.sql(f"DROP TEMPORARY TABLE IF EXISTS {temp_table}")
+            spark.sql(f"CREATE TEMPORARY TABLE {temp_table} AS SELECT * FROM {temp_view}")
             return spark.table(temp_table), True
         except Exception as e:
             log(f"[Staging] {label}: failed ({type(e).__name__}: {e})")
