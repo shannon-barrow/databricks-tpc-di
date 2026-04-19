@@ -150,7 +150,8 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
               "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
 
     counts = {}
-    counts.update(_gen_historical_trades(spark, cfg, dicts, dbutils, shared))
+    hist_result = _gen_historical_trades(spark, cfg, dicts, dbutils, shared)
+    counts.update(hist_result["counts"])
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_INCREMENTAL_BATCHES) as executor:
         futures = [executor.submit(_gen_incremental_trades, spark, cfg, dicts, batch_id, dbutils, shared)
@@ -158,6 +159,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         for f in futures:
             counts.update(f.result())
 
+    # Release trade_df now that incrementals (which read _ct/_hh_hist_batch{b}
+    # temp views that reference it) are done.
+    safe_unpersist(hist_result["trade_df"], hist_result["cleanup_info"])
     safe_unpersist(broker_names, _broker_cleanup)
     # Release CustomerMgmt view caches — Trade was the last consumer
     for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
@@ -540,10 +544,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         for f in futures:
             counts.update(f.result())
 
-    safe_unpersist(trade_df, _trade_df_cleanup)
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
-    return counts
+    # Do not unpersist trade_df here — _ct_hist_batch{2,3} and _hh_hist_batch{2,3}
+    # temp views are lazy filters over trade_df and are consumed by
+    # _gen_incremental_trades. Caller unpersists after incrementals finish.
+    return {"counts": counts, "trade_df": trade_df, "cleanup_info": _trade_df_cleanup}
 
 
 def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
