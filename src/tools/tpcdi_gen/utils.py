@@ -94,7 +94,7 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True):
         slug = _sanitize_label(label)
         temp_view = f"_stg_view_{_STAGING_COUNTER[0]:03d}_{slug}"
         temp_table = f"_stg_tbl_{_STAGING_COUNTER[0]:03d}_{slug}"
-        log(f"[Staging] {label}: writing temp table (serverless)")
+        log(f"[Staging] {label}: cache is unavailable on serverless, staging with temp table")
         try:
             df.createOrReplaceTempView(temp_view)
             spark.sql(f"CREATE OR REPLACE TEMPORARY TABLE {temp_table} AS SELECT * FROM {temp_view}")
