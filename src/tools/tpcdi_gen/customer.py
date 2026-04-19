@@ -971,10 +971,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Release all_df — views are independently materialized/persisted and the XML
-    # is written. safe_unpersist drops Parquet staging on serverless or calls
-    # unpersist() on classic, with appropriate log message.
-    safe_unpersist(all_df, _all_df_cleanup)
+    # Do not unpersist all_df here: _account_owners / _closed_accounts /
+    # _created_accounts / _customer_dates are materialize=False views over it
+    # and are still consumed by generate_incremental (Customer/Account Batch2-3)
+    # and watch_history. cleanup_staging() at end of run removes the parquet.
 
     return {("CustomerMgmt", 1): total}
 
