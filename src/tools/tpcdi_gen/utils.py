@@ -543,59 +543,23 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
 
 
 
-def _concat_parts_to_single_file(staging_dir: str, final_path: str, dbutils):
-    """Concatenate all part files in ``staging_dir`` into a single ``final_path``.
-
-    Uses ``cat`` via subprocess on the /Volumes/ FUSE mount. Kernel-level I/O
-    on a single driver thread is much faster than forcing Spark to coalesce
-    to 1 partition. For datasets with many part files, we pipe the sorted
-    path list through ``xargs cat`` (avoiding ARG_MAX command-line limits
-    when concatenating hundreds or thousands of parts).
-
-    Returns the ``final_path`` that was written.
-    """
-    import subprocess, tempfile, os as _os
-
-    def _to_local(p: str) -> str:
-        return p.replace("dbfs:", "") if p.startswith("dbfs:") else p
-
-    files = dbutils.fs.ls(staging_dir)
-    part_files = sorted([f.path for f in files if f.name.startswith("part-")])
-    if not part_files:
-        return None
-
-    dst_path = _to_local(final_path)
-    list_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
-    try:
-        for p in part_files:
-            list_file.write(_to_local(p) + "\n")
-        list_file.close()
-        subprocess.run(["bash", "-c", f"xargs -a {list_file.name} cat > {dst_path}"],
-                       check=True)
-    finally:
-        _os.unlink(list_file.name)
-    return final_path
-
-
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
                dbutils=None, scale_factor: int = 0):
-    """Write a DataFrame to a staging directory and produce the final file(s).
+    """Write a DataFrame to a staging directory and register final outputs.
 
-    Two output modes depending on dataset size:
+    Spark writes part files capped at ~128MB via ``maxRecordsPerFile``, then
+    ``register_copies_from_staging`` produces final numbered files using the
+    hybrid strategy:
 
-    - **Concat mode** (default for small incremental outputs like Customer,
-      Account, Trade, TradeHistory, CashTransaction, HoldingHistory,
-      WatchHistory): Spark writes naturally-partitioned part files to staging,
-      then the driver concatenates them via ``cat`` into a single final file.
-      Avoids the ``coalesce(1)`` bottleneck that serializes all compute onto
-      one task.
+    - Parts ≥ 100MB are queued for deferred parallel ``dbutils.fs.cp`` (server-
+      side copy, no driver bandwidth).
+    - Parts < 100MB are bin-packed into ≤128MB groups and merged with
+      ``xargs cat`` on the driver FUSE mount.
 
-    - **Split mode** (Batch1 historical, DailyMarket incremental, Prospect
-      incremental): Spark writes with ``maxRecordsPerFile`` to cap output at
-      ~128MB, then part files are registered for deferred bulk copy with
-      numbered suffixes (``_1``, ``_2``, …). Deferred parallel copy via
-      ``bulk_copy_all`` beats driver-side single-stream cat for the largest
-      datasets (DailyMarket ~145 GB, TradeHistory ~53 GB, etc.).
+    Small datasets (most incrementals) trivially pack into a single bin, producing
+    one ``_1`` file. Large datasets (Batch1, DailyMarket) flow mostly through the
+    parallel-cp path with only tail partitions packed. CustomerMgmt XML and audit
+    files use their own writers and don't go through this path.
 
     Args:
         df: DataFrame to write.
@@ -610,7 +574,6 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # --- File sizing ---
     _BYTES_PER_ROW = {
         "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
         "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
@@ -618,13 +581,6 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     }
     filename = os.path.basename(path)
     dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
-    is_batch1 = "/Batch1/" in path
-
-    # Concat mode: incremental datasets that fit comfortably in a single file.
-    # DailyMarket and Prospect are too large — they stay in split mode.
-    use_concat = (not is_batch1) and (dataset not in ("DailyMarket", "Prospect"))
-
-    # Cap file size at ~128MB using maxRecordsPerFile (split mode only).
     row_bytes = _BYTES_PER_ROW.get(dataset, 0)
     max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
@@ -637,20 +593,10 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
         .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
-    if max_records > 0 and not use_concat:
+    if max_records > 0:
         writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
-    if use_concat:
-        # Parallel Spark write + driver-side cat → single final file. Numbered
-        # ``_1`` suffix kept for consistency with pipeline ``fileNamePattern``
-        # regexes that expect ``_[0-9]+`` suffixes.
-        base, ext = os.path.splitext(path)
-        final_target = f"{base}_1{ext}"
-        _concat_parts_to_single_file(staging_dir, final_target, dbutils)
-        return [final_target]
-
-    # Split mode: register each part file for deferred bulk copy.
     return register_copies_from_staging(staging_dir, path, dbutils)
 
 
