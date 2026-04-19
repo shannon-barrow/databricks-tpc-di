@@ -827,8 +827,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     all_df = all_df.repartition(n_parts)
 
     # Cache all_df — it's used to derive 4 views + the XML write + incrementals.
-    # Classic: persist; serverless: temp table.
-    all_df, _ = disk_cache(all_df, spark, "CustomerMgmt actions")
+    # Classic: persist; serverless: Parquet staging.
+    all_df, _ = disk_cache(all_df, spark, "CustomerMgmt actions",
+                           volume_path=cfg.volume_path, dbutils=dbutils)
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
