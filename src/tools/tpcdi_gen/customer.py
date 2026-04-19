@@ -971,12 +971,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Do not unpersist all_df here: _account_owners / _closed_accounts /
+    # Cannot unpersist all_df here: _account_owners / _closed_accounts /
     # _created_accounts / _customer_dates are materialize=False views over it
-    # and are still consumed by generate_incremental (Customer/Account Batch2-3)
-    # and watch_history. cleanup_staging() at end of run removes the parquet.
+    # and are still consumed by generate_incremental and watch_history.
+    # Caller unpersists after both finish.
 
-    return {("CustomerMgmt", 1): total}
+    return {"counts": {("CustomerMgmt", 1): total},
+            "all_df": all_df, "cleanup_info": _all_df_cleanup}
 
 
 def generate_incremental(spark, cfg, dicts, dbutils):
@@ -1301,7 +1302,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=N
     """
     log("[CustomerMgmt] Starting generation")
     counts = {}
-    counts.update(generate_customermgmt(spark, cfg, dicts, dbutils, views_ready_event))
+    cm_result = generate_customermgmt(spark, cfg, dicts, dbutils, views_ready_event)
+    counts.update(cm_result["counts"])
     counts.update(generate_incremental(spark, cfg, dicts, dbutils))
+    # Release all_df now that both historical XML and incremental batches are done.
+    safe_unpersist(cm_result["all_df"], cm_result["cleanup_info"])
     log("[CustomerMgmt] Generation complete")
     return {"counts": counts}
