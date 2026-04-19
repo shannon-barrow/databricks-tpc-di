@@ -509,18 +509,23 @@ def _concat_parts_to_single_file(staging_dir: str, final_path: str, dbutils):
 
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
                dbutils=None, scale_factor: int = 0):
-    """Write a DataFrame to a staging directory and produce a single final file.
+    """Write a DataFrame to a staging directory and produce the final file(s).
 
-    Spark writes naturally-partitioned (and ``maxRecordsPerFile``-capped) part
-    files to staging, then the driver concatenates them via ``cat`` into a
-    single final file named ``{base}_1{ext}`` — matching the TPC-DI pipeline's
-    ``fileNamePattern`` regex ``_[0-9]+``. Kernel-level cat through the FUSE
-    mount avoids both the ``coalesce(1)`` bottleneck (serializes compute onto
-    one task) and the per-call ``dbutils.fs.cp`` overhead of bulk-copying
-    thousands of part files individually.
+    Two output modes depending on dataset size:
 
-    CustomerMgmt XML and audit files have their own writers; they do not go
-    through this path.
+    - **Concat mode** (default for small incremental outputs like Customer,
+      Account, Trade, TradeHistory, CashTransaction, HoldingHistory,
+      WatchHistory): Spark writes naturally-partitioned part files to staging,
+      then the driver concatenates them via ``cat`` into a single final file.
+      Avoids the ``coalesce(1)`` bottleneck that serializes all compute onto
+      one task.
+
+    - **Split mode** (Batch1 historical, DailyMarket incremental, Prospect
+      incremental): Spark writes with ``maxRecordsPerFile`` to cap output at
+      ~128MB, then part files are registered for deferred bulk copy with
+      numbered suffixes (``_1``, ``_2``, …). Deferred parallel copy via
+      ``bulk_copy_all`` beats driver-side single-stream cat for the largest
+      datasets (DailyMarket ~145 GB, TradeHistory ~53 GB, etc.).
 
     Args:
         df: DataFrame to write.
@@ -530,14 +535,12 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         scale_factor: TPC-DI scale factor.
 
     Returns:
-        List containing the single final target file path.
+        List of final target file paths.
     """
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    # Cap part-file size at ~128MB using maxRecordsPerFile. Keeps individual
-    # Spark tasks from producing huge multi-GB part files under natural
-    # partitioning, which would stress executor memory and slow cat throughput.
+    # --- File sizing ---
     _BYTES_PER_ROW = {
         "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
         "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
@@ -545,6 +548,13 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     }
     filename = os.path.basename(path)
     dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
+    is_batch1 = "/Batch1/" in path
+
+    # Concat mode: incremental datasets that fit comfortably in a single file.
+    # DailyMarket and Prospect are too large — they stay in split mode.
+    use_concat = (not is_batch1) and (dataset not in ("DailyMarket", "Prospect"))
+
+    # Cap file size at ~128MB using maxRecordsPerFile (split mode only).
     row_bytes = _BYTES_PER_ROW.get(dataset, 0)
     max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
@@ -557,14 +567,21 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
         .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
-    if max_records > 0:
+    if max_records > 0 and not use_concat:
         writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
-    base, ext = os.path.splitext(path)
-    final_target = f"{base}_1{ext}"
-    _concat_parts_to_single_file(staging_dir, final_target, dbutils)
-    return [final_target]
+    if use_concat:
+        # Parallel Spark write + driver-side cat → single final file. Numbered
+        # ``_1`` suffix kept for consistency with pipeline ``fileNamePattern``
+        # regexes that expect ``_[0-9]+`` suffixes.
+        base, ext = os.path.splitext(path)
+        final_target = f"{base}_1{ext}"
+        _concat_parts_to_single_file(staging_dir, final_target, dbutils)
+        return [final_target]
+
+    # Split mode: register each part file for deferred bulk copy.
+    return register_copies_from_staging(staging_dir, path, dbutils)
 
 
 def write_text(content: str, path: str, dbutils=None):
