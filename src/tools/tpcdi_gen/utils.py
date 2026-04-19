@@ -104,11 +104,11 @@ def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None
     Returns:
         (materialized_df, was_materialized: bool)
     """
-    if skip_on_serverless and _detect_serverless(spark):
-        log(f"[Cache] {label}: skipped (serverless, derived view)")
-        return df, False
-
-    if _detect_serverless(spark):
+    serverless = _detect_serverless(spark)
+    if serverless:
+        if skip_on_serverless:
+            log(f"[Cache] {label}: skipped (serverless, derived view)")
+            return df, False
         if volume_path is None:
             log(f"[Cache] {label}: skipped (serverless, no volume_path)")
             return df, False
