@@ -826,10 +826,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     log(f"[CustomerMgmt] Repartitioning to {n_parts} partitions")
     all_df = all_df.repartition(n_parts)
 
-    # Cache all_df to disk — it's used to derive 4 views + the XML write.
-    # Use disk_cache() helper so serverless skips the persist (which hangs there).
-    all_df, _ = disk_cache(all_df, spark, f"CustomerMgmt actions ({n_parts} partitions)",
-                           volume_path=cfg.volume_path, dbutils=dbutils)
+    # Cache all_df — it's used to derive 4 views + the XML write + incrementals.
+    # Classic: persist; serverless: temp table.
+    all_df, _ = disk_cache(all_df, spark, f"CustomerMgmt actions ({n_parts} partitions)")
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
@@ -839,9 +838,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .select(F.col("CA_ID").alias("closed_ca_id"))
         .distinct())
     # Derived view: filter+select on already-materialized all_df. On serverless
-    # we skip materialization (no volume_path) — re-reading a column-pruned
-    # subset of all_df's Parquet is cheap. On classic, persist() runs normally.
-    closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts")
+    # we skip materialization (materialize=False) — re-reading a column-pruned
+    # subset of all_df's temp table is cheap. On classic, persist() runs normally.
+    closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts", materialize=False)
     closed_accts.createOrReplaceTempView("_closed_accounts")
     n_closed = closed_accts.count()
     log(f"[CustomerMgmt] {n_closed} closed accounts -> _closed_accounts view")
@@ -850,7 +849,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
     # Derived view — see comment on _closed_accounts above.
-    created_accts, _ = disk_cache(created_accts, spark, "_created_accounts")
+    created_accts, _ = disk_cache(created_accts, spark, "_created_accounts", materialize=False)
     created_accts.createOrReplaceTempView("_created_accounts")
     n_created = created_accts.count()
     log(f"[CustomerMgmt] {n_created} created accounts -> _created_accounts view")
@@ -859,7 +858,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
     # Derived view — see comment on _closed_accounts above.
-    acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners")
+    acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners", materialize=False)
     acct_owners.createOrReplaceTempView("_account_owners")
     acct_owners.count()
     log(f"[CustomerMgmt] {n_created} account owners -> _account_owners view", "DEBUG")

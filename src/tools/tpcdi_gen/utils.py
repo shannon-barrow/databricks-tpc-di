@@ -60,42 +60,45 @@ def _detect_serverless(spark) -> bool:
         return True
 
 
-# Counter for disambiguating staging directories across multiple materializations.
+# Counter for disambiguating temp-table/temp-view names across calls.
 _STAGING_COUNTER = [0]
 
 
 def _sanitize_label(label: str) -> str:
-    """Turn a label into a safe filesystem path component."""
+    """Turn a label into a safe SQL identifier component (lowercase + underscores)."""
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_").lower()
-    return slug[:60] or "stage"
+    return slug[:40] or "stage"
 
 
-def disk_cache(df, spark, label: str = "", volume_path: str = None, dbutils=None):
+def disk_cache(df, spark, label: str = "", materialize: bool = True):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
     Classic: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local NVMe.
-    Serverless: persist is unsupported, so when ``volume_path`` is provided we
-    write a Parquet staging file and return a DataFrame that reads it back.
-    Without ``volume_path`` on serverless, returns the input DataFrame unchanged
-    (useful for derived views whose parent is already materialized — pass no
-    volume_path to keep them as logical views on serverless while still
-    persisting on classic).
+    Serverless: persist is unsupported, so we use a session-scoped
+    TEMPORARY TABLE (auto-cleaned at session end — no staging paths, no
+    manual cleanup). See
+    https://www.databricks.com/blog/introducing-temporary-tables-databricks-sql
+
+    Pass ``materialize=False`` for derived views whose parent is already
+    materialized — on serverless they stay as logical views (re-reading a
+    column-pruned subset of the parent is cheap); on classic they still
+    persist since persist is nearly free memory-wise.
 
     Returns:
         (materialized_df, was_materialized: bool)
     """
     if _detect_serverless(spark):
-        if volume_path is None:
+        if not materialize:
             return df, False
         _STAGING_COUNTER[0] += 1
         slug = _sanitize_label(label)
-        staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
+        temp_view = f"_stg_view_{_STAGING_COUNTER[0]:03d}_{slug}"
+        temp_table = f"_stg_tbl_{_STAGING_COUNTER[0]:03d}_{slug}"
         log(f"[Staging] {label}: writing temp table (serverless)")
         try:
-            if dbutils is not None:
-                _cleanup(staging_path, dbutils)
-            df.write.mode("overwrite").parquet(staging_path)
-            return spark.read.parquet(staging_path), True
+            df.createOrReplaceTempView(temp_view)
+            spark.sql(f"CREATE OR REPLACE TEMPORARY TABLE {temp_table} AS SELECT * FROM {temp_view}")
+            return spark.table(temp_table), True
         except Exception as e:
             log(f"[Staging] {label}: failed ({type(e).__name__}: {e})")
             return df, False
@@ -521,11 +524,7 @@ def write_text(content: str, path: str, dbutils=None):
 
 
 def cleanup_staging(volume_path: str, dbutils):
-    """Remove all temporary directories (__staging, __tmp, _staging) after bulk copy.
-
-    Also removes the serverless materialize-staging directory at
-    ``{volume_path}/_staging/`` which holds intermediate Parquet written by
-    ``disk_cache()`` on serverless.
+    """Remove all temporary directories (__staging, __tmp) after bulk copy.
 
     Walks the output volume's batch directories and deletes any leftover staging
     or temp directories. This is a cleanup step run at the very end of generation
@@ -544,9 +543,6 @@ def cleanup_staging(volume_path: str, dbutils):
                     dbutils.fs.rm(f.path, recurse=True)
     except:
         pass
-
-    # Also remove serverless materialize-staging dir at the volume root.
-    _cleanup(f"{volume_path}/_staging", dbutils)
 
 
 def _cleanup(path: str, dbutils):

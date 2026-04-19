@@ -143,9 +143,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     num_sec = spark.table("_symbols").count()
 
     # Cache broker names — used by historical + each incremental batch.
-    # disk_cache() skips on serverless (which doesn't support DISK_ONLY well).
-    broker_names, _ = disk_cache(broker_names, spark, "broker_names",
-                                  volume_path=cfg.volume_path, dbutils=dbutils)
+    broker_names, _ = disk_cache(broker_names, spark, "broker_names")
 
     shared = {"valid_accts": valid_accts, "n_valid": n_valid,
               "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
@@ -369,8 +367,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     # Cache trade_df to disk — evaluated 4x (Trade, TradeHistory, CashTransaction,
     # HoldingHistory). DISK_ONLY avoids memory pressure while preventing re-evaluation.
     trade_df, _trade_cached = disk_cache(trade_df, spark,
-        f"Trade source data ({cfg.trade_total:,} rows)",
-        volume_path=cfg.volume_path, dbutils=dbutils)
+        f"Trade source data ({cfg.trade_total:,} rows)")
 
     # === Write all 4 output tables ===
     def write_trade():
