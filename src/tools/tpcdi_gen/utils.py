@@ -32,17 +32,42 @@ from pyspark import StorageLevel
 from .config import MAX_FILE_BYTES
 
 
-def safe_unpersist(df):
-    """Unpersist a DataFrame if possible; swallow errors on serverless.
+def safe_unpersist(df, cleanup_info=None):
+    """Release a cached or staged DataFrame.
 
-    Serverless raises NOT_SUPPORTED_WITH_SERVERLESS on UNPERSIST TABLE.
-    If the df was never persisted (common on serverless via disk_cache skip),
-    unpersist is a no-op anyway.
+    Accepts the ``cleanup_info`` dict returned by ``disk_cache()``:
+      - Classic persist: calls ``unpersist()`` and logs "Unpersisted cache"
+      - Serverless Parquet staging: deletes the staging directory and logs
+        "Dropped staging table"
+
+    If ``cleanup_info`` is None, falls back to a best-effort unpersist.
+    Serverless raises NOT_SUPPORTED_WITH_SERVERLESS on UNPERSIST TABLE, so
+    errors are swallowed.
     """
-    try:
-        df.unpersist()
-    except Exception:
-        pass
+    if cleanup_info is None:
+        try:
+            df.unpersist()
+        except Exception:
+            pass
+        return
+
+    kind = cleanup_info.get("kind")
+    label = cleanup_info.get("label", "")
+    if kind == "persist":
+        try:
+            df.unpersist()
+        except Exception:
+            pass
+        log(f"[Cache] {label}: unpersisted cache")
+    elif kind == "parquet":
+        path = cleanup_info.get("path")
+        dbutils = cleanup_info.get("dbutils")
+        if path and dbutils is not None:
+            try:
+                dbutils.fs.rm(path, recurse=True)
+            except Exception:
+                pass
+        log(f"[Staging] {label}: dropped staging table")
 
 
 def _detect_serverless(spark) -> bool:
@@ -86,11 +111,17 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True,
     persist since persist is nearly free memory-wise.
 
     Returns:
-        (materialized_df, was_materialized: bool)
+        (materialized_df, cleanup_info or None)
+
+        ``cleanup_info`` is a dict consumed by ``safe_unpersist()``:
+          - ``{"kind": "persist", "label": ...}`` on classic
+          - ``{"kind": "parquet", "path": ..., "dbutils": ..., "label": ...}``
+            on serverless when Parquet staging ran
+          - ``None`` if nothing was materialized (skip paths / failures)
     """
     if _detect_serverless(spark):
         if not materialize or volume_path is None:
-            return df, False
+            return df, None
         _STAGING_COUNTER[0] += 1
         slug = _sanitize_label(label)
         staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
@@ -99,19 +130,21 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True,
             if dbutils is not None:
                 _cleanup(staging_path, dbutils)
             df.write.mode("overwrite").parquet(staging_path)
-            return spark.read.parquet(staging_path), True
+            new_df = spark.read.parquet(staging_path)
+            return new_df, {"kind": "parquet", "path": staging_path,
+                            "dbutils": dbutils, "label": label}
         except Exception as e:
             log(f"[Staging] {label}: failed ({type(e).__name__}: {e})")
-            return df, False
+            return df, None
 
     try:
         df = df.persist(StorageLevel.DISK_ONLY)
         df.count()
         log(f"[Cache] {label}: cached to disk")
-        return df, True
+        return df, {"kind": "persist", "label": label}
     except Exception as e:
         log(f"[Cache] {label}: skipped ({type(e).__name__})")
-        return df, False
+        return df, None
 
 
 # Module-level log level setting
@@ -440,12 +473,50 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
 
 
 
+def _concat_parts_to_single_file(staging_dir: str, final_path: str, dbutils):
+    """Concatenate all part files in ``staging_dir`` into a single ``final_path``.
+
+    Uses ``cat`` via subprocess on the /Volumes/ FUSE mount. This is the same
+    mechanism the CustomerMgmt XML writer uses for header/footer concatenation —
+    kernel-level I/O on a single driver thread is still much faster than
+    forcing Spark to coalesce to 1 partition (which serializes the entire
+    compute+write onto one task).
+
+    Returns the ``final_path`` that was written.
+    """
+    import subprocess
+
+    def _to_local(p: str) -> str:
+        return p.replace("dbfs:", "") if p.startswith("dbfs:") else p
+
+    files = dbutils.fs.ls(staging_dir)
+    part_files = sorted([f.path for f in files if f.name.startswith("part-")])
+    if not part_files:
+        return None
+
+    src_paths = " ".join(_to_local(p) for p in part_files)
+    dst_path = _to_local(final_path)
+    subprocess.run(["bash", "-c", f"cat {src_paths} > {dst_path}"], check=True)
+    return final_path
+
+
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
                dbutils=None, scale_factor: int = 0):
-    """Write a DataFrame to a staging directory and register deferred copies to the final path.
+    """Write a DataFrame to a staging directory and produce the final file(s).
 
-    Uses maxRecordsPerFile to cap output files at ~128MB based on hardcoded per-dataset
-    row sizes. This splits skewed partitions without a shuffle.
+    Two output modes depending on dataset size:
+
+    - **Concat mode** (default for small incremental outputs like Customer,
+      Account, Trade, TradeHistory, CashTransaction, HoldingHistory,
+      WatchHistory): Spark writes naturally-partitioned part files to staging,
+      then the driver concatenates them via ``cat`` into a single final file.
+      Avoids the ``coalesce(1)`` bottleneck that serializes all compute onto
+      one task.
+
+    - **Split mode** (Batch1 historical, DailyMarket incremental, Prospect
+      incremental): Spark writes with ``maxRecordsPerFile`` to cap output at
+      ~128MB, then part files are registered for deferred bulk copy with
+      numbered suffixes (``_1``, ``_2``, …).
 
     Args:
         df: DataFrame to write.
@@ -470,19 +541,11 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
     is_batch1 = "/Batch1/" in path
 
-    if not is_batch1:
-        # Incremental batches: coalesce to minimize file count.
-        # DailyMarket and Prospect use maxRecordsPerFile instead (too large to coalesce).
-        if dataset not in ("DailyMarket", "Prospect"):
-            _INC_MB_PER_1K = {
-                "Trade": 19, "CashTransaction": 7, "HoldingHistory": 3,
-                "WatchHistory": 35, "Customer": 1, "Account": 1,
-            }
-            inc_mb = _INC_MB_PER_1K.get(dataset, 1) * (scale_factor / 1000)
-            n_files = max(1, int(inc_mb / 128) + (1 if inc_mb % 128 > 0 else 0))
-            df = df.coalesce(n_files)
+    # Concat mode: incremental datasets that fit comfortably in a single file.
+    # DailyMarket and Prospect are too large — they stay in split mode.
+    use_concat = (not is_batch1) and (dataset not in ("DailyMarket", "Prospect"))
 
-    # Cap file size at ~128MB using maxRecordsPerFile (Batch1 + DM/Prospect incremental).
+    # Cap file size at ~128MB using maxRecordsPerFile (split mode only).
     row_bytes = _BYTES_PER_ROW.get(dataset, 0)
     max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
@@ -495,11 +558,20 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
         .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
-    if max_records > 0:
+    if max_records > 0 and not use_concat:
         writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
-    # Register staging part files for deferred bulk copy to final path(s)
+    if use_concat:
+        # Parallel Spark write + driver-side cat → single final file. Numbered
+        # ``_1`` suffix kept for consistency with pipeline ``fileNamePattern``
+        # regexes that expect ``_[0-9]+`` suffixes.
+        base, ext = os.path.splitext(path)
+        final_target = f"{base}_1{ext}"
+        _concat_parts_to_single_file(staging_dir, final_target, dbutils)
+        return [final_target]
+
+    # Split mode: register each part file for deferred bulk copy.
     return register_copies_from_staging(staging_dir, path, dbutils)
 
 

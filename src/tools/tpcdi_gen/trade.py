@@ -121,6 +121,65 @@ from .config import *
 from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist
 
 
+def _read_trade_and_derive_internals(spark, cfg, trade_begin_s, trade_range_s):
+    """Read Trade.txt back and re-derive the internal fields needed by TH/CT/HH.
+
+    Used in place of materializing trade_df when we've already written Trade.txt
+    — avoids the double write (Parquet staging + final CSV) at the cost of
+    re-reading Trade.txt and re-hashing the internal timestamp fields. All
+    derivations are deterministic from ``t_id`` + public columns, so the
+    resulting DataFrame is field-for-field equivalent to the original trade_df
+    (minus the join-derived internals like ``_sym_idx`` that no downstream
+    function uses).
+    """
+    schema = ("t_id LONG, t_dts STRING, t_st_id STRING, t_tt_id STRING, "
+              "t_is_cash STRING, t_s_symb STRING, t_qty STRING, t_bid_price STRING, "
+              "t_ca_id STRING, t_exec_name STRING, t_trade_price STRING, "
+              "t_chrg STRING, t_comm STRING, t_tax STRING")
+    trade_df = spark.read.csv(f"{cfg.batch_path(1)}/Trade*.txt",
+                               sep="|", header=False, schema=schema)
+    return (trade_df
+        # Type/flag re-derivations from public columns
+        .withColumn("_is_buy", F.col("t_tt_id").isin("TLB", "TMB"))
+        .withColumn("_is_limit", F.col("t_tt_id").isin("TLB", "TLS"))
+        .withColumn("_is_canceled",
+            F.when(F.col("_is_limit"),
+                hash_key(F.col("t_id"), seed_for("T", "cncl")) % 100 < 10)
+             .otherwise(F.lit(False)))
+        .withColumn("_qty_val", F.col("t_qty").cast("double"))
+        # Recompute internal prices from hash (not from formatted strings, to
+        # preserve full double precision for _trade_val)
+        .withColumn("_bid",
+            (hash_key(F.col("t_id"), seed_for("T", "bid")) % 900 + 101) / 100.0)
+        .withColumn("_tp",
+            F.col("_bid") * (0.95 + (hash_key(F.col("t_id"), seed_for("T", "tp")) % 11) / 100.0))
+        .withColumn("_trade_val", F.col("_tp") * F.col("_qty_val"))
+        # Timestamps — all derived deterministically from t_id
+        .withColumn("_ts_offset",
+            hash_key(F.col("t_id"), seed_for("T", "ts")) % trade_range_s)
+        .withColumn("_base_ts", F.lit(trade_begin_s).cast("long") + F.col("_ts_offset"))
+        .withColumn("_submit_offset",
+            F.when(F.col("_is_limit"),
+                hash_key(F.col("t_id"), seed_for("T", "sub")) % 7776000)
+             .otherwise(F.lit(0)))
+        .withColumn("_submit_ts", F.col("_base_ts") + F.col("_submit_offset"))
+        .withColumn("_complete_ts",
+            F.col("_submit_ts") + (hash_key(F.col("t_id"), seed_for("T", "cmp")) % 300))
+        .withColumn("_cash_ts",
+            F.col("_complete_ts") + (hash_key(F.col("t_id"), seed_for("T", "ct")) % 432000))
+        # CashTransaction name random string
+        .withColumn("_ct_name_len",
+            (hash_key(F.col("t_id"), seed_for("T", "ctn")) % 91 + 10).cast("int"))
+        .withColumn("_ct_name_raw",
+            F.translate(F.concat(
+                F.md5(F.concat(F.col("t_id").cast("string"), F.lit("ct1"))),
+                F.md5(F.concat(F.col("t_id").cast("string"), F.lit("ct2"))),
+                F.md5(F.concat(F.col("t_id").cast("string"), F.lit("ct3"))),
+                F.md5(F.concat(F.col("t_id").cast("string"), F.lit("ct4")))),
+                "0123456789abcdef",
+                "ABCDEFGHIJKabcde")))
+
+
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     """Generate all trade-related tables. Returns counts.
 
@@ -143,8 +202,8 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     num_sec = spark.table("_symbols").count()
 
     # Cache broker names — used by historical + each incremental batch.
-    broker_names, _ = disk_cache(broker_names, spark, "broker_names",
-                                  volume_path=cfg.volume_path, dbutils=dbutils)
+    broker_names, _broker_cleanup = disk_cache(broker_names, spark, "broker_names",
+                                                volume_path=cfg.volume_path, dbutils=dbutils)
 
     shared = {"valid_accts": valid_accts, "n_valid": n_valid,
               "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
@@ -158,14 +217,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         for f in futures:
             counts.update(f.result())
 
-    safe_unpersist(broker_names)
+    safe_unpersist(broker_names, _broker_cleanup)
     # Release CustomerMgmt view caches — Trade was the last consumer
     for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
         try:
             spark.catalog.uncacheTable(view_name)
         except:
             pass
-    log("[Trade] Unpersisted all Trade + CustomerMgmt view caches")
+    log("[Trade] Released all Trade + CustomerMgmt view caches")
 
     log("[Trade] Generation complete")
     return counts
@@ -365,11 +424,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "ABCDEFGHIJKabcde"))
 
 
-    # Cache trade_df to disk — evaluated 4x (Trade, TradeHistory, CashTransaction,
-    # HoldingHistory). DISK_ONLY avoids memory pressure while preventing re-evaluation.
-    trade_df, _trade_cached = disk_cache(trade_df, spark,
-        f"Trade source data ({cfg.trade_total:,} rows)",
-        volume_path=cfg.volume_path, dbutils=dbutils)
+    # No explicit materialization here — writing Trade.txt (below) triggers the
+    # full DAG once, then we re-read Trade.txt + re-derive internal fields for
+    # the other 3 outputs. Avoids the extra Parquet staging + cleanup at the
+    # cost of re-reading the final CSV output for TH/CT/HH.
 
     # === Write all 4 output tables ===
     def write_trade():
@@ -526,19 +584,28 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         return counts_hh
 
     counts = {}
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+    # Step 1: Write Trade.txt FIRST — triggers the full trade_df DAG once, and
+    # the output file becomes our effective "cache" for the other 3 outputs.
+    counts.update(write_trade())
+    log(f"[Trade] Trade.txt written, re-reading as source for TH/CT/HH")
+
+    # Step 2: Re-bind trade_df to a DataFrame that reads Trade.txt and
+    # re-derives internal fields (hash-based, deterministic from t_id).
+    # The closures for write_trade_history/write_cash_transaction/
+    # write_holding_history look up `trade_df` at call time, so they pick up
+    # the new binding transparently.
+    trade_df = _read_trade_and_derive_internals(spark, cfg, trade_begin_s, trade_range_s)
+
+    # Step 3: Run the remaining 3 writes in parallel, all backed by the
+    # re-read Trade.txt.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = [
-            executor.submit(write_trade),
             executor.submit(write_trade_history),
             executor.submit(write_cash_transaction),
             executor.submit(write_holding_history),
         ]
         for f in futures:
             counts.update(f.result())
-
-    if _trade_cached:
-        safe_unpersist(trade_df)
-        log("[Trade] Unpersisted Trade source data cache")
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")

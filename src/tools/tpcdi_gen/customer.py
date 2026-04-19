@@ -828,8 +828,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # Cache all_df — it's used to derive 4 views + the XML write + incrementals.
     # Classic: persist; serverless: Parquet staging.
-    all_df, _ = disk_cache(all_df, spark, "CustomerMgmt actions",
-                           volume_path=cfg.volume_path, dbutils=dbutils)
+    all_df, _all_df_cleanup = disk_cache(all_df, spark, "CustomerMgmt actions",
+                                          volume_path=cfg.volume_path, dbutils=dbutils)
 
     # === Create _closed_accounts temp view ===
     # Cache and materialize views that Trade depends on so Trade reads instantly.
@@ -971,10 +971,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Release all_df cache — views are cached independently and XML is written.
-    # safe_unpersist no-ops on serverless (UNPERSIST TABLE not supported there).
-    safe_unpersist(all_df)
-    log("[CustomerMgmt] Unpersisted CustomerMgmt actions cache")
+    # Release all_df — views are independently materialized/persisted and the XML
+    # is written. safe_unpersist drops Parquet staging on serverless or calls
+    # unpersist() on classic, with appropriate log message.
+    safe_unpersist(all_df, _all_df_cleanup)
 
     return {("CustomerMgmt", 1): total}
 
