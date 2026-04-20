@@ -104,10 +104,58 @@ if sku[0] not in ['CLUSTER','DBSQL']:
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate TPC-DI Data using Spark-native distributed generator
-# MAGIC %run ./tools/spark_data_generator
+# DBTITLE 1,Import workflow-generation modules
+import sys
+_tools_dir = f"{workspace_src_path}/tools"
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+# Force-reload so code changes pick up without a cluster restart.
+for _m in ("_workflow_utils", "generate_datagen_workflow", "generate_benchmark_workflow"):
+    sys.modules.pop(_m, None)
+from generate_datagen_workflow import generate_datagen_workflow
+from generate_benchmark_workflow import generate_benchmark_workflow
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate and submit the Databricks Workflow
-# MAGIC %run ./tools/generate_workflow
+# DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
+datagen_job_id = generate_datagen_workflow(
+    job_name=job_name,
+    scale_factor=scale_factor,
+    catalog=catalog,
+    regenerate_data=dbutils.widgets.get("regenerate_data"),
+    log_level="INFO",
+    repo_src_path=repo_src_path,
+    workspace_src_path=workspace_src_path,
+    api_call=api_call,
+)
+displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
+
+# COMMAND ----------
+
+# DBTITLE 1,Create the Benchmark Workflow (ingest + dim/fact pipeline)
+benchmark_job_id = generate_benchmark_workflow(
+    wf_key=wf_key,
+    workflow_type=workflow_type,
+    job_name=job_name,
+    catalog=catalog,
+    wh_target=wh_target,
+    scale_factor=scale_factor,
+    tpcdi_directory=tpcdi_directory,
+    repo_src_path=repo_src_path,
+    workspace_src_path=workspace_src_path,
+    cloud_provider=cloud_provider,
+    serverless=serverless,
+    pred_opt=pred_opt,
+    perf_opt_flg=perf_opt_flg,
+    incremental=incremental,
+    api_call=api_call,
+    worker_node_type=worker_node_type if serverless != "YES" else None,
+    driver_node_type=driver_node_type if serverless != "YES" else None,
+    dbr_version_id=dbr_version_id if serverless != "YES" else None,
+    default_dbr_version=default_dbr_version,
+    default_worker_type=default_worker_type,
+    cust_mgmt_type=cust_mgmt_type,
+    worker_cores_mult=worker_cores_mult,
+    node_types=node_types,
+)
+displayHTML(f"<h2><a href=/#job/{benchmark_job_id}>Benchmark Workflow</a></h2>")
