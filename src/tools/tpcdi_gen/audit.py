@@ -123,42 +123,104 @@ def _gen_batch_audits(cfg, dbutils):
         write_text('\n'.join(lines) + '\n', f"{cfg.volume_path}/Batch{batch_id}_audit.csv", dbutils)
 
 
-def _gen_table_audits(cfg, counts, dbutils):
-    """Write per-table audit files into the Batch1 directory.
+_AUDIT_HEADER = "DataSet, BatchID ,Date , Attribute , Value, DValue\n"
 
-    Each audit file records expected row counts and derived metrics that the
-    TPC-DI pipeline uses to validate its ETL output. Key derived metrics:
-      - HR_BROKERS: count of brokers (jobcode 314) for DimBroker validation
-      - WH_ACTIVE: ~80% of WatchHistory total (active watch items)
-      - P_C_MATCHING: ~25% of Prospect total (customer-matching prospects)
-      - C_NEW: ~60% of CustomerMgmt rows (new customer actions)
+
+def _audit_row(dataset: str, batch: int, attribute: str, value) -> str:
+    """Format one audit CSV row. ``value`` may be int or None (for date-only rows)."""
+    v = "" if value is None else str(value)
+    return f"{dataset},{batch},,{attribute},{v},\n"
+
+
+def _gen_table_audits(cfg, counts, dbutils):
+    """Write per-table ``*_audit.csv`` files into the Batch1 directory.
+
+    Shape matches DIGen's Audit XML config output so the pipeline's ``Audit``
+    view (a ``read_files`` union over every ``*_audit.csv``) exposes the rows
+    that ``automated_audit.sql`` checks against.
+
+    Attributes emitted per file:
+      HR_audit.csv          — DimBroker.HR_BROKERS
+      CustomerMgmt_audit.csv — DimAccount.{CA_ADDACCT, CA_CLOSEACCT, CA_UPDACCT,
+                                           CA_ID_HIST=-1};
+                               DimCustomer.{C_NEW, C_UPDCUST, C_ID_HIST=0,
+                                            C_INACT, C_DOB_TO, C_DOB_TY,
+                                            C_TIER_INV}
+      Trade_audit.csv       — DimTrade.{T_Records, T_NEW, T_CanceledTrades,
+                                        T_InvalidCommision, T_InvalidCharge}
+      DailyMarket_audit.csv — FactMarketHistory.DM_RECORDS
+      WatchHistory_audit.csv — FactWatches.{WH_ACTIVE, WH_RECORDS}
+      HoldingHistory_audit.csv — FactHoldings.HH_RECORDS
+      FINWIRE_audit.csv     — DimSecurity.{FW_SEC, FW_SEC_DUP=-1};
+                               DimCompany.{FW_CMP, FW_CMP_DUP=-1, FW_FIN,
+                                           FW_FIN_DUP=-1}
+
+    ``CA_ID_HIST=-1`` and ``C_ID_HIST=0`` / ``FW_*_DUP=-1`` are literal sentinel
+    values DIGen's generator never implemented — we emit them unchanged so the
+    automated_audit.sql arithmetic (which sums these in) stays correct.
     """
     bp = cfg.batch_path(1)
-    hdr = "DataSet, BatchID ,Date , Attribute , Value, DValue\n"
 
-    # Per-table audit files with expected counts from the generation run
-    write_text(hdr + f"DimBroker,1,,HR_BROKERS,{counts.get(('HR_BROKERS',1),0)},\n", f"{bp}/HR_audit.csv", dbutils)
-    write_text(hdr + f"DimTrade,1,,T_Records,{counts.get(('Trade',1),0)},\n", f"{bp}/Trade_audit.csv", dbutils)
-    write_text(hdr + f"FactMarketHistory,1,,DM_RECORDS,{counts.get(('DailyMarket',1),0)},\n", f"{bp}/DailyMarket_audit.csv", dbutils)
+    # --- HR / DimBroker ---
+    write_text(_AUDIT_HEADER + _audit_row("DimBroker", 1, "HR_BROKERS",
+                                           counts.get(("HR_BROKERS", 1), 0)),
+               f"{bp}/HR_audit.csv", dbutils)
 
-    # WatchHistory: WH_ACTIVE = ~80% of total (approximate active watch ratio)
+    # --- CustomerMgmt (Batch1) ---
+    cm_lines = [
+        _audit_row("DimAccount", 1, "CA_ADDACCT",   counts.get(("CM_ADDACCT", 1), 0)),
+        _audit_row("DimAccount", 1, "CA_CLOSEACCT", counts.get(("CM_CLOSEACCT", 1), 0)),
+        _audit_row("DimAccount", 1, "CA_UPDACCT",   counts.get(("CM_UPDACCT", 1), 0)),
+        _audit_row("DimAccount", 1, "CA_ID_HIST",   -1),
+        _audit_row("DimCustomer", 1, "C_NEW",       counts.get(("CM_NEW", 1), 0)),
+        _audit_row("DimCustomer", 1, "C_UPDCUST",   counts.get(("CM_UPDCUST", 1), 0)),
+        _audit_row("DimCustomer", 1, "C_ID_HIST",   0),
+        _audit_row("DimCustomer", 1, "C_INACT",     counts.get(("CM_INACT", 1), 0)),
+        _audit_row("DimCustomer", 1, "C_DOB_TO",    counts.get(("CM_DOB_TO", 1), 0)),
+        _audit_row("DimCustomer", 1, "C_DOB_TY",    counts.get(("CM_DOB_TY", 1), 0)),
+        _audit_row("DimCustomer", 1, "C_TIER_INV",  counts.get(("CM_TIER_INV", 1), 0)),
+    ]
+    write_text(_AUDIT_HEADER + "".join(cm_lines), f"{bp}/CustomerMgmt_audit.csv", dbutils)
+
+    # --- Trade ---
+    trade_total = counts.get(("Trade", 1), 0)
+    trade_lines = [
+        _audit_row("DimTrade", 1, "T_Records",          trade_total),
+        _audit_row("DimTrade", 1, "T_NEW",              trade_total),
+        _audit_row("DimTrade", 1, "T_CanceledTrades",   counts.get(("T_CanceledTrades", 1), 0)),
+        _audit_row("DimTrade", 1, "T_InvalidCommision", counts.get(("T_InvalidCommision", 1), 0)),
+        _audit_row("DimTrade", 1, "T_InvalidCharge",    counts.get(("T_InvalidCharge", 1), 0)),
+    ]
+    write_text(_AUDIT_HEADER + "".join(trade_lines), f"{bp}/Trade_audit.csv", dbutils)
+
+    # --- DailyMarket / FactMarketHistory ---
+    write_text(_AUDIT_HEADER + _audit_row("FactMarketHistory", 1, "DM_RECORDS",
+                                           counts.get(("DailyMarket", 1), 0)),
+               f"{bp}/DailyMarket_audit.csv", dbutils)
+
+    # --- WatchHistory / FactWatches: WH_ACTIVE ≈ 80% (ACTV vs CNCL ratio from gen) ---
     wh_total = counts.get(("WatchHistory", 1), 0)
-    write_text(hdr + f"FactWatches,1,,WH_ACTIVE,{int(wh_total * 0.8)},\nFactWatches,1,,WH_RECORDS,{wh_total},\n", f"{bp}/WatchHistory_audit.csv", dbutils)
+    wh_lines = [
+        _audit_row("FactWatches", 1, "WH_ACTIVE",  int(wh_total * 0.8)),
+        _audit_row("FactWatches", 1, "WH_RECORDS", wh_total),
+    ]
+    write_text(_AUDIT_HEADER + "".join(wh_lines), f"{bp}/WatchHistory_audit.csv", dbutils)
 
-    # Prospect: P_C_MATCHING = ~25% (PMatchPct from spec), P_NEW = total (batch 1 = all new)
-    p_total = counts.get(("Prospect", 1), 0)
-    write_text(hdr + f"Prospect,1,,P_C_MATCHING,{int(p_total * 0.25)},\nProspect,1,,P_RECORDS,{p_total},\nProspect,1,,P_NEW,{p_total},\n", f"{bp}/Prospect_audit.csv", dbutils)
+    # --- HoldingHistory / FactHoldings ---
+    write_text(_AUDIT_HEADER + _audit_row("FactHoldings", 1, "HH_RECORDS",
+                                           counts.get(("HoldingHistory", 1), 0)),
+               f"{bp}/HoldingHistory_audit.csv", dbutils)
 
-    # CustomerMgmt: C_NEW = ~60% of total rows are new customer actions
-    new_custs = int(cfg.cm_final_row_count * 0.6)
-    write_text(hdr + f"DimCustomer,1,,C_NEW,{new_custs},\n", f"{bp}/CustomerMgmt_audit.csv", dbutils)
-    write_text(hdr + f"DimTradeHistory,1,,TH_Records,{counts.get(('TradeHistory',1),0)},\n", f"{bp}/TradeHistory_audit.csv", dbutils)
-    write_text(hdr + f"DimTradeHistory,1,,CT_Records,{counts.get(('CashTransaction',1),0)},\n", f"{bp}/CashTransaction_audit.csv", dbutils)
-    write_text(hdr + f"FactHoldings,1,,HH_RECORDS,{counts.get(('HoldingHistory',1),0)},\n", f"{bp}/HoldingHistory_audit.csv", dbutils)
-
-    # Static reference table audits
-    for tbl in ["StatusType", "TaxRate", "Date", "Time", "Industry", "TradeType"]:
-        write_text(hdr + f"{tbl},1,,{tbl}_Records,{counts.get((tbl,1),0)},\n", f"{bp}/{tbl}_audit.csv", dbutils)
+    # --- FINWIRE: per-record-type counts + unimplemented DUP sentinels ---
+    fw_lines = [
+        _audit_row("DimSecurity", 1, "FW_SEC",     counts.get(("FW_SEC", 1), 0)),
+        _audit_row("DimSecurity", 1, "FW_SEC_DUP", -1),
+        _audit_row("DimCompany",  1, "FW_CMP",     counts.get(("FW_CMP", 1), 0)),
+        _audit_row("DimCompany",  1, "FW_CMP_DUP", -1),
+        _audit_row("DimCompany",  1, "FW_FIN",     counts.get(("FW_FIN", 1), 0)),
+        _audit_row("DimCompany",  1, "FW_FIN_DUP", -1),
+    ]
+    write_text(_AUDIT_HEADER + "".join(fw_lines), f"{bp}/FINWIRE_audit.csv", dbutils)
 
 
 def _gen_report(cfg, counts, start, end, elapsed, dbutils):

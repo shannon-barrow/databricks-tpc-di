@@ -548,6 +548,23 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
 
+    # Per-DIGen Trade_audit.csv: T_NEW / T_CanceledTrades / T_InvalidCharge /
+    # T_InvalidCommision. One extra scan over the staged trade_df (cheap —
+    # it's already on disk). The invalid-charge/commission filters mirror
+    # DIGen's check: count where the actual monetary amount exceeds the
+    # gross trade value.
+    _inv_row = trade_df.select(
+        F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("cncl"),
+        F.sum(F.when(F.col("t_chrg").cast("double") > F.col("_trade_val"), 1).otherwise(0)).alias("bad_chrg"),
+        F.sum(F.when(F.col("t_comm").cast("double") > F.col("_trade_val"), 1).otherwise(0)).alias("bad_comm"),
+    ).collect()[0]
+    counts[("T_CanceledTrades", 1)] = _inv_row["cncl"] or 0
+    counts[("T_InvalidCharge", 1)] = _inv_row["bad_chrg"] or 0
+    counts[("T_InvalidCommision", 1)] = _inv_row["bad_comm"] or 0  # sic — DIGen typo
+    log(f"[Trade] Audit counts — canceled: {counts[('T_CanceledTrades',1)]:,}, "
+        f"invalid_charge: {counts[('T_InvalidCharge',1)]:,}, "
+        f"invalid_commission: {counts[('T_InvalidCommision',1)]:,}")
+
     # Kick off a background bulk_copy_all to drain the large Batch1 Trade/TH/CT/HH
     # part files while the incremental batches run. Reduces end-of-run
     # orchestrator copy time substantially since most parts finish copying

@@ -542,4 +542,12 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx})")
     log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
     log("[FINWIRE] Generation complete")
-    return {"counts": {("FINWIRE", 1): total}}
+    # Per-record-type counts for FINWIRE_audit.csv (FW_SEC/FW_CMP/FW_FIN).
+    # These are definitionally exact from cfg (CMP, SEC) or approximate (FIN)
+    # — no need to scan the written files.
+    return {"counts": {
+        ("FINWIRE", 1): total,
+        ("FW_CMP", 1): cfg.cmp_total,
+        ("FW_SEC", 1): cfg.sec_total,
+        ("FW_FIN", 1): fin_count_approx,
+    }}

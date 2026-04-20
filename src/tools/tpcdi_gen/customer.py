@@ -971,12 +971,33 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
+    # Per-ActionType counts for Batch1 CustomerMgmt_audit.csv.
+    # all_df is already staged on disk (disk_cache above), so this groupBy is
+    # a single cheap scan. Emits counts for all six action types even if some
+    # are zero, matching DIGen's audit shape.
+    _at_rows = all_df.groupBy("ActionType").count().collect()
+    _at_counts = {r["ActionType"]: r["count"] for r in _at_rows}
+    audit_counts = {
+        ("CM_ADDACCT", 1):   _at_counts.get("ADDACCT", 0),
+        ("CM_CLOSEACCT", 1): _at_counts.get("CLOSEACCT", 0),
+        ("CM_UPDACCT", 1):   _at_counts.get("UPDACCT", 0),
+        ("CM_NEW", 1):       _at_counts.get("NEW", 0),
+        ("CM_UPDCUST", 1):   _at_counts.get("UPDCUST", 0),
+        ("CM_INACT", 1):     _at_counts.get("INACT", 0),
+        # Our generator never deliberately injects invalid DOB / tier values,
+        # so these are zero. The ETL pipeline will see zero alerts, which
+        # matches zero in the audit → automated_audit checks pass.
+        ("CM_DOB_TO", 1):    0,
+        ("CM_DOB_TY", 1):    0,
+        ("CM_TIER_INV", 1):  0,
+    }
+
     # Cannot unpersist all_df here: _account_owners / _closed_accounts /
     # _created_accounts / _customer_dates are materialize=False views over it
     # and are still consumed by generate_incremental and watch_history.
     # Caller unpersists after both finish.
 
-    return {"counts": {("CustomerMgmt", 1): total},
+    return {"counts": {("CustomerMgmt", 1): total, **audit_counts},
             "all_df": all_df, "cleanup_info": _all_df_cleanup}
 
 
