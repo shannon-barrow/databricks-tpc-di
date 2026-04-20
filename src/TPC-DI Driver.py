@@ -51,49 +51,67 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Setup: Declare defaults and find basic details about the cloud, DBR versions, and available node types
-# MAGIC %run ./tools/setup
+# DBTITLE 1,Install Jinja2
+# MAGIC %pip install jinja2
+
+# COMMAND ----------
+
+# DBTITLE 1,Bootstrap TPC-DI defaults + import workflow-generation modules
+import sys
+
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_tools_dir = f"/Workspace{_nb_path.split('/src')[0]}/src/tools"
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+# Force-reload so edits to any tools/*.py pick up without a cluster restart.
+for _m in ("setup_context", "_workflow_utils", "generate_datagen_workflow", "generate_benchmark_workflow"):
+    sys.modules.pop(_m, None)
+
+from setup_context import SetupContext
+from generate_datagen_workflow import generate_datagen_workflow
+from generate_benchmark_workflow import generate_benchmark_workflow
+
+tpcdi_config = SetupContext(spark, dbutils)
 
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Workflow Type")
+dbutils.widgets.dropdown("workflow_type", tpcdi_config.default_workflow, tpcdi_config.workflow_vals, "Workflow Type")
 dbutils.widgets.dropdown("batched", 'Single Collective Batch', ['Single Collective Batch', 'Incremental Batches'], "Collective batch or incremental batches")
 dbutils.widgets.dropdown("pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
-dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale factor")
-dbutils.widgets.text("job_name", default_job_name, "Job Name")
-dbutils.widgets.text("wh_target", default_wh, 'Target Database')
-dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
-dbutils.widgets.dropdown("perf_or_features", features_or_perf[0], features_or_perf, 'Optimize For UC Features or Fastest Performance')
+dbutils.widgets.dropdown("scale_factor", tpcdi_config.default_sf, tpcdi_config.default_sf_options, "Scale factor")
+dbutils.widgets.text("job_name", tpcdi_config.default_job_name, "Job Name")
+dbutils.widgets.text("wh_target", tpcdi_config.default_wh, 'Target Database')
+dbutils.widgets.text("catalog", tpcdi_config.default_catalog, 'Target Catalog')
+dbutils.widgets.dropdown("perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, 'Optimize For UC Features or Fastest Performance')
 dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
 
-perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == features_or_perf[1] else False
-regenerate_data   = dbutils.widgets.get("regenerate_data") == "YES"
+perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
 catalog           = dbutils.widgets.get("catalog")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
 pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
-wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
+wf_key            = list(tpcdi_config.workflows_dict)[tpcdi_config.workflow_vals.index(workflow_type)]
 sku               = wf_key.split('-')
 job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
-tpcdi_directory = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+tpcdi_directory   = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
 
-dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "Enable Serverless")
-dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
-dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
-dbutils.widgets.dropdown("dbr", default_dbr, list(dbrs.values()), "Databricks Runtime")
+dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 'NO'], "Enable Serverless")
+dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
+dbutils.widgets.dropdown("driver_type", tpcdi_config.default_driver_type, list(tpcdi_config.node_types.keys()), "Driver Type")
+dbutils.widgets.dropdown("dbr", tpcdi_config.default_dbr, list(tpcdi_config.dbrs.values()), "Databricks Runtime")
 serverless        = 'YES' if sku[0] not in ['CLUSTER','DLT'] else dbutils.widgets.get('serverless')
 worker_node_type  = dbutils.widgets.get("worker_type")
 driver_node_type  = dbutils.widgets.get("driver_type")
-dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
+dbr_version_id    = list(tpcdi_config.dbrs.keys())[list(tpcdi_config.dbrs.values()).index(dbutils.widgets.get("dbr"))]
 
 if serverless == 'YES':
   dbutils.widgets.remove('worker_type')
   dbutils.widgets.remove('driver_type')
   dbutils.widgets.remove('dbr')
-  
+
 if sku[0] in ['DBSQL']:
   dbutils.widgets.remove('serverless')
 
@@ -104,19 +122,6 @@ if sku[0] not in ['CLUSTER','DBSQL']:
 
 # COMMAND ----------
 
-# DBTITLE 1,Import workflow-generation modules
-import sys
-_tools_dir = f"{workspace_src_path}/tools"
-if _tools_dir not in sys.path:
-    sys.path.insert(0, _tools_dir)
-# Force-reload so code changes pick up without a cluster restart.
-for _m in ("_workflow_utils", "generate_datagen_workflow", "generate_benchmark_workflow"):
-    sys.modules.pop(_m, None)
-from generate_datagen_workflow import generate_datagen_workflow
-from generate_benchmark_workflow import generate_benchmark_workflow
-
-# COMMAND ----------
-
 # DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
 datagen_job_id = generate_datagen_workflow(
     job_name=job_name,
@@ -124,9 +129,9 @@ datagen_job_id = generate_datagen_workflow(
     catalog=catalog,
     regenerate_data=dbutils.widgets.get("regenerate_data"),
     log_level="INFO",
-    repo_src_path=repo_src_path,
-    workspace_src_path=workspace_src_path,
-    api_call=api_call,
+    repo_src_path=tpcdi_config.repo_src_path,
+    workspace_src_path=tpcdi_config.workspace_src_path,
+    api_call=tpcdi_config.api_call,
 )
 displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 
@@ -141,21 +146,21 @@ benchmark_job_id = generate_benchmark_workflow(
     wh_target=wh_target,
     scale_factor=scale_factor,
     tpcdi_directory=tpcdi_directory,
-    repo_src_path=repo_src_path,
-    workspace_src_path=workspace_src_path,
-    cloud_provider=cloud_provider,
+    repo_src_path=tpcdi_config.repo_src_path,
+    workspace_src_path=tpcdi_config.workspace_src_path,
+    cloud_provider=tpcdi_config.cloud_provider,
     serverless=serverless,
     pred_opt=pred_opt,
     perf_opt_flg=perf_opt_flg,
     incremental=incremental,
-    api_call=api_call,
+    api_call=tpcdi_config.api_call,
     worker_node_type=worker_node_type if serverless != "YES" else None,
     driver_node_type=driver_node_type if serverless != "YES" else None,
     dbr_version_id=dbr_version_id if serverless != "YES" else None,
-    default_dbr_version=default_dbr_version,
-    default_worker_type=default_worker_type,
-    cust_mgmt_type=cust_mgmt_type,
-    worker_cores_mult=worker_cores_mult,
-    node_types=node_types,
+    default_dbr_version=tpcdi_config.default_dbr_version,
+    default_worker_type=tpcdi_config.default_worker_type,
+    cust_mgmt_type=tpcdi_config.cust_mgmt_type,
+    worker_cores_mult=tpcdi_config.worker_cores_mult,
+    node_types=tpcdi_config.node_types,
 )
 displayHTML(f"<h2><a href=/#job/{benchmark_job_id}>Benchmark Workflow</a></h2>")
