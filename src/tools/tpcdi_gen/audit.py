@@ -213,15 +213,30 @@ def _gen_table_audits(cfg, counts, dbutils):
                f"{bp}/HoldingHistory_audit.csv", dbutils)
 
     # --- FINWIRE: per-record-type counts + unimplemented DUP sentinels ---
+    # FW_FIN / FW_FIN_DUP go under DataSet='Financial' (not DimCompany) per
+    # DIGen's actual buf.append("Financial") — the XML comment says DimCompany
+    # but the code emits Financial, which is what automated_audit.sql expects.
     fw_lines = [
         _audit_row("DimSecurity", 1, "FW_SEC",     counts.get(("FW_SEC", 1), 0)),
         _audit_row("DimSecurity", 1, "FW_SEC_DUP", -1),
         _audit_row("DimCompany",  1, "FW_CMP",     counts.get(("FW_CMP", 1), 0)),
         _audit_row("DimCompany",  1, "FW_CMP_DUP", -1),
-        _audit_row("DimCompany",  1, "FW_FIN",     counts.get(("FW_FIN", 1), 0)),
-        _audit_row("DimCompany",  1, "FW_FIN_DUP", -1),
+        _audit_row("Financial",   1, "FW_FIN",     counts.get(("FW_FIN", 1), 0)),
+        _audit_row("Financial",   1, "FW_FIN_DUP", -1),
     ]
     write_text(_AUDIT_HEADER + "".join(fw_lines), f"{bp}/FINWIRE_audit.csv", dbutils)
+
+    # --- Prospect (all 3 batches emit a Batch1 audit; the ETL's Prospect table
+    # carries a BatchID column derived at load time so we just emit once per
+    # batch matching DIGen's per-batch Prospect-audit output). ---
+    p_total = counts.get(("Prospect", 1), 0)
+    p_match = counts.get(("Prospect_Matching", 1), 0)
+    prospect_lines = [
+        _audit_row("Prospect", 1, "P_RECORDS",    p_total),
+        _audit_row("Prospect", 1, "P_C_MATCHING", p_match),
+        _audit_row("Prospect", 1, "P_NEW",        p_total),
+    ]
+    write_text(_AUDIT_HEADER + "".join(prospect_lines), f"{bp}/Prospect_audit.csv", dbutils)
 
 
 def _gen_incremental_table_audits(cfg, counts, dbutils):
@@ -283,11 +298,14 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
         write_text(_AUDIT_HEADER + "".join(acct_lines), f"{bp}/Account_audit.csv", dbutils)
 
         # Trade_audit.csv (Trade.txt CDC-based).
-        # T_Records = total incremental rows for the batch.
+        # DimTrade is SCD Type 2 — every incremental row (I and U) creates a new
+        # DimTrade version. The 'DimTrade row count' check compares batch row
+        # count against T_NEW, so T_NEW = total incremental trades for the batch,
+        # not just the inserts.
         t_records = counts.get(("Trade", b), 0)
         trade_lines = [
             _audit_row("DimTrade", b, "T_Records",          t_records),
-            _audit_row("DimTrade", b, "T_NEW",              counts.get(("TI_NEW", b), 0)),
+            _audit_row("DimTrade", b, "T_NEW",              t_records),
             _audit_row("DimTrade", b, "T_CanceledTrades",   counts.get(("TI_CanceledTrades", b), 0)),
             _audit_row("DimTrade", b, "T_InvalidCommision", counts.get(("TI_InvalidCommision", b), 0)),
             _audit_row("DimTrade", b, "T_InvalidCharge",    counts.get(("TI_InvalidCharge", b), 0)),

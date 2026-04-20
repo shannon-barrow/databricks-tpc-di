@@ -288,6 +288,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     write_file(final, f"{cfg.batch_path(1)}/Prospect.csv", ",", dbutils,
                scale_factor=cfg.sf)
     counts[("Prospect", 1)] = prospect_total
+    counts[("Prospect_Matching", 1)] = n_match
 
     # --- Churn model for incremental batches ---
     # Batch 2+: full extract with ~0.12% churn (same total rows, some replaced).
@@ -359,6 +360,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         batch_df = batch_base.union(new_prospects)
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
+        counts[("Prospect_Matching", batch_id)] = n_match
         log(f"[Prospect] Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)", "DEBUG")
 
     log(f"[Prospect] {prospect_total} rows, {n_match} matching customers ({n_match*100//prospect_total}%)")
