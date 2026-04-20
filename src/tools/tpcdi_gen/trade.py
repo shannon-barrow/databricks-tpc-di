@@ -114,11 +114,12 @@ leading columns: cdc_flag and cdc_dsn (data sequence number).
 
 import concurrent.futures
 import math
+import threading
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist
+from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist, bulk_copy_all
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -546,6 +547,14 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     log(f"[Trade] Trade: {counts.get(('Trade',1),0):,}, TH: ~{counts.get(('TradeHistory',1),0):,}, "
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
+
+    # Kick off a background bulk_copy_all to drain the large Batch1 Trade/TH/CT/HH
+    # part files while the incremental batches run. Reduces end-of-run
+    # orchestrator copy time substantially since most parts finish copying
+    # before the final bulk_copy_all is invoked.
+    threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after Trade historical"),
+                     daemon=True).start()
+
     # Do not unpersist trade_df here — _ct_hist_batch{2,3} and _hh_hist_batch{2,3}
     # temp views are lazy filters over trade_df and are consumed by
     # _gen_incremental_trades. Caller unpersists after incrementals finish.
