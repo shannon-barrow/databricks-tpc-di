@@ -413,6 +413,15 @@ def _gen_historical(spark, cfg, dbutils):
         .withColumn("w_dts", F.date_format(F.col("_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
     )
 
+    # === Step 5b: Dedup on (w_c_id, w_s_symb) after symbol join ===
+    # The step-5 dedup is on _sym_join_idx; after the join, multiple distinct
+    # _sym_join_idx values can fall back to the same _sym0 symbol, producing
+    # duplicate (w_c_id, w_s_symb) pairs. The ETL's FactWatches Historical
+    # silver loader does GROUP BY (w_c_id, w_s_symb), collapsing such dupes,
+    # so our audit WH_ACTIVE/WH_RECORDS must reflect the post-ETL count.
+    # Dedup here so the file matches what ETL will load.
+    deduped_df = deduped_df.dropDuplicates(["w_c_id", "w_s_symb"])
+
     # === Step 6: ACTV + CNCL generation using known/estimated ACTV count ===
     # The post-dedup ACTV count is deterministic per SF and stored in cfg.wh_actv_count
     # (hardcoded for standard SFs, estimated for others). No .count() needed.

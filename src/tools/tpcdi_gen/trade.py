@@ -636,23 +636,30 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     )
 
     # --- Update rows (cdc_flag = "U") ---
-    # These represent status transitions on existing historical trades.
-    # t_id is hashed into the historical range [0, trade_total).
-    # ~93% complete (CMPT), ~7% cancel (CNCL).
-    upd_df = (spark.range(0, n_update).withColumnRenamed("id", "rid")
+    # U rows represent status transitions on existing historical trades. These
+    # MUST be the trades actually transitioning in this batch window —
+    # otherwise FactHoldings's join on DimTrade(batchid=N) AND tradeid=hh_t_id
+    # yields zero rows because HH's trade_ids don't match the randomly-picked
+    # Trade.txt U rows. Source: _hh_hist_batch{N} (CMPT transitions;
+    # trades that complete in this batch window) — exactly the set that
+    # HoldingHistory.txt and CashTransaction.txt reference.
+    trans_tids = (spark.table(f"_hh_hist_batch{batch_id}")
+        .select(F.col("hh_t_id").alias("t_id"))
+        .distinct())
+    # Use row_number for deterministic rid assignment within the batch.
+    trans_tids = trans_tids.withColumn(
+        "rid", F.row_number().over(Window.orderBy("t_id")) - F.lit(1))
+    upd_df = (trans_tids
         .withColumn("cdc_flag", F.lit("U"))
-        # DSNs continue after the inserts for correct ordering
         .withColumn("cdc_dsn", (F.col("rid") + n_new + 1).cast("string"))
-        # Hash into historical trade IDs — these are updates to existing trades
-        .withColumn("t_id", (hash_key(F.col("rid"), bs + 20) % cfg.trade_total).cast("string"))
         .withColumn("t_tt_id",
             F.when(hash_key(F.col("rid"), bs + 21) % 100 < 30, F.lit("TLB"))
              .when(hash_key(F.col("rid"), bs + 21) % 100 < 60, F.lit("TLS"))
              .when(hash_key(F.col("rid"), bs + 21) % 100 < 80, F.lit("TMB"))
              .otherwise(F.lit("TMS")))
-        # Updates move trades to terminal status: ~93% CMPT, ~7% CNCL
-        .withColumn("t_st_id",
-            F.when(hash_key(F.col("rid"), bs + 22) % 100 < 93, F.lit("CMPT")).otherwise(F.lit("CNCL")))
+        # These trades reached CMPT in the batch window (by definition of
+        # _hh_hist_batch). They are not canceled.
+        .withColumn("t_st_id", F.lit("CMPT"))
         .withColumn("t_dts", F.lit(batch_date_str))
         .withColumn("t_is_cash", F.when(hash_key(F.col("rid"), bs + 23) % 100 < 20, F.lit("1")).otherwise(F.lit("0")))
         .withColumn("_sym_idx", hash_key(F.col("rid"), bs + 24) % num_sec)
@@ -707,13 +714,15 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
         "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
         "t_trade_price", "t_chrg", "t_comm", "t_tax")
 
-    # Per-DIGen Trade-Audit (incremental batches): T_NEW = cdc_flag='I',
-    # T_CanceledTrades = t_st_id='CNCL'. InvalidCharge/Commision are 0 for
-    # incremental batches (our gen doesn't inject invalid values here).
+    # Per-DIGen Trade-Audit (incremental batches): aggregate from the final
+    # written data since inc_df's row count is now input-dependent (U rows
+    # come from _hh_hist_batch so their cardinality varies per batch).
     _trade_agg = inc_df.select(
+        F.count("*").alias("t_total"),
         F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("t_new"),
         F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("t_cncl"),
     ).collect()[0]
+    inc_total = _trade_agg["t_total"] or 0
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # CashTransaction and HoldingHistory from historical routing only.
@@ -728,9 +737,9 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
     write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    log(f"[Trade] Batch{batch_id}: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
+    log(f"[Trade] Batch{batch_id}: {inc_total} ({_trade_agg['t_new']} I, {inc_total - (_trade_agg['t_new'] or 0)} U), CT: {ct_count}, HH: {hh_count}")
     return {
-        ("Trade", batch_id): inc_trades,
+        ("Trade", batch_id): inc_total,
         ("CashTransaction", batch_id): ct_count,
         ("HoldingHistory", batch_id): hh_count,
         ("TI_NEW", batch_id):              _trade_agg["t_new"] or 0,
