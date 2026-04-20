@@ -599,7 +599,11 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     # DIGen incremental: ~55% new (I), ~45% updates (U)
     n_new = cfg.trade_inc_new
     n_update = inc_trades - n_new
-    batch_date_str = (FIRST_BATCH_DATE + timedelta(days=batch_id - 1)).strftime("%Y-%m-%d")
+    # Incremental batches cover the day BEFORE their BatchDate table entry —
+    # Batch 2's trades are dated 2017-07-07 (the day before Batch 2's cutoff of
+    # 2017-07-08). Matches DailyMarket incremental's inc_date convention and
+    # the batch1/batch2/batch3 date non-overlap invariant.
+    batch_date_str = (FIRST_BATCH_DATE + timedelta(days=batch_id - 2)).strftime("%Y-%m-%d")
 
     # --- New trades (cdc_flag = "I") ---
     # These are brand-new trades with t_id beyond the historical range.
