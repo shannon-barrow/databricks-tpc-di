@@ -293,18 +293,34 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # --- Churn model for incremental batches ---
     # Batch 2+: full extract with ~0.12% churn (same total rows, some replaced).
     # Churn formula: ~CScaling * internal_sf * 1.2 prospects replaced per batch.
-    # The last churn_per_batch rows of the base set are swapped out for new
-    # prospects (with different seeds) that will NOT match any customer.
+    #
+    # Key property: each batch keeps a *shifting window* of Batch 1's rows plus
+    # the accumulated churn from all prior batches, so Batch 2's new rows still
+    # appear in Batch 3's file. Without this, the silver-layer Prospect loader
+    # (filters by recordbatchid >= batch_id) would discard Batch 2's new rows
+    # at Batch 3 → no rows with batchid=2 in the final Prospect table → the
+    # 'Prospect batches' audit check fails (only 2 distinct batchids).
     churn_per_batch = max(1, int(0.005 * cfg.internal_sf * 1.2))
+    # Row-numbered copy of Batch 1 so we can slice it by position.
+    final_indexed = final.withColumn(
+        "_rn", F.row_number().over(Window.orderBy(F.monotonically_increasing_id()))
+    )
+    accumulated_new = None  # union of all prior batches' new rows
 
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
         batch_offset = batch_id - 1
         # New prospect IDs start after the historical range to avoid collisions
         new_start = prospect_total + (batch_offset - 1) * churn_per_batch
 
-        # Keep rows 0..prospect_total-churn-1 from the base, replace the rest with new ones
-        keep_count = prospect_total - churn_per_batch
-        batch_base = final.limit(keep_count)
+        # Drop the oldest batch_offset * churn_per_batch rows from Batch 1,
+        # then append all prior batches' new rows + this batch's new rows.
+        drop_count = batch_offset * churn_per_batch
+        base_rows_to_keep = prospect_total - drop_count
+        batch_base = (final_indexed
+            .filter(F.col("_rn") > drop_count)
+            .drop("_rn"))
+        if accumulated_new is not None:
+            batch_base = batch_base.unionByName(accumulated_new)
 
         # Generate churn_per_batch new prospects (non-matching, unique seeds per batch)
         new_df = (spark.range(0, churn_per_batch).withColumnRenamed("id", "new_id")
@@ -356,8 +372,11 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                     "creditrating", "ownorrentflag", "employer", "numbercreditcards", "networth")
         )
 
-        # Union the kept base rows with the new churned prospects
-        batch_df = batch_base.union(new_prospects)
+        # Union the kept base rows (+ prior batches' new) with this batch's new
+        batch_df = batch_base.unionByName(new_prospects)
+        # Accumulate this batch's new prospects so subsequent batches include them
+        accumulated_new = (new_prospects if accumulated_new is None
+                           else accumulated_new.unionByName(new_prospects))
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
         counts[("Prospect_Matching", batch_id)] = n_match

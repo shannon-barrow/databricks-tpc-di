@@ -224,7 +224,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     symbols_df = spark.table("_symbols")
     trade_begin_s = int(TRADE_BEGIN_DATE.timestamp())
-    trade_range_s = int((TRADE_END_DATE - TRADE_BEGIN_DATE).total_seconds())
+    # Historical trades' _base_ts must land strictly before FIRST_BATCH_DATE —
+    # otherwise DimTrade rows for Batch 1 would have CreateDate >= LastDay,
+    # failing the automated_audit 'DimTrade date check'. The incremental
+    # batches own the post-cutoff window and write their own new trades via
+    # _gen_incremental_trades.
+    trade_range_s = int((FIRST_BATCH_DATE - TRADE_BEGIN_DATE).total_seconds())
     batch_cutoff_s = int(FIRST_BATCH_DATE_END.timestamp())
 
     # Build base trade DataFrame — one row per trade with all computed attributes.

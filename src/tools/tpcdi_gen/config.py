@@ -88,12 +88,16 @@ TRADE_END_DATE = FIRST_BATCH_DATE_END + timedelta(days=NUM_INCREMENTAL_BATCHES)
 # DIGen computes:
 #   DMBeginDate = computeDate(FIRST_BATCH_DATE_START, Calendar.YEAR, -2) - ONE_DAY
 #               = 2015-07-07 - 1 day = 2015-07-06
-#   DMEndDate   = FIRST_BATCH_DATE_END - ONE_DAY
-#               = 2017-07-08 - 1 day = 2017-07-07
-# This produces exactly 732 days of daily market data.
+#   DMEndDate   = FIRST_BATCH_DATE - ONE_DAY
+#               = 2017-07-07 - 1 day = 2017-07-06
+# Batch 1 historical covers [DM_BEGIN_DATE, DM_END_DATE] inclusive.
+# 2017-07-07 is handled by the Batch 2 incremental (inc_date = FIRST_BATCH_DATE).
+# The automated_audit 'FactMarketHistory SK_DateID' check requires every
+# Batch 1 row to have date < LastDay (=FIRST_BATCH_DATE), so DM_END_DATE
+# must be strictly less than FIRST_BATCH_DATE.
 # ---------------------------------------------------------------------------
 DM_BEGIN_DATE = datetime(FIRST_BATCH_DATE.year - 2, FIRST_BATCH_DATE.month, FIRST_BATCH_DATE.day) - timedelta(days=1)
-DM_END_DATE = FIRST_BATCH_DATE_END - timedelta(days=1)
+DM_END_DATE = FIRST_BATCH_DATE - timedelta(days=1)
 
 # ---------------------------------------------------------------------------
 # WatchHistory dates.
