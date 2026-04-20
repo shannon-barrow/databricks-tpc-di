@@ -3,13 +3,18 @@
 # MAGIC # TPC-DI Spark Data Generator
 # MAGIC
 # MAGIC Distributed PySpark replacement for the single-threaded DIGen.jar.
-# MAGIC Called from the TPC-DI Driver notebook via `%run ./tools/spark_data_generator`.
 # MAGIC
-# MAGIC Expects these variables to be set by the Driver:
-# MAGIC - `scale_factor` (int): TPC-DI scale factor (10, 100, 1000, etc.)
-# MAGIC - `catalog` (str): Unity Catalog name
-# MAGIC - `tpcdi_directory` (str): Base path for raw data volume
-# MAGIC - `workspace_src_path` (str): Workspace path to the src directory
+# MAGIC Can run two ways:
+# MAGIC
+# MAGIC 1. **As a standalone notebook/job** — creates its own widgets for
+# MAGIC    `scale_factor`, `catalog`, `regenerate_data`, `log_level` and derives
+# MAGIC    `tpcdi_directory` and `workspace_src_path`. Use this mode when
+# MAGIC    running as a scheduled job; job parameters match widget names.
+# MAGIC
+# MAGIC 2. **Via `%run ./tools/spark_data_generator` from the Driver notebook** —
+# MAGIC    the Driver injects `scale_factor`, `catalog`, `tpcdi_directory`,
+# MAGIC    `workspace_src_path`, `regenerate_data` into the shared namespace,
+# MAGIC    so the widget-creation block below is skipped.
 
 # COMMAND ----------
 
@@ -17,6 +22,26 @@ import sys, os, warnings, threading
 import concurrent.futures
 from datetime import datetime, timezone
 warnings.filterwarnings("ignore", message=".*No Partition Defined for Window operation.*")
+
+# COMMAND ----------
+
+# Self-initialize when run standalone (no %run parent injected the inputs).
+try:
+    scale_factor  # injected by Driver's %run → skip widget init
+except NameError:
+    dbutils.widgets.dropdown("scale_factor", "10",
+                             ["10", "100", "1000", "5000", "10000", "20000"],
+                             "Scale Factor")
+    dbutils.widgets.text("catalog", "main", "Target Catalog")
+    dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
+    dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"], "Log Level")
+
+    scale_factor = int(dbutils.widgets.get("scale_factor"))
+    catalog = dbutils.widgets.get("catalog")
+    regenerate_data = dbutils.widgets.get("regenerate_data") == "YES"
+    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+    workspace_src_path = _nb_path.split("/src")[0] + "/src"
 
 # COMMAND ----------
 
