@@ -32,7 +32,7 @@ except NameError:
     dbutils.widgets.dropdown("scale_factor", "10",
                              ["10", "100", "1000", "5000", "10000", "20000"],
                              "Scale Factor")
-    dbutils.widgets.text("catalog", "main", "Target Catalog")
+    dbutils.widgets.text("catalog", "tpcdi", "Target Catalog")
     dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
     dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"], "Log Level")
 
