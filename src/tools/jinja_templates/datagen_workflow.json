@@ -1,0 +1,49 @@
+{
+  "name": "{{ job_name }}_DataGen",
+  "description": "TPC-DI data generation workflow. Runs the distributed Spark data generator as a single serverless notebook task.",
+  "email_notifications": {
+    "no_alert_for_skipped_runs": false
+  },
+  "webhook_notifications": {},
+  "timeout_seconds": 0,
+  "max_concurrent_runs": 1,
+  "parameters": [
+    {
+      "name": "scale_factor",
+      "default": "{{ scale_factor }}"
+    },
+    {
+      "name": "catalog",
+      "default": "{{ catalog }}"
+    },
+    {
+      "name": "regenerate_data",
+      "default": "{{ regenerate_data }}"
+    },
+    {
+      "name": "log_level",
+      "default": "{{ log_level }}"
+    }
+  ],
+  "tasks": [
+    {
+      "task_key": "generate_data",
+      "run_if": "ALL_SUCCESS",
+      "notebook_task": {
+        "notebook_path": "{{ repo_src_path }}/tools/spark_data_generator",
+        "source": "WORKSPACE"
+      },
+      "timeout_seconds": 0,
+      "email_notifications": {},
+      "notification_settings": {
+        "no_alert_for_skipped_runs": false,
+        "no_alert_for_canceled_runs": false,
+        "alert_on_last_attempt": false
+      }
+    }
+  ],
+  "queue": {
+    "enabled": true
+  },
+  "performance_target": "PERFORMANCE_OPTIMIZED"
+}
