@@ -14,18 +14,9 @@
 
 SET timezone = Etc/UTC;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
+DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
-CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.finwire;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CustomerIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.AccountIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.WatchIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.DailyMarketIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CashTransactionIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.TradeIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CompanyFinancialsStg;
+CREATE DATABASE ${catalog}.${wh_db}_${scale_factor}_stage;
 -- Enable Predictive Optimization for those workspaces that it is available
 ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMIZATION;
 
