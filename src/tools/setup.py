@@ -4,93 +4,53 @@ pip install jinja2
 
 # COMMAND ----------
 
-import requests
-import string
-import json
-import collections
+# DBTITLE 1,Bootstrap SetupContext and re-export attributes for backward compat
+# The real bootstrap logic lives in src/tools/setup_context.py (importable,
+# testable). This notebook stays as a %run shim: it creates the context and
+# re-exports its attributes into the caller's namespace so existing callers
+# that reference bare names (default_workflow, node_types, api_call, ...)
+# keep working during the migration to `ctx.X`.
+import sys as _sys
 
-# COMMAND ----------
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_tools_dir = f"/Workspace{_nb_path.split('/src')[0]}/src/tools"
+if _tools_dir not in _sys.path:
+    _sys.path.insert(0, _tools_dir)
 
-def api_call(json_payload=None, request_type=None, api_endpoint=None):
-  headers = {'Content-type': 'application/json', 'Accept':'*/*', 'Authorization': f'Bearer {TOKEN}'}
-  if request_type == "POST":
-    response = requests.post(f"{API_URL}{api_endpoint}", json=json_payload, headers=headers)
-  elif request_type == "GET":
-    response = requests.get(f"{API_URL}{api_endpoint}", json=json_payload, headers=headers)
-  else:
-    dbutils.notebook.exit(f"Invalid request type: {request_type}")
-    return
-  if response.status_code == 200: return response
-  else: dbutils.notebook.exit(f"API call failed with status code {response.status_code}: {response.text}")
-  
+# Force-reload so local edits to setup_context.py pick up without a cluster restart.
+_sys.modules.pop("setup_context", None)
+from setup_context import SetupContext
 
-def get_node_types():
-  response = api_call(json_payload=None, request_type="GET", api_endpoint="/api/2.0/clusters/list-node-types")
-  node_types_list = json.loads(response.text)['node_types']
-  node_types_dict = {}
-  for node in node_types_list:
-    node_type_id = node.pop('node_type_id')
-    node_types_dict[node_type_id] = node
-  return collections.OrderedDict(sorted(node_types_dict.items()))
+ctx = SetupContext(spark, dbutils)
 
-def get_dbr_versions(min_version=14.1):
-  response = api_call(json_payload=None, request_type="GET", api_endpoint="/api/2.0/clusters/spark-versions")
-  dbr_versions_list = json.loads(response.text)['versions']
-  dbr_versions_dict = {}
-  for dbr in dbr_versions_list:
-    if not any(invalid in dbr['name'] for invalid in invalid_dbr_list):
-      if float(dbr['name'].split(' ')[0]) >=  min_version:
-        dbr_versions_dict[dbr['key']] = dbr['name']
-  return collections.OrderedDict(sorted(dbr_versions_dict.items(), reverse=True))
-
-# COMMAND ----------
-
-# ENV-Specific API calls and variables
-API_URL = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
-TOKEN = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None)
-if API_URL is None or TOKEN is None: 
-  dbutils.notebook.exit("Unable to capture API/Token from dbutils. Please try again or open a ticket")
-repo_src_path = f"{dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get().split('/src')[0]}/src"
-workspace_src_path = f"/Workspace{repo_src_path}"
-user_name = spark.sql("select lower(regexp_replace(split(current_user(), '@')[0], '(\\\\W+)', ' '))").collect()[0][0]
-workflows_dict      = {
-  "CLUSTER": "Workspace Cluster Workflow", 
-  "DBSQL": "DBSQL Warehouse Workflow",
-  "DLT-CORE": "CORE Delta Live Tables Pipeline", 
-  "DLT-PRO": "PRO Delta Live Tables Pipeline with SCD Type 1/2", 
-  "DLT-ADVANCED": "ADVANCED Delta Live Tables Pipeline with DQ",
-  # "DBT": "dbt Core on DB SQL Warehouse",
-  # "STMV": "Streaming Tables and Materialized Views on DBSQL/DLT"
-}
-default_workflow   = workflows_dict['CLUSTER']
-workflow_vals      = list(workflows_dict.values())
-default_sf         = '10'
-default_job_name   = f"{string.capwords(user_name).replace(' ','-')}-TPCDI"
-default_wh         = f"{string.capwords(user_name).replace(' ','_')}_TPCDI"
-min_dbr_version    = 14.1
-invalid_dbr_list   = ['aarch64', 'ML', 'Snapshot', 'GPU', 'Photon', 'RC', 'Light', 'HLS', 'Beta', 'Latest']
-features_or_perf   = ['Feature-Rich', 'Fastest Performance']
-
-default_sf_options    = ['10', '100', '1000', '5000', '10000', '20000']
-UC_enabled            = eval(string.capwords(spark.conf.get('spark.databricks.unityCatalog.enabled')))
-cloud_provider        = spark.conf.get('spark.databricks.cloudProvider') # "Azure", "GCP", or "AWS"
-node_types            = get_node_types()
-dbrs                  = get_dbr_versions(min_dbr_version)
-default_dbr_version   = list(dbrs.keys())[0]
-default_dbr           = list(dbrs.values())[0]
-default_serverless    = 'NO'
-worker_cores_mult     = 0.016
-if cloud_provider == 'AWS':
-  default_worker_type = "m7gd.2xlarge"
-  default_driver_type = "m7gd.xlarge"
-  cust_mgmt_type      = "m7gd.16xlarge"
-elif cloud_provider == 'GCP':
-  default_worker_type = "n2-standard-8"
-  default_driver_type = "n2-standard-4"
-  cust_mgmt_type      = "n2-standard-64"
-  worker_cores_mult   = worker_cores_mult * 1.5
-elif cloud_provider == 'Azure':
-  default_worker_type = "Standard_D8ads_v5" 
-  default_driver_type = "Standard_D4as_v5"
-  cust_mgmt_type      = "Standard_D64ads_v5" 
-default_catalog = 'tpcdi' if UC_enabled else 'hive_metastore'
+# ---- Backward-compat name bindings (migrate callers to ctx.X over time) ----
+api_call            = ctx.api_call
+get_node_types      = ctx.get_node_types
+get_dbr_versions    = ctx.get_dbr_versions
+API_URL             = ctx.api_url
+TOKEN               = ctx.token
+repo_src_path       = ctx.repo_src_path
+workspace_src_path  = ctx.workspace_src_path
+user_name           = ctx.user_name
+workflows_dict      = ctx.workflows_dict
+default_workflow    = ctx.default_workflow
+workflow_vals       = ctx.workflow_vals
+default_sf          = ctx.default_sf
+default_sf_options  = ctx.default_sf_options
+default_job_name    = ctx.default_job_name
+default_wh          = ctx.default_wh
+min_dbr_version     = ctx.min_dbr_version
+invalid_dbr_list    = ctx.invalid_dbr_list
+features_or_perf    = ctx.features_or_perf
+UC_enabled          = ctx.uc_enabled
+cloud_provider      = ctx.cloud_provider
+node_types          = ctx.node_types
+dbrs                = ctx.dbrs
+default_dbr_version = ctx.default_dbr_version
+default_dbr         = ctx.default_dbr
+default_serverless  = ctx.default_serverless
+worker_cores_mult   = ctx.worker_cores_mult
+default_worker_type = ctx.default_worker_type
+default_driver_type = ctx.default_driver_type
+cust_mgmt_type      = ctx.cust_mgmt_type
+default_catalog     = ctx.default_catalog
