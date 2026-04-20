@@ -51,27 +51,8 @@
 
 # COMMAND ----------
 
-# DBTITLE 1,Install Jinja2
-# MAGIC %pip install jinja2
-
-# COMMAND ----------
-
-# DBTITLE 1,Bootstrap TPC-DI defaults + import workflow-generation modules
-import sys
-
-_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-_tools_dir = f"/Workspace{_nb_path.split('/src')[0]}/src/tools"
-if _tools_dir not in sys.path:
-    sys.path.insert(0, _tools_dir)
-# Force-reload so edits to any tools/*.py pick up without a cluster restart.
-for _m in ("setup_context", "_workflow_utils", "generate_datagen_workflow", "generate_benchmark_workflow"):
-    sys.modules.pop(_m, None)
-
-from setup_context import SetupContext
-from generate_datagen_workflow import generate_datagen_workflow
-from generate_benchmark_workflow import generate_benchmark_workflow
-
-tpcdi_config = SetupContext(spark, dbutils)
+# DBTITLE 1,Setup: bootstrap tpcdi_config + import workflow-generator functions
+# MAGIC %run ./tools/setup
 
 # COMMAND ----------
 
