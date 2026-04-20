@@ -41,7 +41,7 @@ except NameError:
     regenerate_data = dbutils.widgets.get("regenerate_data") == "YES"
     tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
-    workspace_src_path = _nb_path.split("/src")[0] + "/src"
+    workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
 
 # COMMAND ----------
 
