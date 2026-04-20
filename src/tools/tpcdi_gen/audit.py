@@ -59,6 +59,7 @@ def generate(cfg, record_counts: dict, gen_start_time: datetime, dbutils):
     _gen_generator_audit(cfg, dbutils)
     _gen_batch_audits(cfg, dbutils)
     _gen_table_audits(cfg, record_counts, dbutils)
+    _gen_incremental_table_audits(cfg, record_counts, dbutils)
     _gen_report(cfg, record_counts, gen_start_time, gen_end_time, elapsed, dbutils)
 
     print(f"  Audit files and report generated.")
@@ -221,6 +222,60 @@ def _gen_table_audits(cfg, counts, dbutils):
         _audit_row("DimCompany",  1, "FW_FIN_DUP", -1),
     ]
     write_text(_AUDIT_HEADER + "".join(fw_lines), f"{bp}/FINWIRE_audit.csv", dbutils)
+
+
+def _gen_incremental_table_audits(cfg, counts, dbutils):
+    """Write per-dataset audit files for Batch 2+ (incremental batches).
+
+    Mirrors the DIGen Customer-Audit / Account-Audit / Trade-Audit configs,
+    which emit per-batch files under ``Batch{N}/`` directories:
+
+      Batch{N}/Customer_audit.csv:
+        DimCustomer.{C_NEW, C_UPDCUST, C_ID_HIST=0, C_INACT,
+                     C_DOB_TO, C_DOB_TY, C_TIER_INV}
+      Batch{N}/Account_audit.csv:
+        DimAccount.{CA_ADDACCT, CA_CLOSEACCT, CA_UPDACCT, CA_ID_HIST=-1}
+      Batch{N}/Trade_audit.csv:
+        DimTrade.{T_NEW, T_CanceledTrades, T_InvalidCommision, T_InvalidCharge}
+
+    Counts come from the generators' CDC-aware aggregations (CI_*, AI_*,
+    TI_* keys in the counts dict).
+    """
+    for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
+        bp = cfg.batch_path(b)
+
+        # Customer_audit.csv (Customer.txt CDC-based)
+        cust_lines = [
+            _audit_row("DimCustomer", b, "C_NEW",       counts.get(("CI_NEW", b), 0)),
+            _audit_row("DimCustomer", b, "C_UPDCUST",   counts.get(("CI_UPDCUST", b), 0)),
+            _audit_row("DimCustomer", b, "C_ID_HIST",   0),
+            _audit_row("DimCustomer", b, "C_INACT",     counts.get(("CI_INACT", b), 0)),
+            _audit_row("DimCustomer", b, "C_DOB_TO",    counts.get(("CI_DOB_TO", b), 0)),
+            _audit_row("DimCustomer", b, "C_DOB_TY",    counts.get(("CI_DOB_TY", b), 0)),
+            _audit_row("DimCustomer", b, "C_TIER_INV",  counts.get(("CI_TIER_INV", b), 0)),
+        ]
+        write_text(_AUDIT_HEADER + "".join(cust_lines), f"{bp}/Customer_audit.csv", dbutils)
+
+        # Account_audit.csv (Account.txt CDC-based)
+        acct_lines = [
+            _audit_row("DimAccount", b, "CA_ADDACCT",   counts.get(("AI_ADDACCT", b), 0)),
+            _audit_row("DimAccount", b, "CA_CLOSEACCT", counts.get(("AI_CLOSEACCT", b), 0)),
+            _audit_row("DimAccount", b, "CA_UPDACCT",   counts.get(("AI_UPDACCT", b), 0)),
+            _audit_row("DimAccount", b, "CA_ID_HIST",   -1),
+        ]
+        write_text(_AUDIT_HEADER + "".join(acct_lines), f"{bp}/Account_audit.csv", dbutils)
+
+        # Trade_audit.csv (Trade.txt CDC-based).
+        # T_Records = total incremental rows for the batch.
+        t_records = counts.get(("Trade", b), 0)
+        trade_lines = [
+            _audit_row("DimTrade", b, "T_Records",          t_records),
+            _audit_row("DimTrade", b, "T_NEW",              counts.get(("TI_NEW", b), 0)),
+            _audit_row("DimTrade", b, "T_CanceledTrades",   counts.get(("TI_CanceledTrades", b), 0)),
+            _audit_row("DimTrade", b, "T_InvalidCommision", counts.get(("TI_InvalidCommision", b), 0)),
+            _audit_row("DimTrade", b, "T_InvalidCharge",    counts.get(("TI_InvalidCharge", b), 0)),
+        ]
+        write_text(_AUDIT_HEADER + "".join(trade_lines), f"{bp}/Trade_audit.csv", dbutils)
 
 
 def _gen_report(cfg, counts, start, end, elapsed, dbutils):

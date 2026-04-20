@@ -1205,6 +1205,19 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             "c_ctry_2","c_area_2","c_local_2","c_ext_2",
             "c_ctry_3","c_area_3","c_local_3","c_ext_3",
             "c_email_1","c_email_2","c_lcl_tx_id","c_nat_tx_id")
+        # Per-DIGen Customer-Audit (incremental batches): count by cdc_flag + c_st_id.
+        # C_DOB_TO/DOB_TY/TIER_INV emit 0 — our generator doesn't inject invalid values.
+        _cust_agg = cust_df.select(
+            F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("c_new"),
+            F.sum(F.when((F.col("cdc_flag") == "U") & (F.col("c_st_id") != "INAC"), 1).otherwise(0)).alias("c_updcust"),
+            F.sum(F.when(F.col("c_st_id") == "INAC", 1).otherwise(0)).alias("c_inact"),
+        ).collect()[0]
+        counts[("CI_NEW", batch_id)]      = _cust_agg["c_new"] or 0
+        counts[("CI_UPDCUST", batch_id)]  = _cust_agg["c_updcust"] or 0
+        counts[("CI_INACT", batch_id)]    = _cust_agg["c_inact"] or 0
+        counts[("CI_DOB_TO", batch_id)]   = 0
+        counts[("CI_DOB_TY", batch_id)]   = 0
+        counts[("CI_TIER_INV", batch_id)] = 0
         write_file(cust_df, f"{bp}/Customer.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # === Account.txt ===
@@ -1295,6 +1308,15 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id"))
 
         acct_final = acct_no_conflict.unionByName(inac_acct_rows)
+        # Per-DIGen Account-Audit (incremental batches): count by cdc_flag + ca_st_id.
+        _acct_agg = acct_final.select(
+            F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("ca_addacct"),
+            F.sum(F.when((F.col("cdc_flag") == "U") & (F.col("ca_st_id") == "INAC"), 1).otherwise(0)).alias("ca_closeacct"),
+            F.sum(F.when((F.col("cdc_flag") == "U") & (F.col("ca_st_id") == "ACTV"), 1).otherwise(0)).alias("ca_updacct"),
+        ).collect()[0]
+        counts[("AI_ADDACCT", batch_id)]   = _acct_agg["ca_addacct"] or 0
+        counts[("AI_CLOSEACCT", batch_id)] = _acct_agg["ca_closeacct"] or 0
+        counts[("AI_UPDACCT", batch_id)]   = _acct_agg["ca_updacct"] or 0
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # Update _account_owners with this batch's insert accounts so the next batch

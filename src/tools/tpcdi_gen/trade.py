@@ -700,6 +700,13 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
         "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
         "t_trade_price", "t_chrg", "t_comm", "t_tax")
 
+    # Per-DIGen Trade-Audit (incremental batches): T_NEW = cdc_flag='I',
+    # T_CanceledTrades = t_st_id='CNCL'. InvalidCharge/Commision are 0 for
+    # incremental batches (our gen doesn't inject invalid values here).
+    _trade_agg = inc_df.select(
+        F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("t_new"),
+        F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("t_cncl"),
+    ).collect()[0]
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # CashTransaction and HoldingHistory from historical routing only.
@@ -715,4 +722,12 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     log(f"[Trade] Batch{batch_id}: {inc_trades} ({n_new} I, {n_update} U), CT: {ct_count}, HH: {hh_count}")
-    return {("Trade", batch_id): inc_trades, ("CashTransaction", batch_id): ct_count, ("HoldingHistory", batch_id): hh_count}
+    return {
+        ("Trade", batch_id): inc_trades,
+        ("CashTransaction", batch_id): ct_count,
+        ("HoldingHistory", batch_id): hh_count,
+        ("TI_NEW", batch_id):              _trade_agg["t_new"] or 0,
+        ("TI_CanceledTrades", batch_id):   _trade_agg["t_cncl"] or 0,
+        ("TI_InvalidCharge", batch_id):    0,
+        ("TI_InvalidCommision", batch_id): 0,
+    }
