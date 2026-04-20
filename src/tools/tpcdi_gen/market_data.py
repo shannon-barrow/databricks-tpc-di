@@ -156,11 +156,11 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # Write batch 1 (historical): pipe-delimited flat file
-    dm_est = cfg.dm_days * num_sec  # upper bound; actual is slightly less due to deactivations
+    dm_count = dm_df.count()
     write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-    counts = {("DailyMarket", 1): dm_est}
-    log(f"[DailyMarket] ~{dm_est:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
+    counts = {("DailyMarket", 1): dm_count}
+    log(f"[DailyMarket] {dm_count:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
 
     # --- Incremental batches (batch 2, 3, ...) ---
     # Each incremental batch covers a single calendar day. Only securities whose
@@ -199,8 +199,9 @@ def _gen_daily_market(spark, cfg, dbutils):
                 (F.abs(F.hash(F.col("day_id"), F.col("sym_id"), F.lit(seed_for("DM", "inc_v"))).cast("long")) % 999999001 + 1000).cast("string"))
             .select("cdc_flag", "cdc_dsn", "dm_date", "dm_s_symb", "dm_close", "dm_high", "dm_low", "dm_vol")
         )
+        inc_count = inc_df.count()
         write_file(inc_df, f"{cfg.batch_path(batch_id)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-        counts[("DailyMarket", batch_id)] = num_sec
+        counts[("DailyMarket", batch_id)] = inc_count
 
     return counts

@@ -199,10 +199,11 @@ def _gen_table_audits(cfg, counts, dbutils):
                                            counts.get(("DailyMarket", 1), 0)),
                f"{bp}/DailyMarket_audit.csv", dbutils)
 
-    # --- WatchHistory / FactWatches: WH_ACTIVE ≈ 80% (ACTV vs CNCL ratio from gen) ---
+    # --- WatchHistory / FactWatches: exact counts from the generator ---
     wh_total = counts.get(("WatchHistory", 1), 0)
+    wh_actv = counts.get(("WH_ACTV", 1), 0)
     wh_lines = [
-        _audit_row("FactWatches", 1, "WH_ACTIVE",  int(wh_total * 0.8)),
+        _audit_row("FactWatches", 1, "WH_ACTIVE",  wh_actv),
         _audit_row("FactWatches", 1, "WH_RECORDS", wh_total),
     ]
     write_text(_AUDIT_HEADER + "".join(wh_lines), f"{bp}/WatchHistory_audit.csv", dbutils)
@@ -262,8 +263,9 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
         # Fact tables — per-batch incremental row counts the automated_audit
         # cumulative-delta checks require at every BatchID in (1, 2, 3).
         wh_b = counts.get(("WatchHistory", b), 0)
+        wh_actv_b = counts.get(("WH_ACTV", b), 0)
         wh_lines = [
-            _audit_row("FactWatches", b, "WH_ACTIVE",  int(wh_b * 0.8)),
+            _audit_row("FactWatches", b, "WH_ACTIVE",  wh_actv_b),
             _audit_row("FactWatches", b, "WH_RECORDS", wh_b),
         ]
         write_text(_AUDIT_HEADER + "".join(wh_lines), f"{bp}/WatchHistory_audit.csv", dbutils)

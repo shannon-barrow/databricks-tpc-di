@@ -430,11 +430,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        # Estimate: ~2.51 rows per trade (1 PNDG/SBMT + ~0.6 limit SBMT/CNCL + ~0.9 CMPT)
-        th_est = int(cfg.trade_total * 2.51)
+        th_count = th_df.count()
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
-        return {("TradeHistory", 1): th_est}
+        return {("TradeHistory", 1): th_count}
 
     def write_cash_transaction():
         """Write CashTransaction.txt for Batch1 AND Batch2/3.
@@ -460,14 +459,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # would appear in both batches and the FactCashBalances pipeline would
         # emit two rows for one source pair.
         ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        ct_est = int(cfg.trade_total * 0.927)
+        ct_count = ct_b1.count()
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
                    scale_factor=cfg.sf)
 
         # Batch2/3: settlement after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
-        ct_est = int(cfg.trade_total * 0.927)
-        counts_ct = {("CashTransaction", 1): ct_est}
+        counts_ct = {("CashTransaction", 1): ct_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
@@ -511,14 +509,14 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
         # Batch1: completed strictly before cutoff (half-open — matches CT logic).
         hh_b1 = hh_base.filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        hh_est = int(cfg.trade_total * 0.927)
+        hh_count = hh_b1.count()
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
 
         # Batch2/3: completed after cutoff — save as temp views for writing in
         # _gen_incremental_trades.
         hh_est = int(cfg.trade_total * 0.927)
-        counts_hh = {("HoldingHistory", 1): hh_est}
+        counts_hh = {("HoldingHistory", 1): hh_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400

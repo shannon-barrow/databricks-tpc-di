@@ -515,8 +515,6 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         F.col("quarter_id"), F.col("PTS"),
     )
 
-    fin_count_approx = int(cfg.cmp_total * cfg.fw_quarters * 0.55)  # rough estimate for logging
-
     # =====================================================================
     # Merge all record types and write quarterly files
     # =====================================================================
@@ -538,16 +536,25 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     fw_out.write.mode("overwrite").option("maxRecordsPerFile", max_records).text(staging_dir)
     register_copies_from_staging(staging_dir, f"{cfg.batch_path(1)}/FINWIRE.txt", dbutils)
 
-    total = cfg.cmp_total + cfg.sec_total + fin_count_approx
-    log(f"[FINWIRE] ~{total} records (CMP={cfg.cmp_total}, SEC={cfg.sec_total}, FIN=~{fin_count_approx})")
+    # Exact per-record-type counts for FINWIRE_audit.csv (FW_SEC/FW_CMP/FW_FIN).
+    # The base cfg.cmp_total/sec_total are NEW records only — CMP/SEC also emit
+    # ~3% CHANGE+DELETE extras that create additional DimCompany/DimSecurity
+    # SCD Type 2 versions. Scan after write to get the actual written counts.
+    fw_rectype_counts = (
+        all_fw.select(F.substring(F.col("line"), 16, 3).alias("rec_type"))
+        .groupBy("rec_type").count().collect()
+    )
+    _rt = {r["rec_type"].strip(): r["count"] for r in fw_rectype_counts}
+    fw_cmp_exact = _rt.get("CMP", 0)
+    fw_sec_exact = _rt.get("SEC", 0)
+    fw_fin_exact = _rt.get("FIN", 0)
+    total = fw_cmp_exact + fw_sec_exact + fw_fin_exact
+    log(f"[FINWIRE] ~{total} records (CMP={fw_cmp_exact}, SEC={fw_sec_exact}, FIN={fw_fin_exact})")
     log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
     log("[FINWIRE] Generation complete")
-    # Per-record-type counts for FINWIRE_audit.csv (FW_SEC/FW_CMP/FW_FIN).
-    # These are definitionally exact from cfg (CMP, SEC) or approximate (FIN)
-    # — no need to scan the written files.
     return {"counts": {
         ("FINWIRE", 1): total,
-        ("FW_CMP", 1): cfg.cmp_total,
-        ("FW_SEC", 1): cfg.sec_total,
-        ("FW_FIN", 1): fin_count_approx,
+        ("FW_CMP", 1): fw_cmp_exact,
+        ("FW_SEC", 1): fw_sec_exact,
+        ("FW_FIN", 1): fw_fin_exact,
     }}

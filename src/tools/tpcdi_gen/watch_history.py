@@ -438,11 +438,21 @@ def _gen_historical(spark, cfg, dbutils):
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
+    # Exact counts for WatchHistory_audit.csv WH_RECORDS / WH_ACTIVE.
+    # One scan breaks down ACTV vs CNCL; needed because generation dedups
+    # duplicate (c_id, symbol) pairs so the final row count is less than
+    # the pre-dedup target.
+    _wh_counts = result_df.groupBy("w_action").count().collect()
+    _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
+    actv_actual = _wh_by_action.get("ACTV", 0)
+    cncl_actual = _wh_by_action.get("CNCL", 0)
+    total_actual = actv_actual + cncl_actual
+
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf)
 
-    log(f"[WatchHistory] Batch1: {n_actv:,} ACTV + {target_cncl:,} CNCL = {target_total:,} target")
-    return {("WatchHistory", 1): target_total}
+    log(f"[WatchHistory] Batch1: {actv_actual:,} ACTV + {cncl_actual:,} CNCL = {total_actual:,} total")
+    return {("WatchHistory", 1): total_actual, ("WH_ACTV", 1): actv_actual}
 
 
 def _gen_incremental(spark, cfg, batch_id, dbutils):
@@ -524,6 +534,15 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
 
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
+    _wh_counts = inc_df.groupBy("w_action").count().collect()
+    _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
+    actv_actual = _wh_by_action.get("ACTV", 0)
+    cncl_actual = _wh_by_action.get("CNCL", 0)
+    total_actual = actv_actual + cncl_actual
+
     write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-    log(f"[WatchHistory] Batch{batch_id}: {inc_rows} rows ({new_pu} ACTV, {del_pu} CNCL)")
-    return {("WatchHistory", batch_id): inc_rows}
+    log(f"[WatchHistory] Batch{batch_id}: {total_actual} rows ({actv_actual} ACTV, {cncl_actual} CNCL)")
+    return {
+        ("WatchHistory", batch_id): total_actual,
+        ("WH_ACTV", batch_id): actv_actual,
+    }
