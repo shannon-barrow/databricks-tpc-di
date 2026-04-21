@@ -300,14 +300,15 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
         write_text(_AUDIT_HEADER + "".join(acct_lines), f"{bp}/Account_audit.csv", dbutils)
 
         # Trade_audit.csv (Trade.txt CDC-based).
-        # DimTrade is SCD Type 2 — every incremental row (I and U) creates a new
-        # DimTrade version. The 'DimTrade row count' check compares batch row
-        # count against T_NEW, so T_NEW = total incremental trades for the batch,
-        # not just the inserts.
+        # DimTrade's incremental ETL MERGEs on tradeid: cdc_flag='I' INSERTs new
+        # rows, cdc_flag='U' UPDATEs existing rows in place. T_NEW counts only
+        # the inserts — that's what drives DimTrade's cumulative row-count
+        # growth, which the 'DimTrade row count' check compares against running
+        # sum(T_NEW). T_Records is the raw incremental row count (I+U).
         t_records = counts.get(("Trade", b), 0)
         trade_lines = [
             _audit_row("DimTrade", b, "T_Records",          t_records),
-            _audit_row("DimTrade", b, "T_NEW",              t_records),
+            _audit_row("DimTrade", b, "T_NEW",              counts.get(("TI_NEW", b), 0)),
             _audit_row("DimTrade", b, "T_CanceledTrades",   counts.get(("TI_CanceledTrades", b), 0)),
             _audit_row("DimTrade", b, "T_InvalidCommision", counts.get(("TI_InvalidCommision", b), 0)),
             _audit_row("DimTrade", b, "T_InvalidCharge",    counts.get(("TI_InvalidCharge", b), 0)),

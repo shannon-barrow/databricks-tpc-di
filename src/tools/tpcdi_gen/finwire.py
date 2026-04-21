@@ -477,6 +477,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .withColumn("_rev", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "rev"))).cast("long")) % 10000000000).cast("double") + 1.0)
         # Earnings ratio: 0-70% of revenue
         .withColumn("_earn_r", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "er"))).cast("long")) % 70) / 100.0)
+        # Share counts: used both in EPS calc and in the ShOut/DilutedShOut
+        # output columns so FI_BASIC_EPS ≈ FI_NET_EARN / FI_OUT_BASIC (the
+        # automated_audit 'Financial EPS' check enforces a ±0.4 tolerance).
+        .withColumn("_sh_out",
+            (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "sh"))).cast("long")) % 999900000 + 100000).cast("double"))
+        .withColumn("_dil_sh_out",
+            (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "dsh"))).cast("long")) % 999900000 + 100000).cast("double"))
+        .withColumn("_earn", F.col("_rev") * F.col("_earn_r"))
         # CoNameOrCIK: reference this FIN's own company (temporal integrity guaranteed
         # since CMP exists by this quarter — FIN is always after creation_quarter)
         .withColumn("CoNameOrCIK",
@@ -500,16 +508,16 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                  .otherwise(F.lit("1001"))), 8, " "),
             F.rpad(F.date_format("pts_ts", "yyyyMMdd"), 8, " "),
             F.rpad(F.format_string("%.2f", F.col("_rev")), 17, " "),
-            F.rpad(F.format_string("%.2f", F.col("_rev") * F.col("_earn_r")), 17, " "),
-            # EPS = earnings / 1M shares, DilutedEPS = earnings / 1.2M shares
-            F.rpad(F.format_string("%.2f", F.col("_rev") * F.col("_earn_r") / 1000000), 12, " "),
-            F.rpad(F.format_string("%.2f", F.col("_rev") * F.col("_earn_r") / 1200000), 12, " "),
+            F.rpad(F.format_string("%.2f", F.col("_earn")), 17, " "),
+            # EPS = earnings / _sh_out so FI_BASIC_EPS ≈ FI_NET_EARN / FI_OUT_BASIC
+            F.rpad(F.format_string("%.2f", F.col("_earn") / F.col("_sh_out")), 12, " "),
+            F.rpad(F.format_string("%.2f", F.col("_earn") / F.col("_dil_sh_out")), 12, " "),
             F.rpad(F.format_string("%.2f", F.col("_earn_r")), 12, " "),
             F.rpad(F.format_string("%.2f", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "inv"))).cast("long")) % 1000000000).cast("double")), 17, " "),
             F.rpad(F.format_string("%.2f", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "ast"))).cast("long")) % 1000000000000).cast("double")), 17, " "),
             F.rpad(F.format_string("%.2f", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "lia"))).cast("long")) % 10000000000).cast("double")), 17, " "),
-            F.lpad((F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "sh"))).cast("long")) % 999900000 + 100000).cast("string"), 13, " "),
-            F.lpad((F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "dsh"))).cast("long")) % 999900000 + 100000).cast("string"), 13, " "),
+            F.lpad(F.col("_sh_out").cast("long").cast("string"), 13, " "),
+            F.lpad(F.col("_dil_sh_out").cast("long").cast("string"), 13, " "),
             F.col("CoNameOrCIK"),
         ).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
