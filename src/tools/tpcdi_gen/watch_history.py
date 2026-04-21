@@ -505,19 +505,29 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
 
     # Build the incremental DataFrame: sequential range, hash-based customer/security
     # assignment, same 80/20 ACTV/CNCL split as historical.
+    # CNCL rows reuse the same (w_c_id, _sym_idx) pair as the first del_pu
+    # ACTV rows so the ETL's FactWatches silver loader (GROUP BY
+    # (c_id, symbol)) pairs them up. Without this, randomly-picked CNCL
+    # pairs wouldn't match any prior ACTV and the ETL drops them, leaving
+    # our audit WH_RECORDS over-counting by ~del_pu rows per batch.
     inc_df = (spark.range(0, inc_rows).withColumnRenamed("id", "rid")
         .withColumn("cdc_flag", F.lit("I"))
         .withColumn("cdc_dsn", (F.lit(dsn_base) + F.col("rid")).cast("string"))
         .withColumn("w_action",
             F.when(F.col("rid") < F.lit(new_pu), F.lit("ACTV"))
              .otherwise(F.lit("CNCL")))
-        # Hash row ID to pick a customer from the expanded pool.
+        # For ACTV rows: use rid directly. For CNCL rows: reuse the
+        # rid of an ACTV row (CNCL rid = rid - new_pu, wrapped) so
+        # hash inputs match that ACTV's (c_id, symbol).
+        .withColumn("_pair_rid",
+            F.when(F.col("w_action") == "ACTV", F.col("rid"))
+             .otherwise((F.col("rid") - F.lit(new_pu)) % F.lit(max(1, new_pu))))
         .withColumn("w_c_id",
-            (hash_key(F.col("rid"), bs + 1) % F.lit(total_customers)).cast("string"))
-        # Hash row ID (different seed) to pick a security symbol index.
+            (hash_key(F.col("_pair_rid"), bs + 1) % F.lit(total_customers)).cast("string"))
         .withColumn("_sym_idx",
-            (hash_key(F.col("rid"), bs + 2) % F.lit(num_sec)).cast("long"))
+            (hash_key(F.col("_pair_rid"), bs + 2) % F.lit(num_sec)).cast("long"))
         .withColumn("w_dts", F.lit(batch_date))
+        .drop("_pair_rid")
     )
 
     # Map _sym_idx to w_s_symb with temporal validity check.

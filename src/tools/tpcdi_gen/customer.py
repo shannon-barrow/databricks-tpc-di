@@ -1221,18 +1221,22 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             "c_ctry_3","c_area_3","c_local_3","c_ext_3",
             "c_email_1","c_email_2","c_lcl_tx_id","c_nat_tx_id")
         # Per-DIGen Customer-Audit (incremental batches): count by cdc_flag + c_st_id.
-        # C_DOB_TO/DOB_TY/TIER_INV emit 0 — our generator doesn't inject invalid values.
+        # C_DOB_TO/DOB_TY remain 0 — our generator doesn't inject invalid DOB.
+        # C_TIER_INV counts NULL / invalid tier values (the ETL flags those as
+        # 'Invalid customer tier' alerts in DIMessages, and the audit compares
+        # that alert count to running sum of C_TIER_INV).
         _cust_agg = cust_df.select(
             F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("c_new"),
             F.sum(F.when((F.col("cdc_flag") == "U") & (F.col("c_st_id") != "INAC"), 1).otherwise(0)).alias("c_updcust"),
             F.sum(F.when(F.col("c_st_id") == "INAC", 1).otherwise(0)).alias("c_inact"),
+            F.sum(F.when(F.col("c_tier").isNull() | (~F.col("c_tier").isin("1", "2", "3")), 1).otherwise(0)).alias("c_tier_inv"),
         ).collect()[0]
         counts[("CI_NEW", batch_id)]      = _cust_agg["c_new"] or 0
         counts[("CI_UPDCUST", batch_id)]  = _cust_agg["c_updcust"] or 0
         counts[("CI_INACT", batch_id)]    = _cust_agg["c_inact"] or 0
         counts[("CI_DOB_TO", batch_id)]   = 0
         counts[("CI_DOB_TY", batch_id)]   = 0
-        counts[("CI_TIER_INV", batch_id)] = 0
+        counts[("CI_TIER_INV", batch_id)] = _cust_agg["c_tier_inv"] or 0
         write_file(cust_df, f"{bp}/Customer.txt", "|", dbutils, scale_factor=cfg.sf)
 
         # === Account.txt ===
