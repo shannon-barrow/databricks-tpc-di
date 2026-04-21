@@ -286,7 +286,14 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             F.when(F.col("_is_limit"), hash_key(F.col("t_id"), seed_for("T", "sub")) % 7776000).otherwise(F.lit(0)))
         .withColumn("_submit_ts", F.col("_base_ts") + F.col("_submit_offset"))
         # Completion happens 0-300 seconds after submission
-        .withColumn("_complete_ts", F.col("_submit_ts") + (hash_key(F.col("t_id"), seed_for("T", "cmp")) % 300))
+        # +1 to the modulo so _complete_ts is strictly greater than _submit_ts.
+        # Without this, ~0.3% of trades get complete_ts == submit_ts, which
+        # means TH's SBMT row and CMPT row share the same th_dts, and the
+        # DimTrade silver's max_by(struct(th_dts, status)) ties non-
+        # deterministically — sometimes picking SBMT, leaving sk_closedateid
+        # NULL on a supposedly-completed trade. That breaks the
+        # 'FactHoldings CurrentTradeID' and 'FactHoldings SK_*' audit checks.
+        .withColumn("_complete_ts", F.col("_submit_ts") + (hash_key(F.col("t_id"), seed_for("T", "cmp")) % 300 + 1))
         # Cash settlement: 0-5 days after completion.
         # NOT capped at cutoff — trades completing near the cutoff may settle in
         # Batch2/3, which is how DIGen routes incremental CashTransaction files.
