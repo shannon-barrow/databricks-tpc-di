@@ -1062,6 +1062,16 @@ def generate_incremental(spark, cfg, dicts, dbutils):
     acct_dsn_base = hist_size + update_last_id * acct_per_update
 
     counts = {}
+    # Accumulator for customer IDs already inactivated by any prior batch
+    # (Batch 1 CM.xml + any preceding incremental batch). The current-batch
+    # INAC rows downgrade to ACTV if they target an ID in this set —
+    # otherwise the ETL sees the INAC, finds the customer is already
+    # inactive, and refuses to create a second inactive DimCustomer row,
+    # leaving our audit C_INACT higher than the DIMessages delta.
+    # Start from CustomerMgmt.xml's INACT set.
+    _prior_inact = (spark.table("_customer_dates")
+                    .filter(F.col("cust_inact_ts").isNotNull())
+                    .select(F.col("cust_id").cast("string").alias("_prior_inact_cid")))
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
         bp = cfg.batch_path(batch_id)
         bs = seed_for(f"B{batch_id}", "inc")
@@ -1197,15 +1207,11 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                  .otherwise(F.col("c_st_id")))
             .drop("_has_acct_cid"))
 
-        # Downgrade INAC → ACTV if the customer was ALREADY inactivated in a
-        # previous batch. The ETL's DimCustomer incremental wouldn't create a
-        # new inactive DimCustomer version for an already-inactive customer,
-        # so our C_INACT audit would overcount. Use _customer_dates, which
-        # tracks the INACT ActionTS from CustomerMgmt.xml (Batch 1 history).
-        _cust_inact = spark.table("_customer_dates").filter(
-            F.col("cust_inact_ts").isNotNull()).select(F.col("cust_id").cast("string").alias("_prior_inact_cid"))
+        # Downgrade INAC → ACTV if the customer was ALREADY inactivated in any
+        # prior batch (CM.xml historical + any previous incremental batch).
+        # _prior_inact accumulates across the for loop — see definition above.
         cust_df = (cust_df
-            .join(F.broadcast(_cust_inact),
+            .join(F.broadcast(_prior_inact),
                   F.col("c_id") == F.col("_prior_inact_cid"), "left")
             .withColumn("c_st_id",
                 F.when((F.col("c_st_id") == "INAC") & F.col("_prior_inact_cid").isNotNull(), F.lit("ACTV"))
@@ -1231,6 +1237,12 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             F.sum(F.when(F.col("c_st_id") == "INAC", 1).otherwise(0)).alias("c_inact"),
             F.sum(F.when(F.col("c_tier").isNull() | (~F.col("c_tier").isin("1", "2", "3")), 1).otherwise(0)).alias("c_tier_inv"),
         ).collect()[0]
+        # Accumulate this batch's inactivated customer IDs so the next batch
+        # doesn't re-inactivate them.
+        _prior_inact = _prior_inact.unionByName(
+            cust_df.filter(F.col("c_st_id") == "INAC")
+                   .select(F.col("c_id").alias("_prior_inact_cid"))
+        )
         counts[("CI_NEW", batch_id)]      = _cust_agg["c_new"] or 0
         counts[("CI_UPDCUST", batch_id)]  = _cust_agg["c_updcust"] or 0
         counts[("CI_INACT", batch_id)]    = _cust_agg["c_inact"] or 0
