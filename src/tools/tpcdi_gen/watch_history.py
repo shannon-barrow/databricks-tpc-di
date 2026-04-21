@@ -543,6 +543,14 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
 
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
+    # Dedup ACTV rows on (w_c_id, w_s_symb) — the ETL's FactWatches silver
+    # loader GROUP BYs on these, collapsing any duplicates. CNCL rows are
+    # kept as-is since they're matched by (c_id, symbol) join, not counted
+    # separately. Same reasoning as the historical (Batch 1) path.
+    actv_part = inc_df.filter(F.col("w_action") == "ACTV").dropDuplicates(["w_c_id", "w_s_symb"])
+    cncl_part = inc_df.filter(F.col("w_action") == "CNCL")
+    inc_df = actv_part.unionByName(cncl_part)
+
     _wh_counts = inc_df.groupBy("w_action").count().collect()
     _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
     actv_actual = _wh_by_action.get("ACTV", 0)

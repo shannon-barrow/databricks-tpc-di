@@ -1197,6 +1197,21 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                  .otherwise(F.col("c_st_id")))
             .drop("_has_acct_cid"))
 
+        # Downgrade INAC → ACTV if the customer was ALREADY inactivated in a
+        # previous batch. The ETL's DimCustomer incremental wouldn't create a
+        # new inactive DimCustomer version for an already-inactive customer,
+        # so our C_INACT audit would overcount. Use _customer_dates, which
+        # tracks the INACT ActionTS from CustomerMgmt.xml (Batch 1 history).
+        _cust_inact = spark.table("_customer_dates").filter(
+            F.col("cust_inact_ts").isNotNull()).select(F.col("cust_id").cast("string").alias("_prior_inact_cid"))
+        cust_df = (cust_df
+            .join(F.broadcast(_cust_inact),
+                  F.col("c_id") == F.col("_prior_inact_cid"), "left")
+            .withColumn("c_st_id",
+                F.when((F.col("c_st_id") == "INAC") & F.col("_prior_inact_cid").isNotNull(), F.lit("ACTV"))
+                 .otherwise(F.col("c_st_id")))
+            .drop("_prior_inact_cid"))
+
         # Select columns in the exact order expected by the TPC-DI Customer.txt schema.
         cust_df = cust_df.select("cdc_flag","cdc_dsn","c_id","c_tax_id","c_st_id",
             "c_l_name","c_f_name","c_m_name","c_gndr","c_tier","c_dob",
