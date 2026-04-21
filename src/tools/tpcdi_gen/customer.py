@@ -1207,15 +1207,18 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                  .otherwise(F.col("c_st_id")))
             .drop("_has_acct_cid"))
 
-        # Downgrade INAC → ACTV if the customer was ALREADY inactivated in any
-        # prior batch (CM.xml historical + any previous incremental batch).
-        # _prior_inact accumulates across the for loop — see definition above.
+        # Drop U rows targeting already-inactive customers. The ETL's
+        # DimCustomer MERGE would still create SCD2 versions for them
+        # (INAC rows no-op the iscurrent-inactive count; ACTV rows
+        # DECREMENT it via reactivation), breaking the 'DimCustomer
+        # inactive customers' audit check which expects the cumulative
+        # delta to equal our running sum of C_INACT. Dropping these U
+        # rows is simpler than tracking reactivations in the audit.
+        # _prior_inact accumulates across the for loop — see above.
         cust_df = (cust_df
             .join(F.broadcast(_prior_inact),
                   F.col("c_id") == F.col("_prior_inact_cid"), "left")
-            .withColumn("c_st_id",
-                F.when((F.col("c_st_id") == "INAC") & F.col("_prior_inact_cid").isNotNull(), F.lit("ACTV"))
-                 .otherwise(F.col("c_st_id")))
+            .filter(~((F.col("cdc_flag") == "U") & F.col("_prior_inact_cid").isNotNull()))
             .drop("_prior_inact_cid"))
 
         # Select columns in the exact order expected by the TPC-DI Customer.txt schema.
