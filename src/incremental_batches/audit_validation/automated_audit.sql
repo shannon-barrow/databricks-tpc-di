@@ -1374,7 +1374,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID
-                ) as int
+                ) as bigint
               ) - cast(
                 (
                   select sum(MessageData)
@@ -1383,7 +1383,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID -1
-                ) as int
+                ) as bigint
               ) = (
                 select sum(Value)
                 from ${catalog}.${wh_db}_${scale_factor}.Audit
@@ -1943,7 +1943,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID
-                ) as int
+                ) as bigint
               ) - cast(
                 (
                   select sum(MessageData)
@@ -1952,7 +1952,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID -1
-                ) as int
+                ) as bigint
               ) = (
                 select sum(Value)
                 from ${catalog}.${wh_db}_${scale_factor}.Audit
@@ -2081,7 +2081,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID
-                ) as int
+                ) as bigint
               ) - cast(
                 (
                   select sum(MessageData)
@@ -2090,7 +2090,7 @@ from (
                     and MessageType = 'Validation'
                     and MessageText = 'Row count'
                     and BatchID = a.BatchID -1
-                ) as int
+                ) as bigint
               ) = (
                 select sum(Value)
                 from ${catalog}.${wh_db}_${scale_factor}.Audit

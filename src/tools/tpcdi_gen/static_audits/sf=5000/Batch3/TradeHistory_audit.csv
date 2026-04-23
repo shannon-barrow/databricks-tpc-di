@@ -1,0 +1,3 @@
+DataSet, BatchID ,Date , Attribute , Value, DValue
+DimTradeHistory,3,,CT_Records,251103,
+DimTradeHistory,3,,CT_Trades,251103,

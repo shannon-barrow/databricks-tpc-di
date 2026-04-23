@@ -62,7 +62,8 @@ deactivation_quarter = fw_quarters + 1 (effectively "never deactivated").
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log
+from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log, disk_cache
+from .audit import static_audits_available
 
 
 def _add_calendar_quarter_timing(df, quarter_id_col="quarter_id"):
@@ -114,7 +115,7 @@ def _add_calendar_quarter_timing(df, quarter_id_col="quarter_id"):
     return df.drop("_cal_year", "_cal_q_idx", "_q_start_month", "_q_end_month", "_q_end_day", "_q_end_s")
 
 
-def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
+def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event=None) -> dict:
     """Generate all FINWIRE quarterly files.
 
     Persists _symbols and _cmp_refs temp views for downstream tables
@@ -253,7 +254,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     # Format CMP as fixed-width line (TPC-DI FINWIRE spec field widths)
     cmp_lines = cmp_df.select(
-        F.concat(
+        F.rtrim(F.concat(
             F.rpad("PTS", 15, " "), F.rpad(F.lit("CMP"), 3, " "),
             F.rpad("CompanyName", 60, " "), F.col("CIK"),
             F.rpad("Status", 4, " "), F.rpad("IndustryID", 2, " "),
@@ -262,7 +263,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             F.rpad("PostalCode", 12, " "), F.rpad("City", 25, " "),
             F.rpad("StateProvince", 20, " "), F.rpad("Country", 24, " "),
             F.rpad("CEOname", 46, " "), F.rpad("Description", 150, " "),
-        ).alias("line"),
+        )).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
     )
 
@@ -395,10 +396,30 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                     (F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact_q"))) %
                      F.greatest(F.lit(1), F.lit(cfg.fw_quarters) - F.col("creation_quarter"))))
             .otherwise(F.lit(cfg.fw_quarters + 1)))
-        .withColumn("_idx", F.row_number().over(Window.orderBy("Symbol")) - 1)
+        # Order _idx by creation_quarter so WatchHistory's cross-product
+        # decomposition picks temporally-valid symbols: gen 0 pairs use
+        # _sec_idx in [0, hist_sec_ids), which must map to the oldest
+        # symbols (created before customer updates begin). Later gens
+        # extend into symbols created in their quarter window. Prior
+        # alphabetical ordering caused ~25% of WH ACTV pairs to fall back
+        # to _sym0 at SF=5000+, producing a -24.5% drift vs DIGen.
+        .withColumn("_idx", F.row_number().over(
+            Window.orderBy("creation_quarter", "Symbol")) - 1)
         .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
+
+    # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read
+    # it independently of the remaining FINWIRE compute (CMP/FIN union + the
+    # 10-25 min text write). This detaches downstream start time from the
+    # overall FINWIRE wallclock — previously they waited on f_fw.result(),
+    # now they wait on symbols_ready_event set right below.
+    symbols, _sym_cleanup = disk_cache(symbols, spark, "FINWIRE symbols",
+                                        volume_path=cfg.volume_path, dbutils=dbutils)
     symbols.createOrReplaceTempView("_symbols")
-    sym_count = symbols.count()
+    # Estimate — symbols is a groupBy on SEC NEW records' Symbol; ~sec_total after
+    # dedup by Symbol (slight shrinkage from Symbol collisions across quarters).
+    log(f"[FINWIRE] Active symbols: ~{cfg.sec_total:,} -> _symbols view (downstream unblocked)")
+    if symbols_ready_event is not None:
+        symbols_ready_event.set()
 
     # Union NEW + CHANGE/DELETE records, aligned by column name. Done AFTER _symbols
     # is built so extras don't affect creation_quarter/deactivation_quarter tracking.
@@ -406,14 +427,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     # Format SEC as fixed-width line
     sec_lines = sec_df.select(
-        F.concat(
+        F.rtrim(F.concat(
             F.rpad("PTS", 15, " "), F.rpad(F.lit("SEC"), 3, " "),
             F.rpad("Symbol", 15, " "), F.rpad("IssueType", 6, " "),
             F.rpad("Status", 4, " "), F.rpad("Name", 70, " "),
             F.rpad("ExID", 6, " "), F.rpad("ShOut", 13, " "),
             F.col("FirstTradeDate"), F.col("FirstTradeExchg"),
             F.rpad("Dividend", 12, " "), F.col("CoNameOrCIK"),
-        ).alias("line"),
+        )).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
     )
 
@@ -451,6 +472,20 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     cmp_quarters = cmp_quarters.withColumn("_is_active_for_fin",
         F.when(F.col("creation_quarter") == 0, F.lit(True))  # Q0: all active
          .otherwise(hash_key(F.col("cmp_id"), seed_for("CMP", "is_active")) % 100 < _active_pct))
+
+    # Repartition cmp_quarters BEFORE the crossJoin so the downstream
+    # fan-out (each row × fw_quarters) runs across the executor pool. The
+    # default spark.range() partitioning that cmp_df inherits is small
+    # (8-16 parts on serverless), so without this each task holds 10-15 GB
+    # of in-memory FIN data at SF=10000 and spills.
+    #
+    # Target partitions = max(8, cfg.sf / 25). Sized so FIN data distributes
+    # enough to avoid spill (~1 GB/partition at SF=5000, ~1.2 GB at SF=10000)
+    # without monopolising the executor pool — the writer's maxRecordsPerFile
+    # option still splits each partition into multiple ~128 MB output files.
+    fin_target_parts = max(8, cfg.sf // 25)
+    log(f"[FINWIRE] repartitioning cmp_quarters to {fin_target_parts} partitions ahead of crossJoin", "DEBUG")
+    cmp_quarters = cmp_quarters.repartition(fin_target_parts)
 
     # Cross join: only active companies x quarters after creation.
     # Each active company produces one FIN record for every quarter after its creation.
@@ -497,7 +532,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # PostingDate, Revenue, Earnings, EPS, DilutedEPS, Margin, Inventory, Assets,
     # Liabilities, ShOut, DilutedShOut, CoNameOrCIK
     fin_lines = fin_df.select(
-        F.concat(
+        F.rtrim(F.concat(
             F.rpad(F.col("PTS"), 15, " "), F.rpad(F.lit("FIN"), 3, " "),
             F.rpad(F.date_format("pts_ts", "yyyy"), 4, " "),
             F.rpad(F.quarter("pts_ts").cast("string"), 1, " "),
@@ -519,46 +554,90 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             F.lpad(F.col("_sh_out").cast("long").cast("string"), 13, " "),
             F.lpad(F.col("_dil_sh_out").cast("long").cast("string"), 13, " "),
             F.col("CoNameOrCIK"),
-        ).alias("line"),
+        )).alias("line"),
         F.col("quarter_id"), F.col("PTS"),
     )
 
     # =====================================================================
-    # Merge all record types and write quarterly files
+    # Write CMP / SEC / FIN as separate staging dirs (in parallel).
     # =====================================================================
-    # Union CMP + SEC + FIN lines, compute calendar year/quarter from quarter_id,
-    # and partition by filename (e.g. "FINWIRE1967Q1") so Spark writes one file
-    # per quarter in parallel.
-    all_fw = (cmp_lines
-        .union(sec_lines.select("line", "quarter_id", "PTS"))
-        .union(fin_lines.select("line", "quarter_id", "PTS"))
-    )
-
-    # Write as flat text files — same staging+copy pattern as other datasets.
-    # FINWIRE is fixed-width text (~260 bytes/line). Use maxRecordsPerFile
-    # to cap at ~128MB per file. No quarterly grouping — just FINWIRE_1.txt, etc.
-    fw_out = all_fw.select("line")
-    staging_dir = f"{cfg.batch_path(1)}/FINWIRE.txt__staging"
-    _cleanup(staging_dir, dbutils)
+    # The bronze-layer FINWIRE ingest reads all FINWIRE_*.txt files as a
+    # single globbed input and distinguishes record type by the 3-char type
+    # code at byte position 16, so it's indifferent to which file contains
+    # which subset — we don't need to union CMP/SEC/FIN into one output
+    # stream. Splitting lets the 3 writes fan out across executors in
+    # parallel, and avoids a 244M-row union + columnar→row that previously
+    # dominated the FINWIRE stage.
     max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
-    fw_out.write.mode("overwrite").option("maxRecordsPerFile", max_records).text(staging_dir)
-    register_copies_from_staging(staging_dir, f"{cfg.batch_path(1)}/FINWIRE.txt", dbutils)
 
-    # Exact per-record-type counts for FINWIRE_audit.csv (FW_SEC/FW_CMP/FW_FIN).
-    # The base cfg.cmp_total/sec_total are NEW records only — CMP/SEC also emit
-    # ~3% CHANGE+DELETE extras that create additional DimCompany/DimSecurity
-    # SCD Type 2 versions. Scan after write to get the actual written counts.
-    fw_rectype_counts = (
-        all_fw.select(F.substring(F.col("line"), 16, 3).alias("rec_type"))
-        .groupBy("rec_type").count().collect()
-    )
-    _rt = {r["rec_type"].strip(): r["count"] for r in fw_rectype_counts}
-    fw_cmp_exact = _rt.get("CMP", 0)
-    fw_sec_exact = _rt.get("SEC", 0)
-    fw_fin_exact = _rt.get("FIN", 0)
+    # FIN repartition happens earlier, right on cmp_quarters before the
+    # crossJoin — see the block there. Doing it here (just before .write)
+    # would shuffle after the in-memory 475M-row compute had already been
+    # forced onto the narrow spark.range default partitioning, which is
+    # what causes the 15GB/task spill. CMP/SEC are small enough to use
+    # default partitioning and write directly.
+    def _write_subset(df, label):
+        staging = f"{cfg.batch_path(1)}/FINWIRE_{label}.txt__staging"
+        _cleanup(staging, dbutils)
+        df.select("line").write.mode("overwrite") \
+            .option("maxRecordsPerFile", max_records).text(staging)
+        return staging
+
+    import concurrent.futures as _cf
+    with _cf.ThreadPoolExecutor(max_workers=3) as ex:
+        futs = {
+            "cmp": ex.submit(_write_subset, cmp_lines, "cmp"),
+            "sec": ex.submit(_write_subset, sec_lines, "sec"),
+            "fin": ex.submit(_write_subset, fin_lines, "fin"),
+        }
+        staging_dirs = {k: f.result() for k, f in futs.items()}
+
+    # Copy to final FINWIRE_{N}.txt using a shared counter so numbering never
+    # collides across the three subsets. Order here is arbitrary — downstream
+    # reads all files at once.
+    next_idx = 1
+    for subset in ("cmp", "sec", "fin"):
+        _, next_idx = register_copies_from_staging(
+            staging_dirs[subset], f"{cfg.batch_path(1)}/FINWIRE.txt",
+            dbutils, start_idx=next_idx)
+
+    # Analytical estimates for FW_CMP / FW_SEC / FW_FIN audit attributes:
+    #   CMP ≈ cmp_total × 1.03 (NEW + ~3% CHANGE/DELETE extras, excludes last quarter)
+    #   SEC ≈ sec_total × 1.03
+    #   FIN ≈ _active_pct × cmp_per_quarter × fw_quarters × (fw_quarters-1)/2 / fw_quarters
+    #         + cmp_q0_count × (fw_quarters-1)
+    # For dynamic audit regeneration, compute exact values below.
+    last_q_exclusion = (cfg.fw_quarters - 1) / cfg.fw_quarters  # ~99.5%
+    fw_cmp_extras_est = int(cfg.cmp_total * 0.03 * last_q_exclusion)
+    fw_sec_extras_est = int(cfg.sec_total * 0.03 * last_q_exclusion)
+    fw_cmp_exact = cfg.cmp_total + fw_cmp_extras_est
+    fw_sec_exact = cfg.sec_total + fw_sec_extras_est
+    # Active-FIN analytical span: Q0 companies (all active, all fw_quarters-1 FIN
+    # records each) + Qk companies (active_pct% each, averaging fewer FIN rows).
+    cmp_q0_count = cfg.cmp_total - cfg.fw_quarters * cfg.cmp_per_quarter
+    _loss_per_q = max(3, int(cfg.cmp_per_quarter * 0.05))
+    _active_pct = (cfg.cmp_per_quarter - _loss_per_q) / max(1, cfg.cmp_per_quarter)
+    fw_fin_q0 = cmp_q0_count * (cfg.fw_quarters - 1)
+    fw_fin_qn = int(cfg.cmp_per_quarter * _active_pct * (cfg.fw_quarters - 1) * (cfg.fw_quarters - 2) / 2)
+    fw_fin_exact = fw_fin_q0 + fw_fin_qn
     total = fw_cmp_exact + fw_sec_exact + fw_fin_exact
+
+    if not static_audits_available(cfg):
+        # Dynamic audit regeneration: exact counts. Extras counts are over
+        # tiny DFs (~3% of cmp_total/sec_total); the FIN analytical aggregation
+        # scans cmp_total rows instead of fin_total (10+ min savings).
+        log("[FINWIRE] dynamic audit path — computing exact CMP/SEC extras + FIN span", "DEBUG")
+        fw_cmp_extras = cmp_extras.count()
+        fw_sec_extras = sec_extras.count()
+        fw_cmp_exact = cfg.cmp_total + fw_cmp_extras
+        fw_sec_exact = cfg.sec_total + fw_sec_extras
+        fw_fin_exact = cmp_quarters.select(
+            F.sum(F.when(F.col("_is_active_for_fin"),
+                         F.lit(cfg.fw_quarters - 1) - F.col("creation_quarter"))
+                   .otherwise(F.lit(0))).alias("fin")
+        ).first()["fin"] or 0
+        total = fw_cmp_exact + fw_sec_exact + fw_fin_exact
     log(f"[FINWIRE] ~{total} records (CMP={fw_cmp_exact}, SEC={fw_sec_exact}, FIN={fw_fin_exact})")
-    log(f"[FINWIRE] Active symbols: {sym_count} -> _symbols view")
     log("[FINWIRE] Generation complete")
     return {"counts": {
         ("FINWIRE", 1): total,

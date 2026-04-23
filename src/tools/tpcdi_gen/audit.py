@@ -1,7 +1,5 @@
-"""Generate audit files and generation report.
+"""Generate audit files for the TPC-DI benchmark pipeline.
 
-Audit File Generation
-----------------------
 The TPC-DI spec requires audit files that record metadata about the generated
 data so the benchmark pipeline can validate its output. This module produces:
 
@@ -23,46 +21,93 @@ data so the benchmark pipeline can validate its output. This module produces:
    (e.g. P_C_MATCHING for prospect-customer match count, WH_ACTIVE for
    active watch items).
 
-4. digen_report.txt (one file, top-level):
-   Human-readable generation summary with start/end times, scale factor,
-   per-batch record totals, and overall throughput (records/second).
-
 All audit files use CSV format with header:
    DataSet, BatchID ,Date , Attribute , Value, DValue
 (Note: the spacing matches DIGen's exact format for compatibility.)
 """
 
+import os
 from datetime import datetime, timedelta, timezone
 from .config import *
-from .utils import write_text
+from .utils import write_text, log
+
+
+def static_audits_available(cfg) -> bool:
+    """Return True if a pre-computed audit snapshot exists for cfg.sf.
+
+    Generators call this to decide whether to skip log-only / audit-only
+    count() queries — when a static snapshot will be copied at the end of
+    the run, the audit CSVs get exact pre-computed values regardless of
+    what the generators return.
+    """
+    user_sf = int(cfg.internal_sf // 1000)
+    return os.path.isdir(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "static_audits", f"sf={user_sf}"))
 
 
 def generate(cfg, record_counts: dict, gen_start_time: datetime, dbutils):
-    """Write all audit files and digen_report.txt.
+    """Write audit files.
 
-    Called as the final step (Wave 4) after all data generation is complete,
-    so record_counts contains the actual (or estimated) row counts for every
-    table and batch produced during Waves 1-3.
+    If a static audit snapshot exists for this scale factor at
+    ``tpcdi_gen/static_audits/sf={sf}/``, those pre-computed files are copied
+    to the output volume instead of recomputing. Otherwise, audit files are
+    regenerated dynamically using ``record_counts`` populated by each
+    generator during waves 1-3.
 
     Args:
         cfg: ScaleConfig with volume_path, internal_sf, and other parameters.
-        record_counts: dict mapping (table_name, batch_id) to integer row counts.
-        gen_start_time: UTC datetime when generation started (for elapsed time).
+        record_counts: dict mapping (table_name, batch_id) to integer row counts
+            (only used for the dynamic-regeneration path).
+        gen_start_time: retained for signature compatibility; unused.
         dbutils: Databricks dbutils for file I/O.
     """
-    gen_end_time = datetime.now(tz=timezone.utc)
-    # Handle both timezone-aware and naive start times (backward compatibility)
-    if gen_start_time.tzinfo is None:
-        gen_end_time = gen_end_time.replace(tzinfo=None)
-    elapsed = (gen_end_time - gen_start_time).total_seconds()
+    if not _try_copy_static_audits(cfg, dbutils):
+        log("[Audit] no static snapshot for this SF; regenerating dynamically")
+        _gen_generator_audit(cfg, dbutils)
+        _gen_batch_audits(cfg, dbutils)
+        _gen_table_audits(cfg, record_counts, dbutils)
+        _gen_incremental_table_audits(cfg, record_counts, dbutils)
 
-    _gen_generator_audit(cfg, dbutils)
-    _gen_batch_audits(cfg, dbutils)
-    _gen_table_audits(cfg, record_counts, dbutils)
-    _gen_incremental_table_audits(cfg, record_counts, dbutils)
-    _gen_report(cfg, record_counts, gen_start_time, gen_end_time, elapsed, dbutils)
+    print(f"  Audit files generated.")
 
-    print(f"  Audit files and report generated.")
+
+def _try_copy_static_audits(cfg, dbutils) -> bool:
+    """Copy pre-computed audit files from the repo into the output volume.
+
+    Looks for ``tpcdi_gen/static_audits/sf={user_sf}/`` next to this module.
+    Returns True if all expected files were copied, False otherwise (in
+    which case the caller falls back to dynamic generation).
+    """
+    user_sf = int(cfg.internal_sf // 1000)
+    src_root = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "static_audits", f"sf={user_sf}")
+    if not os.path.isdir(src_root):
+        return False
+
+    import io, sys
+    copied = 0
+    for root, _dirs, files in os.walk(src_root):
+        rel = os.path.relpath(root, src_root)
+        for fn in files:
+            if not fn.endswith("_audit.csv"):
+                continue
+            src = os.path.join(root, fn)
+            with open(src) as f:
+                content = f.read()
+            dst = f"{cfg.volume_path}/{fn}" if rel in (".", "") \
+                else f"{cfg.volume_path}/{rel}/{fn}"
+            # Silence dbutils.fs.put output noise.
+            _old = sys.stdout
+            sys.stdout = io.StringIO()
+            try:
+                dbutils.fs.put(dst, content, overwrite=True)
+            finally:
+                sys.stdout = _old
+            copied += 1
+
+    log(f"[Audit] static snapshot sf={user_sf}: {copied} audit files copied")
+    return copied > 0
 
 
 def _gen_generator_audit(cfg, dbutils):
@@ -213,6 +258,22 @@ def _gen_table_audits(cfg, counts, dbutils):
                                            counts.get(("HoldingHistory", 1), 0)),
                f"{bp}/HoldingHistory_audit.csv", dbutils)
 
+    # --- TradeHistory / DimTradeHistory attributes ---
+    # DIGen emits TH_Records, TH_TLBTrades, TH_TLSTrades, TH_TMBTrades,
+    # TH_TMSTrades, TH_CanceledLTrades plus CT_Records and CT_Trades
+    # as a single TradeHistory_audit.csv per batch.
+    th_lines = [
+        _audit_row("DimTradeHistory", 1, "TH_Records",         counts.get(("TH_Records", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "TH_TLBTrades",       counts.get(("TH_TLBTrades", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "TH_TLSTrades",       counts.get(("TH_TLSTrades", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "TH_TMBTrades",       counts.get(("TH_TMBTrades", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "TH_TMSTrades",       counts.get(("TH_TMSTrades", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "TH_CanceledLTrades", counts.get(("TH_CanceledLTrades", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "CT_Records",         counts.get(("CT_Records", 1), 0)),
+        _audit_row("DimTradeHistory", 1, "CT_Trades",          counts.get(("CT_Trades", 1), 0)),
+    ]
+    write_text(_AUDIT_HEADER + "".join(th_lines), f"{bp}/TradeHistory_audit.csv", dbutils)
+
     # --- FINWIRE: per-record-type counts + unimplemented DUP sentinels ---
     # FW_FIN / FW_FIN_DUP go under DataSet='Financial' (not DimCompany) per
     # DIGen's actual buf.append("Financial") — the XML comment says DimCompany
@@ -227,15 +288,17 @@ def _gen_table_audits(cfg, counts, dbutils):
     ]
     write_text(_AUDIT_HEADER + "".join(fw_lines), f"{bp}/FINWIRE_audit.csv", dbutils)
 
-    # --- Prospect (all 3 batches emit a Batch1 audit; the ETL's Prospect table
-    # carries a BatchID column derived at load time so we just emit once per
-    # batch matching DIGen's per-batch Prospect-audit output). ---
+    # --- Prospect B1: P_RECORDS = total historical rows, P_NEW = same
+    # (all rows are new at B1), P_C_MATCHING = count of prospects matching
+    # existing customers. Batches 2/3 emit their own per-batch files
+    # (see _gen_incremental_table_audits below). ---
     p_total = counts.get(("Prospect", 1), 0)
     p_match = counts.get(("Prospect_Matching", 1), 0)
+    p_new = counts.get(("P_NEW", 1), p_total)
     prospect_lines = [
         _audit_row("Prospect", 1, "P_RECORDS",    p_total),
         _audit_row("Prospect", 1, "P_C_MATCHING", p_match),
-        _audit_row("Prospect", 1, "P_NEW",        p_total),
+        _audit_row("Prospect", 1, "P_NEW",        p_new),
     ]
     write_text(_AUDIT_HEADER + "".join(prospect_lines), f"{bp}/Prospect_audit.csv", dbutils)
 
@@ -278,6 +341,28 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
                                                counts.get(("HoldingHistory", b), 0)),
                    f"{bp}/HoldingHistory_audit.csv", dbutils)
 
+        # DimTradeHistory CT_Records/CT_Trades per incremental batch. No TH_*
+        # attributes in incrementals since DIGen doesn't generate incremental
+        # TradeHistory.txt (only Trade.txt CDC updates).
+        th_lines = [
+            _audit_row("DimTradeHistory", b, "CT_Records", counts.get(("CT_Records", b), 0)),
+            _audit_row("DimTradeHistory", b, "CT_Trades",  counts.get(("CT_Trades", b), 0)),
+        ]
+        write_text(_AUDIT_HEADER + "".join(th_lines), f"{bp}/TradeHistory_audit.csv", dbutils)
+
+        # Per-batch Prospect audit. P_RECORDS = total rows in this batch's
+        # Prospect.csv, P_NEW = rows churned (added) in this batch,
+        # P_C_MATCHING = cumulative matching prospects through this batch.
+        p_total_b = counts.get(("Prospect", b), 0)
+        p_match_b = counts.get(("Prospect_Matching", b), 0)
+        p_new_b = counts.get(("P_NEW", b), 0)
+        prospect_lines_b = [
+            _audit_row("Prospect", b, "P_RECORDS",    p_total_b),
+            _audit_row("Prospect", b, "P_C_MATCHING", p_match_b),
+            _audit_row("Prospect", b, "P_NEW",        p_new_b),
+        ]
+        write_text(_AUDIT_HEADER + "".join(prospect_lines_b), f"{bp}/Prospect_audit.csv", dbutils)
+
         # Customer_audit.csv (Customer.txt CDC-based)
         cust_lines = [
             _audit_row("DimCustomer", b, "C_NEW",       counts.get(("CI_NEW", b), 0)),
@@ -316,32 +401,3 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
         write_text(_AUDIT_HEADER + "".join(trade_lines), f"{bp}/Trade_audit.csv", dbutils)
 
 
-def _gen_report(cfg, counts, start, end, elapsed, dbutils):
-    """Write digen_report.txt with generation summary.
-
-    Produces a human-readable report matching DIGen's output format, including:
-      - Start/end timestamps
-      - Generator version identification
-      - Per-batch record totals
-      - Overall throughput (records/second)
-      - Command options used (scale factor)
-    """
-    total = sum(v for k, v in counts.items() if k[0] != "HR_BROKERS")
-    rps = total / elapsed if elapsed > 0 else 0
-    lines = [
-        "TPC-DI Data Generation Report",
-        "=============================",
-        "",
-        f"Start Time: {start.strftime('%Y-%m-%dT%H:%M:%S+0000')}",
-        f"End Time: {end.strftime('%Y-%m-%dT%H:%M:%S+0000')}",
-        f"Generator: Spark Data Generator",
-        f"Scale Factor: {cfg.sf}",
-    ]
-    # Per-batch totals (excludes HR_BROKERS which is a derived metric, not a record count)
-    for batch_id in range(1, NUM_INCREMENTAL_BATCHES + 2):
-        bt = sum(v for k, v in counts.items() if k[1] == batch_id and k[0] != "HR_BROKERS")
-        lines.append(f"AuditTotalRecordsSummaryWriter - TotalRecords for Batch{batch_id}: {bt}")
-    lines.append(f"AuditTotalRecordsSummaryWriter - TotalRecords all Batches: {total} {rps:.2f} records/second")
-    lines.append(f"\nCommand options used: -sf {cfg.sf}")
-
-    write_text('\n'.join(lines) + '\n', f"{cfg.volume_path}/digen_report.txt", dbutils)

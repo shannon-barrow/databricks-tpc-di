@@ -119,7 +119,8 @@ from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist, bulk_copy_all
+from .utils import write_file, seed_for, hash_key, dict_join, log, disk_cache, safe_unpersist
+from .audit import static_audits_available
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -140,15 +141,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     n_valid = valid_accts.count()
     log(f"[Trade] account pool: {n_valid} valid accounts (from _valid_acct_pool)")
 
-    broker_names, n_brokers = _build_broker_names(spark)
+    # n_brokers lets each trade pick a broker index (hash_key % n_brokers).
+    # The broker's full name is computed inline at write time via dict_joins
+    # on _broker_idx — no intermediate broker_names table, no shuffle join.
+    n_brokers = spark.table("_brokers").count()
     num_sec = spark.table("_symbols").count()
 
-    # Cache broker names — used by historical + each incremental batch.
-    broker_names, _broker_cleanup = disk_cache(broker_names, spark, "broker_names",
-                                                volume_path=cfg.volume_path, dbutils=dbutils)
-
     shared = {"valid_accts": valid_accts, "n_valid": n_valid,
-              "broker_names": broker_names, "n_brokers": n_brokers, "num_sec": num_sec}
+              "n_brokers": n_brokers, "num_sec": num_sec}
 
     counts = {}
     hist_result = _gen_historical_trades(spark, cfg, dicts, dbutils, shared)
@@ -163,51 +163,21 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # Release trade_df now that incrementals (which read _ct/_hh_hist_batch{b}
     # temp views that reference it) are done.
     safe_unpersist(hist_result["trade_df"], hist_result["cleanup_info"])
-    safe_unpersist(broker_names, _broker_cleanup)
-    # Release CustomerMgmt view caches — Trade was the last consumer
-    for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
-        try:
-            spark.catalog.uncacheTable(view_name)
-        except:
-            pass
+    # Release CustomerMgmt view caches — Trade was the last consumer.
+    # Serverless rejects UNCACHE TABLE; skip entirely there (views are
+    # session-scoped and go away at session end anyway).
+    from .utils import _detect_serverless
+    if not _detect_serverless(spark):
+        for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
+            try:
+                spark.catalog.uncacheTable(view_name)
+            except:
+                pass
     log("[Trade] Released all Trade + CustomerMgmt view caches")
 
     log("[Trade] Generation complete")
     return counts
 
-
-
-def _build_broker_names(spark):
-    """Build broker full names from HR _brokers view for t_exec_name.
-
-    DIGen uses RandomBrokerGenerator referencing HR employees with jobcode 314.
-    The _brokers temp view was created during account generation and contains
-    broker_id (which is the HR employeeid) and _idx (sequential index).
-
-    To reconstruct each broker's full name, we hash broker_id through the same
-    hr_family_names and hr_given_names dictionaries that the HR generator uses,
-    producing "FirstName LastName" strings. This avoids reading HR CSV files
-    back and instead regenerates names deterministically from the same seeds.
-
-    Returns:
-        (broker_names DataFrame with [_broker_idx, broker_name], count of brokers)
-    """
-    brokers = spark.table("_brokers")
-    # Reconstruct full names by hashing broker_id through the HR name dictionaries.
-    # broker_id IS the employeeid from HR; we use the same seeds as HR generation.
-    broker_names = (brokers
-        .withColumn("_fn_hash", hash_key(F.col("broker_id").cast("long"), seed_for("HR", "fn")))
-        .withColumn("_ln_hash", hash_key(F.col("broker_id").cast("long"), seed_for("HR", "ln")))
-    )
-    broker_names = dict_join(broker_names, "hr_family_names", F.col("_fn_hash"), "_first")
-    broker_names = dict_join(broker_names, "hr_given_names", F.col("_ln_hash"), "_last")
-    broker_names = (broker_names
-        .withColumn("broker_name", F.concat(F.col("_first"), F.lit(" "), F.col("_last")))
-        .select(F.col("_idx").alias("_broker_idx"), "broker_name"))
-
-    n_brokers = broker_names.count()
-    log(f"[Trade] Broker names: {n_brokers} brokers", "DEBUG")
-    return broker_names, n_brokers
 
 
 def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
@@ -218,7 +188,6 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     """
     valid_accts = shared["valid_accts"]
     n_valid = shared["n_valid"]
-    broker_names = shared["broker_names"]
     n_brokers = shared["n_brokers"]
     num_sec = shared["num_sec"]
 
@@ -263,27 +232,32 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         .withColumn("_tp", F.col("_bid") * (0.95 + (hash_key(F.col("t_id"), seed_for("T", "tp")) % 11) / 100.0))
         .withColumn("t_trade_price", F.format_string("%.2f", F.col("_tp")))
         .withColumn("_trade_val", F.col("_tp") * F.col("_qty_val"))
-        # t_chrg: normally 0.01-0.5% of trade value; 0.01% chance of invalid (1-1000%)
+        # t_chrg / t_comm: 0.01-0.5% of trade value. We intentionally do NOT
+        # inject DQ-invalid values (charge/commission > trade value). See
+        # project_no_dq_injection memory: DIGen's purposeful DQ injection is
+        # out of scope; our audit reports 0 T_InvalidCharge/Commision which
+        # matches our ETL emitting 0 alerts.
         .withColumn("t_chrg", F.format_string("%.2f",
-            F.when(hash_key(F.col("t_id"), seed_for("T", "chrg_inv")) % 10000 < 1,
-                F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "chrg_hi")) % 1000 + 1) / 100.0)
-            .otherwise(
-                F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "chrg")) % 50 + 1) / 10000.0)))
-        # t_comm: normally 0.01-0.5% of trade value; 0.01% chance of invalid (1-1000%)
+            F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "chrg")) % 50 + 1) / 10000.0))
         .withColumn("t_comm", F.format_string("%.2f",
-            F.when(hash_key(F.col("t_id"), seed_for("T", "comm_inv")) % 10000 < 1,
-                F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "comm_hi")) % 1000 + 1) / 100.0)
-            .otherwise(
-                F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "comm")) % 50 + 1) / 10000.0)))
+            F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "comm")) % 50 + 1) / 10000.0))
         # t_tax: 5-40% of trade value
         .withColumn("t_tax", F.format_string("%.2f", F.col("_trade_val") * (hash_key(F.col("t_id"), seed_for("T", "tax")) % 36 + 5) / 100.0))
         # --- Cancellation: only limit orders can cancel, at a 10% rate ---
         .withColumn("_is_canceled",
             F.when(F.col("_is_limit"), hash_key(F.col("t_id"), seed_for("T", "cncl")) % 100 < 10).otherwise(F.lit(False)))
         # --- Temporal offsets for the state machine transitions ---
-        # Limit orders wait 0-90 days before submission; market orders submit immediately
+        # Limit orders wait 1-90 days before submission; market orders submit
+        # immediately. The +1 ensures _submit_ts is strictly greater than
+        # _base_ts for limit orders — otherwise TH's th1 (PNDG at _base_ts)
+        # and th2 (CNCL/SBMT at _submit_ts) share a timestamp and the
+        # DimTrade silver's max_by(struct(th_dts, status)) ties non-
+        # deterministically. 'PNDG' sorts after 'CNCL' alphabetically so
+        # a canceled trade gets its status picked as PNDG, silently breaking
+        # the 'DimTrade canceled trades' audit check at higher scale factors
+        # where the 1/7776000 collision probability bites.
         .withColumn("_submit_offset",
-            F.when(F.col("_is_limit"), hash_key(F.col("t_id"), seed_for("T", "sub")) % 7776000).otherwise(F.lit(0)))
+            F.when(F.col("_is_limit"), hash_key(F.col("t_id"), seed_for("T", "sub")) % 7776000 + 1).otherwise(F.lit(0)))
         .withColumn("_submit_ts", F.col("_base_ts") + F.col("_submit_offset"))
         # Completion happens 0-300 seconds after submission
         # +1 to the modulo so _complete_ts is strictly greater than _submit_ts.
@@ -362,11 +336,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     ).withColumn("t_ca_id", F.col("_valid_ca_id"))
 
 
-    # Join broker full names for t_exec_name (reconstructed from HR dictionaries)
-    trade_df = trade_df.join(
-        broker_names, on="_broker_idx", how="left"
-    ).withColumn("t_exec_name", F.col("broker_name"))
-
+    # t_exec_name is computed lazily at write time (inline dict_joins on the
+    # already-present _broker_idx column) — see write_trade() below. Avoids
+    # staging ~26 GB of broker_name strings at SF=5000 and skips a 1.33B × 7.5M
+    # shuffle-hash join that the pre-fix code issued here.
 
     # ct_name: pseudo-random transaction description string for CashTransaction.
     # Length is 10-100 chars; content is generated by MD5-hashing the trade ID
@@ -392,8 +365,22 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     # === Write all 4 output tables ===
     def write_trade():
-        """Write Trade.txt — one row per trade with status at batch cutoff."""
-        out = trade_df.select(
+        """Write Trade.txt — one row per trade with status at batch cutoff.
+
+        t_exec_name (broker full name) is computed here inline via dict_joins
+        on _broker_idx rather than joining a 7.5M-row broker_names table
+        (which required a shuffle-hash join at SF=5000+ and inflated the
+        trade_df parquet stage by ~26 GB). The HR name dictionaries are
+        small (<300 KB combined) and auto-broadcast.
+        """
+        from .utils import dict_count
+        tx = trade_df
+        tx = tx.withColumn("_bk_fn_hash", hash_key(F.col("_broker_idx").cast("long"), seed_for("T", "bk_fn")) % F.lit(dict_count("hr_given_names")))
+        tx = tx.withColumn("_bk_ln_hash", hash_key(F.col("_broker_idx").cast("long"), seed_for("T", "bk_ln")) % F.lit(dict_count("hr_family_names")))
+        tx = dict_join(tx, "hr_given_names",  F.col("_bk_fn_hash"), "_bk_first")
+        tx = dict_join(tx, "hr_family_names", F.col("_bk_ln_hash"), "_bk_last")
+        tx = tx.withColumn("t_exec_name", F.concat(F.col("_bk_first"), F.lit(" "), F.col("_bk_last")))
+        out = tx.select(
             F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
@@ -434,18 +421,61 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("th_dts", F.date_format(F.col("_submit_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
             .withColumn("th_st_id", F.when(F.col("_is_canceled"), F.lit("CNCL")).otherwise(F.lit("SBMT")))
             .select("th_t_id", "th_dts", "th_st_id"))
-        # Row 3: Completion for non-canceled trades (only if completed before cutoff)
+        # Row 3: Completion for non-canceled trades (only if completed strictly
+        # before cutoff). Must use `<` (not `<=`) to match hh_b1's filter —
+        # otherwise a trade with _complete_ts == cutoff produces a CMPT TH row
+        # in B1 AND lands in _hh_hist_batch2 (which uses `>= cutoff`), causing
+        # the B2 incremental MERGE to INSERT a duplicate DimTrade row (the
+        # existing B1 row's sk_closedateid is set, failing the MERGE's
+        # `ON t.sk_closedateid IS NULL` predicate). Seen at SF=5000+ as rare
+        # (~4 trades) duplicate tradeids breaking DimTrade distinct-keys audit.
         th3 = (trade_df
-            .filter(~F.col("_is_canceled") & (F.col("_complete_ts") <= cutoff_ts))
+            .filter(~F.col("_is_canceled") & (F.col("_complete_ts") < cutoff_ts))
             .withColumn("th_t_id", F.col("t_id").cast("string"))
             .withColumn("th_dts", F.date_format(F.col("_complete_ts").cast("timestamp"), "yyyy-MM-dd HH:mm:ss"))
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        th_count = th_df.count()
         write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
-        return {("TradeHistory", 1): th_count}
+        # Analytical estimates for DimTradeHistory counts — always returned so
+        # the main-path log reports consistent values. Per DIGen's trade-type
+        # distribution: TLB/TLS = 30% each (limit orders), TMB/TMS = 20% each.
+        # TH rows per trade: limit orders average 2.9 (PNDG + SBMT/CNCL + CMPT if
+        # not canceled), market orders 2 (PNDG + CMPT). Canceled = 10% of limits.
+        tt = cfg.trade_total
+        est = {
+            ("TradeHistory", 1):       int(tt * 2.54),
+            ("TH_Records", 1):         int(tt * 2.54),
+            ("TH_TLBTrades", 1):       int(tt * 0.87),
+            ("TH_TLSTrades", 1):       int(tt * 0.87),
+            ("TH_TMBTrades", 1):       int(tt * 0.4),
+            ("TH_TMSTrades", 1):       int(tt * 0.4),
+            ("TH_CanceledLTrades", 1): int(tt * 0.06),
+        }
+        if static_audits_available(cfg):
+            return est  # static audit CSV handles exact values; estimates for log only
+        # Dynamic audit regeneration path: compute exact counts (3-5 min scan
+        # over ~2-3B TH rows at SF=5000+). Only runs for unknown SFs.
+        th_with_type = th_df.join(
+            F.broadcast(trade_df.select(
+                F.col("t_id").cast("string").alias("th_t_id"),
+                F.col("t_tt_id"),
+                F.col("_is_canceled"))),
+            on="th_t_id", how="left")
+        th_by_type = th_with_type.groupBy("t_tt_id").count().collect()
+        tt_counts = {r["t_tt_id"]: r["count"] for r in th_by_type}
+        th_total = sum(tt_counts.values())
+        th_cncl_count = th_with_type.filter(F.col("th_st_id") == "CNCL").count()
+        return {
+            ("TradeHistory", 1):       th_total,
+            ("TH_Records", 1):         th_total,
+            ("TH_TLBTrades", 1):       tt_counts.get("TLB", 0),
+            ("TH_TLSTrades", 1):       tt_counts.get("TLS", 0),
+            ("TH_TMBTrades", 1):       tt_counts.get("TMB", 0),
+            ("TH_TMSTrades", 1):       tt_counts.get("TMS", 0),
+            ("TH_CanceledLTrades", 1): th_cncl_count,
+        }
 
     def write_cash_transaction():
         """Write CashTransaction.txt for Batch1 AND Batch2/3.
@@ -471,17 +501,24 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # would appear in both batches and the FactCashBalances pipeline would
         # emit two rows for one source pair.
         ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        ct_count = ct_b1.count()
         write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
                    scale_factor=cfg.sf)
 
-        # Batch2/3: settlement after cutoff — save as temp views for writing in
-        # _gen_incremental_trades.
-        counts_ct = {("CashTransaction", 1): ct_count}
+        # Analytical B1 estimate: CT = one per non-canceled trade that settled
+        # before cutoff. ~94% non-canceled × ~99.7% settled-before-cutoff.
+        tt = cfg.trade_total
+        ct_count_est = int(tt * 0.94 * 0.997)
+        counts_ct = {
+            ("CashTransaction", 1): ct_count_est,
+            ("CT_Records", 1):      ct_count_est,
+            ("CT_Trades", 1):       ct_count_est,
+        }
+
+        # Batch2/3 incremental temp views (views are required for downstream
+        # incremental Trade writes — the temp view creation itself is lazy).
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
             b_start = batch_cutoff_s + (b - 2) * 86400
             b_end = batch_cutoff_s + (b - 1) * 86400
-            # Half-open [b_start, b_end) — no boundary overlap with Batch 1 or adjacent batches.
             ct_inc = (ct_base
                 .filter((F.col("_cash_ts") >= F.lit(b_start).cast("long")) &
                         (F.col("_cash_ts") < F.lit(b_end).cast("long")))
@@ -489,6 +526,24 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "ct_ca_id", "ct_dts", "ct_amt", "ct_name"))
             ct_inc.createOrReplaceTempView(f"_ct_hist_batch{b}")
+
+        if static_audits_available(cfg):
+            # Estimate incremental CT ≈ trade_inc × non-canceled pct
+            ct_inc_est = int(cfg.trade_inc * 0.94)
+            for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
+                counts_ct[("CT_Records", b)] = ct_inc_est
+                counts_ct[("CT_Trades", b)]  = ct_inc_est
+            return counts_ct
+
+        # Dynamic audit regeneration — need exact per-batch counts
+        ct_count = ct_b1.count()
+        counts_ct[("CashTransaction", 1)] = ct_count
+        counts_ct[("CT_Records", 1)] = ct_count
+        counts_ct[("CT_Trades", 1)] = ct_count
+        for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
+            ct_inc_count = spark.table(f"_ct_hist_batch{b}").count()
+            counts_ct[("CT_Records", b)] = ct_inc_count
+            counts_ct[("CT_Trades", b)]  = ct_inc_count
         return counts_ct
 
     def write_holding_history():
@@ -521,12 +576,17 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
         # Batch1: completed strictly before cutoff (half-open — matches CT logic).
         hh_b1 = hh_base.filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        hh_count = hh_b1.count()
         write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
                    scale_factor=cfg.sf)
+        # Analytical estimate: HH = one per non-canceled trade completed before
+        # cutoff (same as CT).
+        hh_count = int(cfg.trade_total * 0.94 * 0.997) if static_audits_available(cfg) else hh_b1.count()
 
         # Batch2/3: completed after cutoff — save as temp views for writing in
-        # _gen_incremental_trades.
+        # _gen_incremental_trades. Also save SBMT/CNCL transition views
+        # (trades whose _submit_ts falls in the batch window — these produce
+        # PNDG→SBMT or PNDG→CNCL U rows in incremental Trade.txt, closing
+        # the DimTrade T_Records B2/B3 -40% drift vs DIGen.
         hh_est = int(cfg.trade_total * 0.927)
         counts_hh = {("HoldingHistory", 1): hh_count}
         for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
@@ -540,6 +600,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
                 .withColumn("cdc_dsn", F.monotonically_increasing_id() + 1)
                 .select("cdc_flag", "cdc_dsn", "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
             hh_inc.createOrReplaceTempView(f"_hh_hist_batch{b}")
+
+            # Trades (limit orders) with _submit_ts in this batch window.
+            # Each emits a PNDG→SBMT (or PNDG→CNCL) U row in Trade.txt.
+            # Note: keep (t_id, _is_canceled) columns; other fields are
+            # generated fresh in _gen_incremental_trades (matching the
+            # existing CMPT-U behavior of using hash-based field values).
+            sub_inc = (trade_df
+                .filter(F.col("_is_limit") &
+                        (F.col("_submit_ts") >= F.lit(b_start).cast("long")) &
+                        (F.col("_submit_ts") < F.lit(b_end).cast("long")))
+                .select(F.col("t_id"), F.col("_is_canceled")))
+            sub_inc.createOrReplaceTempView(f"_t_submit_hist_batch{b}")
         return counts_hh
 
     counts = {}
@@ -559,28 +631,49 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         f"CT: ~{counts.get(('CashTransaction',1),0):,}, HH: ~{counts.get(('HoldingHistory',1),0):,}")
 
     # Per-DIGen Trade_audit.csv: T_NEW / T_CanceledTrades / T_InvalidCharge /
-    # T_InvalidCommision. One extra scan over the staged trade_df (cheap —
-    # it's already on disk). The invalid-charge/commission filters mirror
-    # DIGen's check: count where the actual monetary amount exceeds the
-    # gross trade value.
-    _inv_row = trade_df.select(
-        F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("cncl"),
-        F.sum(F.when(F.col("t_chrg").cast("double") > F.col("_trade_val"), 1).otherwise(0)).alias("bad_chrg"),
-        F.sum(F.when(F.col("t_comm").cast("double") > F.col("_trade_val"), 1).otherwise(0)).alias("bad_comm"),
-    ).collect()[0]
-    counts[("T_CanceledTrades", 1)] = _inv_row["cncl"] or 0
-    counts[("T_InvalidCharge", 1)] = _inv_row["bad_chrg"] or 0
-    counts[("T_InvalidCommision", 1)] = _inv_row["bad_comm"] or 0  # sic — DIGen typo
+    # T_InvalidCommision. Analytical estimates used for the log line below and
+    # as defaults for the audit CSV; when no static snapshot is available for
+    # this SF we fall back to exact scans over staged trade_df.
+    # Canceled = 10% of limit orders = 6% of trade_total (deterministic hash).
+    # Invalid charge/commission = 0 (we don't inject DQ per project memory).
+    counts[("T_CanceledTrades", 1)]    = int(cfg.trade_total * 0.06)
+    counts[("T_InvalidCharge", 1)]     = 0
+    counts[("T_InvalidCommision", 1)]  = 0  # sic — DIGen typo
+
+    if not static_audits_available(cfg):
+        # Dynamic audit regeneration: exact scans for unknown SFs.
+        # Use rounded t_trade_price * t_qty (not raw _trade_val = _tp * _qty) to
+        # match the ETL's DimTrade alert check exactly.
+        _tp_x_qty = F.col("t_trade_price").cast("double") * F.col("t_qty").cast("double")
+        # Exclude trades updated in B2/B3 via the incremental DimTrade MERGE —
+        # those overwrite comm/chrg with valid values, so counting them here
+        # would over-count T_Invalid*.
+        updated_tids = (
+            spark.table("_hh_hist_batch2").select(F.col("hh_t_id").alias("_upd_t_id"))
+            .unionByName(spark.table("_hh_hist_batch3").select(F.col("hh_t_id").alias("_upd_t_id")))
+            .unionByName(spark.table("_t_submit_hist_batch2").select(F.col("t_id").cast("string").alias("_upd_t_id")))
+            .unionByName(spark.table("_t_submit_hist_batch3").select(F.col("t_id").cast("string").alias("_upd_t_id")))
+            .distinct()
+        )
+        _surv = trade_df.join(F.broadcast(updated_tids),
+                              F.col("t_id") == F.col("_upd_t_id"), "left_anti")
+        _inv_row = trade_df.select(
+            F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("cncl"),
+        ).collect()[0]
+        _bad_row = _surv.select(
+            F.sum(F.when(F.col("t_chrg").cast("double") > _tp_x_qty, 1).otherwise(0)).alias("bad_chrg"),
+            F.sum(F.when(F.col("t_comm").cast("double") > _tp_x_qty, 1).otherwise(0)).alias("bad_comm"),
+        ).collect()[0]
+        counts[("T_CanceledTrades", 1)]   = _inv_row["cncl"] or 0
+        counts[("T_InvalidCharge", 1)]    = _bad_row["bad_chrg"] or 0
+        counts[("T_InvalidCommision", 1)] = _bad_row["bad_comm"] or 0
+
     log(f"[Trade] Audit counts — canceled: {counts[('T_CanceledTrades',1)]:,}, "
         f"invalid_charge: {counts[('T_InvalidCharge',1)]:,}, "
         f"invalid_commission: {counts[('T_InvalidCommision',1)]:,}")
 
-    # Kick off a background bulk_copy_all to drain the large Batch1 Trade/TH/CT/HH
-    # part files while the incremental batches run. Reduces end-of-run
-    # orchestrator copy time substantially since most parts finish copying
-    # before the final bulk_copy_all is invoked.
-    threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after Trade historical"),
-                     daemon=True).start()
+    # Per-dataset async copies are kicked off inside each write_file; no
+    # explicit post-historical drain is needed.
 
     # Do not unpersist trade_df here — _ct_hist_batch{2,3} and _hh_hist_batch{2,3}
     # temp views are lazy filters over trade_df and are consumed by
@@ -653,42 +746,98 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     # Trade.txt U rows. Source: _hh_hist_batch{N} (CMPT transitions;
     # trades that complete in this batch window) — exactly the set that
     # HoldingHistory.txt and CashTransaction.txt reference.
-    trans_tids = (spark.table(f"_hh_hist_batch{batch_id}")
+    # Helper: build a U-row DataFrame from a set of (t_id, status) pairs.
+    # All U rows share the same hash-based field generation pattern; only
+    # t_id, t_st_id, and t_dts differ per source.
+    # t_dts offsets are chosen so DimTrade Incremental's max_by ordering
+    # places later-lifecycle transitions AFTER earlier ones for the same
+    # trade (a historical limit order that both submits and completes in
+    # the same batch window produces both an SBMT U row and a CMPT U row —
+    # without distinct timestamps, max_by ties and may pick SBMT, leaving
+    # sk_closedateid NULL and breaking FactHoldings SK_*/CurrentTradeID).
+    def _build_u_rows(tids_df, status_col, t_dts_str, dsn_offset, bs_offset):
+        return (tids_df
+            .withColumn("rid", F.row_number().over(Window.orderBy("t_id")) - F.lit(1))
+            .withColumn("cdc_flag", F.lit("U"))
+            .withColumn("cdc_dsn", (F.col("rid") + F.lit(dsn_offset) + 1).cast("string"))
+            .withColumn("t_tt_id",
+                F.when(hash_key(F.col("rid"), bs + bs_offset) % 100 < 30, F.lit("TLB"))
+                 .when(hash_key(F.col("rid"), bs + bs_offset) % 100 < 60, F.lit("TLS"))
+                 .when(hash_key(F.col("rid"), bs + bs_offset) % 100 < 80, F.lit("TMB"))
+                 .otherwise(F.lit("TMS")))
+            .withColumn("t_st_id", status_col)
+            .withColumn("t_dts", F.lit(t_dts_str))
+            .withColumn("t_is_cash", F.when(hash_key(F.col("rid"), bs + bs_offset + 2) % 100 < 20, F.lit("1")).otherwise(F.lit("0")))
+            .withColumn("_sym_idx", hash_key(F.col("rid"), bs + bs_offset + 3) % num_sec)
+            .withColumn("t_qty", (hash_key(F.col("rid"), bs + bs_offset + 4) % 9991 + 10).cast("string"))
+            .withColumn("t_bid_price", F.format_string("%.2f", (hash_key(F.col("rid"), bs + bs_offset + 5) % 900 + 101) / 100.0))
+            .withColumn("_va_idx", hash_key(F.col("rid"), bs + bs_offset + 6) % F.lit(n_valid))
+            .withColumn("_tp", (hash_key(F.col("rid"), bs + bs_offset + 5) % 900 + 101) / 100.0)
+            .withColumn("t_trade_price", F.format_string("%.2f", F.col("_tp")))
+            .withColumn("t_chrg", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + bs_offset + 7) % 50 + 1) / 10000.0))
+            .withColumn("t_comm", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + bs_offset + 8) % 50 + 1) / 10000.0))
+            .withColumn("t_tax", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + bs_offset + 9) % 36 + 5) / 100.0))
+            .withColumn("_broker_idx", hash_key(F.col("rid"), bs + bs_offset + 10) % F.lit(n_brokers)))
+
+    # t_dts offsets per transition type so max_by in DimTrade Incremental
+    # picks CMPT over SBMT for same-batch transitions. Order: I (new trade,
+    # midnight) < SBMT U (01s) < CNCL U (02s) < CMPT U (03s) < new-market
+    # CMPT U (04s). new-market CMPT has the latest t_dts so its CMPT wins
+    # over the I row's SBMT status.
+    t_dts_sbmt = f"{batch_date_str} 00:00:01"
+    t_dts_cncl = f"{batch_date_str} 00:00:02"
+    t_dts_cmpt = f"{batch_date_str} 00:00:03"
+
+    # CMPT transitions: trades completing in batch window (from _hh_hist_batch).
+    cmpt_tids = (spark.table(f"_hh_hist_batch{batch_id}")
         .select(F.col("hh_t_id").alias("t_id"))
         .distinct())
-    # Use row_number for deterministic rid assignment within the batch.
-    trans_tids = trans_tids.withColumn(
-        "rid", F.row_number().over(Window.orderBy("t_id")) - F.lit(1))
-    upd_df = (trans_tids
-        .withColumn("cdc_flag", F.lit("U"))
-        .withColumn("cdc_dsn", (F.col("rid") + n_new + 1).cast("string"))
-        .withColumn("t_tt_id",
-            F.when(hash_key(F.col("rid"), bs + 21) % 100 < 30, F.lit("TLB"))
-             .when(hash_key(F.col("rid"), bs + 21) % 100 < 60, F.lit("TLS"))
-             .when(hash_key(F.col("rid"), bs + 21) % 100 < 80, F.lit("TMB"))
-             .otherwise(F.lit("TMS")))
-        # These trades reached CMPT in the batch window (by definition of
-        # _hh_hist_batch). They are not canceled.
-        .withColumn("t_st_id", F.lit("CMPT"))
-        .withColumn("t_dts", F.lit(batch_date_str))
-        .withColumn("t_is_cash", F.when(hash_key(F.col("rid"), bs + 23) % 100 < 20, F.lit("1")).otherwise(F.lit("0")))
-        .withColumn("_sym_idx", hash_key(F.col("rid"), bs + 24) % num_sec)
-        .withColumn("t_qty", (hash_key(F.col("rid"), bs + 25) % 9991 + 10).cast("string"))
-        .withColumn("t_bid_price", F.format_string("%.2f", (hash_key(F.col("rid"), bs + 26) % 900 + 101) / 100.0))
-        .withColumn("_va_idx", hash_key(F.col("rid"), bs + 27) % F.lit(n_valid))
-        .withColumn("_tp", (hash_key(F.col("rid"), bs + 26) % 900 + 101) / 100.0)
-        .withColumn("t_trade_price", F.format_string("%.2f", F.col("_tp")))
-        .withColumn("t_chrg", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + 33) % 50 + 1) / 10000.0))
-        .withColumn("t_comm", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + 34) % 50 + 1) / 10000.0))
-        .withColumn("t_tax", F.format_string("%.2f", F.col("_tp") * (hash_key(F.col("rid"), bs + 35) % 36 + 5) / 100.0))
-        .withColumn("_broker_idx", hash_key(F.col("rid"), bs + 28) % F.lit(n_brokers))
-    )
+    upd_cmpt = _build_u_rows(cmpt_tids, F.lit("CMPT"), t_dts_cmpt,
+                             dsn_offset=n_new, bs_offset=21)
 
-    # Union inserts and updates into a single CDC output
+    # SBMT / CNCL transitions: limit orders whose _submit_ts falls in this
+    # batch window (from _t_submit_hist_batch). Each emits one U row with
+    # t_st_id=SBMT (non-canceled) or t_st_id=CNCL (canceled). This closes
+    # the DimTrade T_Records B2/B3 -40% drift vs DIGen.
+    submit_df = spark.table(f"_t_submit_hist_batch{batch_id}")
+    sbmt_tids = submit_df.filter(~F.col("_is_canceled")).select(F.col("t_id"))
+    cncl_tids = submit_df.filter(F.col("_is_canceled")).select(F.col("t_id"))
+    # DSN offsets keep each source's rids in distinct ranges (n_new is an
+    # upper bound of I rows; upd_cmpt gets [n_new, n_new+2M]; sbmt gets
+    # [n_new+2M, ...]; cncl gets [n_new+3M, ...]). Exact non-overlap is
+    # not required since the ETL doesn't rely on cdc_dsn ordering — only
+    # that each row is a distinct CDC event.
+    upd_sbmt = _build_u_rows(sbmt_tids, F.lit("SBMT"), t_dts_sbmt,
+                             dsn_offset=n_new + 2_000_000, bs_offset=50)
+    upd_cncl = _build_u_rows(cncl_tids, F.lit("CNCL"), t_dts_cncl,
+                             dsn_offset=n_new + 3_000_000, bs_offset=70)
+
+    # New market orders (TMB/TMS) complete same-day. Emit a CMPT U row per
+    # such trade (paired with the SBMT I row already in new_df). These close
+    # the FactHoldings HH_RECORDS -46% drift vs DIGen at B2/B3 and the
+    # corresponding chunk of T_Records drift.
+    # t_dts uses the t_dts_cmpt offset so DimTrade Incremental's max_by
+    # deterministically picks this CMPT U row over the SBMT I row (which
+    # sits at batch_date midnight).
+    new_market_cmpt = (new_df.filter(F.col("t_tt_id").isin("TMB", "TMS"))
+        .withColumn("cdc_flag", F.lit("U"))
+        .withColumn("t_st_id", F.lit("CMPT"))
+        .withColumn("t_dts", F.lit(t_dts_cmpt))
+        # Keep all other fields (t_id, symbols, prices, etc.) so the U row
+        # reflects the same trade; only cdc_flag/t_st_id/t_dts differ from
+        # the SBMT I row. cdc_dsn is offset into a fresh range to keep DSNs
+        # locally unique without risking collision with I / other U rows.
+        .withColumn("cdc_dsn", (F.col("rid") + F.lit(n_new + 4_000_000) + 1).cast("string")))
+
+    # Union all inserts and updates into a single CDC output.
     common_cols = ["cdc_flag", "cdc_dsn", "t_id", "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
                    "_sym_idx", "t_qty", "t_bid_price", "_va_idx", "_tp", "_broker_idx",
                    "t_trade_price", "t_chrg", "t_comm", "t_tax"]
-    inc_df = new_df.select(*common_cols).union(upd_df.select(*common_cols))
+    inc_df = (new_df.select(*common_cols)
+        .union(upd_cmpt.select(*common_cols))
+        .union(upd_sbmt.select(*common_cols))
+        .union(upd_cncl.select(*common_cols))
+        .union(new_market_cmpt.select(*common_cols)))
 
     # Join symbol with temporal validity (same as historical trades).
     # Incremental trades are at batch_date (~2017-07-08), so most symbols are active,
@@ -714,9 +863,15 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     # Join valid (non-closed) account
     inc_df = inc_df.join(valid_accts, on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
 
-    # Join broker name from shared cached lookup
-    broker_names = shared["broker_names"]
-    inc_df = inc_df.join(broker_names, on="_broker_idx", how="left").withColumn("t_exec_name", F.col("broker_name"))
+    # Derive t_exec_name inline from _broker_idx — same pattern as historical
+    # write_trade. HR name dicts auto-broadcast; no intermediate broker_names
+    # table needed.
+    from .utils import dict_count
+    inc_df = inc_df.withColumn("_bk_fn_hash", hash_key(F.col("_broker_idx").cast("long"), seed_for("T", "bk_fn")) % F.lit(dict_count("hr_given_names")))
+    inc_df = inc_df.withColumn("_bk_ln_hash", hash_key(F.col("_broker_idx").cast("long"), seed_for("T", "bk_ln")) % F.lit(dict_count("hr_family_names")))
+    inc_df = dict_join(inc_df, "hr_given_names",  F.col("_bk_fn_hash"), "_bk_first")
+    inc_df = dict_join(inc_df, "hr_family_names", F.col("_bk_ln_hash"), "_bk_last")
+    inc_df = inc_df.withColumn("t_exec_name", F.concat(F.col("_bk_first"), F.lit(" "), F.col("_bk_last")))
 
     # Final column selection: CDC columns first, then standard trade columns
     inc_df = inc_df.select(
@@ -724,36 +879,65 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
         "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
         "t_trade_price", "t_chrg", "t_comm", "t_tax")
 
-    # Per-DIGen Trade-Audit (incremental batches): aggregate from the final
-    # written data since inc_df's row count is now input-dependent (U rows
-    # come from _hh_hist_batch so their cardinality varies per batch).
-    _trade_agg = inc_df.select(
-        F.count("*").alias("t_total"),
-        F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("t_new"),
-        F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("t_cncl"),
-    ).collect()[0]
-    inc_total = _trade_agg["t_total"] or 0
+    # Analytical estimates for Trade-Audit (incremental batches):
+    #   t_new ≈ cfg.trade_inc_new; t_total = n_new + n_update
+    #   t_cncl ≈ 10% of limit-order U rows; invalid = 0
+    t_new_est = cfg.trade_inc_new
+    t_total_est = inc_trades  # n_new + n_update
+    t_cncl_est = int(n_update * 0.6 * 0.1)  # limit-order U rows canceled
     write_file(inc_df, f"{bp}/Trade.txt", "|", dbutils, scale_factor=cfg.sf)
 
-    # CashTransaction and HoldingHistory from historical routing only.
-    # DIGen generates all trades in a unified pass and routes CT/HH by timestamp.
-    # Our historical generator replicates this — trades completing/settling after
-    # the cutoff are routed to Batch2/3 via temp views.
     ct_batch = spark.table(f"_ct_hist_batch{batch_id}")
     hh_batch = spark.table(f"_hh_hist_batch{batch_id}")
 
-    ct_count = ct_batch.count()
-    hh_count = hh_batch.count()
-    write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
-    write_file(hh_batch, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+    # HH rows for new market orders completing same-day.
+    new_market_hh = (new_df.filter(F.col("t_tt_id").isin("TMB", "TMS"))
+        .withColumn("hh_t_id", F.col("t_id"))
+        .withColumn("_is_buy", F.col("t_tt_id") == "TMB")
+        .withColumn("hh_h_t_id",
+            F.when(F.col("_is_buy"), F.col("t_id"))
+             .otherwise((hash_key(F.col("t_id").cast("long"), seed_for("T", "hh_ref")) %
+                 F.greatest(F.lit(1), F.col("t_id").cast("long"))).cast("string")))
+        .withColumn("hh_before_qty", F.when(F.col("_is_buy"), F.lit("0")).otherwise(F.col("t_qty")))
+        .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0")))
+        .withColumn("cdc_flag", F.lit("I"))
+        .withColumn("cdc_dsn_hh", (F.col("rid") + F.lit(10_000_000)).cast("bigint"))
+        .select("cdc_flag", F.col("cdc_dsn_hh").alias("cdc_dsn"),
+                "hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty"))
 
-    log(f"[Trade] Batch{batch_id}: {inc_total} ({_trade_agg['t_new']} I, {inc_total - (_trade_agg['t_new'] or 0)} U), CT: {ct_count}, HH: {hh_count}")
+    hh_combined = hh_batch.unionByName(new_market_hh)
+    write_file(ct_batch, f"{bp}/CashTransaction.txt", "|", dbutils, scale_factor=cfg.sf)
+    write_file(hh_combined, f"{bp}/HoldingHistory.txt", "|", dbutils, scale_factor=cfg.sf)
+
+    # CT/HH batch estimates: one CT per non-canceled trade in batch, similar for HH.
+    ct_count = int(inc_trades * 0.94)
+    hh_count = int(inc_trades * 0.94)
+    log(f"[Trade] Batch{batch_id}: {t_total_est:,} ({t_new_est:,} I, {t_total_est - t_new_est:,} U), CT: ~{ct_count:,}, HH: ~{hh_count:,}")
+
+    if not static_audits_available(cfg):
+        # Dynamic audit regeneration — compute exact counts.
+        _trade_agg = inc_df.select(
+            F.count("*").alias("t_total"),
+            F.sum(F.when(F.col("cdc_flag") == "I", 1).otherwise(0)).alias("t_new"),
+            F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("t_cncl"),
+        ).collect()[0]
+        ct_count = ct_batch.count()
+        hh_count = hh_combined.count()
+        return {
+            ("Trade", batch_id): _trade_agg["t_total"] or 0,
+            ("CashTransaction", batch_id): ct_count,
+            ("HoldingHistory", batch_id): hh_count,
+            ("TI_NEW", batch_id):              _trade_agg["t_new"] or 0,
+            ("TI_CanceledTrades", batch_id):   _trade_agg["t_cncl"] or 0,
+            ("TI_InvalidCharge", batch_id):    0,
+            ("TI_InvalidCommision", batch_id): 0,
+        }
     return {
-        ("Trade", batch_id): inc_total,
+        ("Trade", batch_id): t_total_est,
         ("CashTransaction", batch_id): ct_count,
         ("HoldingHistory", batch_id): hh_count,
-        ("TI_NEW", batch_id):              _trade_agg["t_new"] or 0,
-        ("TI_CanceledTrades", batch_id):   _trade_agg["t_cncl"] or 0,
+        ("TI_NEW", batch_id):              t_new_est,
+        ("TI_CanceledTrades", batch_id):   t_cncl_est,
         ("TI_InvalidCharge", batch_id):    0,
         ("TI_InvalidCommision", batch_id): 0,
     }

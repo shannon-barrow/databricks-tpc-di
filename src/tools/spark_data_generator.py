@@ -51,23 +51,59 @@ def spark_generate():
   Uses variables from the Driver notebook (scale_factor, catalog, tpcdi_directory,
   workspace_src_path) rather than its own widgets.
   """
+  # Inline timestamped logger usable before tpcdi_gen.utils.log is imported.
+  # All early-phase timing goes through this so the gap between cell start and
+  # first `[Reference]` log is visible. Once the utils log is imported, we
+  # prefer that one for level filtering.
+  _t0 = datetime.now(timezone.utc)
+  def _tlog(msg):
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"  {ts} [Init] {msg}")
+
+  _tlog(f"spark_generate() entered (scale_factor={scale_factor}, catalog={catalog})")
+
+  # Raise broadcast-join thresholds. The CustomerMgmt schedule DF alone is
+  # ~180MB at SF=5000 and scales with SF; default (10MB static / 30MB AQE)
+  # forces Spark into shuffle joins that materialize the 25M-row all_df
+  # across executors. Bumping to 200MB lets Spark broadcast the schedule
+  # without the shuffle storm. NB: on Spark Connect / serverless the very
+  # first spark.conf.set() is the first remote call of the session, so
+  # initial JVM + Unity-Catalog session init time is charged here (not to
+  # the catalog-existence check that runs next).
+  _tlog("setting spark.sql.autoBroadcastJoinThreshold=200m (first spark-connect call — warmup)")
+  spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "200m")
+  _tlog("setting spark.databricks.adaptive.autoBroadcastJoinThreshold=200m")
+  spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "200m")
+  _tlog("broadcast-join thresholds set")
+
   blob_out_path = f"{tpcdi_directory}spark_datagen/sf={scale_factor}"
 
   if catalog != 'hive_metastore':
+    _tlog(f"checking catalog '{catalog}' existence")
     catalog_exists = spark.sql(f"SELECT count(*) FROM system.information_schema.tables WHERE table_catalog = '{catalog}'").first()[0] > 0
+    _tlog(f"catalog check complete: exists={catalog_exists}")
     if not catalog_exists:
+      _tlog("creating catalog + granting privileges")
       spark.sql(f"""CREATE CATALOG IF NOT EXISTS {catalog}""")
       spark.sql(f"""GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`""")
+      _tlog("catalog created")
+    _tlog("CREATE DATABASE IF NOT EXISTS tpcdi_raw_data")
     spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data COMMENT 'Schema for TPC-DI Raw Files Volume'")
+    _tlog("CREATE VOLUME IF NOT EXISTS tpcdi_volume")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume COMMENT 'TPC-DI Raw Files'")
+    _tlog("schema + volume ready")
 
+  _tlog(f"dbutils.fs.ls check on {blob_out_path}")
   if _path_exists(blob_out_path):
     if regenerate_data:
-      print(f"Regenerate Data enabled. Deleting existing data at {blob_out_path}")
+      _tlog(f"regenerate_data=YES; recursive delete of prior output begins")
       dbutils.fs.rm(blob_out_path, recurse=True)
+      _tlog("prior output deleted")
     else:
       print(f"Data generation skipped since {blob_out_path} already exists. Set Regenerate Data to YES to overwrite.")
       return
+  else:
+    _tlog("no prior output to delete")
 
   # Import tpcdi_gen module.
   # Clear any previously cached module imports to pick up code changes.
@@ -75,6 +111,7 @@ def spark_generate():
   _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
   _vol_tools_dir = f"{_vol_module_dir}/tools"
 
+  _tlog("clearing stale sys.modules['tpcdi_gen.*'] entries")
   for _m in list(sys.modules.keys()):
     if _m.startswith("tpcdi_gen"):
       del sys.modules[_m]
@@ -82,6 +119,7 @@ def spark_generate():
   # Try workspace path first (works on SINGLE_USER clusters).
   # Fall back to Volume copy for USER_ISOLATION/SHARED clusters where
   # /Workspace paths aren't accessible via Python file I/O.
+  _tlog("probing workspace path accessibility")
   _ws_accessible = False
   try:
     _ws_accessible = os.path.isdir(f"{_tools_dir}/tpcdi_gen")
@@ -90,9 +128,9 @@ def spark_generate():
 
   if _ws_accessible:
     sys.path.insert(0, _tools_dir)
-    print(f"Module path (workspace): {_tools_dir}/tpcdi_gen")
+    _tlog(f"module source: workspace path {_tools_dir}/tpcdi_gen")
   else:
-    print(f"Workspace not accessible. Copying modules to Volume...")
+    _tlog("workspace path NOT accessible; copying module to volume")
     _ws_tpcdi_gen = f"file:{workspace_src_path}/tools/tpcdi_gen"
     _vol_tpcdi_gen = f"{_vol_module_dir}/tools/tpcdi_gen"
     try:
@@ -109,17 +147,19 @@ def spark_generate():
       except:
         pass
     sys.path.insert(0, _vol_tools_dir)
-    print(f"Module path (volume): {_vol_tools_dir}/tpcdi_gen")
+    _tlog(f"module source: volume copy {_vol_tools_dir}/tpcdi_gen")
 
+  _tlog("importing tpcdi_gen.config / utils / dictionaries")
   from tpcdi_gen.config import ScaleConfig, NUM_INCREMENTAL_BATCHES
-  from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging, set_log_level
+  from tpcdi_gen.utils import make_output_dirs, register_dict_views, bulk_copy_all, cleanup_staging, set_log_level, wait_for_background_copies, log as _utlog
   from tpcdi_gen import dictionaries
+  _tlog("core imports done")
 
-  # Set log level from widget (defined in Driver notebook), default to INFO
+  # Set log level from widget
   try:
       set_log_level(dbutils.widgets.get("log_level"))
   except:
-      set_log_level("INFO")
+      set_log_level("DEBUG")
 
   cfg = ScaleConfig(int(scale_factor), catalog)
   gen_start_time = datetime.now(tz=timezone.utc)
@@ -129,17 +169,22 @@ def spark_generate():
   print(f"Scale Factor: {scale_factor} ")
   print(f"Output: {cfg.volume_path}")
 
-  # Clean previous output to prevent stale files
+  # Second recursive delete (redundant with the first one above, but harmless
+  # since the first already cleaned anything present).
+  _utlog(f"[Init] redundant cleanup of {cfg.volume_path}", "DEBUG")
   try:
     dbutils.fs.rm(cfg.volume_path, recurse=True)
-    print(f"Cleaned previous output at {cfg.volume_path}")
   except:
     pass
+  _utlog("[Init] output dir cleaned", "DEBUG")
 
-  # Initialize
+  _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
   make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
+  _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
   dicts = dictionaries.load_all()
+  _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")
   register_dict_views(spark, dicts)
+  _utlog("[Init] dictionary views registered", "DEBUG")
 
   # ================================================================
   # Dependency-graph scheduling: each dataset starts as soon as its
@@ -168,11 +213,18 @@ def spark_generate():
   print("DEPENDENCY-GRAPH SCHEDULING")
   print("=" * 60)
 
+  # Event signaled by FINWIRE as soon as _symbols is materialized to parquet.
+  # DailyMarket, WatchHistory, Trade wait on THIS instead of f_fw.result(), so
+  # they start ~2-3 min into FINWIRE (after SEC/_symbols is done) instead of
+  # waiting for the full 10-25 min CMP+FIN union+text write at SF=5000+.
+  fw_symbols_ready = threading.Event()
+
   with concurrent.futures.ThreadPoolExecutor(max_workers=12) as executor:
     # --- Tier 0: No dependencies (start immediately) ---
     f_ref = executor.submit(reference_tables.generate_all, spark, cfg, dicts, dbutils)
     f_hr = executor.submit(hr.generate, spark, cfg, dicts, dbutils)
-    f_fw = executor.submit(finwire.generate, spark, cfg, dicts, dbutils)
+    f_fw = executor.submit(finwire.generate, spark, cfg, dicts, dbutils,
+                           symbols_ready_event=fw_symbols_ready)
     f_prospect = executor.submit(prospect.generate, spark, cfg, dicts, dbutils)
 
     # --- Tier 1: CustomerMgmt (depends on HR) ---
@@ -182,26 +234,26 @@ def spark_generate():
     cust_views_ready = threading.Event()
     def run_customer():
       f_hr.result()  # wait for _brokers
-      threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after HR+Reference"), daemon=True).start()
+      # Per-dataset async copies are kicked off by each write_file; no wave drain needed.
       return customer.generate(spark, cfg, dicts, dbutils, views_ready_event=cust_views_ready)
     f_cust = executor.submit(run_customer)
 
-    # --- Tier 1: Depends on FINWIRE (_symbols) ---
+    # --- Tier 1: Depends on _symbols (wait on event, not full FINWIRE) ---
     def run_watch_history():
-      f_fw.result()  # wait for _symbols
+      fw_symbols_ready.wait()
       return watch_history.generate(spark, cfg, dicts, dbutils)
     f_wh = executor.submit(run_watch_history)
 
     def run_daily_market():
-      f_fw.result()  # wait for _symbols
+      fw_symbols_ready.wait()
       return market_data.generate(spark, cfg, dbutils)
     f_dm = executor.submit(run_daily_market)
 
     # --- Tier 2: Trade starts when views are ready (not full CustomerMgmt) ---
     def run_trade():
       cust_views_ready.wait()  # wait for views only (~4 min into CustomerMgmt)
-      f_fw.result()            # wait for _symbols (likely already done)
-      threading.Thread(target=bulk_copy_all, args=(dbutils, 64, "after CustMgmt views"), daemon=True).start()
+      fw_symbols_ready.wait()  # wait for _symbols (staged parquet)
+      # Per-dataset async copies are kicked off by each write_file; no wave drain needed.
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 
@@ -218,7 +270,11 @@ def spark_generate():
   from tpcdi_gen.utils import log as _log
   _log("[Orchestrator] All data generation complete. Copying files to final locations...")
 
-  # Final copy + cleanup
+  # Final copy + cleanup. Wait for any async copy threads (kicked off e.g.
+  # after Trade historical) to drain before cleanup_staging — otherwise
+  # cleanup can delete staging part files while the background thread is
+  # still copying them, producing PathNotFound and missing final files.
+  wait_for_background_copies()
   bulk_copy_all(dbutils, max_workers=64, label="final")
   _log("[Orchestrator] File copy complete. Cleaning up staging directories...")
   cleanup_staging(cfg.volume_path, dbutils)

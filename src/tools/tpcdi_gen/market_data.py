@@ -45,6 +45,7 @@ from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F
 from .config import *
 from .utils import write_file, seed_for, hash_key, log
+from .audit import static_audits_available
 
 
 def generate(spark: SparkSession, cfg, dbutils) -> dict:
@@ -98,7 +99,6 @@ def _gen_daily_market(spark, cfg, dbutils):
     # _symbols temp view was created by finwire.generate() in Wave 1.
     # Contains: Symbol, creation_quarter, deactivation_quarter, _idx
     symbols_df = spark.table("_symbols")
-    num_sec = symbols_df.count()
 
     # Build symbols with creation/deactivation dates converted from quarter IDs
     # to calendar dates, then clamp to the DailyMarket date window.
@@ -156,11 +156,16 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # Write batch 1 (historical): pipe-delimited flat file
-    dm_count = dm_df.count()
     write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-    counts = {("DailyMarket", 1): dm_count}
-    log(f"[DailyMarket] {dm_count:,} historical ({cfg.dm_days} days × {num_sec} syms, minus deactivations)")
+    # Analytical estimate: sec_total × dm_days × 0.95 (0.95 accounts for symbols
+    # deactivated mid-window on average). Exact count only computed when we
+    # need it for dynamic audit regeneration at an unknown SF.
+    dm_count_est = int(cfg.sec_total * cfg.dm_days * 0.95)
+    counts = {("DailyMarket", 1): dm_count_est}
+    log(f"[DailyMarket] ~{dm_count_est:,} historical ({cfg.dm_days} days × {cfg.sec_total} syms, minus deactivations)")
+    if not static_audits_available(cfg):
+        counts[("DailyMarket", 1)] = dm_df.count()
 
     # --- Incremental batches (batch 2, 3, ...) ---
     # Each incremental batch covers a single calendar day. Only securities whose
@@ -199,9 +204,11 @@ def _gen_daily_market(spark, cfg, dbutils):
                 (F.abs(F.hash(F.col("day_id"), F.col("sym_id"), F.lit(seed_for("DM", "inc_v"))).cast("long")) % 999999001 + 1000).cast("string"))
             .select("cdc_flag", "cdc_dsn", "dm_date", "dm_s_symb", "dm_close", "dm_high", "dm_low", "dm_vol")
         )
-        inc_count = inc_df.count()
         write_file(inc_df, f"{cfg.batch_path(batch_id)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-        counts[("DailyMarket", batch_id)] = inc_count
+        # Per-batch incremental ≈ active symbols on that one day (~sec_total).
+        inc_count_est = int(cfg.sec_total * 0.95)
+        counts[("DailyMarket", batch_id)] = (
+            inc_df.count() if not static_audits_available(cfg) else inc_count_est)
 
     return counts

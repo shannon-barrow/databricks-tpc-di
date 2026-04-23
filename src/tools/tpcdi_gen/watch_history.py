@@ -88,6 +88,7 @@ from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
 from .utils import write_file, seed_for, hash_key, log
+from .audit import static_audits_available
 
 
 # 80% of each update's rows are ACTV (new watches), 20% are CNCL (cancellations).
@@ -228,14 +229,30 @@ def _gen_historical(spark, cfg, dbutils):
     n_cncl = del_pu * total_updates
     wh_total_hist = wh_rpu * total_updates
 
-    # Precompute generation sizes (Python side — only ~435 values)
-    # For each generation g, compute:
-    #   ls, rs         = left/right dimensions at generation g
-    #   prev_ls/rs     = dimensions at generation g-1 (0 for g=0)
-    #   prev_cp        = total cross-product size at g-1 (cumulative pairs before this gen)
-    #   total_cp       = total cross-product size at g (cumulative pairs including this gen)
-    #   new_cp         = new pairs added in this generation = total_cp - prev_cp
-    # new_cp_size(g) = totalSize(g) - totalSize(g-1) = new pairs added in generation g
+    # Precompute generation sizes (Python side — only ~435 values).
+    # Also precompute bijective permutation parameters (b, c) per generation
+    # so each generation's ACTV records map to UNIQUE pair_ids via the LCG
+    # f(x) = (b*x + c) % new_cp_size (DIGen-style). This eliminates the hash
+    # collisions that previously caused ~5-25% WH_ACTIVE drift vs DIGen as
+    # scale grew — each record now gets a distinct pair instead of colliding
+    # with other records' hashes. `b` must be coprime with new_cp_size; we
+    # start from a large odd prime-ish candidate and step until gcd==1.
+    import math as _math
+    import random as _rand
+    _bc_rng = _rand.Random(seed_for("WH", "bcperm"))
+    def _bij_params(modulus: int) -> tuple:
+        if modulus < 3:
+            return 1, 0
+        # Candidate b: random in [1, modulus). Step until coprime with modulus.
+        b = _bc_rng.randrange(1, modulus)
+        # Fast coprimality via gcd; step upward if needed.
+        while _math.gcd(b, modulus) != 1:
+            b += 1
+            if b >= modulus:
+                b = 1
+        c = _bc_rng.randrange(0, modulus)
+        return int(b), int(c)
+
     gen_info = []
     for g in range(total_updates):
         ls = sl + gl * g
@@ -245,12 +262,15 @@ def _gen_historical(spark, cfg, dbutils):
             prev_cp = 0
             prev_ls = 0
             prev_rs = 0
+            modulus = total_cp
         else:
             prev_ls = sl + gl * (g - 1)
             prev_rs = sr + gr * (g - 1)
             prev_cp = prev_ls * prev_rs
+            modulus = total_cp - prev_cp
         new_cp = total_cp - prev_cp
-        gen_info.append((g, ls, rs, prev_ls, prev_rs, prev_cp, total_cp, new_cp))
+        bij_b, bij_c = _bij_params(max(1, modulus))
+        gen_info.append((g, ls, rs, prev_ls, prev_rs, prev_cp, total_cp, new_cp, bij_b, bij_c))
 
     log(f"[WatchHistory] start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}", "DEBUG")
     log(f"[WatchHistory] Per update: {new_pu} ACTV + {del_pu} CNCL = {wh_rpu}, total={wh_total_hist}", "DEBUG")
@@ -268,12 +288,14 @@ def _gen_historical(spark, cfg, dbutils):
 
     # === Build generation lookup as broadcast DataFrame ===
     # This small DataFrame (~435 rows) is broadcast-joined to every WH record
-    # so each record knows its generation's cross-product geometry.
-    gen_rows = [(g, int(ls), int(rs), int(pls), int(prs), int(pcp), int(tcp), int(ncp))
-                for g, ls, rs, pls, prs, pcp, tcp, ncp in gen_info]
+    # so each record knows its generation's cross-product geometry and its
+    # bijective permutation parameters.
+    gen_rows = [(g, int(ls), int(rs), int(pls), int(prs), int(pcp), int(tcp), int(ncp),
+                 int(bb), int(bc))
+                for g, ls, rs, pls, prs, pcp, tcp, ncp, bb, bc in gen_info]
     gen_df = spark.createDataFrame(gen_rows,
         ["gen_id", "left_size", "right_size", "prev_left_size", "prev_right_size",
-         "prev_total_cp", "total_cp", "new_cp_size"])
+         "prev_total_cp", "total_cp", "new_cp_size", "bij_b", "bij_c"])
 
     # === Step 1: Generate ONLY ACTV records ===
     # Optimization: CNCL records are regenerated from sampling ACTV in Step 6, so
@@ -292,26 +314,22 @@ def _gen_historical(spark, cfg, dbutils):
     # Join generation info so each record has its generation's cross-product dimensions.
     all_df = all_df.join(F.broadcast(gen_df), all_df["update_id"] == gen_df["gen_id"], "left")
 
-    # === Step 2: Assign unique pair within generation ===
-    # Hash wh_id into the NEW pairs added in this generation.
-    #   For gen 0: hash into the full initial cross-product [0, start_left * start_right).
-    #   For gen g>0: hash into [0, new_cp_size) then offset by prev_total_cp to get a
-    #   globally unique pair_id. This ensures ACTV pairs never collide across generations
-    #   because each generation's pair_ids occupy a non-overlapping range.
-    #
-    # The hash function (hash_key) acts as a pseudo-random permutation, analogous to
-    # DIGen's BijectivePermutation — it spreads selections across both the
-    # "existing custs x new secs" and "new custs x all secs" regions of new pairs.
+    # === Step 2: Assign unique pair within generation via bijective LCG ===
+    # f(x) = (b*x + c) % modulus  — where b coprime with modulus (guarantees
+    # bijection on [0, modulus)). Replaces hash-based selection which had
+    # collisions scaling with new_pu²/new_cp_size. pos_in_update (= rid in
+    # generation) ranges [0, new_pu); new_pu ≤ new_cp_size so the mapping
+    # is injective over the used domain.
+    #   Gen 0: modulus = total_cp (initial cross-product); no offset.
+    #   Gen g>0: modulus = new_cp_size; offset by prev_total_cp for global pair space.
     all_df = (all_df
         .withColumn("_pair_id",
             F.when(F.col("update_id") == 0,
-                # Gen 0: hash into full initial cross-product
-                hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
+                (F.col("pos_in_update") * F.col("bij_b") + F.col("bij_c")) %
                     F.greatest(F.lit(1), F.col("total_cp").cast("long")))
             .otherwise(
-                # Gen g>0: hash into new pairs, offset to global pair space
                 F.col("prev_total_cp").cast("long") +
-                hash_key(F.col("wh_id"), seed_for("WH", "actv")) %
+                (F.col("pos_in_update") * F.col("bij_b") + F.col("bij_c")) %
                     F.greatest(F.lit(1), F.col("new_cp_size").cast("long"))))
     )
 
@@ -422,21 +440,32 @@ def _gen_historical(spark, cfg, dbutils):
     # Dedup here so the file matches what ETL will load.
     deduped_df = deduped_df.dropDuplicates(["w_c_id", "w_s_symb"])
 
-    # === Step 6: ACTV + CNCL generation using known/estimated ACTV count ===
-    # The post-dedup ACTV count is deterministic per SF and stored in cfg.wh_actv_count
-    # (hardcoded for standard SFs, estimated for others). No .count() needed.
+    # === Step 6: ACTV + CNCL generation using deterministic hash-based selection ===
+    # Previously used .sample(fraction).limit(target) which is stochastic per-partition
+    # and produces slightly different row counts on each re-evaluation (groupBy.count()
+    # vs. write_file). That divergence over-counts WH_RECORDS in the audit file by
+    # a few hundred rows vs. the actual file, breaking the automated_audit check
+    # "FactWatches active watches" (Row count + Inactive watches == cumulative WH_RECORDS).
+    # Replacing with a deterministic hash filter: pick rows where hash(c_id|symbol)
+    # mod M < cutoff. Count and write see identical rows.
     actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
     n_actv = cfg.wh_actv_count
     target_total = cfg.wh_total
     target_cncl = target_total - n_actv
-    cncl_fraction = min(0.99, target_cncl / max(1, n_actv) * 1.05)  # slight oversample
+
+    _cncl_mod = 1 << 30
+    cncl_cutoff = max(0, int(target_cncl / max(1, n_actv) * _cncl_mod))
 
     cncl_df = (actv_df
-        .sample(fraction=cncl_fraction, seed=seed_for("WH", "cncl_sample"))
-        .limit(target_cncl)
+        .withColumn("_cncl_sel",
+            hash_key(F.concat_ws("|", F.col("w_c_id"), F.col("w_s_symb")),
+                     seed_for("WH", "cncl_sample")) % F.lit(_cncl_mod))
+        .filter(F.col("_cncl_sel") < F.lit(cncl_cutoff))
+        .drop("_cncl_sel")
         .withColumn("w_action", F.lit("CNCL"))
         .withColumn("_cncl_offset",
-            hash_key(F.monotonically_increasing_id(), seed_for("WH", "cncl_ts")) %
+            hash_key(F.concat_ws("|", F.col("w_c_id"), F.col("w_s_symb")),
+                     seed_for("WH", "cncl_ts")) %
                 F.greatest(F.lit(1), F.lit(wh_end_s).cast("long") - F.col("_ts")))
         .withColumn("w_dts", F.date_format(
             (F.col("_ts") + F.col("_cncl_offset") + 1).cast("timestamp"),
@@ -447,21 +476,27 @@ def _gen_historical(spark, cfg, dbutils):
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
-    # Exact counts for WatchHistory_audit.csv WH_RECORDS / WH_ACTIVE.
-    # One scan breaks down ACTV vs CNCL; needed because generation dedups
-    # duplicate (c_id, symbol) pairs so the final row count is less than
-    # the pre-dedup target.
-    _wh_counts = result_df.groupBy("w_action").count().collect()
-    _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
-    actv_actual = _wh_by_action.get("ACTV", 0)
-    cncl_actual = _wh_by_action.get("CNCL", 0)
-    total_actual = actv_actual + cncl_actual
-
+    staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
     write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
                scale_factor=cfg.sf)
 
-    log(f"[WatchHistory] Batch1: {actv_actual:,} ACTV + {cncl_actual:,} CNCL = {total_actual:,} total")
-    return {("WatchHistory", 1): total_actual, ("WH_ACTV", 1): actv_actual}
+    # Analytical estimate: n_actv = wh_actv_count; target_cncl = wh_total - wh_actv_count.
+    actv_est = n_actv
+    cncl_est = target_cncl
+    total_est = actv_est + cncl_est
+    log(f"[WatchHistory] Batch1: {actv_est:,} ACTV + {cncl_est:,} CNCL = {total_est:,} total")
+
+    if not static_audits_available(cfg):
+        # Dynamic audit regeneration: scan staged WatchHistory for exact counts.
+        written_df = spark.read.csv(
+            staging_path, sep="|", header=False,
+            schema="w_c_id STRING, w_s_symb STRING, w_dts STRING, w_action STRING")
+        _wh_counts = written_df.groupBy("w_action").count().collect()
+        _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
+        actv_actual = _wh_by_action.get("ACTV", 0)
+        cncl_actual = _wh_by_action.get("CNCL", 0)
+        return {("WatchHistory", 1): actv_actual + cncl_actual, ("WH_ACTV", 1): actv_actual}
+    return {("WatchHistory", 1): total_est, ("WH_ACTV", 1): actv_est}
 
 
 def _gen_incremental(spark, cfg, batch_id, dbutils):
@@ -554,22 +589,38 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
     # Dedup ACTV rows on (w_c_id, w_s_symb) — the ETL's FactWatches silver
-    # loader GROUP BYs on these, collapsing any duplicates. CNCL rows are
-    # kept as-is since they're matched by (c_id, symbol) join, not counted
-    # separately. Same reasoning as the historical (Batch 1) path.
+    # loader GROUP BYs on these, collapsing any duplicates. CNCL is also
+    # deduped so our audit WH_RECORDS/cncl count matches the ETL's
+    # 'Inactive watches' count (which is one-per-pair, not one-per-row).
+    # Without CNCL dedup, rare (c_id, symb) collisions leak extra rows
+    # into our audit total that the ETL doesn't count, breaking the
+    # FactWatches active watches audit check.
     actv_part = inc_df.filter(F.col("w_action") == "ACTV").dropDuplicates(["w_c_id", "w_s_symb"])
-    cncl_part = inc_df.filter(F.col("w_action") == "CNCL")
+    cncl_part = inc_df.filter(F.col("w_action") == "CNCL").dropDuplicates(["w_c_id", "w_s_symb"])
     inc_df = actv_part.unionByName(cncl_part)
 
-    _wh_counts = inc_df.groupBy("w_action").count().collect()
-    _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
-    actv_actual = _wh_by_action.get("ACTV", 0)
-    cncl_actual = _wh_by_action.get("CNCL", 0)
-    total_actual = actv_actual + cncl_actual
-
+    staging_inc = f"{cfg.batch_path(batch_id)}/WatchHistory.txt__staging"
     write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils, scale_factor=cfg.sf)
-    log(f"[WatchHistory] Batch{batch_id}: {total_actual} rows ({actv_actual} ACTV, {cncl_actual} CNCL)")
+
+    # Analytical incremental estimates — 80/20 ACTV/CNCL split of rows_per_update.
+    inc_rows_est = cp.get("wh_rows_per_update", 0)
+    actv_est = int(inc_rows_est * 0.8)
+    cncl_est = inc_rows_est - actv_est
+    log(f"[WatchHistory] Batch{batch_id}: {inc_rows_est:,} rows ({actv_est:,} ACTV, {cncl_est:,} CNCL)")
+
+    if not static_audits_available(cfg):
+        written_inc = spark.read.csv(
+            staging_inc, sep="|", header=False,
+            schema="cdc_flag STRING, cdc_dsn STRING, w_c_id STRING, w_s_symb STRING, w_dts STRING, w_action STRING")
+        _wh_counts = written_inc.groupBy("w_action").count().collect()
+        _wh_by_action = {r["w_action"]: r["count"] for r in _wh_counts}
+        actv_actual = _wh_by_action.get("ACTV", 0)
+        cncl_actual = _wh_by_action.get("CNCL", 0)
+        return {
+            ("WatchHistory", batch_id): actv_actual + cncl_actual,
+            ("WH_ACTV", batch_id): actv_actual,
+        }
     return {
-        ("WatchHistory", batch_id): total_actual,
-        ("WH_ACTV", batch_id): actv_actual,
+        ("WatchHistory", batch_id): inc_rows_est,
+        ("WH_ACTV", batch_id): actv_est,
     }

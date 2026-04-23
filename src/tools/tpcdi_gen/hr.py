@@ -32,6 +32,7 @@ CustomerMgmt and Prospect.
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
 from .utils import write_file, seed_for, dict_join, hash_key, log
+from .audit import static_audits_available
 
 
 def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
@@ -137,8 +138,11 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .select(F.col("employeeid").alias("broker_id"))
         .withColumn("_idx", F.row_number().over(Window.orderBy(F.monotonically_increasing_id())) - 1))
     brokers.createOrReplaceTempView("_brokers")
-    broker_count = brokers.count()
-
-    log(f"[HR] {cfg.hr_rows} rows ({broker_count} brokers -> _brokers view)")
+    # Analytical estimate: 30% of employees become brokers (hash-based selection
+    # with ±0.01% variance). Exact count only computed when we need it for
+    # dynamic audit regeneration.
+    broker_count_est = int(cfg.hr_rows * BROKER_PCT)
+    broker_count = brokers.count() if not static_audits_available(cfg) else broker_count_est
+    log(f"[HR] {cfg.hr_rows:,} rows (~{broker_count_est:,} brokers -> _brokers view)")
     log("[HR] Generation complete")
     return {"counts": {("HR", 1): cfg.hr_rows, ("HR_BROKERS", 1): broker_count}}

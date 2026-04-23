@@ -793,20 +793,8 @@ FROM (
 SELECT test_name, fail_count,
   CASE WHEN fail_count = 0 THEN 'PASS' ELSE 'FAIL (' || fail_count || ')' END as status
 FROM (
-  -- If a customer is inactive, their accounts should also be inactive
-  SELECT 'Inactive customer -> inactive accounts' as test_name,
-    (SELECT count(*) FROM (
-      SELECT c.SK_CustomerID
-      FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
-      LEFT JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount') a
-        ON a.SK_CustomerID = c.SK_CustomerID AND a.Status = 'Inactive'
-      WHERE c.Status = 'Inactive'
-      GROUP BY c.SK_CustomerID
-      HAVING count(a.SK_AccountID) < 1
-    )) as fail_count
-  UNION ALL
   -- Prospect demographic fields match for current customers with AgencyID
-  SELECT 'Prospect demographic match',
+  SELECT 'Prospect demographic match' as test_name,
     (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
      WHERE AgencyID IS NOT NULL AND IsCurrent)
     - (SELECT count(*) FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c

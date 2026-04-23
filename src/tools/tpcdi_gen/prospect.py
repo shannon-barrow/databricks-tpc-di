@@ -107,6 +107,19 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             .otherwise(F.lit(-1)))
     )
 
+    # Repartition at SF>=1000 so all downstream dict_joins and withColumn
+    # passes fan out across many tasks instead of stacking on a handful of
+    # default partitions (which spills ~3GB at SF=5000 because each task
+    # holds all 25M rows' string materializations in memory before the
+    # final sort/write). Target ≈ sf/125 partitions so each maps to one
+    # ~128MB output file at write time (matches the ~40 files/batch observed
+    # at SF=5000). Below SF=1000 the whole Prospect fits comfortably on
+    # default partitioning and the write's maxRecordsPerFile already handles
+    # file-size capping, so we skip the extra shuffle.
+    target_prospect_partitions = cfg.sf // 125 if cfg.sf >= 1000 else 0
+    if target_prospect_partitions:
+        prospect_df = prospect_df.repartition(target_prospect_partitions)
+
     # --- Name+address matching via shared hash seeds ---
     # For matching rows, use the SAME seeds as CustomerMgmt so dictionary lookups
     # produce identical values. This is the core of the matching logic: if Prospect
@@ -289,6 +302,8 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                scale_factor=cfg.sf)
     counts[("Prospect", 1)] = prospect_total
     counts[("Prospect_Matching", 1)] = n_match
+    # P_NEW per DIGen: all rows in B1 are new (first-time load).
+    counts[("P_NEW", 1)] = prospect_total
 
     # --- Churn model for incremental batches ---
     # Batch 2+: full extract with ~0.12% churn (same total rows, some replaced).
@@ -301,10 +316,14 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # at Batch 3 → no rows with batchid=2 in the final Prospect table → the
     # 'Prospect batches' audit check fails (only 2 distinct batchids).
     churn_per_batch = max(1, int(0.005 * cfg.internal_sf * 1.2))
-    # Row-numbered copy of Batch 1 so we can slice it by position.
+    # Row-numbered copy of Batch 1 so we can slice it by position. The
+    # row_number() Window.orderBy(...) forces a single-partition shuffle, so
+    # at SF>=1000 re-partition back out to match the expected output file
+    # count before B2/B3 compute + write fans back out.
     final_indexed = final.withColumn(
-        "_rn", F.row_number().over(Window.orderBy(F.monotonically_increasing_id()))
-    )
+        "_rn", F.row_number().over(Window.orderBy(F.monotonically_increasing_id())))
+    if target_prospect_partitions:
+        final_indexed = final_indexed.repartition(target_prospect_partitions)
     accumulated_new = None  # union of all prior batches' new rows
 
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
@@ -379,7 +398,12 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                            else accumulated_new.unionByName(new_prospects))
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
-        counts[("Prospect_Matching", batch_id)] = n_match
+        # Per-batch matching grows by the churn's matching count. At
+        # P_MATCH_PCT=0.25, ~25% of churn_per_batch new prospects match
+        # existing customers. Cumulative through B{batch_id}.
+        churn_match_cumulative = int(0.25 * churn_per_batch * batch_offset)
+        counts[("Prospect_Matching", batch_id)] = n_match + churn_match_cumulative
+        counts[("P_NEW", batch_id)] = churn_per_batch
         log(f"[Prospect] Batch{batch_id}: {prospect_total} rows ({churn_per_batch} churned)", "DEBUG")
 
     log(f"[Prospect] {prospect_total} rows, {n_match} matching customers ({n_match*100//prospect_total}%)")

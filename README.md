@@ -3,8 +3,12 @@
 Databricks TPC-DI (Data Integration) is an implementation of specifications derived from the [TPC-DI](http://tpc.org/tpcdi/default5.asp) Benchmark.  
 This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **14.1** or higher. 
 
-## Note About Data Generation: 
-**_To generate data you need to be on a non-serverless Unity Catalog-enabled cluster.  As of today (until a workaround is found) you will also need to use DBR 15.4 or under (DBR 16.x or higher does not like running the JAR on the driver!)_**
+## Note About Data Generation
+**Data generation now uses a distributed PySpark implementation** that replaces
+the single-threaded DIGen.jar. It runs natively on **Databricks Serverless**
+(no DBR / node-type / UC cluster restriction) and scales across the executor
+pool so large scale factors finish in a fraction of the time the JAR required.
+See [Data Generation](#data-generation) below.
 
 [![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
@@ -60,30 +64,59 @@ This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 2. Create a Databricks Workflow (this created workflow is what executes the ingestion and transformations for the benchmark).  
 
 #### Data Generation
-- Data generation is a requisite step by TPC to create the required raw data in the various formats.  
-- All Raw Data Generation is executed through the provided TPC ***DIGen.JAR*** Java executable file, provided in the repo to simplify the user experience.  To download the original source code from the TPC website, it can be found [here](https://www.tpc.org/TPC_Documents_Current_Versions/download_programs/tools-download-request5.asp?bm_type=TPC-DI&bm_vers=1.1.0&mode=CURRENT-ONLY)
-- The number of files does not change with increasing scale factors - the size of the files increases as the scale factor increases
-- The steps in the data generator are as follows:
-  1) Copy the *TPC-provided JAR and dependencies* to the driver from the {repo_root}/src/tools/datagen folder
-  2) Execute a python wrapper to the JAR, which generates all required files into the driver's /localdisk0/tmp/tpcdi folder
-  3) Then move the generated files from the driver into a Unity Catalog volume inside the catalog designated. The default catalog created is named *tpcdi*.  Therefore the raw data volume location for this tpcdi catalog would be: */Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume*
+Data generation is now a **distributed PySpark implementation** living at
+`src/tools/spark_data_generator.py` (plus modules under `src/tools/tpcdi_gen/`).
+It replaces the TPC-provided DIGen.jar and writes byte-compatible output
+(same filenames, formats, row counts, and audit attributes) so the rest of
+the benchmark pipeline is unchanged.
 
-![Type of Raw Data Generated](/src/tools/readme_images/data_gen.png "Type of Raw Data Generated")  
+##### Interface
+- Standalone Databricks notebook / job. Parameters:
+  - `scale_factor` — `10`, `100`, `1000`, `5000`, `10000`, `20000`
+  - `catalog` — target catalog for the output volume (default `main`)
+  - `regenerate_data` — `YES` to wipe and regenerate; `NO` to no-op if output already exists
+  - `log_level` — `DEBUG` / `INFO` / `WARN`
+- Output path: `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}/`
+- Can also be invoked via `%run` from the TPC-DI Driver notebook; job parameters
+  match widget names.
 
-##### IMPORTANT NOTES
-- The Data Generation JAR was developed by TPC - it is out-of-scope for this effort, though it is required for the benchmark
-- The data generation JAR is **NOT** a distributed spark step, or even very multi-threaded for that matter.  
-  - This step may execute in less than a minute for scale_factor=10, or as long as 2 hours on scale_factor=10000.  
-- Data generation executes on the driver, make sure you have a driver with local storage and enough memory to handle this type of data generation step. 
-  - This shouldn't be a problem unless running data generation on scale factors over 1000. 
-- The default setting for this implementation is to execute on a scale factor of 10 - which generates only 1GB of data in less than 1 minute - since the code/workflow are the same NO MATTER THE SCALE FACTOR.
-- **If generating a large scale factor** (i.e. over 1000), via the workflow_builder:
-  - We suggest a **storage-optimized single node cluster** to generate the raw data.
-  - Please be patient with the execution as you may go several minutes without a log entry into the stdout of the cell when the very large files on large scale factors are being generated
-  - The scale factor increase will ONLY affect how much data is generated, how long the job takes to execute, and how many resources it will take to benchmark in the subsequent workflow.  
-  - Therefore we do not suggest increasing the scale factor unless you are trying to actually run benchmarks.
-- To account for multiple users attempting to generate files repeatedly for a workspace, the data generation step will check to see if the requested scale factor raw data exists in Unity Catalog Volumes already. 
-  - If it does (meaning you or someone else has executed the TPC-DI in this workspace already) then this step will be skipped - thus removing unnecessary data being stored and also removing the need to generate the data again.
+![Type of Raw Data Generated](/src/tools/readme_images/data_gen.png "Type of Raw Data Generated")
+
+##### Architecture highlights
+- **Dependency-graph scheduling** — Reference / HR / FINWIRE / Prospect start
+  concurrently; CustomerMgmt starts as soon as HR publishes the `_brokers`
+  temp view; Trade / DailyMarket / WatchHistory start as soon as FINWIRE
+  publishes `_symbols` (via an early threading-event + Parquet-staged view).
+  On serverless this means all four heavy phases overlap.
+- **Serverless-compatible caching** — Spark Connect forbids `persist()` /
+  `UNCACHE TABLE`, so large intermediates are staged to Parquet in
+  `_staging/` and read back. `cleanup_staging` removes these at end of run.
+- **Bijection-based ID scheduling** — CustomerMgmt C_IDs and CA_IDs for
+  INACT / CLOSEACCT / UPDCUST / UPDACCT / ADDACCT actions are pre-computed
+  at the driver via a numpy-vectorised implementation of DIGen's
+  `GrowingOffsetPermutation` (pool bijection with skip-resolution over
+  cumulative deletions). Row counts match DIGen exactly at every scale.
+- **FINWIRE split + repartition** — CMP, SEC, and FIN subsets write to
+  independent staging dirs in parallel instead of being union'd into a
+  single 244 M-row stream. FIN is repartitioned to `max(8, sf // 25)`
+  partitions ahead of the cross-join so it fans out across the executor
+  pool instead of stacking on spark.range default partitioning.
+- **Static audit snapshots** — pre-computed `*_audit.csv` files for the
+  common scale factors live at `src/tools/tpcdi_gen/static_audits/sf={sf}/`
+  and are copied at the end of a run instead of being regenerated. Unknown
+  scale factors fall back to dynamic audit regeneration.
+- **FUSE-hardened file concat** — output parts bin-packed into ~128 MB
+  files via pure-Python `shutil.copyfileobj` with per-source retries
+  (handles `EAGAIN` from the UC Volume FUSE mount under heavy parallel I/O).
+
+##### Notes
+- The generator is deterministic — same scale factor always yields the
+  same row counts and audit values.
+- Partition sizing has been tuned per phase (Prospect, FINWIRE/FIN,
+  CustomerMgmt schedule DF) to avoid spill on serverless while leaving
+  executor capacity for concurrent phases.
+- If the target scale factor directory already exists and
+  `regenerate_data=NO`, the step is a no-op (safe to re-run).
 
 #### Workflow Creation
 The Databricks TPC-DI is developed in a way to make the execution simple and easy.  

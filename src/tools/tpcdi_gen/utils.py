@@ -40,10 +40,30 @@ def safe_unpersist(df, cleanup_info=None):
       - Serverless Parquet staging: deletes the staging directory and logs
         "Dropped staging table"
 
-    If ``cleanup_info`` is None, falls back to a best-effort unpersist.
-    Serverless raises NOT_SUPPORTED_WITH_SERVERLESS on UNPERSIST TABLE, so
-    errors are swallowed.
+    If ``cleanup_info`` is None, falls back to a best-effort unpersist on
+    classic compute; on serverless, unpersist is a no-op because persist
+    was never supported (disk_cache staged to Parquet instead, and the
+    staging dir is already cleaned up by ``cleanup_staging``).
     """
+    # Serverless has no persist semantics to reverse. UNCACHE TABLE raises
+    # NOT_SUPPORTED_WITH_SERVERLESS; skip the call entirely to avoid noisy
+    # query-error logs.
+    try:
+        spark = df.sparkSession
+        if _detect_serverless(spark):
+            if cleanup_info and cleanup_info.get("kind") == "parquet":
+                path = cleanup_info.get("path")
+                dbutils = cleanup_info.get("dbutils")
+                if path and dbutils is not None:
+                    try:
+                        dbutils.fs.rm(path, recurse=True)
+                    except Exception:
+                        pass
+                log(f"[Staging] {cleanup_info.get('label','')}: dropped staging table")
+            return
+    except Exception:
+        pass
+
     if cleanup_info is None:
         try:
             df.unpersist()
@@ -96,7 +116,8 @@ def _sanitize_label(label: str) -> str:
 
 
 def disk_cache(df, spark, label: str = "", materialize: bool = True,
-               volume_path: str = None, dbutils=None):
+               volume_path: str = None, dbutils=None,
+               max_records_per_file: int = 0):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
     Classic: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local NVMe.
@@ -104,6 +125,12 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True,
     ``{volume_path}/_staging/{N}_{label}`` and return a DataFrame that reads it
     back. ``cleanup_staging`` removes the ``_staging/`` directory at the end of
     the run.
+
+    ``max_records_per_file`` caps each parquet staging file, which controls
+    the partition count on read-back (each file becomes ~1 input split).
+    Use this to keep a high partition count for distribution; without it,
+    Spark may produce a few huge parquet files and the read-back partition
+    count drops far below the upstream ``repartition(N)``.
 
     Pass ``materialize=False`` for derived views whose parent is already
     materialized — on serverless they stay as logical views (re-reading a
@@ -129,7 +156,10 @@ def disk_cache(df, spark, label: str = "", materialize: bool = True,
         try:
             if dbutils is not None:
                 _cleanup(staging_path, dbutils)
-            df.write.mode("overwrite").parquet(staging_path)
+            writer = df.write.mode("overwrite")
+            if max_records_per_file > 0:
+                writer = writer.option("maxRecordsPerFile", max_records_per_file)
+            writer.parquet(staging_path)
             new_df = spark.read.parquet(staging_path)
             return new_df, {"kind": "parquet", "path": staging_path,
                             "dbutils": dbutils, "label": label}
@@ -372,15 +402,50 @@ def hash_key(col_expr, seed: int) -> "F.Column":
 #      a thread pool, significantly reducing total wall-clock time.
 # At the end of the generation run, bulk_copy_all() processes all pending copies.
 
-_pending_copies = []  # list of (source_path, target_path) tuples
+_pending_copies = []  # legacy: rarely used; new register_copies_from_staging
+                      # kicks off per-dataset copies directly.
+_background_threads = []  # Thread objects for per-dataset async copies
+
+
+def _start_dataset_copy(dbutils, copies, label: str = "", max_workers: int = 32):
+    """Kick off a background thread that copies just this dataset's part files.
+
+    Each write_file call uses this to start copying its large parts as soon
+    as the write returns, rather than queueing to a global list for a later
+    "drain everything" sweep. This avoids:
+      - Racing cleanup_staging vs. still-running bulk copies at scale.
+      - Head-of-line blocking: a slow dataset's copy no longer delays
+        fast datasets from finalizing.
+
+    Threads are tracked in `_background_threads` so the orchestrator can
+    wait_for_background_copies() before cleanup_staging.
+    """
+    import threading
+    def worker():
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(dbutils.fs.cp, src, tgt) for src, tgt in copies]
+            for f in concurrent.futures.as_completed(futures):
+                f.result()
+        log(f"[Copy] {label}: {len(copies)} parts copied", "DEBUG")
+    t = threading.Thread(target=worker, daemon=True)
+    _background_threads.append(t)
+    t.start()
+
+
+def wait_for_background_copies(timeout_per_thread: float = 3600):
+    """Join all tracked background-copy threads. Call before cleanup_staging."""
+    threads = list(_background_threads)
+    _background_threads.clear()
+    for t in threads:
+        t.join(timeout=timeout_per_thread)
 
 
 def register_copy(source: str, target: str):
-    """Register a file copy to be executed later in bulk.
+    """Legacy: register a copy into the global bulk queue.
 
-    Args:
-        source: Source file path (typically a Spark part file in a staging directory).
-        target: Destination file path (the final output location).
+    Preferred path: write_file -> register_copies_from_staging now starts
+    per-dataset async copies directly. This function is retained for
+    backward compat if any caller still queues manually.
     """
     _pending_copies.append((source, target))
 
@@ -414,7 +479,8 @@ def _pack_small_parts(small_parts, max_bytes: int):
     return [sorted(b["files"], key=lambda f: f.name) for b in bins]
 
 
-def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
+def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
+                                  start_idx: int = 1):
     """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
 
     Spark writes output as a directory of ``part-NNNNN`` files sized up to
@@ -433,21 +499,26 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
       ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
       produces fewer downstream files.
 
-    Output files are numbered sequentially: ``Customer_1.txt``,
-    ``Customer_2.txt``, … — matching the TPC-DI ``fileNamePattern`` regex.
+    Output files are numbered sequentially starting from ``start_idx``:
+    e.g. ``Customer_1.txt``, ``Customer_2.txt``, … matching the TPC-DI
+    ``fileNamePattern`` regex. Multiple calls can share a sequence by
+    passing the returned `next_idx` as the next call's ``start_idx`` (used
+    by FINWIRE where CMP/SEC/FIN subsets each stage separately but land in
+    the same ``FINWIRE_N.txt`` namespace).
 
     Args:
         staging_dir: Path to the Spark output directory containing part files.
         final_path: Desired final output path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
         dbutils: Databricks dbutils object for filesystem operations.
+        start_idx: First ``_N`` value to use (default 1).
 
     Returns:
-        List of final target paths.
+        (list of final target paths, next_idx to use for subsequent calls).
     """
     files = dbutils.fs.ls(staging_dir)
     part_files = [f for f in files if f.name.startswith("part-")]
     if not part_files:
-        return []
+        return [], start_idx
 
     large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
                    key=lambda f: f.name)
@@ -456,36 +527,56 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils):
 
     base, ext = os.path.splitext(final_path)
     targets = []
-    idx = 1
+    idx = start_idx
 
-    # Large parts: queue for parallel dbutils.fs.cp (server-side copy).
+    # Large parts: kick off a per-dataset async copy immediately so this
+    # dataset can start copying as soon as write_file returns, without
+    # waiting for a global drain. The thread is tracked in
+    # `_background_threads` so orchestrator can wait_for_background_copies()
+    # before cleanup_staging.
+    large_copies = []
     for pf in large:
         target = f"{base}_{idx}{ext}"
-        register_copy(pf.path, target)
+        large_copies.append((pf.path, target))
         targets.append(target)
         idx += 1
+    if large_copies:
+        _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
 
     # Small parts: cat-pack on driver into ~128MB chunks.
+    # FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily
+    # unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds
+    # of concat operations across TradeHistory/CashTransaction/HH/etc.
+    # running simultaneously through the dep-graph scheduler and xargs cat's
+    # 5-retry loop wasn't enough.
+    # Switched to pure-Python concat with per-source retry: open dst once,
+    # copy each src via shutil.copyfileobj; if a source read hits OSError
+    # (EAGAIN wraps up as such), back off and retry that source only.
     if bins:
-        import subprocess, tempfile
+        import shutil, time
         for bin_files in bins:
             target = f"{base}_{idx}{ext}"
             dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
-            list_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt")
-            try:
+            with open(dst_local, "wb") as out:
                 for pf in bin_files:
                     src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
-                    list_file.write(src_local + "\n")
-                list_file.close()
-                subprocess.run(
-                    ["bash", "-c", f"xargs -a {list_file.name} cat > {dst_local}"],
-                    check=True)
-            finally:
-                os.unlink(list_file.name)
+                    last_err = None
+                    for attempt in range(10):
+                        try:
+                            with open(src_local, "rb") as src:
+                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
+                            break
+                        except OSError as e:
+                            last_err = e
+                            if attempt == 0:
+                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
+                            time.sleep(min(30, 0.5 * (2 ** attempt)))
+                    else:
+                        raise last_err
             targets.append(target)
             idx += 1
 
-    return targets
+    return targets, idx
 
 
 def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
@@ -597,7 +688,8 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
-    return register_copies_from_staging(staging_dir, path, dbutils)
+    targets, _next = register_copies_from_staging(staging_dir, path, dbutils)
+    return targets
 
 
 def write_text(content: str, path: str, dbutils=None):
