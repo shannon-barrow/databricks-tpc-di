@@ -403,8 +403,14 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         # extend into symbols created in their quarter window. Prior
         # alphabetical ordering caused ~25% of WH ACTV pairs to fall back
         # to _sym0 at SF=5000+, producing a -24.5% drift vs DIGen.
-        .withColumn("_idx", F.row_number().over(
-            Window.orderBy("creation_quarter", "Symbol")) - 1)
+        # _idx cast to long here: downstream consumers (Trade, WatchHistory,
+        # DailyMarket) compare this to hash_key(...) expressions that return
+        # long. If _idx stayed int, Spark's analyzer inserts a cast(_idx as
+        # bigint) into the join condition — that cast can prevent the
+        # optimizer from auto-broadcasting _symbols even when it's well under
+        # the autoBroadcastJoinThreshold.
+        .withColumn("_idx", (F.row_number().over(
+            Window.orderBy("creation_quarter", "Symbol")) - 1).cast("long"))
         .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
 
     # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read

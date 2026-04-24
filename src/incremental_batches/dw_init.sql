@@ -23,26 +23,31 @@ ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMI
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## Just create a view over the top of the audit files - no reason to ingest
+-- MAGIC ## Load the audit files into a materialized Audit table
+-- MAGIC Previously this was a view over the CSV files. A view is fragile: if the
+-- MAGIC underlying `*_audit.csv` files are deleted (e.g., the next datagen run
+-- MAGIC wipes the volume), subsequent queries against `Audit` fail partway through
+-- MAGIC the benchmark. Materializing the rows into a Delta table decouples the
+-- MAGIC audit validation from the source file lifecycle.
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}.Audit (
-  dataset COMMENT 'Component the data is associated with', 
-  batchid COMMENT 'BatchID the data is associated with', 
-  date COMMENT 'Date value corresponding to the Attribute', 
-  attribute COMMENT 'Attribute this row of data corresponds to', 
-  value COMMENT 'Integer value corresponding to the Attribute', 
-  dvalue COMMENT 'Decimal value corresponding to the Attribute'
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Audit (
+  dataset STRING COMMENT 'Component the data is associated with',
+  batchid INT COMMENT 'BatchID the data is associated with',
+  date DATE COMMENT 'Date value corresponding to the Attribute',
+  attribute STRING COMMENT 'Attribute this row of data corresponds to',
+  value BIGINT COMMENT 'Integer value corresponding to the Attribute',
+  dvalue DECIMAL(15,5) COMMENT 'Decimal value corresponding to the Attribute'
 ) AS SELECT *
-FROM 
+FROM
   read_files(
   "${tpcdi_directory}sf=${scale_factor}/*",
   format => "csv",
-  inferSchema => False, 
+  inferSchema => False,
   header => True,
   sep => ",",
-  fileNamePattern => "*_audit.csv", 
+  fileNamePattern => "*_audit.csv",
   schema => "dataset STRING, batchid INT, date DATE, attribute STRING, value BIGINT, dvalue DECIMAL(15,5)"
 )
 

@@ -211,7 +211,16 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     # Build base trade DataFrame — one row per trade with all computed attributes.
     # All randomness is deterministic via hash_key(t_id, seed).
-    trade_df = (spark.range(0, cfg.trade_total).withColumnRenamed("id", "t_id")
+    #
+    # Partition sizing: each trade row grows from 8 bytes (just id) to ~hundreds
+    # of bytes as 30+ withColumns and the broadcast join against _symbols add
+    # fields. Default partitioning at SF=20000 (~24 tasks) was putting ~108M
+    # rows/task → 237+ GB spill inside the "range" stage. Tie partition count
+    # to scale factor so per-partition row count stays manageable
+    # (~1M rows/partition at all scales). At SF=20000: 2500 partitions.
+    target_trade_partitions = max(8, cfg.sf // 8)
+    trade_df = (spark.range(0, cfg.trade_total, numPartitions=target_trade_partitions)
+        .withColumnRenamed("id", "t_id")
         # --- Trade type: TLB=30%, TLS=30%, TMB=20%, TMS=20% ---
         .withColumn("_tt_rand", hash_key(F.col("t_id"), seed_for("T", "tt")) % 100)
         .withColumn("t_tt_id",

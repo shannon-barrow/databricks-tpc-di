@@ -70,10 +70,10 @@ def spark_generate():
   # first spark.conf.set() is the first remote call of the session, so
   # initial JVM + Unity-Catalog session init time is charged here (not to
   # the catalog-existence check that runs next).
-  _tlog("setting spark.sql.autoBroadcastJoinThreshold=200m (first spark-connect call — warmup)")
-  spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "200m")
-  _tlog("setting spark.databricks.adaptive.autoBroadcastJoinThreshold=200m")
-  spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "200m")
+  _tlog("setting spark.sql.autoBroadcastJoinThreshold=250m (first spark-connect call — warmup)")
+  spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "250m")
+  _tlog("setting spark.databricks.adaptive.autoBroadcastJoinThreshold=250m")
+  spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "250m")
   _tlog("broadcast-join thresholds set")
 
   blob_out_path = f"{tpcdi_directory}spark_datagen/sf={scale_factor}"
