@@ -330,11 +330,11 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     # Join to _cmp_refs to resolve the company reference.
     # Broadcast join since _cmp_refs is small (one row per company).
     sec_df = sec_df.join(
-        F.broadcast(spark.table("_cmp_refs").select(
+        spark.table("_cmp_refs").select(
             F.col("_idx").alias("_cmp_ref_idx"),
             F.col("CIK").alias("_ref_cik"),
             F.col("CompanyName").alias("_ref_name"),
-            F.col("creation_quarter").alias("_ref_cq"))),
+            F.col("creation_quarter").alias("_ref_cq")),
         on="_cmp_ref_idx", how="left")
 
     # Temporal integrity enforcement: if the referenced company was created AFTER
@@ -489,10 +489,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
 
     # Cross join: only active companies x quarters after creation.
     # Each active company produces one FIN record for every quarter after its creation.
-    # broadcast(quarters_df) since it is small (~202 rows).
+    # quarters_df is small (~202 rows) — optimizer will auto-broadcast under the 200MB threshold.
     fin_base = (cmp_quarters
         .filter(F.col("_is_active_for_fin"))
-        .crossJoin(F.broadcast(quarters_df))
+        .crossJoin(quarters_df)
         .filter(F.col("fin_quarter_id") > F.col("creation_quarter"))
         .withColumn("quarter_id", F.col("fin_quarter_id"))
     )

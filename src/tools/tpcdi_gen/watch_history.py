@@ -312,7 +312,7 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # Join generation info so each record has its generation's cross-product dimensions.
-    all_df = all_df.join(F.broadcast(gen_df), all_df["update_id"] == gen_df["gen_id"], "left")
+    all_df = all_df.join(gen_df, all_df["update_id"] == gen_df["gen_id"], "left")
 
     # === Step 2: Assign unique pair within generation via bijective LCG ===
     # f(x) = (b*x + c) % modulus  — where b coprime with modulus (guarantees
@@ -412,11 +412,11 @@ def _gen_historical(spark, cfg, dbutils):
     _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
 
     deduped_df = deduped_df.join(
-        F.broadcast(symbols_df.select(
+        symbols_df.select(
             F.col("_idx").cast("long").alias("_sym_join_idx"),
             F.col("Symbol").alias("_sym_name"),
             F.col("creation_quarter").alias("_sym_cq"),
-            F.col("deactivation_quarter").alias("_sym_dq"))),
+            F.col("deactivation_quarter").alias("_sym_dq")),
         on="_sym_join_idx", how="left")
 
     # Temporal symbol check: fall back to symbol 0 if outside creation/deactivation range
@@ -574,11 +574,11 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
 
     inc_df = inc_df.join(
-        F.broadcast(symbols_df.select(
+        symbols_df.select(
             F.col("_idx").cast("long").alias("_sym_idx"),
             F.col("Symbol").alias("_sym_name"),
             F.col("creation_quarter").alias("_sym_cq"),
-            F.col("deactivation_quarter").alias("_sym_dq"))),
+            F.col("deactivation_quarter").alias("_sym_dq")),
         on="_sym_idx", how="left")
     inc_df = inc_df.withColumn("w_s_symb",
         F.when((F.lit(batch_quarter) > F.col("_sym_cq")) &

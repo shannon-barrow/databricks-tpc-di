@@ -314,7 +314,7 @@ def dict_join_batch(df: DataFrame, lookups: list) -> DataFrame:
             renamed = (dict_df
                 .withColumnRenamed("_idx", jk)
                 .withColumnRenamed("value", alias))
-            df = df.join(F.broadcast(renamed), on=jk, how="left").drop(jk)
+            df = df.join(renamed, on=jk, how="left").drop(jk)
 
     return df
 
@@ -360,8 +360,7 @@ def dict_join(df: DataFrame, dict_name: str, hash_col, alias: str) -> DataFrame:
         .withColumnRenamed("_idx", jk)
         .withColumnRenamed("value", alias))
 
-    # Broadcast join: the dictionary is small, so broadcast avoids shuffle
-    return df2.join(F.broadcast(dict_df), on=jk, how="left").drop(jk)
+    return df2.join(dict_df, on=jk, how="left").drop(jk)
 
 
 def hash_key(col_expr, seed: int) -> "F.Column":

@@ -312,11 +312,11 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
 
     trade_df = trade_df.join(
-        F.broadcast(symbols_df.select(
+        symbols_df.select(
             F.col("_idx").alias("_sym_idx"),
             F.col("Symbol").alias("_sym_name"),
             F.col("creation_quarter").alias("_sym_cq"),
-            F.col("deactivation_quarter").alias("_sym_dq"))),
+            F.col("deactivation_quarter").alias("_sym_dq")),
         on="_sym_idx", how="left")
 
     # If the symbol wasn't active at trade time, fall back to symbol 0.
@@ -458,10 +458,10 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # Dynamic audit regeneration path: compute exact counts (3-5 min scan
         # over ~2-3B TH rows at SF=5000+). Only runs for unknown SFs.
         th_with_type = th_df.join(
-            F.broadcast(trade_df.select(
+            trade_df.select(
                 F.col("t_id").cast("string").alias("th_t_id"),
                 F.col("t_tt_id"),
-                F.col("_is_canceled"))),
+                F.col("_is_canceled")),
             on="th_t_id", how="left")
         th_by_type = th_with_type.groupBy("t_tt_id").count().collect()
         tt_counts = {r["t_tt_id"]: r["count"] for r in th_by_type}
@@ -655,7 +655,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .unionByName(spark.table("_t_submit_hist_batch3").select(F.col("t_id").cast("string").alias("_upd_t_id")))
             .distinct()
         )
-        _surv = trade_df.join(F.broadcast(updated_tids),
+        _surv = trade_df.join(updated_tids,
                               F.col("t_id") == F.col("_upd_t_id"), "left_anti")
         _inv_row = trade_df.select(
             F.sum(F.when(F.col("t_st_id") == "CNCL", 1).otherwise(0)).alias("cncl"),
@@ -849,11 +849,11 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
     _sym0 = symbols_df.filter(F.col("_idx") == 0).select("Symbol").collect()[0][0]
 
     inc_df = inc_df.join(
-        F.broadcast(symbols_df.select(
+        symbols_df.select(
             F.col("_idx").alias("_sym_idx"),
             F.col("Symbol").alias("_sym_name"),
             F.col("creation_quarter").alias("_sym_cq"),
-            F.col("deactivation_quarter").alias("_sym_dq"))),
+            F.col("deactivation_quarter").alias("_sym_dq")),
         on="_sym_idx", how="left")
     inc_df = inc_df.withColumn("t_s_symb",
         F.when((F.lit(batch_quarter) > F.col("_sym_cq")) &

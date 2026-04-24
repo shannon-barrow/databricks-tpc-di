@@ -685,7 +685,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Broker assignment: each account is assigned a broker deterministically from the CA_ID.
     all_df = all_df.withColumn("_broker_idx", hash_key(F.col("CA_ID"), seed_for("CM", "br")) % broker_count)
     all_df = all_df.join(
-        F.broadcast(brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("CA_B_ID"))),
+        brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("CA_B_ID")),
         on="_broker_idx", how="left")
 
     # Email addresses: primary is always populated; alternate has ~50% chance of being empty.
@@ -896,7 +896,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                 F.substring(F.col("ActionTS"), 1, 10).alias("_inact_day")))
     all_df = all_df.withColumn("_day_tmp", F.substring(F.col("ActionTS"), 1, 10))
     all_df = (all_df
-        .join(F.broadcast(inact_days),
+        .join(inact_days,
               (F.col("ActionType") == "ADDACCT") &
               (F.col("C_ID") == F.col("_inact_cid")) &
               (F.col("_day_tmp") == F.col("_inact_day")),
@@ -972,7 +972,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     time_filtered = created_accts.filter(F.col("created_ca_id") < n_available)
     # Remove closed accounts
     filtered = time_filtered.join(
-        F.broadcast(closed_accts),
+        closed_accts,
         time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
     # Collect from disk cache (~9.6M rows at SF=10000 = ~77MB, fast) + enumerate
     valid_ca_ids = sorted([row.created_ca_id for row in filtered.collect()])
@@ -1328,7 +1328,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         # (Incremental insert customers don't automatically get accounts like historical NEWs.)
         _owners = spark.table("_account_owners")
         cust_df = (cust_df
-            .join(F.broadcast(_owners.select(F.col("owner_cid").alias("_has_acct_cid")).distinct()),
+            .join(_owners.select(F.col("owner_cid").alias("_has_acct_cid")).distinct(),
                   F.col("c_id") == F.col("_has_acct_cid"), "left")
             .withColumn("c_st_id",
                 F.when((F.col("c_st_id") == "INAC") & F.col("_has_acct_cid").isNull(), F.lit("ACTV"))
@@ -1344,7 +1344,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         # rows is simpler than tracking reactivations in the audit.
         # _prior_inact accumulates across the for loop — see above.
         cust_df = (cust_df
-            .join(F.broadcast(_prior_inact),
+            .join(_prior_inact,
                   F.col("c_id") == F.col("_prior_inact_cid"), "left")
             .filter(~((F.col("cdc_flag") == "U") & F.col("_prior_inact_cid").isNotNull()))
             .drop("_prior_inact_cid"))
@@ -1431,7 +1431,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .withColumn("_broker_idx", hash_key(F.col("rid"), bs+101) % broker_count)
         )
         acct_df = acct_df.join(
-            F.broadcast(brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("ca_b_id"))),
+            brokers_df.select(F.col("_idx").alias("_broker_idx"), F.col("broker_id").alias("ca_b_id")),
             on="_broker_idx", how="left")
 
         # --- Drop 'U' rows referencing non-existent CA_IDs (ADDACCT dedup holes) ---
@@ -1459,7 +1459,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         # is being closed), but an empty broker causes the row to be dropped.
         _first_broker = brokers_df.select("broker_id").first()[0]
         inac_acct_rows = (inac_custs
-            .join(F.broadcast(acct_owners), F.col("_inac_cid") == F.col("owner_cid"), "inner")
+            .join(acct_owners, F.col("_inac_cid") == F.col("owner_cid"), "inner")
             .withColumn("cdc_flag", F.lit("U"))
             .withColumn("cdc_dsn", F.lit("0"))
             .withColumn("ca_b_id", F.lit(str(_first_broker)))
