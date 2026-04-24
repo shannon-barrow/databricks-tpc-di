@@ -1009,56 +1009,52 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     ).text(tmp_path)
     log(f"[CustomerMgmt] XML body written to staging")
 
-    # Step 2: Concat header + body + footer per file using filesystem cat
-    xml_header = '<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">\n'
-    xml_footer = '\n</TPCDI:Actions>\n'
-    import subprocess, tempfile
-
-    # Write header/footer to local temp files
-    header_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-    header_file.write(xml_header)
-    header_file.close()
-    footer_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-    footer_file.write(xml_footer)
-    footer_file.close()
+    # Step 2: Concat header + body + footer per file using pure-Python I/O.
+    # Previously this shelled out to `bash -c "cat hdr src ftr > dst"`; at
+    # SF=20000 with ~800 files concat'd in parallel, UC Volume FUSE throws
+    # EAGAIN ("Resource temporarily unavailable") on both reads and the
+    # output redirect. shell-level retries can't recover a half-written
+    # redirect once cat has already failed. Mirror the retry pattern used
+    # in utils.py register_copies_from_staging: open dst once, write
+    # header bytes, copyfileobj the source in 4MB chunks with per-source
+    # retry on OSError, then write footer bytes.
+    xml_header_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">\n'
+    xml_footer_bytes = b'\n</TPCDI:Actions>\n'
+    import shutil, time as _time
 
     part_files = sorted(
         [f for f in dbutils.fs.ls(tmp_path) if f.name.startswith("part-")],
         key=lambda f: f.name)
 
-    # Convert dbfs/volume paths to local FUSE paths for cat
     def to_local(path):
         # UC Volumes: /Volumes/... is directly accessible (not via /dbfs/)
         if "/Volumes/" in path:
             return path.replace("dbfs:", "")
         return path.replace("dbfs:", "/dbfs")
 
-    import concurrent.futures, time as _time
+    import concurrent.futures
     def wrap_xml(args):
         i, pf = args
-        src = to_local(pf.path)
-        dst = to_local(f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
-        # FUSE mount on UC Volumes can return EAGAIN under parallel I/O; retry
-        # with exponential backoff before giving up.
-        last_err = None
-        for attempt in range(5):
-            try:
-                subprocess.run(
-                    ["bash", "-c", f"cat {header_file.name} {src} {footer_file.name} > {dst}"],
-                    check=True)
-                return
-            except subprocess.CalledProcessError as e:
-                last_err = e
-                _time.sleep(2 ** attempt)
-        raise last_err
+        src_local = to_local(pf.path)
+        dst_local = to_local(f"{cfg.batch_path(1)}/CustomerMgmt_{i+1}.xml")
+        with open(dst_local, "wb") as out:
+            out.write(xml_header_bytes)
+            last_err = None
+            for attempt in range(10):
+                try:
+                    with open(src_local, "rb") as src:
+                        shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
+                    last_err = None
+                    break
+                except OSError as e:
+                    last_err = e
+                    _time.sleep(min(30, 0.5 * (2 ** attempt)))
+            if last_err is not None:
+                raise last_err
+            out.write(xml_footer_bytes)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(wrap_xml, enumerate(part_files)))
-
-    # Cleanup temp files
-    import os as _os
-    _os.unlink(header_file.name)
-    _os.unlink(footer_file.name)
 
     total_new = hist_size + update_last_id * new_custs
     total_caids = hist_size + update_last_id * new_accts
