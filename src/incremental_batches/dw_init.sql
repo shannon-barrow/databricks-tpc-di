@@ -32,14 +32,12 @@ ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMI
 
 -- COMMAND ----------
 
-CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Audit (
-  dataset STRING COMMENT 'Component the data is associated with',
-  batchid INT COMMENT 'BatchID the data is associated with',
-  date DATE COMMENT 'Date value corresponding to the Attribute',
-  attribute STRING COMMENT 'Attribute this row of data corresponds to',
-  value BIGINT COMMENT 'Integer value corresponding to the Attribute',
-  dvalue DECIMAL(15,5) COMMENT 'Decimal value corresponding to the Attribute'
-) AS SELECT *
+-- Delta RTAS (CREATE OR REPLACE TABLE ... AS SELECT) doesn't accept an
+-- inline schema spec. Schema is inferred from read_files' `schema =>`
+-- option, which gives identical types to what the view used to declare.
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Audit
+  COMMENT 'Audit counts emitted by the data generator; loaded from *_audit.csv'
+  AS SELECT *
 FROM
   read_files(
   "${tpcdi_directory}sf=${scale_factor}/*",
