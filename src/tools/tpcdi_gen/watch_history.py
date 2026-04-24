@@ -240,15 +240,22 @@ def _gen_historical(spark, cfg, dbutils):
     import math as _math
     import random as _rand
     _bc_rng = _rand.Random(seed_for("WH", "bcperm"))
-    def _bij_params(modulus: int) -> tuple:
+    # Photon evaluates `pos_in_update * bij_b + bij_c` in signed bigint. At SF>=20000
+    # with naive `b` in [1, modulus), `b * max_pos` overflows 2^63-1 and Photon raises
+    # ARITHMETIC_OVERFLOW under ANSI. Cap `b` so `b * max_pos + c` stays in bigint.
+    _LONG_SAFE = 1 << 62  # headroom for +bij_c (bij_c <= modulus < 2^62)
+    def _bij_params(modulus: int, max_pos: int) -> tuple:
         if modulus < 3:
             return 1, 0
-        # Candidate b: random in [1, modulus). Step until coprime with modulus.
-        b = _bc_rng.randrange(1, modulus)
-        # Fast coprimality via gcd; step upward if needed.
+        cap = max(1, _LONG_SAFE // max(1, max_pos))
+        upper = min(modulus, cap)
+        if upper < 3:
+            return 1, 0
+        # Candidate b: random in [1, upper). Step until coprime with modulus.
+        b = _bc_rng.randrange(1, upper)
         while _math.gcd(b, modulus) != 1:
             b += 1
-            if b >= modulus:
+            if b >= upper:
                 b = 1
         c = _bc_rng.randrange(0, modulus)
         return int(b), int(c)
@@ -269,7 +276,7 @@ def _gen_historical(spark, cfg, dbutils):
             prev_cp = prev_ls * prev_rs
             modulus = total_cp - prev_cp
         new_cp = total_cp - prev_cp
-        bij_b, bij_c = _bij_params(max(1, modulus))
+        bij_b, bij_c = _bij_params(max(1, modulus), new_pu)
         gen_info.append((g, ls, rs, prev_ls, prev_rs, prev_cp, total_cp, new_cp, bij_b, bij_c))
 
     log(f"[WatchHistory] start=({sl} custs x {sr} secs), growth=(+{gl}, +{gr}), gen={max_gen}", "DEBUG")
