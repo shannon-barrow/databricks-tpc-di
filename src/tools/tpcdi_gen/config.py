@@ -331,6 +331,34 @@ class ScaleConfig:
         # Use 0.9997 as the survival rate. The .limit() on CNCL prevents overshoot.
         self.wh_actv_count = int(self.wh_total * 0.8 * 0.9997)
 
+        # ----- Trade account pool -----
+        # Count of brokerage accounts that existed by TRADE_BEGIN_DATE. Since
+        # CA_IDs are assigned sequentially as CustomerMgmt actions execute (in
+        # time order), a simple `ca_id < n_available_accounts` yields exactly
+        # the set of accounts created before trades began. Trade picks via
+        # hash % n_available_accounts and uses the hash directly as CA_ID —
+        # no enumeration, no join to a pool DataFrame, no dependency on
+        # CustomerMgmt completing. Closures are ignored (matches DIGen's
+        # relativeTimeFrame reference: only creation time matters).
+        cust_per_update = int(0.005 * self.internal_sf)
+        acct_per_update = int(0.01 * self.internal_sf)
+        _new_custs = int(cust_per_update * 0.7)
+        _new_accts = int(acct_per_update * 0.7)
+        _change_custs = int(cust_per_update * 0.2)
+        _change_accts = int(acct_per_update * 0.2)
+        _del_custs = int(cust_per_update * 0.1)
+        _del_accts = int(acct_per_update * 0.1)
+        _addaccts = _new_accts - _new_custs
+        _rows_per_update = (_new_custs + _addaccts + _change_accts + _del_accts
+                            + _change_custs + _del_custs)
+        _cm_final = self.cm_final_row_count
+        _update_last_id = (_cm_final - _new_accts) // _rows_per_update
+        _hist_size = _cm_final - _update_last_id * _rows_per_update
+        _n_created = _hist_size + _update_last_id * _new_accts
+        _trade_fraction = ((TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds()
+                           / (CM_END_DATE - CM_BEGIN_DATE).total_seconds())
+        self.n_available_accounts = max(_hist_size, int(_n_created * _trade_fraction))
+
         # ----- DailyMarket parameters -----
         # dm_days: Number of days in the DailyMarket date range (732 days for
         #   the period 2015-07-06 to 2017-07-07).

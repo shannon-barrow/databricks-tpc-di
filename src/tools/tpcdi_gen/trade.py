@@ -135,11 +135,13 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     .collect()/.count() calls that were adding ~4 min per invocation.
     """
     log("[Trade] Starting generation")
-    # Read pre-built valid account pool from CustomerMgmt (already cached with sequential IDs).
-    # This avoids collecting millions of rows to the driver.
-    valid_accts = spark.table("_valid_acct_pool")
-    n_valid = valid_accts.count()
-    log(f"[Trade] account pool: {n_valid} valid accounts (from _valid_acct_pool)")
+    # Account pool size is analytical (see Config.n_available_accounts).
+    # CA_IDs are sequential 0..n_valid-1 — no view/join needed; Trade uses
+    # its hash-derived _va_idx directly as the CA_ID. This also drops Trade's
+    # dependency on CustomerMgmt — Trade now only needs HR (_brokers) and
+    # FINWIRE (_symbols) to start.
+    n_valid = cfg.n_available_accounts
+    log(f"[Trade] account pool: {n_valid} valid accounts (analytical)")
 
     # n_brokers lets each trade pick a broker index (hash_key % n_brokers).
     # The broker's full name is computed inline at write time via dict_joins
@@ -147,8 +149,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     n_brokers = spark.table("_brokers").count()
     num_sec = spark.table("_symbols").count()
 
-    shared = {"valid_accts": valid_accts, "n_valid": n_valid,
-              "n_brokers": n_brokers, "num_sec": num_sec}
+    shared = {"n_valid": n_valid, "n_brokers": n_brokers, "num_sec": num_sec}
 
     counts = {}
     hist_result = _gen_historical_trades(spark, cfg, dicts, dbutils, shared)
@@ -168,7 +169,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # session-scoped and go away at session end anyway).
     from .utils import _detect_serverless
     if not _detect_serverless(spark):
-        for view_name in ["_closed_accounts", "_created_accounts", "_account_owners", "_valid_acct_pool"]:
+        for view_name in ["_account_owners"]:
             try:
                 spark.catalog.uncacheTable(view_name)
             except:
@@ -186,7 +187,6 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
     Uses pre-built shared lookups (valid_accts, broker_names, num_sec) from generate()
     to avoid redundant .collect()/.count() calls.
     """
-    valid_accts = shared["valid_accts"]
     n_valid = shared["n_valid"]
     n_brokers = shared["n_brokers"]
     num_sec = shared["num_sec"]
@@ -330,10 +330,8 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
 
-    # Join valid (non-closed) account IDs via the sequential index
-    trade_df = trade_df.join(
-        valid_accts, on="_va_idx", how="left"
-    ).withColumn("t_ca_id", F.col("_valid_ca_id"))
+    # CA_ID is the hash-derived _va_idx directly (sequential 0..n_valid-1).
+    trade_df = trade_df.withColumn("t_ca_id", F.col("_va_idx").cast("string"))
 
 
     # t_exec_name is computed lazily at write time (inline dict_joins on the
@@ -686,7 +684,6 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
 
     Uses pre-built shared lookups (valid_accts, broker_names, num_sec) from generate().
     """
-    valid_accts = shared["valid_accts"]
     n_valid = shared["n_valid"]
     n_brokers = shared["n_brokers"]
     num_sec = shared["num_sec"]
@@ -861,7 +858,7 @@ def _gen_incremental_trades(spark, cfg, dicts, batch_id, dbutils, shared):
             F.col("_sym_name"))
          .otherwise(F.lit(_sym0)))
     # Join valid (non-closed) account
-    inc_df = inc_df.join(valid_accts, on="_va_idx", how="left").withColumn("t_ca_id", F.col("_valid_ca_id"))
+    inc_df = inc_df.withColumn("t_ca_id", F.col("_va_idx").cast("string"))
 
     # Derive t_exec_name inline from _broker_idx — same pattern as historical
     # write_trade. HR name dicts auto-broadcast; no intermediate broker_names

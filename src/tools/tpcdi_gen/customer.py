@@ -929,59 +929,26 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                                           volume_path=cfg.volume_path, dbutils=dbutils,
                                           max_records_per_file=_xml_records_per_file)
 
-    # === Create _closed_accounts temp view ===
-    # Cache and materialize views that Trade depends on so Trade reads instantly.
-    # when it reads these views — essentially re-running CustomerMgmt.
-    closed_accts = (all_df
-        .filter(F.col("ActionType") == "CLOSEACCT")
-        .select(F.col("CA_ID").alias("closed_ca_id"))
-        .distinct())
-    # Derived view: filter+select on already-materialized all_df. On serverless
-    # we skip materialization (materialize=False) — re-reading a column-pruned
-    # subset of all_df's temp table is cheap. On classic, persist() runs normally.
-    closed_accts, _ = disk_cache(closed_accts, spark, "_closed_accounts", materialize=False)
-    closed_accts.createOrReplaceTempView("_closed_accounts")
-    # Analytical: CLOSEACCT picks from the schedule = del_accts × update_last_id.
-    n_closed = n_close
-    log(f"[CustomerMgmt] {n_closed:,} closed accounts -> _closed_accounts view")
-
+    # === _account_owners temp view ===
+    # Maps each created CA_ID to its owning C_ID. Used by incremental Batch2/3
+    # to (a) force INAC candidates to ACTV when they have no accounts, (b)
+    # drop U rows referencing non-existent CA_IDs, and (c) emit cascade INAC
+    # account rows for newly-inactive customers. Not used by Trade.
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
-
-    created_accts = _acct_creating.select(F.col("CA_ID").alias("created_ca_id"))
-    # Derived view — see comment on _closed_accounts above.
-    created_accts, _ = disk_cache(created_accts, spark, "_created_accounts", materialize=False)
-    created_accts.createOrReplaceTempView("_created_accounts")
-    # Analytical: NEW + ADDACCT rows = hist_size + update_last_id × new_accts.
-    n_created = hist_size + update_last_id * new_accts
-    log(f"[CustomerMgmt] {n_created:,} created accounts -> _created_accounts view")
-
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
-    # Derived view — see comment on _closed_accounts above.
+    # Derived view: filter+select on already-materialized all_df. On serverless
+    # we skip materialization (materialize=False) — re-reading a column-pruned
+    # subset of all_df's temp table is cheap. On classic, persist() runs normally.
     acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners", materialize=False)
     acct_owners.createOrReplaceTempView("_account_owners")
 
-    # Build valid account pool with sequential IDs for Trade.
-    # Trade uses hash % n_valid to assign accounts, so _va_idx must be 0..n_valid-1.
-    # Only include accounts that existed by TRADE_BEGIN_DATE (filter by ID range).
-    # ca_ids are allocated sequentially, so filtering by < n_available gives the
-    # same set as orderBy().limit() without a sort (partition-parallel filter).
-    trade_fraction = (TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds() / (CM_END_DATE - CM_BEGIN_DATE).total_seconds()
-    n_available = max(hist_size, int(n_created * trade_fraction))
-    time_filtered = created_accts.filter(F.col("created_ca_id") < n_available)
-    # Remove closed accounts
-    filtered = time_filtered.join(
-        closed_accts,
-        time_filtered["created_ca_id"] == closed_accts["closed_ca_id"], "left_anti")
-    # Collect from disk cache (~9.6M rows at SF=10000 = ~77MB, fast) + enumerate
-    valid_ca_ids = sorted([row.created_ca_id for row in filtered.collect()])
-    valid_acct_pool = spark.createDataFrame(
-        [(i, str(ca_id)) for i, ca_id in enumerate(valid_ca_ids)],
-        ["_va_idx", "_valid_ca_id"])
-    valid_acct_pool.createOrReplaceTempView("_valid_acct_pool")
-    n_valid = len(valid_ca_ids)
-    log(f"[CustomerMgmt] {n_valid} valid accounts -> _valid_acct_pool view (from {n_available} by trade date)")
+    # Trade's account pool is computed analytically from cfg (see
+    # Config.n_available_accounts). CA_IDs are sequential 0..n_available-1 and
+    # Trade picks via hash % n_available, using the hash directly as CA_ID.
+    # So no view or DataFrame is built here — Trade doesn't depend on CM.
+    log(f"[CustomerMgmt] {cfg.n_available_accounts} valid accounts (analytical, via cfg.n_available_accounts)")
 
     # === Create _customer_dates temp view ===
     # Track the lifecycle of each customer: when they were created (NEW) and when they

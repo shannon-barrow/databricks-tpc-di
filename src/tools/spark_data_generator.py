@@ -249,11 +249,13 @@ def spark_generate():
       return market_data.generate(spark, cfg, dbutils)
     f_dm = executor.submit(run_daily_market)
 
-    # --- Tier 2: Trade starts when views are ready (not full CustomerMgmt) ---
+    # --- Tier 2: Trade no longer depends on CustomerMgmt. n_valid is
+    # computed analytically (cfg.n_available_accounts) and t_ca_id uses the
+    # hash-derived _va_idx directly. Trade only waits for HR (_brokers) and
+    # FINWIRE (_symbols).
     def run_trade():
-      cust_views_ready.wait()  # wait for views only (~4 min into CustomerMgmt)
-      fw_symbols_ready.wait()  # wait for _symbols (staged parquet)
-      # Per-dataset async copies are kicked off by each write_file; no wave drain needed.
+      f_hr.result()            # _brokers view must exist for n_brokers count
+      fw_symbols_ready.wait()  # _symbols (staged parquet)
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 
