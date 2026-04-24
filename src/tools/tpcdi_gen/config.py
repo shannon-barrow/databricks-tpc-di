@@ -359,6 +359,13 @@ class ScaleConfig:
                            / (CM_END_DATE - CM_BEGIN_DATE).total_seconds())
         self.n_available_accounts = max(_hist_size, int(_n_created * _trade_fraction))
 
+        # Analytical broker count estimate: 30% of HR employees become brokers
+        # via hash-based sampling with ~0.01% variance. Trade uses this as a
+        # modulus to compute _broker_idx; it does NOT join to _brokers, so the
+        # tiny variance between estimate and exact count is harmless. Lets
+        # Trade start without waiting on HR when static audits are available.
+        self.n_brokers_estimate = int(self.hr_rows * BROKER_PCT)
+
         # ----- DailyMarket parameters -----
         # dm_days: Number of days in the DailyMarket date range (732 days for
         #   the period 2015-07-06 to 2017-07-07).

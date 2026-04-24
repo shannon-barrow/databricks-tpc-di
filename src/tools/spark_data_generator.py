@@ -249,13 +249,15 @@ def spark_generate():
       return market_data.generate(spark, cfg, dbutils)
     f_dm = executor.submit(run_daily_market)
 
-    # --- Tier 2: Trade no longer depends on CustomerMgmt. n_valid is
-    # computed analytically (cfg.n_available_accounts) and t_ca_id uses the
-    # hash-derived _va_idx directly. Trade only waits for HR (_brokers) and
-    # FINWIRE (_symbols).
+    # --- Tier 2: Trade no longer depends on CustomerMgmt or HR (when static
+    # audits are available). n_valid and n_brokers come from cfg analytically;
+    # t_ca_id uses the hash-derived _va_idx directly. Trade only waits for HR
+    # in the dynamic audit regen path (where we need exact _brokers count).
+    from tpcdi_gen.audit import static_audits_available as _sa_avail
     def run_trade():
-      f_hr.result()            # _brokers view must exist for n_brokers count
-      fw_symbols_ready.wait()  # _symbols (staged parquet)
+      fw_symbols_ready.wait()  # _symbols (staged parquet) — always required
+      if not _sa_avail(cfg):
+        f_hr.result()          # _brokers view needed for exact count
       return trade.generate(spark, cfg, dicts, dbutils)
     f_trade = executor.submit(run_trade)
 

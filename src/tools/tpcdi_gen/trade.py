@@ -137,16 +137,24 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     log("[Trade] Starting generation")
     # Account pool size is analytical (see Config.n_available_accounts).
     # CA_IDs are sequential 0..n_valid-1 — no view/join needed; Trade uses
-    # its hash-derived _va_idx directly as the CA_ID. This also drops Trade's
-    # dependency on CustomerMgmt — Trade now only needs HR (_brokers) and
-    # FINWIRE (_symbols) to start.
+    # its hash-derived _va_idx directly as the CA_ID. Combined with the
+    # analytical n_brokers below, Trade no longer depends on CustomerMgmt
+    # at all, and only waits on HR when we're regenerating audits dynamically.
     n_valid = cfg.n_available_accounts
     log(f"[Trade] account pool: {n_valid} valid accounts (analytical)")
 
     # n_brokers lets each trade pick a broker index (hash_key % n_brokers).
-    # The broker's full name is computed inline at write time via dict_joins
-    # on _broker_idx — no intermediate broker_names table, no shuffle join.
-    n_brokers = spark.table("_brokers").count()
+    # Trade does NOT join to _brokers — t_exec_name is derived inline from
+    # _broker_idx via dict_joins on HR name dictionaries. So any n_brokers
+    # value that stays stable across the run works; tiny estimate↔exact
+    # variance is harmless. Use the analytical estimate when static audits
+    # are present (lets Trade start without waiting on HR); use the exact
+    # count when we're regenerating audits dynamically to keep audit counts
+    # as faithful to the underlying HR data as possible.
+    if static_audits_available(cfg):
+        n_brokers = cfg.n_brokers_estimate
+    else:
+        n_brokers = spark.table("_brokers").count()
     num_sec = spark.table("_symbols").count()
 
     shared = {"n_valid": n_valid, "n_brokers": n_brokers, "num_sec": num_sec}
