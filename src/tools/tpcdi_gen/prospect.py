@@ -44,7 +44,7 @@ Other Field Notes
   - All demographic fields (income, cars, children, etc.) have 5% NULL rate
 """
 
-from pyspark.sql import SparkSession, functions as F, Window
+from pyspark.sql import SparkSession, functions as F
 from .config import *
 from .utils import write_file, seed_for, dict_join, hash_key, dict_count, log
 
@@ -287,7 +287,12 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             .otherwise((hash_key(F.col("p_id"), seed_for("P", "nw")) % 3990000 + 10000).cast("string")))
     )
 
+    # Keep p_id on `final` so B2/B3 can slice the "oldest drop_count rows" with
+    # a simple filter on the dense 0..prospect_total-1 sequence. Dropping
+    # p_id here would force a row_number() Window.orderBy(...) pass, which
+    # shuffles the entire dataset onto a single task (~15 min at SF=20000).
     final = prospect_df.select(
+        "p_id",
         "agencyid", "lastname", "firstname", "middleinitial", "gender",
         "addressline1", "addressline2", "postalcode", "city", "state", "country",
         "phone", "income", "numbercars", "numberchildren", "maritalstatus", "age",
@@ -298,7 +303,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # =====================================================================
     # Batch 1: full historical load (all prospect_total rows)
     counts = {}
-    write_file(final, f"{cfg.batch_path(1)}/Prospect.csv", ",", dbutils,
+    write_file(final.drop("p_id"), f"{cfg.batch_path(1)}/Prospect.csv", ",", dbutils,
                scale_factor=cfg.sf)
     counts[("Prospect", 1)] = prospect_total
     counts[("Prospect_Matching", 1)] = n_match
@@ -316,14 +321,6 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # at Batch 3 → no rows with batchid=2 in the final Prospect table → the
     # 'Prospect batches' audit check fails (only 2 distinct batchids).
     churn_per_batch = max(1, int(0.005 * cfg.internal_sf * 1.2))
-    # Row-numbered copy of Batch 1 so we can slice it by position. The
-    # row_number() Window.orderBy(...) forces a single-partition shuffle, so
-    # at SF>=1000 re-partition back out to match the expected output file
-    # count before B2/B3 compute + write fans back out.
-    final_indexed = final.withColumn(
-        "_rn", F.row_number().over(Window.orderBy(F.monotonically_increasing_id())))
-    if target_prospect_partitions:
-        final_indexed = final_indexed.repartition(target_prospect_partitions)
     accumulated_new = None  # union of all prior batches' new rows
 
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
@@ -335,9 +332,9 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         # then append all prior batches' new rows + this batch's new rows.
         drop_count = batch_offset * churn_per_batch
         base_rows_to_keep = prospect_total - drop_count
-        batch_base = (final_indexed
-            .filter(F.col("_rn") > drop_count)
-            .drop("_rn"))
+        batch_base = (final
+            .filter(F.col("p_id") >= drop_count)
+            .drop("p_id"))
         if accumulated_new is not None:
             batch_base = batch_base.unionByName(accumulated_new)
 
