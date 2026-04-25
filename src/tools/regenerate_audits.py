@@ -429,6 +429,17 @@ print("=== HR brokers ===")
 hr_brokers = compute_hr_brokers_count()
 print(f"  {hr_brokers}")
 
+# COMMAND ----------
+
+# MAGIC %md ## CustomerMgmt + FINWIRE scans (slow — separated so they can be re-run independently)
+# MAGIC
+# MAGIC At SF=20000+ the CustomerMgmt XML scan reads ~800 files and takes minutes;
+# MAGIC FINWIRE scans ~200 quarterly fixed-width files (~1B rows). Isolating them
+# MAGIC means a syntax fix to one of the lighter scans doesn't force re-running
+# MAGIC the heavy ones.
+
+# COMMAND ----------
+
 print("=== CustomerMgmt action counts (B1) ===")
 cm_b1 = compute_customermgmt_audit()
 print(f"  {cm_b1}")
