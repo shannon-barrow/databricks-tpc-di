@@ -343,16 +343,25 @@ def compute_hr_brokers_count() -> int:
 # COMMAND ----------
 
 def compute_customermgmt_audit() -> dict:
-    """Parse Batch1/CustomerMgmt_*.xml and count ActionType occurrences."""
-    df = (spark.read.format("xml")
-          .option("rowTag", "Action")
-          .option("rootTag", "TPCDI:Actions")
-          .load(f"{batch_path(1)}/CustomerMgmt_*.xml"))
-    action_col = next((c for c in df.columns if c.lower() in ("_actiontype", "actiontype")), None)
-    if action_col is None:
-        raise RuntimeError(f"could not find ActionType in CustomerMgmt XML; columns: {df.columns}")
-    rows = df.groupBy(action_col).count().collect()
-    by_action = {r[action_col]: r["count"] for r in rows}
+    """Parse Batch1/CustomerMgmt_*.xml and count ActionType occurrences.
+
+    Uses the same read_files() XML invocation as the benchmark's bronze
+    CustomerMgmtRaw.sql (rowTag = "TPCDI:Action" with the TPCDI namespace
+    prefix; rootTag is implicit). The ActionType comes through as
+    `_ActionType` column from the XML attribute.
+    """
+    df = spark.sql(f"""
+        SELECT _ActionType AS ActionType
+        FROM read_files(
+            "{batch_path(1)}",
+            format => "xml",
+            inferSchema => False,
+            rowTag => "TPCDI:Action",
+            fileNamePattern => "CustomerMgmt_[0-9]*.xml"
+        )
+    """)
+    rows = df.groupBy("ActionType").count().collect()
+    by_action = {r["ActionType"]: r["count"] for r in rows}
     return {
         "cm_new":       by_action.get("NEW", 0),
         "cm_addacct":   by_action.get("ADDACCT", 0),
