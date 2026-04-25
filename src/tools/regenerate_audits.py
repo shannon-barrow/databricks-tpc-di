@@ -375,15 +375,20 @@ def compute_customermgmt_audit() -> dict:
 
 # MAGIC %md ## FINWIRE per-record counts (CMP / SEC / FIN)
 # MAGIC
-# MAGIC FINWIRE files are fixed-width. Per the bronze ingest, the rectype occupies
-# MAGIC bytes 16-18 (3 chars) of each line: `CMP`, `SEC`, or `FIN`.
+# MAGIC FINWIRE files are fixed-width. Per `bronze/ingest_finwire.sql`, the
+# MAGIC rectype occupies bytes 16-18 (3 chars) of each line: `CMP`, `SEC`, or
+# MAGIC `FIN`. Files are named `FINWIRE_<n>.txt` (we ship merged numbered parts
+# MAGIC rather than DIGen's quarterly `FINWIRE2017Q3` files).
 
 # COMMAND ----------
 
 def compute_finwire_audit() -> dict:
-    df = (spark.read.text(f"{batch_path(1)}/FINWIRE*Q*")
-          .filter(~F.col("value").endswith("_audit.csv"))
-          .withColumn("rec_type", F.substring(F.col("value"), 16, 3)))
+    """Mirrors bronze/ingest_finwire.sql: read the FINWIRE_*.txt fixed-width
+    files via text format and parse rectype from bytes 16-18."""
+    df = spark.sql(f"""
+        SELECT substring(value, 16, 3) AS rec_type
+        FROM text.`{batch_path(1)}/FINWIRE_*.txt`
+    """)
     rows = df.groupBy("rec_type").count().collect()
     by_t = {r["rec_type"]: r["count"] for r in rows}
     return {
