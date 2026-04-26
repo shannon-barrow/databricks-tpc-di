@@ -452,6 +452,17 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     schedule_df = spark.createDataFrame(_sched_pdf)
     del _sched_pdf
 
+    # Collapse Arrow batch partitions into a small number of writers. With
+    # Arrow enabled, createDataFrame(pandas) produces one partition per
+    # arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at
+    # SF=20000. Without this, Photon's writer auto-rotates files at ~217K
+    # rows (per-file byte budget), producing 320+ tiny files written
+    # serially by one task — ~7 min wall-clock for a 584 MB output.
+    # coalesce (not repartition) because we only need to reduce fan-out;
+    # a shuffle would be wasted work.
+    _sched_target_parts = max(8, cfg.sf // 2500)
+    schedule_df = schedule_df.coalesce(_sched_target_parts)
+
     # Map action_code → ActionType string so the join key matches all_df.
     schedule_df = schedule_df.withColumn("_sched_action",
         F.when(F.col("_sched_action_code") == ACT_INACT,   F.lit("INACT"))
