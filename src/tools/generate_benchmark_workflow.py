@@ -106,15 +106,14 @@ def generate_benchmark_workflow(
         opt_write = "'delta.autoOptimize.optimizeWrite'=True"
         index_cols = ""
 
-    # Pass tpcdi_directory up to (but not including) sf={scale_factor}.
-    # Downstream notebooks append sf=${scale_factor}/ so they can be reused
-    # across scale factors by just changing the scale_factor param.
-    tpcdi_sf_directory = f"{tpcdi_directory}spark_datagen/"
-
+    # The Driver builds tpcdi_directory up to (but not including) sf={scale_factor}/
+    # — including the generator-specific subdir (spark_datagen/ for Spark, none
+    # for DIGen) — so we pass it through unchanged. Downstream notebooks append
+    # sf=${scale_factor}/ themselves.
     dag_args = {
         "catalog": catalog,
         "wh_target": wh_target,
-        "tpcdi_directory": tpcdi_sf_directory,
+        "tpcdi_directory": tpcdi_directory,
         "scale_factor": scale_factor,
         "job_name": job_name,
         "repo_src_path": repo_src_path,
