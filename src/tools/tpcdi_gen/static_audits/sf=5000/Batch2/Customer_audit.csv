@@ -1,8 +1,0 @@
-DataSet, BatchID ,Date , Attribute , Value, DValue
-DimCustomer,2,,C_NEW,17500,
-DimCustomer,2,,C_UPDCUST,4172,
-DimCustomer,2,,C_ID_HIST,0,
-DimCustomer,2,,C_INACT,2114,
-DimCustomer,2,,C_DOB_TO,0,
-DimCustomer,2,,C_DOB_TY,0,
-DimCustomer,2,,C_TIER_INV,1160,
