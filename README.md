@@ -87,7 +87,9 @@ is identical.
   - `catalog` — target catalog for the output volume (default `main`)
   - `regenerate_data` — `YES` to wipe and regenerate; `NO` to no-op if output already exists
   - `log_level` — `DEBUG` / `INFO` / `WARN` (Spark generator only)
-- Output path: `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/`
+- Output path:
+  - `spark` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}/`
+  - `digen` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/` (legacy, preserves existing workspaces)
 - Can also be invoked via `%run` from the TPC-DI Driver notebook; job parameters
   match widget names.
 

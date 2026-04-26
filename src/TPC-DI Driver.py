@@ -65,7 +65,6 @@ dbutils.widgets.text("job_name", tpcdi_config.default_job_name, "Job Name")
 dbutils.widgets.text("wh_target", tpcdi_config.default_wh, 'Target Database')
 dbutils.widgets.text("catalog", tpcdi_config.default_catalog, 'Target Catalog')
 dbutils.widgets.dropdown("perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, 'Optimize For UC Features or Fastest Performance')
-dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
 dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Generator")
 
 perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
@@ -78,7 +77,9 @@ wf_key            = list(tpcdi_config.workflows_dict)[tpcdi_config.workflow_vals
 sku               = wf_key.split('-')
 job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
-tpcdi_directory   = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+data_generator    = dbutils.widgets.get("data_generator")
+_volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+tpcdi_directory   = f'{_volume_base}spark_datagen/' if data_generator == "spark" else _volume_base
 
 dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 'NO'], "Enable Serverless")
 dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
@@ -109,12 +110,12 @@ datagen_job_id = generate_datagen_workflow(
     job_name=job_name,
     scale_factor=scale_factor,
     catalog=catalog,
-    regenerate_data=dbutils.widgets.get("regenerate_data"),
+    regenerate_data="NO",
     log_level="INFO",
     repo_src_path=tpcdi_config.repo_src_path,
     workspace_src_path=tpcdi_config.workspace_src_path,
     api_call=tpcdi_config.api_call,
-    data_generator=dbutils.widgets.get("data_generator"),
+    data_generator=data_generator,
     default_dbr_version=tpcdi_config.default_dbr_version,
     default_worker_type=tpcdi_config.default_worker_type,
 )

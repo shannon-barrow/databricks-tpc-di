@@ -32,6 +32,15 @@ posts the rendered template to the Jobs API. The DIGen branch additionally
 requires `default_dbr_version` and `default_worker_type` (its classic
 single-node cluster spec).
 
+**Output paths differ.** The Driver chooses `tpcdi_directory` based on the
+selected generator and forwards that to the benchmark workflow:
+- `spark` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/`
+- `digen` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/` (legacy path
+  preserved so workspaces with prior DIGen output don't have to regenerate)
+
+Each generator hardcodes its own write path internally; the datagen Jinja
+templates don't take `tpcdi_directory`. Only the benchmark workflow does.
+
 ## Data generator architecture
 
 Entry point: `src/tools/spark_data_generator.py` (notebook). It calls
