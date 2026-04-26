@@ -402,13 +402,20 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             virtual = (b * ps + c) % addacct_pool
             _append_picks(ACT_ADDACCT, g, _resolve_skip_vec(virtual, combined_inacts))
 
-        # UPDCUST picks (pool: prior-alive customers)
-        if alive_cust >= max(3, change_custs):
+        # UPDCUST picks (pool: prior-alive customers MINUS this-update INACTs).
+        # Excluding this-update INACTs prevents UPDCUST and INACT from both
+        # picking the same customer in the same update — those would emit two
+        # CustomerMgmt actions for the same C_ID on the same day, which silver
+        # collapses via `WHERE effectivedate < enddate` and breaks the
+        # 'DimCustomer row count' check (audit count > silver row count).
+        # ADDACCT already does this above (line ~397) using combined_inacts.
+        upd_pool = pool_cust - len(combined_inacts)
+        if upd_pool >= max(3, change_custs):
             rng = _rand.Random((_updcust_seed << 16) ^ g)
-            b, c = _bij_params(alive_cust, rng)
+            b, c = _bij_params(upd_pool, rng)
             ps = _np.arange(change_custs, dtype=_np.int64)
-            virtual = (b * ps + c) % alive_cust
-            _append_picks(ACT_UPDCUST, g, _resolve_skip_vec(virtual, inact_sorted))
+            virtual = (b * ps + c) % upd_pool
+            _append_picks(ACT_UPDCUST, g, _resolve_skip_vec(virtual, combined_inacts))
 
         # UPDACCT picks (pool: prior-alive accounts)
         if alive_acct >= max(3, change_accts):
@@ -981,11 +988,23 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # INACT. Using only INACT misses CLOSEACCT-only inactivations, leaving
     # _prior_inact incomplete; B2 then emits INAC for already-Inactive
     # customers, double-counting in the audit vs the ETL delta.
+    # Silver/DimCustomer Historical filters CustomerMgmt actions to NEW/INACT/UPDCUST
+    # before computing SCD2 history (silver/DimCustomer Historical.sql:159). So
+    # `last_action` for our `_customer_dates` view must use the same filter,
+    # otherwise an UPDACCT/ADDACCT/CLOSEACCT on a deactivated customer's
+    # account would mask their INACT (those rows have the account's owning
+    # C_ID and a later ActionTS than the INACT). That broke the B3
+    # 'DimCustomer inactive customers' audit at SF=10: customer 1044 had
+    # NEW(2008-02-28), INACT(2008-11-05), UPDACCT(2011-05-25 — owns the account
+    # being updated). max_by picked UPDACCT as last; cust_inact didn't match;
+    # _prior_inact didn't include 1044; B3 emitted a re-INAC row that silver
+    # made into a duplicate Inactive SCD2 row, inflating audit C_INACT.
     last_action = (all_df
+        .filter(F.col("ActionType").isin("NEW", "INACT", "UPDCUST"))
         .groupBy(F.col("C_ID").alias("cust_id"))
         .agg(F.max_by(F.struct(F.col("ActionType"), F.col("ActionTS")), F.col("ActionTS")).alias("last")))
     cust_inact = (last_action
-        .filter(F.col("last.ActionType").isin("INACT", "CLOSEACCT"))
+        .filter(F.col("last.ActionType") == "INACT")
         .select(F.col("cust_id"), F.col("last.ActionTS").alias("cust_inact_ts")))
     cust_dates = cust_new.join(cust_inact, on="cust_id", how="left")
     cust_dates.createOrReplaceTempView("_customer_dates")
