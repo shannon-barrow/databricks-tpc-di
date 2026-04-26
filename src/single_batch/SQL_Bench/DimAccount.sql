@@ -10,7 +10,7 @@ WITH accountincremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Account_[0-9]*.txt",
+    fileNamePattern => "{Account.txt,Account_[0-9]*.txt}",
     schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
   )

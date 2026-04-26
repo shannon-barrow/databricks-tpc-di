@@ -66,6 +66,7 @@ dbutils.widgets.text("wh_target", tpcdi_config.default_wh, 'Target Database')
 dbutils.widgets.text("catalog", tpcdi_config.default_catalog, 'Target Catalog')
 dbutils.widgets.dropdown("perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, 'Optimize For UC Features or Fastest Performance')
 dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
+dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Generator")
 
 perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
 catalog           = dbutils.widgets.get("catalog")
@@ -113,6 +114,9 @@ datagen_job_id = generate_datagen_workflow(
     repo_src_path=tpcdi_config.repo_src_path,
     workspace_src_path=tpcdi_config.workspace_src_path,
     api_call=tpcdi_config.api_call,
+    data_generator=dbutils.widgets.get("data_generator"),
+    default_dbr_version=tpcdi_config.default_dbr_version,
+    default_worker_type=tpcdi_config.default_worker_type,
 )
 displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 

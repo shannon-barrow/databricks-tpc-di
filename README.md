@@ -4,11 +4,12 @@ Databricks TPC-DI (Data Integration) is an implementation of specifications deri
 This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **14.1** or higher. 
 
 ## Note About Data Generation
-**Data generation now uses a distributed PySpark implementation** that replaces
-the single-threaded DIGen.jar. It runs natively on **Databricks Serverless**
-(no DBR / node-type / UC cluster restriction) and scales across the executor
-pool so large scale factors finish in a fraction of the time the JAR required.
-See [Data Generation](#data-generation) below.
+**Data generation defaults to a distributed PySpark implementation** that runs
+on **Databricks Serverless** and scales across the executor pool so large scale
+factors finish in a fraction of the time the original DIGen.jar required. The
+legacy single-threaded **DIGen.jar** path is still available — selectable via
+the Driver's `data_generator` widget — for byte-compatible output with the
+upstream TPC-DI reference implementation. See [Data Generation](#data-generation) below.
 
 [![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
@@ -64,19 +65,29 @@ This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 2. Create a Databricks Workflow (this created workflow is what executes the ingestion and transformations for the benchmark).  
 
 #### Data Generation
-Data generation is now a **distributed PySpark implementation** living at
-`src/tools/spark_data_generator.py` (plus modules under `src/tools/tpcdi_gen/`).
-It replaces the TPC-provided DIGen.jar and writes byte-compatible output
-(same filenames, formats, row counts, and audit attributes) so the rest of
-the benchmark pipeline is unchanged.
+Two interchangeable implementations are supported, selected via the Driver's
+`data_generator` widget:
+
+- **`spark` (default)** — distributed PySpark generator at
+  `src/tools/spark_data_generator.py` (plus modules under `src/tools/tpcdi_gen/`).
+  Runs on serverless. Outputs are split files like `Customer_1.txt`,
+  `Customer_2.txt`, etc.
+- **`digen`** — the legacy single-threaded DIGen.jar wrapped by
+  `src/tools/data_generator.py`. Runs on a small classic single-node cluster
+  (a Java subprocess can't run on serverless). Outputs are single files like
+  `Customer.txt`, `Trade.txt`, etc.
+
+The benchmark ingestion code reads either format via brace-alternation globs
+of the form `{Customer.txt,Customer_[0-9]*.txt}`, so the rest of the pipeline
+is identical.
 
 ##### Interface
 - Standalone Databricks notebook / job. Parameters:
   - `scale_factor` — `10`, `100`, `1000`, `5000`, `10000`, `20000`
   - `catalog` — target catalog for the output volume (default `main`)
   - `regenerate_data` — `YES` to wipe and regenerate; `NO` to no-op if output already exists
-  - `log_level` — `DEBUG` / `INFO` / `WARN`
-- Output path: `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}/`
+  - `log_level` — `DEBUG` / `INFO` / `WARN` (Spark generator only)
+- Output path: `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/`
 - Can also be invoked via `%run` from the TPC-DI Driver notebook; job parameters
   match widget names.
 

@@ -1,13 +1,27 @@
-"""Create a TPC-DI data-generation workflow (serverless, single notebook task).
+"""Create a TPC-DI data-generation workflow.
 
-Renders ``jinja_templates/datagen_workflow.json`` and POSTs it to the Jobs API.
+Two implementations are supported, selected by the ``data_generator`` arg:
+
+- ``"spark"`` (default): the distributed PySpark generator (`tools/spark_data_generator`)
+  running as a serverless notebook task. Outputs are split files like
+  ``Customer_1.txt``, ``Customer_2.txt``, etc.
+- ``"digen"``: the legacy single-threaded ``DIGen.jar`` utility wrapped by
+  ``tools/data_generator``, running on a small classic single-node cluster
+  (subprocess + Java can't run on serverless). Outputs are single files
+  named ``Customer.txt``, ``Trade.txt``, etc.
+
+Both paths render a Jinja template (`datagen_workflow.json` for Spark,
+`datagen_workflow_digen.json` for DIGen) and POST it to the Jobs API.
 """
-from typing import Callable
+from typing import Callable, Optional
 
 from _workflow_utils import render_and_submit, template_path
 
 
-_TEMPLATE_NAME = "datagen_workflow.json"
+_TEMPLATES = {
+    "spark": "datagen_workflow.json",
+    "digen": "datagen_workflow_digen.json",
+}
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 
 
@@ -21,6 +35,9 @@ def generate_datagen_workflow(
     repo_src_path: str,
     workspace_src_path: str,
     api_call: Callable,
+    data_generator: str = "spark",
+    default_dbr_version: Optional[str] = None,
+    default_worker_type: Optional[str] = None,
 ) -> int:
     """Create the data-generation workflow and return its ``job_id``.
 
@@ -29,14 +46,28 @@ def generate_datagen_workflow(
         scale_factor: TPC-DI scale factor (int; stringified for the template).
         catalog: UC catalog for the generated volume.
         regenerate_data: ``"YES"`` or ``"NO"`` — whether to delete existing data.
-        log_level: Log level for the generator (``DEBUG`` / ``INFO`` / ``WARN``).
+        log_level: Log level for the Spark generator
+            (``DEBUG`` / ``INFO`` / ``WARN``). Ignored for DIGen path.
         repo_src_path: Workspace-relative path to the ``src`` directory (without
             ``/Workspace`` prefix). Used inside the rendered notebook_task path.
         workspace_src_path: Absolute workspace path to the ``src`` directory.
             Used to locate the Jinja template file.
         api_call: Callable matching the signature ``api_call(payload, method,
             endpoint) -> Response`` (supplied by the Driver setup).
+        data_generator: Which implementation to use — ``"spark"`` (default,
+            distributed PySpark on serverless) or ``"digen"`` (legacy DIGen.jar
+            on classic single-node).
+        default_dbr_version: DBR version id for the DIGen path's classic cluster.
+            Required when ``data_generator='digen'``.
+        default_worker_type: Node type id for the DIGen path's classic cluster.
+            Required when ``data_generator='digen'``.
     """
+    if data_generator not in _TEMPLATES:
+        raise ValueError(
+            f"Unknown data_generator={data_generator!r}; "
+            f"expected one of {sorted(_TEMPLATES.keys())}"
+        )
+
     dag_args = {
         "job_name": job_name,
         "scale_factor": scale_factor,
@@ -45,9 +76,21 @@ def generate_datagen_workflow(
         "log_level": log_level,
         "repo_src_path": repo_src_path,
     }
-    print(f"Rendering Data Generation Workflow JSON via {_TEMPLATE_NAME}")
+    if data_generator == "digen":
+        if not default_dbr_version or not default_worker_type:
+            raise ValueError(
+                "data_generator='digen' requires default_dbr_version and "
+                "default_worker_type — DIGen.jar runs on a classic single-node "
+                "cluster (subprocess + Java can't run on serverless)."
+            )
+        dag_args["default_dbr_version"] = default_dbr_version
+        dag_args["default_worker_type"] = default_worker_type
+
+    template_name = _TEMPLATES[data_generator]
+    print(f"Rendering Data Generation Workflow JSON via {template_name} "
+          f"(data_generator={data_generator!r})")
     return render_and_submit(
-        template_path(workspace_src_path, _TEMPLATE_NAME),
+        template_path(workspace_src_path, template_name),
         dag_args,
         _JOBS_API_ENDPOINT,
         api_call,

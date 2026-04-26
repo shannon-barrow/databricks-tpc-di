@@ -61,7 +61,7 @@ CustomerIncrementalRaw AS (
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Customer_[0-9]*.txt",
+        fileNamePattern => "{Customer.txt,Customer_[0-9]*.txt}",
         schema => "${CustomerIncremental.schema}"
     )
 ),
@@ -375,7 +375,7 @@ with prospect_raw as (
       inferSchema => False,
       header => False,
       sep => ",",
-      fileNamePattern => "Prospect_[0-9]*.csv",
+      fileNamePattern => "{Prospect.csv,Prospect_[0-9]*.csv}",
       schema => "${ProspectRaw.schema}"
     )
 )
@@ -531,7 +531,7 @@ WITH AccountIncremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Account_[0-9]*.txt",
+    fileNamePattern => "{Account.txt,Account_[0-9]*.txt}",
     schema => "${AccountIncremental.schema}"
   )
 ),
@@ -661,7 +661,7 @@ WITH dailymarkethistorical AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "DailyMarket_[0-9]*.txt",
+    fileNamePattern => "{DailyMarket.txt,DailyMarket_[0-9]*.txt}",
     schema => "${DailyMarketHistorical.schema}"
   )
 ),
@@ -675,7 +675,7 @@ DailyMarketIncremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "DailyMarket_[0-9]*.txt",
+    fileNamePattern => "{DailyMarket.txt,DailyMarket_[0-9]*.txt}",
     schema => "${DailyMarketIncremental.schema}"
   )
 ),
@@ -774,7 +774,7 @@ WITH TradeIncremental AS (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Trade_[0-9]*.txt",
+    fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
     schema => "${TradeIncremental.schema}"
   )
   group by t_id
@@ -790,7 +790,7 @@ trade as (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "Trade_[0-9]*.txt",
+      fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
       schema => "${TradeHistory.schema}"
   )
 ),
@@ -804,7 +804,7 @@ TradeHistory AS (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "TradeHistory_[0-9]*.txt",
+      fileNamePattern => "{TradeHistory.txt,TradeHistory_[0-9]*.txt}",
       schema => "${TradeHistoryRaw.schema}"
   )
 ),
@@ -937,7 +937,7 @@ WITH Holdings as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "HoldingHistory_[0-9]*.txt",
+    fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
     schema => "${HoldingHistory.schema}"
   )
   UNION ALL
@@ -950,7 +950,7 @@ WITH Holdings as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "HoldingHistory_[0-9]*.txt",
+    fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
     schema => "${HoldingIncremental.schema}"
   )
 )
@@ -989,7 +989,7 @@ with CashTransactions as (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "CashTransaction_[0-9]*.txt",
+      fileNamePattern => "{CashTransaction.txt,CashTransaction_[0-9]*.txt}",
       schema => "${CashTransactionHistory.schema}"
     )
   UNION ALL
@@ -1003,7 +1003,7 @@ with CashTransactions as (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "CashTransaction_[0-9]*.txt",
+      fileNamePattern => "{CashTransaction.txt,CashTransaction_[0-9]*.txt}",
       schema => "${CashTransactionIncremental.schema}"
     )
 ),
@@ -1051,7 +1051,7 @@ WITH all_watches as (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "WatchHistory_[0-9]*.txt",
+      fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
       schema => "${WatchHistory.schema}"
     )
   UNION ALL
@@ -1065,7 +1065,7 @@ WITH all_watches as (
       inferSchema => False,
       header => False,
       sep => "|",
-      fileNamePattern => "WatchHistory_[0-9]*.txt",
+      fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
       schema => "${WatchIncremental.schema}"
     )
 ),

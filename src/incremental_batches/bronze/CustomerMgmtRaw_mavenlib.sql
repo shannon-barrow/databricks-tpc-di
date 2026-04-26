@@ -9,7 +9,7 @@ CREATE WIDGET TEXT catalog DEFAULT 'tpcdi';
 
 CREATE OR REPLACE TEMPORARY VIEW v_cust_mgmt
 USING ${xml_lib}
-OPTIONS (path "${tpcdi_directory}sf=${scale_factor}/Batch1/CustomerMgmt.xml", rowTag "TPCDI:Action", inferSchema "false");
+OPTIONS (path "${tpcdi_directory}sf=${scale_factor}/Batch1/{CustomerMgmt.xml,CustomerMgmt_[0-9]*.xml}", rowTag "TPCDI:Action", inferSchema "false");
 
 -- COMMAND ----------
 

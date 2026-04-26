@@ -62,5 +62,5 @@ FROM read_files(
   format => "xml",
   inferSchema => False,
   rowTag => "TPCDI:Action",
-  fileNamePattern => "CustomerMgmt_[0-9]*.xml"
+  fileNamePattern => "{CustomerMgmt.xml,CustomerMgmt_[0-9]*.xml}"
 );

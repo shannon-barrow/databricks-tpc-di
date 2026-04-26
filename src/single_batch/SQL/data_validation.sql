@@ -22,7 +22,7 @@ FROM
    FROM read_files(
      "${tpcdi_directory}sf=${scale_factor}/Batch1",
      format => "csv", inferSchema => False, header => False, sep => ",",
-     fileNamePattern => "HR_[0-9]*.csv",
+     fileNamePattern => "{HR.csv,HR_[0-9]*.csv}",
      schema => "employeeid STRING, managerid STRING, employeefirstname STRING, employeelastname STRING, employeemi STRING, employeejobcode STRING, employeebranch STRING, employeeoffice STRING, employeephone STRING"
    ) WHERE employeejobcode = '314') src,
   (SELECT count(*) as target_rows FROM IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimBroker')) tgt;
@@ -45,7 +45,7 @@ inc_custs AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "Customer_[0-9]*.txt",
+      fileNamePattern => "{Customer.txt,Customer_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, c_id BIGINT, c_tax_id STRING, c_st_id STRING, c_l_name STRING, c_f_name STRING, c_m_name STRING, c_gndr STRING, c_tier STRING, c_dob STRING, c_adline1 STRING, c_adline2 STRING, c_zipcode STRING, c_city STRING, c_state_prov STRING, c_ctry STRING, c_ctry_1 STRING, c_area_1 STRING, c_local_1 STRING, c_ext_1 STRING, c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, c_ext_2 STRING, c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, c_ext_3 STRING, c_email_1 STRING, c_email_2 STRING, c_lcl_tx_id STRING, c_nat_tx_id STRING"
     )
@@ -61,7 +61,7 @@ all_custs AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "Customer_[0-9]*.txt",
+      fileNamePattern => "{Customer.txt,Customer_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, c_id BIGINT, c_tax_id STRING, c_st_id STRING, c_l_name STRING, c_f_name STRING, c_m_name STRING, c_gndr STRING, c_tier STRING, c_dob STRING, c_adline1 STRING, c_adline2 STRING, c_zipcode STRING, c_city STRING, c_state_prov STRING, c_ctry STRING, c_ctry_1 STRING, c_area_1 STRING, c_local_1 STRING, c_ext_1 STRING, c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, c_ext_2 STRING, c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, c_ext_3 STRING, c_email_1 STRING, c_email_2 STRING, c_lcl_tx_id STRING, c_nat_tx_id STRING"
     )
@@ -96,7 +96,7 @@ inc_accts AS (
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
     format => "csv", inferSchema => False, header => False, sep => "|",
-    fileNamePattern => "Account_[0-9]*.txt",
+    fileNamePattern => "{Account.txt,Account_[0-9]*.txt}",
     schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
   )
@@ -109,7 +109,7 @@ all_accts AS (
     SELECT accountid FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "Account_[0-9]*.txt",
+      fileNamePattern => "{Account.txt,Account_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT, accountdesc STRING, taxstatus TINYINT, status STRING"
     )
@@ -213,7 +213,7 @@ WITH trade_source AS (
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch1",
     format => "csv", inferSchema => False, header => False, sep => "|",
-    fileNamePattern => "Trade_[0-9]*.txt",
+    fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
     schema => "t_id BIGINT, t_dts STRING, t_st_id STRING, t_tt_id STRING, t_is_cash STRING, t_s_symb STRING, t_qty INT, t_bid_price DOUBLE, t_ca_id BIGINT, t_exec_name STRING, t_trade_price DOUBLE, t_chrg DOUBLE, t_comm DOUBLE, t_tax DOUBLE"
   )
 ),
@@ -222,7 +222,7 @@ trade_inc AS (
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
     format => "csv", inferSchema => False, header => False, sep => "|",
-    fileNamePattern => "Trade_[0-9]*.txt",
+    fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
     schemaEvolutionMode => 'none',
     schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts STRING, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   ) WHERE cdc_flag = 'I'
@@ -249,7 +249,7 @@ WITH batch1_trades AS (
   FROM read_files(
     "${tpcdi_directory}sf=${scale_factor}/Batch1",
     format => "csv", inferSchema => False, header => False, sep => "|",
-    fileNamePattern => "Trade_[0-9]*.txt",
+    fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
     schema => "t_id BIGINT, t_dts STRING, t_st_id STRING, t_tt_id STRING, t_is_cash STRING, t_s_symb STRING, t_qty INT, t_bid_price DOUBLE, t_ca_id BIGINT, t_exec_name STRING, t_trade_price DOUBLE, t_chrg DOUBLE, t_comm DOUBLE, t_tax DOUBLE"
   )
 ),
@@ -285,7 +285,7 @@ WITH all_cash AS (
       FROM read_files(
         "${tpcdi_directory}sf=${scale_factor}/Batch1",
         format => "csv", inferSchema => False, header => False, sep => "|",
-        fileNamePattern => "CashTransaction_[0-9]*.txt",
+        fileNamePattern => "{CashTransaction.txt,CashTransaction_[0-9]*.txt}",
         schemaEvolutionMode => 'none',
         schema => "ct_ca_id BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
       )
@@ -294,7 +294,7 @@ WITH all_cash AS (
       FROM read_files(
         "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
         format => "csv", inferSchema => False, header => False, sep => "|",
-        fileNamePattern => "CashTransaction_[0-9]*.txt",
+        fileNamePattern => "{CashTransaction.txt,CashTransaction_[0-9]*.txt}",
         schemaEvolutionMode => 'none',
         schema => "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP, ct_amt DOUBLE, ct_name STRING"
       )
@@ -328,7 +328,7 @@ WITH all_hh AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch1",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "HoldingHistory_[0-9]*.txt",
+      fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
       schema => "hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
     )
     UNION ALL
@@ -336,7 +336,7 @@ WITH all_hh AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "HoldingHistory_[0-9]*.txt",
+      fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
     )
@@ -371,7 +371,7 @@ WITH watch_all AS (
       FROM read_files(
         "${tpcdi_directory}sf=${scale_factor}/Batch1",
         format => "csv", inferSchema => False, header => False, sep => "|",
-        fileNamePattern => "WatchHistory_[0-9]*.txt",
+        fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
         schema => "w_c_id BIGINT, w_s_symb STRING, w_dts STRING, w_action STRING"
       )
       UNION ALL
@@ -379,7 +379,7 @@ WITH watch_all AS (
       FROM read_files(
         "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
         format => "csv", inferSchema => False, header => False, sep => "|",
-        fileNamePattern => "WatchHistory_[0-9]*.txt",
+        fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
         schemaEvolutionMode => 'none',
         schema => "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts STRING, w_action STRING"
       )
@@ -413,7 +413,7 @@ WITH watches_agg AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch1",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "WatchHistory_[0-9]*.txt",
+      fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
       schema => "w_c_id BIGINT, w_s_symb STRING, w_dts STRING, w_action STRING"
     )
     UNION ALL
@@ -421,7 +421,7 @@ WITH watches_agg AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "WatchHistory_[0-9]*.txt",
+      fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts STRING, w_action STRING"
     )
@@ -460,7 +460,7 @@ WITH dm_source AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch1",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "DailyMarket_[0-9]*.txt",
+      fileNamePattern => "{DailyMarket.txt,DailyMarket_[0-9]*.txt}",
       schema => "dm_date DATE, dm_s_symb STRING, dm_close DOUBLE, dm_high DOUBLE, dm_low DOUBLE, dm_vol INT"
     )
     UNION ALL
@@ -468,7 +468,7 @@ WITH dm_source AS (
     FROM read_files(
       "${tpcdi_directory}sf=${scale_factor}/Batch{2,3}",
       format => "csv", inferSchema => False, header => False, sep => "|",
-      fileNamePattern => "DailyMarket_[0-9]*.txt",
+      fileNamePattern => "{DailyMarket.txt,DailyMarket_[0-9]*.txt}",
       schemaEvolutionMode => 'none',
       schema => "cdc_flag STRING, cdc_dsn BIGINT, dm_date DATE, dm_s_symb STRING, dm_close DOUBLE, dm_high DOUBLE, dm_low DOUBLE, dm_vol INT"
     )
@@ -506,7 +506,7 @@ FROM
    FROM read_files(
      "${tpcdi_directory}sf=${scale_factor}/Batch3",
      format => "csv", inferSchema => False, header => False, sep => ",",
-     fileNamePattern => "Prospect_[0-9]*.csv",
+     fileNamePattern => "{Prospect.csv,Prospect_[0-9]*.csv}",
      schema => "agencyid STRING, lastname STRING, firstname STRING, middleinitial STRING, gender STRING, addressline1 STRING, addressline2 STRING, postalcode STRING, city STRING, state STRING, country STRING, phone STRING, income STRING, numbercars INT, numberchildren INT, maritalstatus STRING, age INT, creditrating INT, ownorrentflag STRING, employer STRING, numbercreditcards INT, networth INT"
    )) src,
   (SELECT count(*) as target_rows

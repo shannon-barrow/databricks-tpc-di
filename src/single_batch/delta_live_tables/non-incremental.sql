@@ -25,7 +25,7 @@ FROM
     inferSchema => False, 
     header => False,
     sep => ",",
-    fileNamePattern => "HR_[0-9]*.csv", 
+    fileNamePattern => "{HR.csv,HR_[0-9]*.csv}", 
     schema => "employeeid BIGINT COMMENT 'ID of employee', managerid BIGINT COMMENT 'ID of employee’s manager', employeefirstname STRING COMMENT 'First name', employeelastname STRING COMMENT 'Last name', employeemi STRING COMMENT 'Middle initial', employeejobcode STRING COMMENT 'Numeric job code', employeebranch STRING COMMENT 'Facility in which employee has office', employeeoffice STRING COMMENT 'Office number or description', employeephone STRING COMMENT 'Employee phone number'"
   )
 WHERE employeejobcode = 314

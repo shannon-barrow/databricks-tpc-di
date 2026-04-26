@@ -22,7 +22,7 @@ def TradeHistory():
           inferSchema => False,
           header => False,
           sep => "|",
-          fileNamePattern => "Trade_[0-9]*.txt",
+          fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
           schema => "${TradeHistory.schema}"
         ))
     ),
@@ -38,7 +38,7 @@ def TradeHistory():
           inferSchema => False,
           header => False,
           sep => "|",
-          fileNamePattern => "TradeHistory_[0-9]*.txt",
+          fileNamePattern => "{TradeHistory.txt,TradeHistory_[0-9]*.txt}",
           schema => "${TradeHistoryRaw.schema}"
       )
       group by th_t_id
@@ -100,7 +100,7 @@ def TradeIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Trade_[0-9]*.txt",
+        fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
         schema => "${TradeIncremental.schema}"
       ))
     )
@@ -212,7 +212,7 @@ def CustomerIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Customer_[0-9]*.txt",
+        fileNamePattern => "{Customer.txt,Customer_[0-9]*.txt}",
         schema => "${CustomerIncremental.schema}"
       ))
     )
@@ -346,7 +346,7 @@ def AccountIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "Account_[0-9]*.txt",
+        fileNamePattern => "{Account.txt,Account_[0-9]*.txt}",
         schema => "${AccountIncremental.schema}"
       ))
     )
@@ -422,7 +422,7 @@ def WatchHistory():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "WatchHistory_[0-9]*.txt",
+        fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
         schema => "${WatchHistory.schema}"
       ))
 """)
@@ -446,7 +446,7 @@ def WatchIncremental():
         inferSchema => False,
         header => False,
         sep => "|",
-        fileNamePattern => "WatchHistory_[0-9]*.txt",
+        fileNamePattern => "{WatchHistory.txt,WatchHistory_[0-9]*.txt}",
         schema => "${WatchIncremental.schema}"
       ))
 """)

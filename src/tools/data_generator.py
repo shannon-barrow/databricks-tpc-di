@@ -1,10 +1,52 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # DIGen.jar Data Generator (legacy)
+# MAGIC
+# MAGIC Runs the original single-threaded Java DIGen utility. Writes raw files
+# MAGIC named like `Customer.txt`, `Trade.txt`, etc. (NO `_N` suffix).
+# MAGIC
+# MAGIC Selectable from the Driver via the `data_generator` widget. The Spark
+# MAGIC equivalent lives at `tools/spark_data_generator` and is the default.
+# MAGIC
+# MAGIC Can run two ways:
+# MAGIC 1. **As a standalone notebook/job** (used by `generate_datagen_workflow()`
+# MAGIC    when `data_generator='digen'`) — creates its own widgets for
+# MAGIC    `scale_factor`, `catalog`, `regenerate_data` and derives
+# MAGIC    `tpcdi_directory` and `workspace_src_path` from the notebook context.
+# MAGIC 2. **Via `%run ./tools/data_generator` from the Driver notebook** — the
+# MAGIC    Driver injects `scale_factor`, `catalog`, `tpcdi_directory`,
+# MAGIC    `workspace_src_path`, `regenerate_data` into the shared namespace so
+# MAGIC    the widget-creation block below is skipped.
+
+# COMMAND ----------
+
 import os
 import concurrent.futures
 import requests
 import shutil
 import subprocess
 import shlex
+
+# COMMAND ----------
+
+# Self-initialize when run as a standalone job (no %run parent injected the inputs).
+try:
+    scale_factor  # injected by Driver's %run → skip widget init
+except NameError:
+    dbutils.widgets.dropdown("scale_factor", "10",
+                             ["10", "100", "1000", "5000", "10000"],
+                             "Scale Factor")
+    dbutils.widgets.text("catalog", "tpcdi", "Target Catalog")
+    dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
+
+    scale_factor = int(dbutils.widgets.get("scale_factor"))
+    catalog = dbutils.widgets.get("catalog")
+    regenerate_data = dbutils.widgets.get("regenerate_data") == "YES"
+    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    UC_enabled = catalog != "hive_metastore"
+    lighthouse = False
+    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+    workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
 
 # COMMAND ----------
 
@@ -37,6 +79,18 @@ def generate_data():
   else: # No Unity Catalog enabled so use DBFS to store raw files instead of volumes
     os_blob_out_path = f"/dbfs{blob_out_path}"
     blob_out_path = f"dbfs:{blob_out_path}" 
+
+  # When run as a standalone job, regenerate_data may be a Python bool.
+  # When run via Driver %run, the legacy code didn't have this flag — treat
+  # missing as False (skip-if-exists, the original behavior).
+  try:
+    _regen = bool(regenerate_data) if not isinstance(regenerate_data, str) else regenerate_data == "YES"
+  except NameError:
+    _regen = False
+
+  if os.path.exists(os_blob_out_path) and _regen:
+    print(f"regenerate_data=YES; recursive delete of prior output at {blob_out_path}")
+    dbutils.fs.rm(blob_out_path, recurse=True)
 
   if os.path.exists(os_blob_out_path):
     print(f"Data generation skipped since the raw data/directory {blob_out_path} already exists for this scale factor.")
