@@ -355,7 +355,20 @@ class ScaleConfig:
         _update_last_id = (_cm_final - _new_accts) // _rows_per_update
         _hist_size = _cm_final - _update_last_id * _rows_per_update
         _n_created = _hist_size + _update_last_id * _new_accts
-        _trade_fraction = ((TRADE_BEGIN_DATE - CM_BEGIN_DATE).total_seconds()
+        # Subtract a 30-day safety margin from TRADE_BEGIN_DATE before computing
+        # the fraction. Account creation_ts in our generator is per-update with
+        # sub-day positional offsets, so the boundary at exactly TRADE_BEGIN_DATE
+        # is fuzzy: the last few accounts in the pool may have creation_ts a few
+        # seconds AFTER TRADE_BEGIN_DATE. Any trade landing in those seconds
+        # with a hash that picks one of those accounts produces a row whose
+        # account.creation_ts > trade_dts — failing the silver layer's
+        # temporal SCD2 join (DimTrade SK_AccountID/SK_BrokerID/SK_CustomerID
+        # 'Bad join' audit checks). The drift only manifests at large SFs
+        # (~9 bad trades at SF=10000, ~18 at SF=20000), but exact-equality
+        # audit checks fail on any drift. The 30-day margin gives plenty of
+        # headroom to absorb sub-day creation_ts jitter, costing ~30/3650
+        # ≈ 0.8% of the pool — negligible.
+        _trade_fraction = ((TRADE_BEGIN_DATE - timedelta(days=30) - CM_BEGIN_DATE).total_seconds()
                            / (CM_END_DATE - CM_BEGIN_DATE).total_seconds())
         self.n_available_accounts = max(_hist_size, int(_n_created * _trade_fraction))
 
