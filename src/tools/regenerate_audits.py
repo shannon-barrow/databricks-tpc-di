@@ -315,17 +315,26 @@ def compute_daily_market_count(batch_id: int) -> int:
     return read_csv(path, schema).count()
 
 def compute_watch_history_audit(batch_id: int) -> dict:
+    """Per DIGen WatchHistory-Audit.xml:
+      WH_RECORDS = total rows in WatchHistory.txt
+      WH_ACTIVE  = rows where w_action starts with 'A' (i.e., ACTV)
+
+    Note this is NOT 'net active' (ACTV - CNCL) — it's literally the count
+    of ACTV-flagged rows. The benchmark's automated_audit FactWatches check
+    expects this to match the silver layer's row-count delta because each
+    ACTV creates a unique (c_id, sym) pair via the bijection, so total
+    ACTV rows == total distinct pairs touched.
+    """
     path = f"{batch_path(batch_id)}/WatchHistory_*.txt"
     schema = WATCH_HIST_SCHEMA if batch_id == 1 else WATCH_INC_SCHEMA
     df = read_csv(path, schema)
     aggs = df.select(
         F.count("*").alias("wh_records"),
-        F.sum(F.when(F.col("w_action") == "ACTV", 1).otherwise(0)).alias("actv"),
-        F.sum(F.when(F.col("w_action") == "CNCL", 1).otherwise(0)).alias("cncl"),
+        F.sum(F.when(F.col("w_action") == "ACTV", 1).otherwise(0)).alias("wh_active"),
     ).collect()[0]
     return {
         "wh_records": aggs["wh_records"] or 0,
-        "wh_active":  (aggs["actv"] or 0) - (aggs["cncl"] or 0),  # net active
+        "wh_active":  aggs["wh_active"]  or 0,
     }
 
 def compute_prospect_count(batch_id: int) -> int:
