@@ -41,7 +41,7 @@ class SetupContext:
     features_or_perf = ["Feature-Rich", "Fastest Performance"]
     default_sf = "10"
     default_sf_options = ["10", "100", "1000", "5000", "10000", "20000"]
-    default_serverless = "NO"
+    default_serverless = "YES"
 
     def __init__(self, spark, dbutils):
         self.spark = spark
@@ -91,6 +91,15 @@ class SetupContext:
     # ---------- Catalog/node/DBR lookups ----------
 
     def get_node_types(self):
+        """Return full Databricks /list-node-types catalog as
+        ``{node_type_id: {full_info_dict}}``.
+
+        The widget consumer uses ``list(self.node_types.keys())`` for the
+        dropdown options. The workflow_builders use the full info_dict
+        (num_cores, category, num_local_disks, etc.) via
+        ``workflow_builders._node_picker.pick_node()`` to choose the best
+        ARM-with-local-disk node for data-gen clusters per cloud.
+        """
         response = self.api_call(None, "GET", "/api/2.0/clusters/list-node-types")
         items = json.loads(response.text)["node_types"]
         out = {}

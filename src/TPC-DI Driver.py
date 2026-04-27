@@ -126,6 +126,9 @@ datagen_job_id = generate_datagen_workflow(
     data_generator=data_generator,
     default_dbr_version=tpcdi_config.default_dbr_version,
     default_worker_type=tpcdi_config.default_worker_type,
+    serverless=serverless,
+    node_types=tpcdi_config.node_types,
+    cloud_provider=tpcdi_config.cloud_provider,
 )
 displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 

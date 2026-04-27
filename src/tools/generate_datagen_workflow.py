@@ -44,6 +44,9 @@ def generate_datagen_workflow(
     data_generator: str = "spark",
     default_dbr_version: Optional[str] = None,
     default_worker_type: Optional[str] = None,
+    serverless: str = "YES",
+    node_types: Optional[dict] = None,
+    cloud_provider: Optional[str] = None,
 ) -> int:
     """Create the data-generation workflow and return its ``job_id``.
 
@@ -92,6 +95,9 @@ def generate_datagen_workflow(
         repo_src_path=repo_src_path,
         default_dbr_version=default_dbr_version,
         default_worker_type=default_worker_type,
+        serverless=serverless,
+        node_types=node_types,
+        cloud_provider=cloud_provider,
     )
     print(f"Submitting built JSON to Databricks API {_JOBS_API_ENDPOINT}")
     return submit_dag(dag_dict, _JOBS_API_ENDPOINT, api_call)
