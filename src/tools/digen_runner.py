@@ -354,4 +354,3 @@ def run(
     finally:
         # Always clean up the per-session scratch dir, even on error.
         shutil.rmtree(session_root, ignore_errors=True)
-        print(f"  cleaned up session scratch dir: {session_root}")
