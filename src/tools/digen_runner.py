@@ -46,8 +46,41 @@ def _abort_digen(reason: str) -> None:
     )
 
 
-def preflight(spark: Any) -> None:
-    """Verify cluster can actually run DIGen. Raises before any side effect."""
+_SCRATCH_CANDIDATES = ("/local_disk0", "/tmp")
+
+
+def _pick_scratch_dir() -> str:
+    """Pick a writable scratch directory for DIGen's tmp output.
+
+    /local_disk0 is preferred (typically larger and faster on classic
+    clusters), but it's locked down on USER_ISOLATION access mode. /tmp is
+    almost always writable; smaller, but fine for SF ≤ 1000.
+
+    Returns the first writable path; raises if none work.
+    """
+    last_err = None
+    for cand in _SCRATCH_CANDIDATES:
+        try:
+            os.makedirs(cand, exist_ok=True)
+            probe = os.path.join(cand, ".tpcdi_write_probe")
+            with open(probe, "w") as f:
+                f.write("ok")
+            os.unlink(probe)
+            return cand
+        except (PermissionError, OSError) as e:
+            last_err = e
+            continue
+    _abort_digen(
+        f"no writable scratch directory found (tried {list(_SCRATCH_CANDIDATES)}): "
+        f"{type(last_err).__name__}: {last_err}. /local_disk0 is typically blocked "
+        f"on USER_ISOLATION clusters — switch the cluster to SINGLE_USER access mode "
+        f"or use /tmp."
+    )
+
+
+def preflight(spark: Any) -> str:
+    """Verify cluster can actually run DIGen. Raises before any side effect.
+    Returns the writable scratch root to use as DRIVER_ROOT."""
     # Java callable.
     try:
         r = subprocess.run(["java", "-version"], capture_output=True, timeout=10)
@@ -59,9 +92,8 @@ def preflight(spark: Any) -> None:
     except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError) as e:
         _abort_digen(f"cannot invoke `java` ({type(e).__name__}: {e})")
 
-    # /local_disk0 present (typical of classic clusters; absent on serverless).
-    if not os.path.isdir("/local_disk0"):
-        _abort_digen("/local_disk0 not present (typical of serverless clusters)")
+    # Scratch directory writable.
+    scratch = _pick_scratch_dir()
 
     # DBR version ≤ 15.4.
     dbr = (
@@ -80,7 +112,8 @@ def preflight(spark: Any) -> None:
         print(f"WARNING: could not parse DBR version from {dbr!r}; "
               f"proceeding anyway (cluster looks non-serverless).")
 
-    print(f"DIGen pre-flight check OK: java available, /local_disk0 present, DBR={dbr}")
+    print(f"DIGen pre-flight check OK: java available, scratch_dir={scratch}, DBR={dbr}")
+    return scratch
 
 
 # ---------- File ops ----------
@@ -176,13 +209,14 @@ def run(
         threads: Override for the file-move thread pool. Defaults to
             `spark.sparkContext.defaultParallelism`.
     """
-    preflight(spark)
+    DRIVER_ROOT = preflight(spark)
 
     UC_enabled = catalog != "hive_metastore"
-    DRIVER_ROOT = "/local_disk0"
-    tpcdi_tmp_path = "/tmp/tpcdi/"
-    driver_tmp_path = f"{DRIVER_ROOT}{tpcdi_tmp_path}datagen/"
-    driver_out_path = f"{DRIVER_ROOT}{tpcdi_tmp_path}sf={scale_factor}"
+    # Use a stable subdir under whatever scratch root the preflight picked
+    # (either /local_disk0 or /tmp). Avoid `/{root}/tmp/...` since `/tmp` may
+    # be the root itself.
+    driver_tmp_path = f"{DRIVER_ROOT}/tpcdi/datagen/"
+    driver_out_path = f"{DRIVER_ROOT}/tpcdi/sf={scale_factor}"
     blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
 
     if UC_enabled:
