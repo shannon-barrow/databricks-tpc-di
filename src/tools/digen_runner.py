@@ -220,7 +220,6 @@ def run(
     workspace_src_path: str,
     dbutils: Any,
     spark: Any,
-    threads: int | None = None,
     **_unused,  # accepts (and ignores) shared kwargs like log_level for signature parity with spark_runner
 ) -> None:
     """Run the legacy DIGen.jar data-generation flow.
@@ -234,8 +233,6 @@ def run(
         workspace_src_path: Absolute workspace path to the `src` directory
             (used to find `tools/datagen/DIGen.jar`).
         dbutils, spark: Databricks notebook builtins, passed in.
-        threads: Override for the file-move thread pool. Defaults to
-            `spark.sparkContext.defaultParallelism`.
     """
     DRIVER_ROOT = preflight(spark, scale_factor)
 
@@ -293,12 +290,8 @@ def run(
     for d in next(os.walk(driver_out_path))[1]:
         dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
 
-    if threads is None:
-        # 64 is fine even if it exceeds the cluster's core count — these are
-        # IO-bound shutil.copyfile workers, the OS will just queue extras.
-        threads = 64
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
+    # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine.
+    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
         futures = []
         for fn in filenames:
             futures.append(executor.submit(
