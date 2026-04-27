@@ -379,7 +379,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             tpcdi_directory=tpcdi_directory,
             wh_db_default=f"{wh_target}_{exec_type}_{datagen_label}_{batched_label}",
             pred_opt=pred_opt,
-        ),
+        ) + [common.cleanup_param()],
     }
 
     # Cluster choice — same logic as single_batch.
@@ -400,6 +400,15 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             worker_node_count=worker_node_count or 0,
             cloud_provider=cloud_provider,
         )]
+
+    # Final cleanup task — drops the run's schemas if delete_tables_when_finished=TRUE.
+    # automated_audit is the last "real" task; cleanup waits on ALL_DONE so a
+    # partial-failure run still gets cleaned up.
+    tasks.append(common.make_cleanup_task(
+        repo_src_path=repo_src_path, job_name=job_name,
+        exec_type=exec_type, serverless=serverless, wh_id=wh_id,
+        depends_on=["automated_audit"],
+    ))
 
     workflow["tasks"] = tasks
     return workflow

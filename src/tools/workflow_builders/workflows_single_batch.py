@@ -376,7 +376,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             tpcdi_directory=tpcdi_directory,
             wh_db_default=f"{wh_target}_{exec_type}_{datagen_label}_{batched_label}",
             pred_opt=pred_opt,
-        ),
+        ) + [common.cleanup_param()],
     }
 
     # Cluster: serverless+digen+SF>100 → SingleNode for mavenlib;
@@ -399,6 +399,18 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             worker_node_count=worker_node_count or 0,
             cloud_provider=cloud_provider,
         )]
+
+    # Final cleanup task — drops the run's schemas if delete_tables_when_finished=TRUE.
+    # Depends on every leaf so it's last; run_if=ALL_DONE means partial-failure
+    # runs still get cleaned up.
+    tasks.append(common.make_cleanup_task(
+        repo_src_path=repo_src_path, job_name=job_name,
+        exec_type=exec_type, serverless=serverless, wh_id=wh_id,
+        depends_on=[
+            "Gold_FactCashBalances", "Silver_Prospect", "Gold_FactWatches",
+            "Silver_FactHoldings", "Gold_FactMarketHistory",
+        ],
+    ))
 
     workflow["tasks"] = tasks
     return workflow

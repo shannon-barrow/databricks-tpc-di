@@ -135,6 +135,33 @@ def _simple_pipeline_task(pipeline_id: int) -> list[dict]:
     }]
 
 
+def _cleanup_task(*, repo_src_path: str) -> dict:
+    """Final cleanup task — drops the run's schema if delete_tables_when_finished
+    is TRUE. run_if=ALL_DONE so partial-failure runs still get cleaned up."""
+    return {
+        "task_key": "cleanup",
+        "depends_on": [{"task_key": "TPC-DI-DLT-PIPELINE"}],
+        "run_if": "ALL_DONE",
+        "notebook_task": {
+            "notebook_path": f"{repo_src_path}/tools/cleanup_after_benchmark",
+            "base_parameters": {
+                "catalog": "{{job.parameters.catalog}}",
+                "wh_db": "{{job.parameters.wh_db}}",
+                "scale_factor": "{{job.parameters.scale_factor}}",
+                "delete_tables_when_finished": "{{job.parameters.delete_tables_when_finished}}",
+            },
+            "source": "WORKSPACE",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "notification_settings": {
+            "no_alert_for_skipped_runs": False,
+            "no_alert_for_canceled_runs": False,
+            "alert_on_last_attempt": False,
+        },
+    }
+
+
 def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
           datagen_label: str, scale_factor: int, repo_src_path: str,
           tpcdi_directory: str, data_generator: str, pipeline_id: int,
@@ -151,6 +178,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         {"name": "scale_factor", "default": str(scale_factor)},
         {"name": "wh_db", "default": f"{wh_target}_DLT_{edition}_{datagen_label}"},
         {"name": "tpcdi_directory", "default": tpcdi_directory},
+        {"name": "delete_tables_when_finished", "default": "TRUE"},
     ]
 
     workflow: dict = {
@@ -179,4 +207,5 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         )
     else:
         workflow["tasks"] = _simple_pipeline_task(pipeline_id)
+    workflow["tasks"].append(_cleanup_task(repo_src_path=repo_src_path))
     return workflow

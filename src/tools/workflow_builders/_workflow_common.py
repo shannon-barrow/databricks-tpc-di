@@ -207,6 +207,46 @@ def make_customermgmt_task(
     )
 
 
+def make_cleanup_task(
+    *,
+    repo_src_path: str,
+    job_name: str,
+    exec_type: str,
+    serverless: str,
+    wh_id: str | None,
+    depends_on: list[str],
+) -> dict:
+    """Final task: drops the run's schemas when `delete_tables_when_finished`
+    is TRUE (default). Always runs — `run_if=ALL_DONE` — so a partial-failure
+    upstream still has its debris cleaned up.
+
+    Reads catalog / wh_db / scale_factor / delete_tables_when_finished from
+    job parameters, all of which the workflow already exposes.
+    """
+    return make_task(
+        task_key="cleanup",
+        notebook_path=f"{repo_src_path}/tools/cleanup_after_benchmark",
+        depends_on=depends_on,
+        run_if="ALL_DONE",
+        base_params={
+            "catalog": "{{job.parameters.catalog}}",
+            "wh_db": "{{job.parameters.wh_db}}",
+            "scale_factor": "{{job.parameters.scale_factor}}",
+            "delete_tables_when_finished": "{{job.parameters.delete_tables_when_finished}}",
+        },
+        exec_type=exec_type,
+        serverless=serverless,
+        job_name=job_name,
+        wh_id=wh_id,
+    )
+
+
+def cleanup_param() -> dict:
+    """Job parameter the Driver bakes into every benchmark workflow.
+    Users override per-run if they want to keep the schemas around."""
+    return {"name": "delete_tables_when_finished", "default": "TRUE"}
+
+
 def constraint_clause(constraint_def: str, perf_opt_flg: bool) -> str:
     """Render the inline constraint string used in dim/fact tasks."""
     return constraint_def if not perf_opt_flg else ""
