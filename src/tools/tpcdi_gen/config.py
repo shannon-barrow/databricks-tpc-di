@@ -224,9 +224,16 @@ class ScaleConfig:
     Args:
         scale_factor: The benchmark scale factor (e.g. 10, 100, 1000).
         catalog: Unity Catalog catalog name for constructing output Volume paths.
+        tpcdi_directory: Fully-qualified output directory (must end with `/`).
+            For Spark output the parent entry (`tools/data_gen`) passes
+            ``/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/``;
+            we just append ``sf={scale_factor}`` to it. If omitted, defaults
+            to that same fully-qualified Spark path so older callers still
+            work.
     """
 
-    def __init__(self, scale_factor: int, catalog: str):
+    def __init__(self, scale_factor: int, catalog: str,
+                 tpcdi_directory: str | None = None):
         self.sf = scale_factor
         # DIGen multiplies the user-facing SF by 1000 to get the internal scaling
         # base. All row counts are expressed as a coefficient times internal_sf.
@@ -234,8 +241,10 @@ class ScaleConfig:
         self.internal_sf = scale_factor * 1000
         self.catalog = catalog
 
-        # Output paths - write to spark_datagen subfolder to avoid clobbering DIGen output
-        self.volume_path = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}"
+        # Spark output goes under spark_datagen/ to avoid clobbering DIGen output.
+        if tpcdi_directory is None:
+            tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
+        self.volume_path = f"{tpcdi_directory}sf={scale_factor}"
         self.batch_path = lambda b: f"{self.volume_path}/Batch{b}"
 
         # ----- Row counts -----

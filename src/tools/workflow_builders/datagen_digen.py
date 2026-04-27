@@ -89,11 +89,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
         "parameters": [
-            {"name": "data_generator", "default": "digen"},
+            {"name": "spark_or_native_datagen", "default": "native"},
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},
-            {"name": "tpcdi_directory", "default": tpcdi_directory},
         ],
         "tasks": [{
             "task_key": "generate_data",

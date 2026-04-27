@@ -35,12 +35,15 @@ except NameError:
     dbutils.widgets.text("catalog", "tpcdi", "Target Catalog")
     dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
     dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"], "Log Level")
-    dbutils.widgets.text("tpcdi_directory", "", "TPCDI Output Directory (defaults to /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/)")
+    dbutils.widgets.text("tpcdi_directory", "", "TPCDI Output Directory (defaults to /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/)")
 
     scale_factor = int(dbutils.widgets.get("scale_factor"))
     catalog = dbutils.widgets.get("catalog")
     regenerate_data = dbutils.widgets.get("regenerate_data") == "YES"
-    tpcdi_directory = dbutils.widgets.get("tpcdi_directory") or f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    # Spark output goes under spark_datagen/ to avoid clobbering DIGen output.
+    # When called via tools/data_gen, the parent passes the fully-qualified
+    # path. When run directly, default to that same fully-qualified path.
+    tpcdi_directory = dbutils.widgets.get("tpcdi_directory") or f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
     _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
     workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
 
@@ -77,7 +80,7 @@ def spark_generate():
   spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "250m")
   _tlog("broadcast-join thresholds set")
 
-  blob_out_path = f"{tpcdi_directory}spark_datagen/sf={scale_factor}"
+  blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
 
   if catalog != 'hive_metastore':
     _tlog(f"checking catalog '{catalog}' existence")
@@ -109,7 +112,7 @@ def spark_generate():
   # Import tpcdi_gen module.
   # Clear any previously cached module imports to pick up code changes.
   _tools_dir = f"{workspace_src_path}/tools"
-  _vol_module_dir = f"{tpcdi_directory}spark_datagen/_module"
+  _vol_module_dir = f"{tpcdi_directory}_module"
   _vol_tools_dir = f"{_vol_module_dir}/tools"
 
   _tlog("clearing stale sys.modules['tpcdi_gen.*'] entries")
@@ -162,7 +165,7 @@ def spark_generate():
   except:
       set_log_level("DEBUG")
 
-  cfg = ScaleConfig(int(scale_factor), catalog)
+  cfg = ScaleConfig(int(scale_factor), catalog, tpcdi_directory=tpcdi_directory)
   gen_start_time = datetime.now(tz=timezone.utc)
   all_counts = {}
 

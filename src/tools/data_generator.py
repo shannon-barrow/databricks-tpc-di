@@ -21,11 +21,69 @@
 # COMMAND ----------
 
 import os
+import re
 import concurrent.futures
 import requests
 import shutil
 import subprocess
 import shlex
+
+# COMMAND ----------
+
+# DBTITLE 1,Pre-flight: confirm cluster can actually run DIGen.jar BEFORE any side effects
+# DIGen.jar is a Java subprocess that requires:
+#   - A non-serverless classic cluster (serverless can't shell out to Java)
+#   - DBR ≤ 15.4 (the audit logic relies on DBR 15.4 behaviors)
+#
+# If either check fails we hard-stop NOW, before generate_data() does anything
+# destructive. Otherwise a wrong cluster + regenerate_data=YES would wipe the
+# existing volume contents and then fail to regenerate.
+
+def _abort_digen(reason: str):
+    msg = (
+        f"DIGen pre-flight check FAILED: {reason}\n\n"
+        f"DIGen.jar requires a NON-SERVERLESS cluster with DBR <= 15.4. "
+        f"Re-create this job's cluster as a classic Photon DBR 15.4 cluster, "
+        f"or pick the Spark generator instead (spark_or_native_datagen='spark') "
+        f"if your cluster is serverless. No volume data has been modified."
+    )
+    raise RuntimeError(msg)
+
+# Check 1: Java is callable. On serverless, `java` is not on PATH and
+# subprocess can't reach it.
+try:
+    _java_check = subprocess.run(["java", "-version"], capture_output=True, timeout=10)
+    if _java_check.returncode != 0:
+        _abort_digen(
+            f"`java -version` exited {_java_check.returncode}: "
+            f"{_java_check.stderr.decode(errors='replace')[:200]}"
+        )
+except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError) as _e:
+    _abort_digen(f"cannot invoke `java` ({type(_e).__name__}: {_e})")
+
+# Check 2: /local_disk0 exists and is writable (DIGen writes its temp output here).
+if not os.path.isdir("/local_disk0"):
+    _abort_digen("/local_disk0 not present (typical of serverless clusters)")
+
+# Check 3: DBR version <= 15.4. Spark/Databricks expose the DBR version in
+# either spark.databricks.clusterUsageTags.sparkVersion or env var.
+_dbr = (
+    spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", None)
+    or os.environ.get("DATABRICKS_RUNTIME_VERSION", "")
+)
+_m = re.match(r"^(\d+)\.(\d+)", str(_dbr))
+if _m:
+    _major, _minor = int(_m.group(1)), int(_m.group(2))
+    if (_major, _minor) > (15, 4):
+        _abort_digen(
+            f"DBR {_dbr} > 15.4. The DIGen audit logic depends on DBR 15.4 "
+            f"behaviors and the JAR has not been validated on newer runtimes."
+        )
+else:
+    print(f"WARNING: could not parse DBR version from {_dbr!r}; "
+          f"proceeding anyway (cluster looks non-serverless).")
+
+print(f"DIGen pre-flight check OK: java available, /local_disk0 present, DBR={_dbr}")
 
 # COMMAND ----------
 

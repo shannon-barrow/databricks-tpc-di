@@ -2,59 +2,68 @@
 # MAGIC %md
 # MAGIC # TPC-DI Unified Data Generator (entry point)
 # MAGIC
-# MAGIC Single dispatch notebook for data generation. Reads the `data_generator`
-# MAGIC job parameter and routes to either:
+# MAGIC Single dispatch notebook for data generation. Reads the
+# MAGIC `spark_or_native_datagen` job parameter and routes to either:
 # MAGIC
 # MAGIC - **`spark`** (default) — `./spark_data_generator` (distributed PySpark
-# MAGIC   generator on serverless or any classic Photon cluster)
-# MAGIC - **`digen`** — `./data_generator` (legacy single-threaded DIGen.jar
-# MAGIC   wrapper; requires non-serverless DBR 15.4 + Photon)
+# MAGIC   generator on serverless or any classic Photon cluster). Writes to
+# MAGIC   `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={SF}/`
+# MAGIC   so it doesn't clobber DIGen output.
+# MAGIC - **`native`** — `./data_generator` (legacy single-threaded DIGen.jar
+# MAGIC   wrapper). Writes to `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={SF}/`.
 # MAGIC
-# MAGIC The switch is purely a job parameter — the same job (with a cluster that
-# MAGIC supports both implementations, e.g. classic Photon DBR 15.4) can flip
-# MAGIC between generators at run time. Pre-existing job_id stays stable; only
-# MAGIC the `data_generator` value changes.
+# MAGIC The output directory is computed inside this notebook from `catalog` +
+# MAGIC the generator choice — users do not pass it explicitly. The selection is
+# MAGIC purely a job parameter, so a single job (with a cluster that supports
+# MAGIC both implementations — e.g. classic Photon DBR 15.4) can flip between
+# MAGIC generators at run time. (Today DIGen.jar can't run on serverless; when
+# MAGIC that limitation is removed, the same job with the serverless config
+# MAGIC will be able to flip without any config change either.)
 
 # COMMAND ----------
 
-dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Generator")
+dbutils.widgets.dropdown("spark_or_native_datagen", "spark",
+                         ["spark", "native"], "Spark or Native (DIGen) data generator")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"],
                          "Scale Factor")
 dbutils.widgets.text("catalog", "main", "Target Catalog")
 dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
-dbutils.widgets.text("tpcdi_directory", "",
-                     "TPCDI Output Directory (defaults to /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/)")
 dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"],
                          "Log Level (Spark generator only)")
 
 # COMMAND ----------
 
-data_generator = dbutils.widgets.get("data_generator")
-
-# Forward all widgets to the child notebook as arguments. Both child notebooks
-# self-init their widgets when run as a standalone job, so the arguments dict
-# becomes the widget values inside the child.
-_args = {
-    "scale_factor": dbutils.widgets.get("scale_factor"),
-    "catalog": dbutils.widgets.get("catalog"),
-    "regenerate_data": dbutils.widgets.get("regenerate_data"),
-    "tpcdi_directory": dbutils.widgets.get("tpcdi_directory"),
-}
-
-if data_generator == "spark":
-    _args["log_level"] = dbutils.widgets.get("log_level")
-    _target = "./spark_data_generator"
-elif data_generator == "digen":
-    _target = "./data_generator"
-else:
+# Normalize the generator choice — accept any case + leading/trailing whitespace.
+choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
+if choice not in ("spark", "native"):
     raise ValueError(
-        f"Unknown data_generator={data_generator!r}; expected 'spark' or 'digen'"
+        f"spark_or_native_datagen must be 'spark' or 'native' "
+        f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
     )
 
-print(f"data_gen dispatch → {_target} (data_generator={data_generator!r})")
-print(f"  forwarding args: {_args}")
+catalog = dbutils.widgets.get("catalog")
+_volume_base = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
 
-# timeout_seconds=0 → no timeout (Databricks default for long-running gen jobs)
-result = dbutils.notebook.run(_target, timeout_seconds=0, arguments=_args)
+if choice == "spark":
+    tpcdi_directory = f"{_volume_base}spark_datagen/"
+    target = "./spark_data_generator"
+else:  # native
+    tpcdi_directory = _volume_base
+    target = "./data_generator"
+
+_args = {
+    "scale_factor": dbutils.widgets.get("scale_factor"),
+    "catalog": catalog,
+    "regenerate_data": dbutils.widgets.get("regenerate_data"),
+    "tpcdi_directory": tpcdi_directory,
+}
+if choice == "spark":
+    _args["log_level"] = dbutils.widgets.get("log_level")
+
+print(f"data_gen dispatch → {target} (spark_or_native_datagen={choice!r})")
+print(f"  output directory: {tpcdi_directory}sf={_args['scale_factor']}/")
+
+# timeout_seconds=0 → no timeout
+result = dbutils.notebook.run(target, timeout_seconds=0, arguments=_args)
 print(f"Child notebook completed (result preview: {result[:120] if isinstance(result, str) else result})")
