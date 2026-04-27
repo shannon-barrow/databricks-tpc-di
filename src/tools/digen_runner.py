@@ -28,6 +28,7 @@ import shlex
 import shutil
 import subprocess
 import tempfile
+import time
 from typing import Any
 
 # Force flush on every print so logs in the Databricks notebook output stream
@@ -147,9 +148,8 @@ def preflight(spark: Any, scale_factor: int) -> str:
 
 # ---------- File ops ----------
 
-def _move_file(source_location: str, target_location: str) -> str:
+def _move_file(source_location: str, target_location: str) -> None:
     shutil.copyfile(source_location, target_location)
-    return f"Finished moving {source_location} to {target_location}"
 
 
 def _copy_directory(source_dir: str, target_dir: str, overwrite: bool):
@@ -296,19 +296,41 @@ def run(
             dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
 
         # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine.
+        # Progress is reported every 5% (and on completion) instead of per file —
+        # at high SFs there are millions of files and per-file logs hit the
+        # notebook output truncation limit.
+        total_files = len(filenames)
+        print(f"Copying {total_files:,} files to {blob_out_path} ...")
+        move_start = time.time()
+        completed = 0
+        errors = 0
+        last_logged_pct = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
-            futures = []
-            for fn in filenames:
-                futures.append(executor.submit(
+            futures = [
+                executor.submit(
                     _move_file,
                     source_location=fn,
                     target_location=fn.replace(driver_out_path, os_blob_out_path),
-                ))
+                )
+                for fn in filenames
+            ]
             for f in concurrent.futures.as_completed(futures):
                 try:
-                    print(f.result())
+                    f.result()
                 except Exception as e:
-                    print(f"  move-file error: {type(e).__name__}: {e}")
+                    errors += 1
+                    if errors <= 5:
+                        print(f"  move-file error: {type(e).__name__}: {e}")
+                completed += 1
+                pct = (completed * 100) // total_files
+                if pct >= last_logged_pct + 5 or completed == total_files:
+                    elapsed = time.time() - move_start
+                    rate = completed / max(elapsed, 0.001)
+                    print(f"  [Progress] {completed:,}/{total_files:,} files "
+                          f"({pct}%) — elapsed {elapsed:.1f}s, {rate:,.0f} files/s")
+                    last_logged_pct = pct
+        if errors:
+            print(f"  ({errors} file-move error(s) total; first 5 shown above)")
 
         # End-of-run summary: confirm completion, show output location, and dump
         # DIGen's own report so the user can see the per-batch row counts and
