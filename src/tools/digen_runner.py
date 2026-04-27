@@ -21,12 +21,17 @@ the existing volume only to fail at DIGen.jar invocation.
 from __future__ import annotations
 
 import concurrent.futures
+import functools
 import os
 import re
 import shlex
 import shutil
 import subprocess
 from typing import Any
+
+# Force flush on every print so logs in the Databricks notebook output stream
+# don't run together when stdout buffering interleaves with Spark logs.
+print = functools.partial(print, flush=True)  # noqa: A001 — intentional shadow
 
 
 # ---------- Pre-flight ----------
@@ -132,7 +137,14 @@ def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> N
         if p.poll() is not None and output == '':
             break
         if output:
-            print(output.strip())
+            # DIGen sometimes emits progress with embedded \r (carriage return,
+            # no \n). If we just .strip() and print, those embedded \r's land
+            # in the Databricks log and overwrite text in the same line. Split
+            # on \r so each progress chunk lands on its own line.
+            for chunk in output.replace("\r\n", "\n").split("\r"):
+                chunk = chunk.rstrip()
+                if chunk:
+                    print(chunk)
     p.wait()
 
 
