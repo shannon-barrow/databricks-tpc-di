@@ -1,8 +1,8 @@
 """Shared helpers for the CLUSTER/DBSQL benchmark workflow builders.
 
-Both `workflows_single_batch.py` and `workflows_incremental.py` build the
-same family of multi-task workflow JSON; this module factors out the
-repeated task and cluster shapes.
+`workflows_single_batch.py` and `workflows_incremental.py` build the same
+family of multi-task workflow JSON; this module factors out the repeated
+task and cluster shapes.
 """
 from __future__ import annotations
 
@@ -151,8 +151,8 @@ def make_task(
     task["email_notifications"] = {}
     task["notification_settings"] = dict(_DEFAULT_NOTIF)
 
-    # Reorder notebook_task keys to match Jinja's natural ordering: notebook_path,
-    # base_parameters, warehouse_id (if any), source.
+    # Stable notebook_task key ordering (notebook_path, base_parameters,
+    # warehouse_id, source) so the JSON diffs cleanly across runs.
     ordered_notebook: dict[str, Any] = {"notebook_path": notebook_task["notebook_path"]}
     if "base_parameters" in notebook_task:
         ordered_notebook["base_parameters"] = notebook_task["base_parameters"]
@@ -272,15 +272,3 @@ def cleanup_param() -> dict:
     """Job parameter the Driver bakes into every benchmark workflow.
     Users override per-run if they want to keep the schemas around."""
     return {"name": "delete_tables_when_finished", "default": "TRUE"}
-
-
-def constraint_clause(constraint_def: str, perf_opt_flg: bool) -> str:
-    """Render the inline constraint string used in dim/fact tasks."""
-    return constraint_def if not perf_opt_flg else ""
-
-
-def tbl_props(opt_write: str, index_cols: str, finwire: bool = False) -> str:
-    """Render the inline tbl_props string."""
-    if finwire:
-        return f"'delta.dataSkippingNumIndexedCols' = 0, 'delta.autoOptimize.autoCompact'=False, {opt_write}"
-    return f"'delta.autoOptimize.autoCompact'=False, {opt_write} {index_cols}"

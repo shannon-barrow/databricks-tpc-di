@@ -1,7 +1,5 @@
 """Builder for the Spark distributed data-generation workflow.
 
-Replaces `jinja_templates/datagen_workflow.json`.
-
 By default runs as a single serverless notebook task. If the user picks
 non-serverless on the Driver, builds a classic Photon cluster sized by
 scale_factor:

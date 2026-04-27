@@ -1,7 +1,7 @@
 """Builder for the SQL Warehouse JSON.
 
-Replaces `jinja_templates/warehouse_jinja_template.json`. Submitted to
-`/api/2.0/sql/warehouses` (POST creates a serverless PRO warehouse).
+Submitted to `/api/2.0/sql/warehouses` (POST creates a serverless PRO
+warehouse).
 """
 from __future__ import annotations
 

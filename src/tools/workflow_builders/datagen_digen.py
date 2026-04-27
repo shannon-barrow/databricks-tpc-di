@@ -1,7 +1,6 @@
 """Builder for the DIGen.jar (native, legacy) data-generation workflow.
 
-Replaces `jinja_templates/datagen_workflow_digen.json`. Produces a dict
-suitable for POST to `/api/2.1/jobs/create`.
+Produces a dict suitable for POST to `/api/2.1/jobs/create`.
 
 DIGen is a sequential single-threaded Java utility — no Spark involvement
 during generation — so the cluster is **always single-node** and forced

@@ -1,12 +1,10 @@
 """Builder for the CLUSTER/DBSQL single-batch benchmark workflow.
 
-Replaces `jinja_templates/workflows_single_batch.json`.
-
-The original Jinja template is highly repetitive — every dim/fact/ingest
-task repeats the same envelope (depends_on, run_if, notebook_task,
-optional warehouse_id, optional job_cluster_key, notification_settings).
-We push that boilerplate into `_workflow_common.make_task()` and only
-spell out the per-task parameters here.
+Every dim/fact/ingest task shares the same envelope (depends_on, run_if,
+notebook_task, optional warehouse_id, optional job_cluster_key,
+notification_settings). That boilerplate lives in
+`_workflow_common.make_task()`; this module spells out only the per-task
+parameters.
 """
 from __future__ import annotations
 

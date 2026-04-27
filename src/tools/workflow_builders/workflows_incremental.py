@@ -1,7 +1,6 @@
 """Builder for the CLUSTER/DBSQL incremental-batch benchmark workflow.
 
-Replaces `jinja_templates/workflows_incremental.json`. This is the
-auditable variant of the benchmark — runs all 3 TPC-DI batches with
+The auditable variant of the benchmark — runs all 3 TPC-DI batches with
 audit checks at the end of each. ~50 tasks; the per-batch incremental
 group repeats with just `batch_id` differing, so we loop over those.
 """

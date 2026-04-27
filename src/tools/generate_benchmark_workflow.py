@@ -28,12 +28,6 @@ _WH_SCALE_FACTOR_MAP = {
 }
 
 
-def _pick_workflow_template(sku_head: str, incremental: bool) -> str | None:
-    """Jinja template for the wrapping workflow, or None if a Python builder
-    handles it. All paths now use Python builders — Jinja templates retired."""
-    return None
-
-
 def _get_or_create_warehouse(wh_name: str, dag_args: dict,
                               workspace_src_path: str, api_call: Callable) -> int:
     """Return existing warehouse id or create one from the warehouse builder."""
@@ -85,7 +79,6 @@ def generate_benchmark_workflow(
     from setup's ``workflows_dict``.
     """
     sku = wf_key.split("-")
-    workflow_template = _pick_workflow_template(sku[0], incremental)
 
     if sku[0] == "SDP":
         print("All 3 TPC-DI batches will be executed in a single SDP pipeline batch.")
