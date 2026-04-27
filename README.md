@@ -8,8 +8,9 @@ This repo includes multiple implementations and interpretations of the **TPC-DI 
 on **Databricks Serverless** and scales across the executor pool so large scale
 factors finish in a fraction of the time the original DIGen.jar required. The
 legacy single-threaded **DIGen.jar** path is still available — selectable via
-the Driver's `data_generator` widget — for byte-compatible output with the
-upstream TPC-DI reference implementation. See [Data Generation](#data-generation) below.
+the Driver's `Data Generator` widget (parameter `spark_or_native_datagen`,
+values `spark` or `native`) — for byte-compatible output with the upstream
+TPC-DI reference implementation. See [Data Generation](#data-generation) below.
 
 [![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
@@ -24,34 +25,36 @@ The TPC-DI spec does not provide code, instead relying on documenting business r
 This repo is an implementation of the spec only - one that executes only on the cloud-based Databricks platform.   
 
 ### LIMITATIONS
-* The code base is implemented to execute successfully ONLY on the Databricks platform EXCEPT the nested dbt version of the code, which is a STANDALONE version meant to be run from your local dev environment.
-  * The remainder of of this README is dedicated to the Databricks implementation. Please refer to the README found in the src/dbtpcdi folder for short instructions about how to execute the dbt version of the code against Databricks and Snowflake warehouses
+* The code base is implemented to execute on the Databricks platform.
 * This code requires:
   * Databricks E2 Deployment. 
   * Databricks Repos functionality. 
   * Access to GitHub via public internet access. 
 * Serverless has been introduced as an optional execution mechanism but requires access to serverless compute
 * Unity Catalog will be required to use a catalog outside of hive_metastore. Additionally, UC is a prerequisite for lineage and primary/foreign key constraints
+* The legacy DIGen.jar (native) data-generation path requires a non-serverless cluster with **DBR 15.4** and Photon. The Driver creates this cluster automatically when you choose `native`. The Spark generator path runs on serverless and has no DBR restrictions.
 
 ### Notes on Scoring/Metrics and Publication
 As of writing, the TPC-DI has not modified its submittal/scoring metrics to accomodate cloud-based platforms and infrastructure. Furthermore, as of writing, there has never been an official submission to this benchmark.  Therefore, no throughput metrics are mentioned or discussed in this code repository.  Databricks is attempting to work with the TPC to amend the rules for submission and modernize the throughput metrics for a future "official submittal" to be published by the TPC.  Until then, this code has been opened for demonstrating how such a Data Integration ETL application could be built upon the Databricks Lakehouse - without any performance metrics being published.
 
 # Execution Mechanisms
-The benchmark has been implemented in various ways to demonstrate the versatility of the Databricks Lakehouse platform.  Users can reference each implementation side-by-side to better enable them to build other similar data engineering pipelines:
+The benchmark has been implemented in several ways to demonstrate the versatility of the Databricks Lakehouse platform. Users can reference each implementation side-by-side to better enable them to build other similar data engineering pipelines:
 
-1. Traditional Native Notebooks Workflow
-2. Databricks DBSQL Warehouse based Workflow 
-2. Databricks Delta Live Tables CORE
-3. Databricks Delta Live Tables with SCD Type 1/ PRO: introduces easier handling of SCD TYPE 1/2 historical tracking using the new APPLY CHANGES INTO syntax
-4. Databricks Delta Live Tables with DQ ADVANCED: introduces Data Quality metrics as well so data engineers can more easily handle bad data quality, analysts can more confidently trust their data, and support teams can more easily monitor the quality of data as it enters the Lakehouse.
+1. **Workspace Cluster Workflow** — classic-cluster (or serverless) job with the auditable, batch-aware ETL.
+2. **DBSQL Warehouse Workflow** — same DAG, executed against a serverless SQL Warehouse instead of a job cluster.
+3. **Delta Live Tables Pipeline (CORE)** — declarative DLT pipeline.
+4. **Delta Live Tables Pipeline (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
+5. **Delta Live Tables Pipeline (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
 
-There are 2 additional options that a user can toggle for **EACH** of the above deployment choices and they include:
-1. **Scale Factor**: The value chosen correlates to HOW MUCH data will be processed. The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected. What will be adjusted is the amount of data per file. In general the change in scale factor is reflected by a linear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor. 
-2. **Serverless**: choose faster performance and startup time with the Databricks SERVERLESS Workflows or SERVERLESS Delta Live Tables (which includes Enzyme as a standard feature)
-3. **Collective Batch or Incremental Batches**: You could choose to run all batches in a single collective batch, or if you prefer to run the auditable version of the code that incrementally processes only 1 batch at a time then you will need to choose the 'Incremental Batches' option and make sure to choose a Workspace Cluster or DBSQL Warehouse execution flow type.
-4. **Predictive Optimization**: Predictive Optimization removes the need to manually manage maintenance operations for Delta tables on Databricks. You could choose to enable or disable it. While enabled, Databricks automatically identifies tables that would benefit from maintenance operations and runs them for the user. Maintenance operations are only run as necessary, eliminating both unnecessary runs for maintenance operations and the burden associated with tracking and troubleshooting performance.
-5. **Job Name & Target Database**: The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI, you could change it to the preferred job name and target database name if required.  Your workflow type chosen will also be appended to this name upon creation to remove conflicts of generating multiple workflows for various execution mechanisms (i.e. cluster, DBSQL, DLT, etc)
-6. **Various cluster options**: If you do not choose serverless you can adjust the DBR and worker/driver type. The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
+The following toggles apply across the deployment choices above:
+
+1. **Data Generator** (`spark_or_native_datagen`): `spark` (default, distributed PySpark on serverless) or `native` (legacy DIGen.jar wrapped by `tools/digen_runner`, runs on a non-serverless DBR 15.4 + Photon cluster). Output paths differ — `spark` writes under `…/tpcdi_volume/spark_datagen/sf={SF}/`, `native` writes to `…/tpcdi_volume/sf={SF}/`. The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
+2. **Scale Factor**: How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**. Defaults to 10.
+3. **Serverless**: Faster performance and startup with serverless Workflows / DLT pipelines (DLT includes Enzyme as a standard feature). DBSQL is always serverless. The DIGen native datagen ignores this widget — it always uses a non-serverless cluster.
+4. **Collective Batch or Incremental Batches**: Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; DLT pipelines always run all batches in a single DLT pass.
+5. **Predictive Optimization**: `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
+6. **Job Name & Target Database**: Pattern is `[firstname]-[lastname]-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
+7. **Various cluster options**: When not choosing serverless, the DBR and worker/driver type dropdowns let you override the cloud-aware defaults the Driver picks for you.
 
 
 ## Components of Execution
@@ -66,32 +69,40 @@ This portion is **NOT benchmarked**.  The sole purpose of this step is to:
 
 #### Data Generation
 Two interchangeable implementations are supported, selected via the Driver's
-`data_generator` widget:
+**Data Generator** widget (job parameter `spark_or_native_datagen`):
 
-- **`spark` (default)** — distributed PySpark generator at
-  `src/tools/spark_data_generator.py` (plus modules under `src/tools/tpcdi_gen/`).
-  Runs on serverless. Outputs are split files like `Customer_1.txt`,
-  `Customer_2.txt`, etc.
-- **`digen`** — the legacy single-threaded DIGen.jar wrapped by
-  `src/tools/data_generator.py`. Runs on a small classic single-node cluster
-  (a Java subprocess can't run on serverless). Outputs are single files like
-  `Customer.txt`, `Trade.txt`, etc.
+- **`spark` (default)** — distributed PySpark generator. The unified entry
+  notebook (`src/tools/data_gen.py`) imports `spark_runner` (which calls into
+  `src/tools/tpcdi_gen/`) and runs everything inline on serverless. Outputs
+  are split files like `Customer_1.txt`, `Customer_2.txt`, etc.
+- **`native`** — the legacy single-threaded DIGen.jar wrapped by
+  `src/tools/digen_runner.py` (also invoked from `data_gen.py`). Forced to
+  a non-serverless DBR 15.4 + Photon cluster (a Java subprocess can't run
+  on serverless). Worker count scales with SF: single-node up to SF=1000;
+  +1 worker per 1000 of SF above that. Outputs are single files per table
+  (`Customer.txt`, `Trade.txt`, etc.).
 
 The benchmark ingestion code reads either format via brace-alternation globs
 of the form `{Customer.txt,Customer_[0-9]*.txt}`, so the rest of the pipeline
 is identical.
 
 ##### Interface
-- Standalone Databricks notebook / job. Parameters:
+The Driver creates a datagen job with parameters:
+  - `spark_or_native_datagen` — `spark` (default) or `native` (case-insensitive, trimmed)
   - `scale_factor` — `10`, `100`, `1000`, `5000`, `10000`, `20000`
   - `catalog` — target catalog for the output volume (default `main`)
-  - `regenerate_data` — `YES` to wipe and regenerate; `NO` to no-op if output already exists
-  - `log_level` — `DEBUG` / `INFO` / `WARN` (Spark generator only)
-- Output path:
+  - `regenerate_data` — `YES` to wipe and regenerate; `NO` (default) to no-op if output already exists
+  - `log_level` — `DEBUG` / `INFO` / `WARN` (consumed by the Spark runner; ignored by DIGen)
+
+Output path:
   - `spark` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}/`
-  - `digen` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/` (legacy, preserves existing workspaces)
-- Can also be invoked via `%run` from the TPC-DI Driver notebook; job parameters
-  match widget names.
+  - `native` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/`
+
+Native pre-flight: before any volume side effect, `digen_runner` verifies (a)
+`java` is callable, (b) a writable scratch directory is available
+(`/local_disk0` preferred; `/tmp` fallback for SF≤100), and (c) DBR ≤ 15.4.
+If any check fails the job hard-aborts with a clear "switch the cluster to
+SINGLE_USER access mode" hint and **no volume data is touched**.
 
 ![Type of Raw Data Generated](/src/tools/readme_images/data_gen.png "Type of Raw Data Generated")
 

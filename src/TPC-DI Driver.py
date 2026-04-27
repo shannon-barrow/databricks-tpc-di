@@ -6,48 +6,43 @@
 # MAGIC %md
 # MAGIC # Welcome to the TPC-DI Spec Implementation on Databricks!
 # MAGIC
-# MAGIC ## Please refer to the README for additional documentation!
+# MAGIC ## Please refer to the README for additional documentation.
 # MAGIC
-# MAGIC ### To Execute the benchmark please follow these instructions:  
-# MAGIC 1. **FIRST**, execute the first 2 cells after this initial documentation cell (the setup cell below and the widget generation cell).  
-# MAGIC 2. **THEN**, choose from the widgets above, starting with the WORKFLOW TYPE
+# MAGIC ## How to run
+# MAGIC 1. **First**, run the *Setup* cell below — it bootstraps `tpcdi_config` and imports the workflow generators.
+# MAGIC 2. **Then**, run the *Widgets* cell to render the dropdowns above the notebook.
+# MAGIC 3. **Pick your options**, starting with **Workflow Type**, then run the two cells at the bottom — they create:
+# MAGIC    - a **data-generation workflow** (Spark or DIGen.jar — see widget below)
+# MAGIC    - a **benchmark workflow** that ingests the generated data and builds the dimensional model.
 # MAGIC
-# MAGIC ### Workflow Types:
-# MAGIC - CLUSTER-based Workflow with Structured Streaming Notebooks  
-# MAGIC   - Leverage traditional cluster and do an incremental (benchmarked) run OR execute all batches in one pass. 
-# MAGIC - DBSQL WAREHOUSE-based Workflow with Structured Streaming Notebooks   
-# MAGIC   - Same as cluster approached above BUT against a DBSQL Warehouse. Do an incremental (benchmarked) run OR execute all batches in one pass. 
-# MAGIC - Delta Live Tables Pipeline: CORE Sku   
-# MAGIC   - Leverage DLT for simplified, cost-effective ETL pipelines 
-# MAGIC - Delta Live Tables Pipeline with SCD Type 1/2: PRO Sku   
-# MAGIC   - Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD. 
-# MAGIC - Delta Live Tables Pipeline with DQ: ADVANCED Sku   
-# MAGIC   - Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!  
+# MAGIC Each cell prints a link to the created workflow when it finishes.
 # MAGIC
-# MAGIC ### Other widget options include:
-# MAGIC - **Scale Factor**:  
-# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a linear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
-# MAGIC - **Serverless**:  
-# MAGIC         Serverless workflows and DLT are in preview! Ensure your workspace is configured to leverage the serverless preview otherwise this notebook will fail to generate a workflow for you.
-# MAGIC - **Collective Batch or Incremental Batches**:  
-# MAGIC         The "formal" benchmark requires audit checks in between batches.  However, dbt, Delta Live Tables, and Streaming Tables/Materialized Views do NOT support an incremental batch nature in which the job stops to do "official audit checks" since they are more declarative in nature and ingest ALL available files at once.  Therefore the fastest and preferred method to run this for unofficial use is to run all batches in a single batch.  If you prefer to run the auditable version of the code that incrementally processes only 1 batch at a time then you will need to choose the 'Incremental Batches' option and make sure to choose a Workspace Cluster or DBSQL Warehouse execution flow type.  
-# MAGIC - **Predictive Optimization**:  
-# MAGIC         Predictive Optimization removes the need to manually manage maintenance operations for Delta tables on Databricks. You could choose to enable or disable it. With predictive optimization enabled, Databricks automatically identifies tables that would benefit from maintenance operations and runs them for the user. Maintenance operations are only run as necessary, eliminating both unnecessary runs for maintenance operations and the burden associated with tracking and troubleshooting performance.
-# MAGIC - **Job Name & Target Database**:  
-# MAGIC         The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI,  you could change it to the preferred job name and target database name if required.
-# MAGIC - **Various cluster options**:  
-# MAGIC         If you do not choose serverless you can adjust the DBR and worker/driver type.  The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
-# MAGIC - **Optimize For UC Features or Fastest Performance**:
-# MAGIC         In some cases this benchmark is used to test Databricks SKUs against one another. In which case, feel free to leave as 'Feature-Rich'.  However, in other cases this benchmark is used to compare Databricks against competitive platforms that can not or will not implement the same features that optimize the downstream user experience and performance. To ensure these competitive benchmarks test platforms on a 'like-to-like' set of features, choose 'Fastest Performance' in this widget. Choosing this removes some of the constraints that are checked at write time (which can adversely affect performance to a small degree), removes optimized writes (which coalesces small files into bigger files that improves downstream consumption), and removes some other constraint checks that help enable PK/FK relationship.  In normal production scenarios we encourag customers to leverage these Delta and Unity Catalog features.  Only choose to disable them here when comparing against competitive platforms that cannot or will not also perform the same optimizations which improve user experience at the cost of some ETL performance.
+# MAGIC ## Workflow Types
+# MAGIC - **Workspace Cluster Workflow** — classic-cluster (or serverless) job that runs the auditable, batch-aware ETL.
+# MAGIC - **DBSQL Warehouse Workflow** — same DAG, but backed by a serverless SQL Warehouse instead of a job cluster.
+# MAGIC - **Delta Live Tables Pipeline (CORE)** — declarative DLT pipeline; simplest path.
+# MAGIC - **Delta Live Tables Pipeline (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
+# MAGIC - **Delta Live Tables Pipeline (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
 # MAGIC
-# MAGIC ### Many options are configurable from the workflow_builder EXCEPT the cluster or warehouse size.
-# MAGIC - Serverless clusters/DLT pipelines are dynamically autoscaled
-# MAGIC - Clusters and warehouses are sized to achieve the best TCO based on the scale factor chosen
-# MAGIC - If you prefer changing the cluster/WH size for your own testing then it can be manually modified from the Workflow created by this notebook
+# MAGIC ## Widget reference
+# MAGIC - **Workflow Type** — see above. Picks the benchmark workflow shape.
+# MAGIC - **Data Generator** (`spark_or_native_datagen` on the created job) — `spark` (default) or `native`.
+# MAGIC   - `spark` → distributed PySpark generator on serverless. Output goes to `…/tpcdi_volume/spark_datagen/sf={SF}/`.
+# MAGIC   - `native` → legacy single-threaded DIGen.jar wrapped in `tools/digen_runner`. Forces a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). Output goes to `…/tpcdi_volume/sf={SF}/`. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
+# MAGIC   - The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
+# MAGIC - **Scale Factor** — How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**.
+# MAGIC - **Collective Batch or Incremental Batches** — Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; DLT pipelines always run all batches in a single DLT pass.
+# MAGIC - **Serverless** — `YES` runs the benchmark on serverless compute (workflow or DLT). `NO` provisions a classic cluster sized by scale factor. Note: DBSQL is always serverless; DIGen datagen is always non-serverless regardless of this setting.
+# MAGIC - **Predictive Optimization** — `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
+# MAGIC - **Job Name & Target Database** — Pattern is `{firstname}-{lastname}-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
+# MAGIC - **Worker Type / Driver Type / DBR** — Only shown for non-serverless runs. Best defaults are auto-selected; the dropdowns let you override per cloud / per workspace.
+# MAGIC - **Optimize For UC Features or Fastest Performance** — `Feature-Rich` (default) keeps PK/FK constraints, optimized writes, and data-skipping indexes that improve the downstream user experience. `Fastest Performance` strips them to compare Databricks against platforms that can't or won't implement those features. In production scenarios we recommend leaving this as `Feature-Rich`.
+# MAGIC - **Regenerate Data** — On the *generated datagen job's* parameters (not on this Driver). `YES` wipes the existing volume output and regenerates from scratch; `NO` (default) skips if the SF directory already exists.
 # MAGIC
-# MAGIC **NOTE**: The following execution types have been removed, at least temporarily:
-# MAGIC 1. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
-# MAGIC 2. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>
+# MAGIC ## Cluster / warehouse sizing
+# MAGIC Serverless clusters and DLT pipelines auto-scale. Classic clusters and SQL Warehouses are sized for best TCO at the chosen scale factor. To override, edit the cluster spec on the workflow this Driver creates.
+# MAGIC
+# MAGIC The DIGen datagen job ignores the *Serverless* widget — it always provisions a non-serverless DBR 15.4 Photon cluster (DIGen.jar is a Java subprocess that can't run on serverless). The Spark datagen job is always serverless.
 
 # COMMAND ----------
 
