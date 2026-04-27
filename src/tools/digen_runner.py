@@ -100,6 +100,18 @@ def _copy_directory(source_dir: str, target_dir: str, overwrite: bool):
         print(f"The folder you're trying to copy doesn't exist: {source_dir}")
 
 
+def _path_exists(dbutils: Any, path: str) -> bool:
+    """Existence check that goes through dbutils.fs (Volume API) rather than
+    os.path.exists. The FUSE mount caches directory listings and can report
+    a freshly-deleted path as still existing for several seconds, which made
+    `regenerate_data=YES` log a delete and then immediately skip generation."""
+    try:
+        dbutils.fs.ls(path)
+        return True
+    except Exception:
+        return False
+
+
 def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> None:
     cmd = f"java -jar {digen_path}DIGen.jar -sf {scale_factor} -o {output_path}"
     print(f"Generating data and outputting to {output_path}")
@@ -167,11 +179,11 @@ def run(
         os_blob_out_path = f"/dbfs{blob_out_path}"
         blob_out_path = f"dbfs:{blob_out_path}"
 
-    if os.path.exists(os_blob_out_path) and regenerate_data:
+    if _path_exists(dbutils, blob_out_path) and regenerate_data:
         print(f"regenerate_data=YES; recursive delete of prior output at {blob_out_path}")
         dbutils.fs.rm(blob_out_path, recurse=True)
 
-    if os.path.exists(os_blob_out_path):
+    if _path_exists(dbutils, blob_out_path):
         print(f"Data generation skipped since the raw data/directory {blob_out_path} "
               f"already exists for this scale factor.")
         return
