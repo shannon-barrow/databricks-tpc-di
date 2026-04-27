@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from _workflow_utils import render_dag, submit_dag, template_path
 from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
 from workflow_builders import dlt_workflow as _dlt_workflow_builder
+from workflow_builders import workflows_single_batch as _single_batch_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -29,12 +30,12 @@ _WH_SCALE_FACTOR_MAP = {
 
 def _pick_workflow_template(sku_head: str, incremental: bool) -> str | None:
     """Jinja template for the wrapping workflow, or None if a Python builder
-    handles it (currently: DLT)."""
+    handles it. DLT and CLUSTER/DBSQL single-batch use Python builders."""
     if sku_head == "DLT":
         return None
     if incremental:
         return "workflows_incremental.json"
-    return "workflows_single_batch.json"
+    return None  # single-batch CLUSTER/DBSQL → Python builder
 
 
 def _get_or_create_warehouse(wh_name: str, dag_args: dict,
@@ -234,10 +235,12 @@ Scale Factor:             {scale_factor}
             dag_args["wh_name"], dag_args, workspace_src_path, api_call)
 
     # --- Submit the workflow itself ---
-    if workflow_template is None:
-        # DLT path: use the Python builder.
+    if workflow_template is None and sku[0] == "DLT":
         print("Building DLT Workflow JSON via workflow_builders.dlt_workflow")
         workflow_dag = _dlt_workflow_builder.build(**dag_args)
+    elif workflow_template is None:
+        print("Building Workflow JSON via workflow_builders.workflows_single_batch")
+        workflow_dag = _single_batch_builder.build(**dag_args)
     else:
         wf_template_path = template_path(workspace_src_path, workflow_template)
         print(f"Rendering New Workflow JSON via {workflow_template}")

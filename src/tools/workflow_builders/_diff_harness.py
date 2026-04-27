@@ -95,6 +95,8 @@ def run_all() -> int:
 
     # ----- dlt_workflow ----- already cut over
 
+    # ----- workflows_single_batch ----- already cut over
+
     print()
     if failures:
         print(f"FAILED: {failures} case(s) mismatched")
