@@ -19,8 +19,6 @@ TPC-DI reference implementation. See [Data Generation](#data-generation) below.
 
 <img src="/src/tools/readme_images/tpcdi_flow.svg" alt="TPC-DI execution flow — Setup, Benchmark, and Audit groups" width="100%">
 
-(Vector SVG — stays sharp at any zoom. PNG fallback at `src/tools/readme_images/tpcdi_flow.png`.)
-
 ## Summary
 Historically, the process of synchronizing a decision support system with data from operational systems has been referred to as Extract, Transform, Load (ETL) and the tools supporting such process have been referred to as ETL tools. Recently, ETL was replaced by the more comprehensive acronym, data integration (DI). DI describes the process of extracting and combining data from a variety of data source formats, transforming that data into a unified data model representation and loading it into a data store. The TPC-DI benchmark combines and transforms data extracted from an On-Line Transaction Processing (OTLP) system along with other sources of data, and loads it into a data warehouse. The source and destination data models, data transformations and implementation rules have been designed to be broadly representative of modern data integration requirements.
 
