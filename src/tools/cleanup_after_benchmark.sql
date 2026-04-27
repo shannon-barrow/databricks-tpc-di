@@ -22,9 +22,13 @@
 
 -- COMMAND ----------
 
-CREATE WIDGET TEXT catalog DEFAULT 'main';
-CREATE WIDGET TEXT wh_db DEFAULT '';
-CREATE WIDGET TEXT scale_factor DEFAULT '10';
+-- :catalog / :wh_db / :scale_factor come from the task's base_parameters and
+-- bind automatically on both clusters and SQL warehouses. CREATE WIDGET is
+-- left commented out so it doesn't error on warehouses (which reject that
+-- syntax) — uncomment when running interactively from a notebook.
+-- CREATE WIDGET TEXT catalog DEFAULT 'main';
+-- CREATE WIDGET TEXT wh_db DEFAULT '';
+-- CREATE WIDGET TEXT scale_factor DEFAULT '10';
 
 -- COMMAND ----------
 
