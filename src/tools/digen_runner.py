@@ -308,3 +308,23 @@ def run(
                 print(f.result())
             except Exception as e:
                 print(f"  move-file error: {type(e).__name__}: {e}")
+
+    # End-of-run summary: confirm completion, show output location, and dump
+    # DIGen's own report so the user can see the per-batch row counts and
+    # timing without having to open the Volume browser.
+    print("\n" + "=" * 60)
+    print(f"DIGen Data Generation Complete!")
+    print(f"  Scale Factor: {scale_factor}")
+    print(f"  Output Location: {os_blob_out_path}/")
+    print("=" * 60)
+    report_path = os.path.join(os_blob_out_path, "digen_report.txt")
+    try:
+        with open(report_path) as rf:
+            report = rf.read()
+        print(f"\n--- digen_report.txt ({report_path}) ---")
+        print(report)
+        print("--- end of digen_report.txt ---")
+    except FileNotFoundError:
+        print(f"  (digen_report.txt not found at {report_path})")
+    except Exception as e:
+        print(f"  could not read digen_report.txt: {type(e).__name__}: {e}")
