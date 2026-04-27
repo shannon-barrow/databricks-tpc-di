@@ -100,6 +100,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             exec_type=exec_type,
             wh_id=wh_id,
             depends_on=["dw_init"],
+            modern_notebook_path=f"{repo_src_path}/single_batch/SQL/CustomerMgmtRaw",
         ),
     ]
 

@@ -173,13 +173,14 @@ def make_customermgmt_task(
     exec_type: str,
     wh_id: str | None,
     depends_on: list[str],
+    modern_notebook_path: str,
 ) -> dict:
     """Shared customermgmt task for both single_batch and incremental workflows.
 
     For digen + SF>100 this routes to the mavenlib notebook on a SingleNode
     classic cluster with the legacy spark-xml maven library; otherwise it
-    uses the modern read_files()-based notebook on serverless or the regular
-    job cluster.
+    uses `modern_notebook_path` (the read_files()-based notebook, which lives
+    in different repo dirs for single_batch vs incremental flows).
     """
     if data_generator == "digen" and scale_factor > 100:
         return make_task(
@@ -196,7 +197,7 @@ def make_customermgmt_task(
         )
     return make_task(
         task_key="ingest_customermgmt",
-        notebook_path=f"{repo_src_path}/single_batch/SQL/CustomerMgmtRaw",
+        notebook_path=modern_notebook_path,
         depends_on=depends_on,
         base_params={"xml_lib": "xml"},
         exec_type=exec_type,

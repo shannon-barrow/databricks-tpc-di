@@ -12,6 +12,7 @@ from _workflow_utils import render_dag, submit_dag, template_path
 from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
 from workflow_builders import dlt_workflow as _dlt_workflow_builder
 from workflow_builders import workflows_single_batch as _single_batch_builder
+from workflow_builders import workflows_incremental as _incremental_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -30,12 +31,8 @@ _WH_SCALE_FACTOR_MAP = {
 
 def _pick_workflow_template(sku_head: str, incremental: bool) -> str | None:
     """Jinja template for the wrapping workflow, or None if a Python builder
-    handles it. DLT and CLUSTER/DBSQL single-batch use Python builders."""
-    if sku_head == "DLT":
-        return None
-    if incremental:
-        return "workflows_incremental.json"
-    return None  # single-batch CLUSTER/DBSQL → Python builder
+    handles it. All paths now use Python builders — Jinja templates retired."""
+    return None
 
 
 def _get_or_create_warehouse(wh_name: str, dag_args: dict,
@@ -235,15 +232,14 @@ Scale Factor:             {scale_factor}
             dag_args["wh_name"], dag_args, workspace_src_path, api_call)
 
     # --- Submit the workflow itself ---
-    if workflow_template is None and sku[0] == "DLT":
+    if sku[0] == "DLT":
         print("Building DLT Workflow JSON via workflow_builders.dlt_workflow")
         workflow_dag = _dlt_workflow_builder.build(**dag_args)
-    elif workflow_template is None:
+    elif incremental:
+        print("Building Workflow JSON via workflow_builders.workflows_incremental")
+        workflow_dag = _incremental_builder.build(**dag_args)
+    else:
         print("Building Workflow JSON via workflow_builders.workflows_single_batch")
         workflow_dag = _single_batch_builder.build(**dag_args)
-    else:
-        wf_template_path = template_path(workspace_src_path, workflow_template)
-        print(f"Rendering New Workflow JSON via {workflow_template}")
-        workflow_dag = render_dag(wf_template_path, dag_args)
     print("Submitting Workflow JSON to Databricks Jobs API")
     return submit_dag(workflow_dag, _JOBS_API_ENDPOINT, api_call)
