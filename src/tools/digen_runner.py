@@ -238,16 +238,7 @@ def run(
     DRIVER_ROOT = preflight(spark, scale_factor)
 
     UC_enabled = catalog != "hive_metastore"
-    # Use a fresh unique session dir under the scratch root rather than a
-    # shared `/tpcdi/` path — `/tmp/` persists across Databricks notebook
-    # sessions on long-lived clusters, and a prior session running under a
-    # different uid would leave behind un-deletable directories.
-    session_root = tempfile.mkdtemp(prefix="tpcdi_", dir=DRIVER_ROOT)
-    driver_tmp_path = f"{session_root}/datagen/"
-    driver_out_path = f"{session_root}/sf={scale_factor}"
-    print(f"  session scratch root: {session_root}")
     blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
-
     if UC_enabled:
         os_blob_out_path = blob_out_path
     else:
@@ -263,68 +254,82 @@ def run(
               f"already exists for this scale factor.")
         return
 
-    print(f"Raw Data Directory {blob_out_path} does not exist yet. Proceeding to "
-          f"generate data for scale factor={scale_factor} into this directory")
-    _copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
-    print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
-    _digen_subprocess(driver_tmp_path, scale_factor, driver_out_path)
-    print(f"Data generation for scale factor={scale_factor} has completed in directory: {driver_out_path}")
-    print(f"Moving generated files from Driver directory {driver_out_path} to "
-          f"Storage directory {blob_out_path}")
+    # Fresh unique session dir under the scratch root. /tmp/ persists across
+    # Databricks notebook sessions on long-lived clusters, and a prior session
+    # running under a different uid would leave behind un-deletable directories
+    # if we used a shared path.
+    session_root = tempfile.mkdtemp(prefix="tpcdi_", dir=DRIVER_ROOT)
+    driver_tmp_path = f"{session_root}/datagen/"
+    driver_out_path = f"{session_root}/sf={scale_factor}"
+    print(f"  session scratch root: {session_root}")
 
-    if UC_enabled:
-        catalog_exists = spark.sql(
-            f"SELECT count(*) FROM system.information_schema.tables "
-            f"WHERE table_catalog = '{catalog}'"
-        ).first()[0] > 0
-        if not catalog_exists:
-            spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
-            spark.sql(f"GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`")
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
-                  f"COMMENT 'Schema for TPC-DI Raw Files Volume'")
-        spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
-                  f"COMMENT 'TPC-DI Raw Files'")
-
-    filenames = [
-        os.path.join(root, name)
-        for root, _dirs, files in os.walk(top=driver_out_path, topdown=True)
-        for name in files
-    ]
-    dbutils.fs.mkdirs(blob_out_path)
-    for d in next(os.walk(driver_out_path))[1]:
-        dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
-
-    # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
-        futures = []
-        for fn in filenames:
-            futures.append(executor.submit(
-                _move_file,
-                source_location=fn,
-                target_location=fn.replace(driver_out_path, os_blob_out_path),
-            ))
-        for f in concurrent.futures.as_completed(futures):
-            try:
-                print(f.result())
-            except Exception as e:
-                print(f"  move-file error: {type(e).__name__}: {e}")
-
-    # End-of-run summary: confirm completion, show output location, and dump
-    # DIGen's own report so the user can see the per-batch row counts and
-    # timing without having to open the Volume browser.
-    print("\n" + "=" * 60)
-    print(f"DIGen Data Generation Complete!")
-    print(f"  Scale Factor: {scale_factor}")
-    print(f"  Output Location: {os_blob_out_path}/")
-    print("=" * 60)
-    report_path = os.path.join(os_blob_out_path, "digen_report.txt")
     try:
-        with open(report_path) as rf:
-            report = rf.read()
-        print(f"\n--- digen_report.txt ({report_path}) ---")
-        print(report)
-        print("--- end of digen_report.txt ---")
-    except FileNotFoundError:
-        print(f"  (digen_report.txt not found at {report_path})")
-    except Exception as e:
-        print(f"  could not read digen_report.txt: {type(e).__name__}: {e}")
+        print(f"Raw Data Directory {blob_out_path} does not exist yet. Proceeding to "
+              f"generate data for scale factor={scale_factor} into this directory")
+        _copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
+        print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
+        _digen_subprocess(driver_tmp_path, scale_factor, driver_out_path)
+        print(f"Data generation for scale factor={scale_factor} has completed in directory: {driver_out_path}")
+        print(f"Moving generated files from Driver directory {driver_out_path} to "
+              f"Storage directory {blob_out_path}")
+
+        if UC_enabled:
+            catalog_exists = spark.sql(
+                f"SELECT count(*) FROM system.information_schema.tables "
+                f"WHERE table_catalog = '{catalog}'"
+            ).first()[0] > 0
+            if not catalog_exists:
+                spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
+                spark.sql(f"GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`")
+            spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
+                      f"COMMENT 'Schema for TPC-DI Raw Files Volume'")
+            spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
+                      f"COMMENT 'TPC-DI Raw Files'")
+
+        filenames = [
+            os.path.join(root, name)
+            for root, _dirs, files in os.walk(top=driver_out_path, topdown=True)
+            for name in files
+        ]
+        dbutils.fs.mkdirs(blob_out_path)
+        for d in next(os.walk(driver_out_path))[1]:
+            dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
+
+        # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=64) as executor:
+            futures = []
+            for fn in filenames:
+                futures.append(executor.submit(
+                    _move_file,
+                    source_location=fn,
+                    target_location=fn.replace(driver_out_path, os_blob_out_path),
+                ))
+            for f in concurrent.futures.as_completed(futures):
+                try:
+                    print(f.result())
+                except Exception as e:
+                    print(f"  move-file error: {type(e).__name__}: {e}")
+
+        # End-of-run summary: confirm completion, show output location, and dump
+        # DIGen's own report so the user can see the per-batch row counts and
+        # timing without having to open the Volume browser.
+        print("\n" + "=" * 60)
+        print(f"DIGen Data Generation Complete!")
+        print(f"  Scale Factor: {scale_factor}")
+        print(f"  Output Location: {os_blob_out_path}/")
+        print("=" * 60)
+        report_path = os.path.join(os_blob_out_path, "digen_report.txt")
+        try:
+            with open(report_path) as rf:
+                report = rf.read()
+            print(f"\n--- digen_report.txt ({report_path}) ---")
+            print(report)
+            print("--- end of digen_report.txt ---")
+        except FileNotFoundError:
+            print(f"  (digen_report.txt not found at {report_path})")
+        except Exception as e:
+            print(f"  could not read digen_report.txt: {type(e).__name__}: {e}")
+    finally:
+        # Always clean up the per-session scratch dir, even on error.
+        shutil.rmtree(session_root, ignore_errors=True)
+        print(f"  cleaned up session scratch dir: {session_root}")
