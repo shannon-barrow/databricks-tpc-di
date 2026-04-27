@@ -100,16 +100,21 @@ if sku[0] not in ['CLUSTER','DBSQL']:
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across
 #   all benchmark variants at that SF), so its name omits exec_type/batched.
-# - Benchmark job: full identifying suffixes. DLT has no batched concept, so
-#   omit that suffix there.
+# - Benchmark job: batched + exec + gen suffixes. DLT has no batched concept,
+#   so omit that suffix there. The data_generator is also stamped on every
+#   created job as a `data_generator` tag so jobs are queryable by generator.
+# - `_datagen_label` (long form) is preserved for schema names — changing it
+#   would break already-materialized `..._spark_data_gen_*` schemas.
 _datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
-_batched_label   = "incremental" if incremental else "single_batch"
+_gen_label       = "SparkGen" if data_generator == "spark" else "NativeGen"
+_batched_label   = "Incremental" if incremental else "SingleBatch"
+_exec_label      = "Cluster" if sku[0] == "CLUSTER" else wf_key
 _base_name       = dbutils.widgets.get('job_name')
-datagen_job_name = f"{_base_name}-SF{scale_factor}-{_datagen_label}"
+datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
 if sku[0] in ['CLUSTER','DBSQL']:
-  job_name = f"{_base_name}-SF{scale_factor}-{wf_key}-{_datagen_label}-{_batched_label}"
+  job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
 else:
-  job_name = f"{_base_name}-SF{scale_factor}-{wf_key}-{_datagen_label}"
+  job_name = f"{_base_name}-SF{scale_factor}-{_exec_label}-{_gen_label}"
 
 # COMMAND ----------
 

@@ -51,7 +51,8 @@ def generate_datagen_workflow(
     """Create the data-generation workflow and return its ``job_id``.
 
     Args:
-        job_name: Base job name — template appends ``_DataGen``.
+        job_name: Final job name as used in the Jobs API (Driver builds it
+            as ``{base}-SF{sf}-{SparkGen|NativeGen}``).
         scale_factor: TPC-DI scale factor (int; stringified for the template).
         catalog: UC catalog for the generated volume.
         regenerate_data: ``"YES"`` or ``"NO"`` — whether to delete existing data.

@@ -102,8 +102,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     )
 
     return {
-        "name": f"{job_name}_DataGen",
+        "name": job_name,
         "description": description,
+        "tags": {"data_generator": "native_jar"},
         "email_notifications": {"no_alert_for_skipped_runs": False},
         "webhook_notifications": {},
         "timeout_seconds": 0,
