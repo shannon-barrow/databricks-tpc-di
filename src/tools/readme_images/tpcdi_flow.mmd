@@ -1,23 +1,8 @@
-flowchart LR
-    U[User] --> D[TPC-DI Driver notebook]
-    D -->|picks workflow type, SF, generator| Setup[setup.py]
-    Setup --> CreateJobs[Driver creates two jobs]
-    CreateJobs --> DG[Datagen Workflow]
-    CreateJobs --> BM[Benchmark Workflow]
-
-    DG --> DGNB[tools/data_gen.py]
-    DGNB -->|spark_or_native_datagen| Choice{which generator?}
-    Choice -->|spark default| Spark[spark_runner.py<br/>distributed PySpark<br/>serverless]
-    Choice -->|native| Digen[digen_runner.py<br/>DIGen.jar subprocess<br/>DBR 15.4 + Photon]
-    Spark --> SOut[/Volumes/.../spark_datagen/sf=N/]
-    Digen --> NOut[/Volumes/.../sf=N/]
-
-    BM --> Bronze[Bronze: read raw files]
-    SOut -.read.-> Bronze
-    NOut -.read.-> Bronze
-    Bronze --> Silver[Silver: SCD2 dims + staging facts]
-    Silver --> Gold[Gold: fact tables]
-    Gold --> Audit{Incremental mode?}
-    Audit -->|yes| AuditRes[automated_audit_results table]
-    Audit -->|no| Done[Benchmark complete]
-    AuditRes --> Done
+flowchart TD
+    S1[1. Open the TPC-DI Driver notebook]
+    S2[2. Choose your options:<br/>workflow type, scale factor, generator]
+    S3[3. Run the Driver — it creates 2 workflows for you]
+    S4[4. Run the Data Generation workflow]
+    S5[5. Run the Benchmark workflow]
+    S6[6. Review audit results — incremental mode only]
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6
