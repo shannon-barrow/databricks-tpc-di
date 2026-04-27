@@ -1,6 +1,10 @@
 {
   "name": "{{ job_name }}",
-  "description": "TPC-DI incremental-batch workflow on {{ exec_type }} ({{ datagen_label }}, SF={{ scale_factor }}). Reads raw input from `{{ tpcdi_directory }}sf={{ scale_factor }}/`, writes to schema `{{ catalog }}.{{ wh_target }}_{{ exec_type }}_{{ datagen_label }}_incremental_{{ scale_factor }}` (and `..._stage`). Processes 3 TPC-DI batches sequentially with audit checks at the end of each batch — this is the auditable variant required for spec validation.",
+  {% if data_generator == "spark" %}
+  "description": "TPC-DI incremental-batch workflow on {{ exec_type }} (**Spark** data generator, SF={{ scale_factor }}). Reads distributed PySpark output from `{{ tpcdi_directory }}sf={{ scale_factor }}/` — split files per table (e.g. `Customer_1.txt`, `Customer_2.txt`, ...). Writes to schema `{{ catalog }}.{{ wh_target }}_{{ exec_type }}_spark_data_gen_incremental_{{ scale_factor }}` (and `..._stage`). Processes 3 TPC-DI batches sequentially with audit checks at the end of each batch — this is the auditable variant required for spec validation.",
+  {% else %}
+  "description": "TPC-DI incremental-batch workflow on {{ exec_type }} (**DIGen.jar** native, legacy data generator, SF={{ scale_factor }}). Reads single-threaded DIGen output from `{{ tpcdi_directory }}sf={{ scale_factor }}/` — one file per table (e.g. `Customer.txt`, `Trade.txt`). Writes to schema `{{ catalog }}.{{ wh_target }}_{{ exec_type }}_native_data_gen_incremental_{{ scale_factor }}` (and `..._stage`). Processes 3 TPC-DI batches sequentially with audit checks at the end of each batch — this is the auditable variant required for spec validation.",
+  {% endif %}
   "email_notifications": {
     "no_alert_for_skipped_runs": false
   },

@@ -1,13 +1,17 @@
 {
     "name": "{{ job_name }}",
-    "description": "TPC-DI Delta Live Tables {{ edition }} pipeline ({{ datagen_label }}, SF={{ scale_factor }}). Reads raw input from `{{ tpcdi_directory }}sf={{ scale_factor }}/`, materializes target schema `{{ catalog }}.{{ wh_target }}_DLT_{{ edition }}_{{ datagen_label }}_{{ scale_factor }}`. All 3 TPC-DI batches are processed in a single DLT run.{% if scale_factor > 100 %} The ***run_customermgmt*** parameter accepts ***YES*** or ***NO*** — if the historical CustomerMgmt XML has already been ingested, set to ***NO*** to skip re-ingestion (dw_init does not remove it since that is expensive at high SF); defaults to ***YES***.{% endif %}",
+    {% if data_generator == "spark" %}
+    "description": "TPC-DI Delta Live Tables {{ edition }} pipeline (**Spark** data generator, SF={{ scale_factor }}). Reads distributed PySpark output from `{{ tpcdi_directory }}sf={{ scale_factor }}/` (split files like `Customer_1.txt`, `Customer_2.txt`, ..., `CustomerMgmt_1.xml`, ...). Materializes target schema `{{ catalog }}.{{ wh_target }}_DLT_{{ edition }}_spark_data_gen_{{ scale_factor }}`. All 3 TPC-DI batches are processed in a single DLT run. The CustomerMgmt XML re-ingestion gate is not used here — split XML files re-parse cheaply, so the pipeline always re-ingests.",
+    {% else %}
+    "description": "TPC-DI Delta Live Tables {{ edition }} pipeline (**DIGen.jar** native, legacy data generator, SF={{ scale_factor }}). Reads single-threaded DIGen output from `{{ tpcdi_directory }}sf={{ scale_factor }}/` (one file per table — `Customer.txt`, `Trade.txt`, `CustomerMgmt.xml`). Materializes target schema `{{ catalog }}.{{ wh_target }}_DLT_{{ edition }}_native_data_gen_{{ scale_factor }}`. All 3 TPC-DI batches are processed in a single DLT run.{% if scale_factor > 100 %} The ***run_customermgmt*** parameter accepts ***YES*** or ***NO*** — DIGen produces a single large CustomerMgmt.xml that is expensive to re-parse at high SF, so this gate exists to skip re-ingestion if already loaded; defaults to ***YES***.{% endif %}",
+    {% endif %}
     "email_notifications": {},
     "webhook_notifications": {},
     "timeout_seconds": 0,
     "max_concurrent_runs": 1,
     "format": "MULTI_TASK", 
     "parameters": [
-      {% if scale_factor > 100 %}
+      {% if data_generator == "digen" and scale_factor > 100 %}
       {
         "name": "run_customermgmt",
         "default": "YES"
@@ -30,7 +34,7 @@
         "default": "{{ tpcdi_directory }}"
       }
     ],
-    {% if scale_factor > 100 %}
+    {% if data_generator == "digen" and scale_factor > 100 %}
     "job_clusters": [
         {
             "job_cluster_key": "{{ job_name }}_compute",
@@ -63,7 +67,7 @@
     ],
     {% endif %}
     "tasks": [
-        {% if scale_factor > 100 %}
+        {% if data_generator == "digen" and scale_factor > 100 %}
         {
             "task_key": "run_customermgmt_YES_NO",
             "run_if": "ALL_SUCCESS",
