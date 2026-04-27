@@ -93,6 +93,8 @@ def run_all() -> int:
 
     # ----- dlt_pipeline ----- already cut over
 
+    # ----- dlt_workflow ----- already cut over
+
     print()
     if failures:
         print(f"FAILED: {failures} case(s) mismatched")

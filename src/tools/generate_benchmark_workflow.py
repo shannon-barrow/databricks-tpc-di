@@ -10,6 +10,7 @@ from typing import Callable, Optional
 
 from _workflow_utils import render_dag, submit_dag, template_path
 from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
+from workflow_builders import dlt_workflow as _dlt_workflow_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -26,9 +27,11 @@ _WH_SCALE_FACTOR_MAP = {
 }
 
 
-def _pick_workflow_template(sku_head: str, incremental: bool) -> str:
+def _pick_workflow_template(sku_head: str, incremental: bool) -> str | None:
+    """Jinja template for the wrapping workflow, or None if a Python builder
+    handles it (currently: DLT)."""
     if sku_head == "DLT":
-        return "dlt_workflow.json"
+        return None
     if incremental:
         return "workflows_incremental.json"
     return "workflows_single_batch.json"
@@ -231,8 +234,13 @@ Scale Factor:             {scale_factor}
             dag_args["wh_name"], dag_args, workspace_src_path, api_call)
 
     # --- Submit the workflow itself ---
-    wf_template_path = template_path(workspace_src_path, workflow_template)
-    print(f"Rendering New Workflow JSON via {workflow_template}")
-    workflow_dag = render_dag(wf_template_path, dag_args)
-    print("Submitting rendered Workflow JSON to Databricks Jobs API")
+    if workflow_template is None:
+        # DLT path: use the Python builder.
+        print("Building DLT Workflow JSON via workflow_builders.dlt_workflow")
+        workflow_dag = _dlt_workflow_builder.build(**dag_args)
+    else:
+        wf_template_path = template_path(workspace_src_path, workflow_template)
+        print(f"Rendering New Workflow JSON via {workflow_template}")
+        workflow_dag = render_dag(wf_template_path, dag_args)
+    print("Submitting Workflow JSON to Databricks Jobs API")
     return submit_dag(workflow_dag, _JOBS_API_ENDPOINT, api_call)
