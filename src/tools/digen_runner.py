@@ -48,37 +48,65 @@ def _abort_digen(reason: str) -> None:
 
 _SCRATCH_CANDIDATES = ("/local_disk0", "/tmp")
 
+# /tmp is typically the OS root partition (10-30 GB shared with logs and JARs)
+# and only big enough for small SFs. /local_disk0 is the VM's local SSD —
+# tens of GB on small VMs to multi-TB on large drivers. SF=100 ≈ 10 GB raw
+# already pushes /tmp; anything above that must use /local_disk0, which means
+# the cluster's data_security_mode has to be SINGLE_USER.
+_MAX_SCALE_FACTOR_FOR_TMP = 100
 
-def _pick_scratch_dir() -> str:
-    """Pick a writable scratch directory for DIGen's tmp output.
 
-    /local_disk0 is preferred (typically larger and faster on classic
-    clusters), but it's locked down on USER_ISOLATION access mode. /tmp is
-    almost always writable; smaller, but fine for SF ≤ 1000.
+def _is_writable(path: str) -> bool:
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".tpcdi_write_probe")
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.unlink(probe)
+        return True
+    except (PermissionError, OSError):
+        return False
 
-    Returns the first writable path; raises if none work.
+
+def _pick_scratch_dir(scale_factor: int) -> str:
+    """Pick a writable scratch directory big enough for the chosen scale_factor.
+
+    Prefers /local_disk0 (large fast NVMe). Falls back to /tmp only when the
+    SF is small enough to fit in OS root. If /local_disk0 isn't writable AND
+    the SF needs more than /tmp can fit, hard-aborts with a SINGLE_USER hint.
     """
-    last_err = None
-    for cand in _SCRATCH_CANDIDATES:
-        try:
-            os.makedirs(cand, exist_ok=True)
-            probe = os.path.join(cand, ".tpcdi_write_probe")
-            with open(probe, "w") as f:
-                f.write("ok")
-            os.unlink(probe)
-            return cand
-        except (PermissionError, OSError) as e:
-            last_err = e
-            continue
+    local_disk_writable = _is_writable("/local_disk0")
+    tmp_writable = _is_writable("/tmp")
+
+    if local_disk_writable:
+        return "/local_disk0"
+
+    if tmp_writable and scale_factor <= _MAX_SCALE_FACTOR_FOR_TMP:
+        print(f"WARNING: /local_disk0 not writable (typical of USER_ISOLATION / "
+              f"SHARED clusters). Falling back to /tmp/ for scratch — OK for "
+              f"SF={scale_factor} (≤{_MAX_SCALE_FACTOR_FOR_TMP}) but consider "
+              f"switching to SINGLE_USER access mode for larger scale factors.")
+        return "/tmp"
+
+    if not local_disk_writable and scale_factor > _MAX_SCALE_FACTOR_FOR_TMP:
+        _abort_digen(
+            f"SF={scale_factor} requires /local_disk0 (the VM's large local "
+            f"SSD), but it's not writable on this cluster — likely because the "
+            f"cluster's `data_security_mode` is USER_ISOLATION or SHARED. /tmp "
+            f"on the OS root partition is too small for SF>{_MAX_SCALE_FACTOR_FOR_TMP} "
+            f"(SF=100 ≈ 10 GB raw, SF=1000 ≈ 100 GB, SF=10000 ≈ 1 TB).\n"
+            f"FIX: edit the cluster's access mode and set Single User (SINGLE_USER), "
+            f"then restart the cluster. /local_disk0 will become writable and "
+            f"this job will use it. No volume data has been modified."
+        )
+
     _abort_digen(
-        f"no writable scratch directory found (tried {list(_SCRATCH_CANDIDATES)}): "
-        f"{type(last_err).__name__}: {last_err}. /local_disk0 is typically blocked "
-        f"on USER_ISOLATION clusters — switch the cluster to SINGLE_USER access mode "
-        f"or use /tmp."
+        f"no writable scratch directory: /local_disk0={local_disk_writable}, "
+        f"/tmp={tmp_writable}. Switch cluster to SINGLE_USER access mode."
     )
 
 
-def preflight(spark: Any) -> str:
+def preflight(spark: Any, scale_factor: int) -> str:
     """Verify cluster can actually run DIGen. Raises before any side effect.
     Returns the writable scratch root to use as DRIVER_ROOT."""
     # Java callable.
@@ -92,8 +120,8 @@ def preflight(spark: Any) -> str:
     except (FileNotFoundError, subprocess.TimeoutExpired, PermissionError) as e:
         _abort_digen(f"cannot invoke `java` ({type(e).__name__}: {e})")
 
-    # Scratch directory writable.
-    scratch = _pick_scratch_dir()
+    # Scratch directory writable + big enough for the chosen scale_factor.
+    scratch = _pick_scratch_dir(scale_factor)
 
     # DBR version ≤ 15.4.
     dbr = (
@@ -209,7 +237,7 @@ def run(
         threads: Override for the file-move thread pool. Defaults to
             `spark.sparkContext.defaultParallelism`.
     """
-    DRIVER_ROOT = preflight(spark)
+    DRIVER_ROOT = preflight(spark, scale_factor)
 
     UC_enabled = catalog != "hive_metastore"
     # Use a stable subdir under whatever scratch root the preflight picked
