@@ -1,9 +1,4 @@
 # Databricks notebook source
-# DBTITLE 1,Install Jinja2
-pip install jinja2
-
-# COMMAND ----------
-
 # DBTITLE 1,Put tools/ on sys.path, import the TPC-DI entry points, bootstrap tpcdi_config
 # This cell does the pieces that can't cleanly live inside an importable Python
 # module — sys.path manipulation, %pip install, and module-cache reset so that

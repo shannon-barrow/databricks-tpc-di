@@ -8,9 +8,10 @@ API. Returns the created ``job_id``.
 import json
 from typing import Callable, Optional
 
-from _workflow_utils import render_dag, submit_dag, template_path
+from _workflow_utils import submit_dag
 from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
 from workflow_builders import dlt_workflow as _dlt_workflow_builder
+from workflow_builders import warehouse as _warehouse_builder
 from workflow_builders import workflows_single_batch as _single_batch_builder
 from workflow_builders import workflows_incremental as _incremental_builder
 
@@ -18,8 +19,6 @@ from workflow_builders import workflows_incremental as _incremental_builder
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 _PIPELINES_API_ENDPOINT = "/api/2.0/pipelines"
 _WH_API_ENDPOINT = "/api/2.0/sql/warehouses"
-_WAREHOUSE_TEMPLATE = "warehouse_jinja_template.json"
-
 _WH_SCALE_FACTOR_MAP = {
     "10": "2X-Small",
     "100": "2X-Small",
@@ -37,16 +36,15 @@ def _pick_workflow_template(sku_head: str, incremental: bool) -> str | None:
 
 def _get_or_create_warehouse(wh_name: str, dag_args: dict,
                               workspace_src_path: str, api_call: Callable) -> int:
-    """Return existing warehouse id or create one from the warehouse template."""
+    """Return existing warehouse id or create one from the warehouse builder."""
     response = api_call(None, "GET", _WH_API_ENDPOINT)
     for wh in json.loads(response.text)["warehouses"]:
         if wh["name"] == wh_name:
             print(f"DB SQL Warehouse {wh_name} exists! Warehouse ID: {wh['id']}")
             return wh["id"]
     print(f"Warehouse {wh_name} does not exist, creating...")
-    rendered = render_dag(template_path(workspace_src_path, _WAREHOUSE_TEMPLATE),
-                          dag_args)
-    response = api_call(rendered, "POST", _WH_API_ENDPOINT)
+    payload = _warehouse_builder.build(**dag_args)
+    response = api_call(payload, "POST", _WH_API_ENDPOINT)
     wh_id = json.loads(response.text)["id"]
     print(f"DB SQL Warehouse {wh_name} created. Warehouse ID: {wh_id}")
     return wh_id
