@@ -46,6 +46,7 @@ def run(
     workspace_src_path: str,
     dbutils: Any,
     spark: Any,
+    **_unused,  # accepts (and ignores) any extra kwargs for signature parity with digen_runner
 ) -> None:
     """Generate TPC-DI data using the distributed Spark-native generator."""
 

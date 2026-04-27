@@ -136,6 +136,7 @@ def run(
     dbutils: Any,
     spark: Any,
     threads: int | None = None,
+    **_unused,  # accepts (and ignores) shared kwargs like log_level for signature parity with spark_runner
 ) -> None:
     """Run the legacy DIGen.jar data-generation flow.
 

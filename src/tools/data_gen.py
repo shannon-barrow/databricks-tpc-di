@@ -63,26 +63,22 @@ print(f"data_gen dispatch → {_choice!r}")
 print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
 print(f"  regenerate_data={_regenerate}, log_level={_log_level}")
 
+# Both runner.run() functions take the same kwargs. log_level is consumed by
+# spark_runner and silently ignored by digen_runner via **_unused.
+_run_kwargs = dict(
+    scale_factor=_scale_factor,
+    catalog=_catalog,
+    tpcdi_directory=_tpcdi_directory,
+    regenerate_data=_regenerate,
+    log_level=_log_level,
+    workspace_src_path=_workspace_src_path,
+    dbutils=dbutils,
+    spark=spark,
+)
+
 if _choice == "spark":
-    from spark_runner import run as spark_run
-    spark_run(
-        scale_factor=_scale_factor,
-        catalog=_catalog,
-        tpcdi_directory=_tpcdi_directory,
-        regenerate_data=_regenerate,
-        log_level=_log_level,
-        workspace_src_path=_workspace_src_path,
-        dbutils=dbutils,
-        spark=spark,
-    )
+    from spark_runner import run as runner
 else:  # native
-    from digen_runner import run as digen_run
-    digen_run(
-        scale_factor=_scale_factor,
-        catalog=_catalog,
-        tpcdi_directory=_tpcdi_directory,
-        regenerate_data=_regenerate,
-        workspace_src_path=_workspace_src_path,
-        dbutils=dbutils,
-        spark=spark,
-    )
+    from digen_runner import run as runner
+
+runner(**_run_kwargs)
