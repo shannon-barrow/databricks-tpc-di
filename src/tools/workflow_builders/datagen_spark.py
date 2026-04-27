@@ -8,16 +8,16 @@ from __future__ import annotations
 def build(*, job_name: str, scale_factor: int, catalog: str,
           regenerate_data: str, log_level: str, repo_src_path: str,
           **_unused) -> dict:
+    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     description = (
         f"TPC-DI **Spark** data-generation workflow (SF={scale_factor}). "
         f"Distributed PySpark generator running as a single serverless notebook "
         f"task. Writes raw input files to "
-        f"`/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
-        f"sf={scale_factor}/`. Outputs are split files like `Customer_1.txt`, "
-        f"`Customer_2.txt`, ... (matched by the benchmark via "
-        f"`{{Customer.txt,Customer_[0-9]*.txt}}`-style globs). Set "
-        f"`regenerate_data=YES` to wipe and rebuild; defaults to `NO` (no-op "
-        f"if output already exists)."
+        f"`{tpcdi_directory}spark_datagen/sf={scale_factor}/`. Outputs are split "
+        f"files like `Customer_1.txt`, `Customer_2.txt`, ... (matched by the "
+        f"benchmark via `{{Customer.txt,Customer_[0-9]*.txt}}`-style globs). "
+        f"Set `regenerate_data=YES` to wipe and rebuild; defaults to `NO` "
+        f"(no-op if output already exists)."
     )
 
     return {
@@ -32,6 +32,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},
             {"name": "log_level", "default": log_level},
+            {"name": "tpcdi_directory", "default": tpcdi_directory},
         ],
         "tasks": [{
             "task_key": "generate_data",

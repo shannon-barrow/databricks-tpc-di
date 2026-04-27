@@ -68,11 +68,12 @@ def generate_datagen_workflow(
             f"Unknown data_generator={data_generator!r}; "
             f"expected one of {sorted(_BUILDERS.keys())}"
         )
-    if data_generator == "digen" and (not default_dbr_version or not default_worker_type):
+    if data_generator == "digen" and not default_worker_type:
         raise ValueError(
-            "data_generator='digen' requires default_dbr_version and "
-            "default_worker_type — DIGen.jar runs on a classic single-node "
-            "cluster (subprocess + Java can't run on serverless)."
+            "data_generator='digen' requires default_worker_type — DIGen.jar "
+            "runs on a classic, non-serverless cluster (Java subprocess "
+            "can't run on serverless), and the default node type comes "
+            "from setup_context's cloud-aware default."
         )
 
     print(f"Building Data Generation Workflow JSON via "

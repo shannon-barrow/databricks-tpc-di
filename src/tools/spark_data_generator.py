@@ -35,11 +35,12 @@ except NameError:
     dbutils.widgets.text("catalog", "tpcdi", "Target Catalog")
     dbutils.widgets.dropdown("regenerate_data", "NO", ["YES", "NO"], "Regenerate Data")
     dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"], "Log Level")
+    dbutils.widgets.text("tpcdi_directory", "", "TPCDI Output Directory (defaults to /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/)")
 
     scale_factor = int(dbutils.widgets.get("scale_factor"))
     catalog = dbutils.widgets.get("catalog")
     regenerate_data = dbutils.widgets.get("regenerate_data") == "YES"
-    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    tpcdi_directory = dbutils.widgets.get("tpcdi_directory") or f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
     workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
 
