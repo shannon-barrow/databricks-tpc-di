@@ -1,5 +1,20 @@
 # Claude / AI Agent Context
 
+> **PRIMARY USE CASE — AI/AGENT CONSUMPTION.** This codebase is being
+> deliberately built and curated for use as a *skills asset* by AI agents,
+> specifically:
+> - **Claude** (Claude Code, claude.ai Projects, Claude Code skills/plugins)
+> - **Databricks Genie** (workspace-native conversational analytics)
+>
+> Every artifact in the repo — the workflow builders, the audit module, the
+> static audit snapshots, the unified `data_gen` entry point, the README's
+> flow diagram, and especially this file — is designed so an AI agent can
+> reason about the TPC-DI benchmark, answer questions about it, and make
+> well-informed code/SQL suggestions without re-discovering the architecture
+> from scratch. When making changes, prioritize keeping this file (and
+> README) accurate over leaving cruft. Outdated docs hurt agent answers
+> directly.
+
 This document captures project-specific context for AI agents (Claude Code,
 Genie, claude.ai Projects) working on this repo. Always-on context for Claude
 Code when this file lives at the repo root.
@@ -23,14 +38,17 @@ The existing `main` branch holds the original DIGen-based pipeline. The
 `data_generator` widget on the Driver:
 
 - `spark` (default) — distributed PySpark, runs on serverless.
-- `digen` — DIGen.jar wrapped by `src/tools/data_generator.py`, runs on a
-  small classic single-node cluster (Java subprocess can't run on serverless).
+- `digen` — DIGen.jar wrapped by `src/tools/digen_runner.py`, runs on a
+  classic single-node cluster (Java subprocess can't run on serverless).
 
-`generate_datagen_workflow()` dispatches via a `_TEMPLATES` dict to either
-`datagen_workflow.json` (Spark) or `datagen_workflow_digen.json` (DIGen) and
-posts the rendered template to the Jobs API. The DIGen branch additionally
-requires `default_dbr_version` and `default_worker_type` (its classic
-single-node cluster spec).
+Both flow through a single notebook entry — `src/tools/data_gen.py` — which
+imports `spark_runner.py` or `digen_runner.py` directly (no
+`dbutils.notebook.run` indirection that would spin up an extra cluster on
+serverless). `generate_datagen_workflow()` dispatches via a `_BUILDERS`
+dict to `workflow_builders/datagen_spark.py` or `workflow_builders/datagen_digen.py`
+(both pure Python — Jinja templates retired). The DIGen builder additionally
+requires `default_dbr_version` and `default_worker_type` (its forced
+non-serverless DBR 15.4 + Photon cluster spec).
 
 **Output paths differ.** The Driver chooses `tpcdi_directory` based on the
 selected generator and forwards that to the benchmark workflow:
@@ -38,12 +56,14 @@ selected generator and forwards that to the benchmark workflow:
 - `digen` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/` (legacy path
   preserved so workspaces with prior DIGen output don't have to regenerate)
 
-Each generator hardcodes its own write path internally; the datagen Jinja
-templates don't take `tpcdi_directory`. Only the benchmark workflow does.
+Each runner hardcodes its own write path internally; the datagen builders
+don't take `tpcdi_directory`. Only the benchmark workflow does.
 
 ## Data generator architecture
 
-Entry point: `src/tools/spark_data_generator.py` (notebook). It calls
+Entry point: `src/tools/data_gen.py` (the unified Driver-invoked notebook).
+It reads the `spark_or_native_datagen` job parameter and imports either
+`spark_runner.py` or `digen_runner.py`. The Spark path calls
 `spark_generate()` which orchestrates per-table generators living in
 `src/tools/tpcdi_gen/`:
 
@@ -192,9 +212,43 @@ produces the same SCD2 outcome under silver's filtering rules.
 
 ## Benchmark architecture
 
-The benchmark is a 47-task workflow (`Shannon-Barrow-TPCDI-CLUSTER` job)
-that ingests generated data, builds the silver/gold dimensional model, and
-runs validation checks. Key SQL files under `src/incremental_batches/`:
+The benchmark comes in three runtime variants — `CLUSTER` (job cluster or
+serverless), `DBSQL` (SQL warehouse), and `SDP` (Spark Declarative
+Pipelines, the Databricks runtime previously branded "DLT"). The Driver
+creates one job per `(scale_factor, batched, exec_type, data_generator)`
+combination using Python builders under `src/tools/workflow_builders/`:
+
+- `datagen_spark.py` / `datagen_digen.py` — datagen workflows
+- `workflows_single_batch.py` / `workflows_incremental.py` — Cluster + DBSQL
+  benchmark workflows (one-shot vs auditable per-batch variants)
+- `sdp_pipeline.py` / `sdp_workflow.py` — SDP pipeline definition + the
+  Jobs-API workflow that runs it
+- `warehouse.py` — DBSQL warehouse spec
+- `_workflow_common.py` — shared helpers (`make_task`, `make_cleanup_tasks`,
+  cluster specs, etc.)
+
+**Job naming convention** (Driver-built):
+- Datagen: `{base}-SF{N}-{SparkGen|NativeGen}`
+- Cluster/DBSQL benchmark: `{base}-SF{N}-{Incremental|SingleBatch}-{Cluster|DBSQL}-{SparkGen|NativeGen}`
+- SDP benchmark: `{base}-SF{N}-{SDP-CORE|SDP-PRO|SDP-ADVANCED}-{SparkGen|NativeGen}`
+
+Every created job carries a `data_generator: spark|native_jar` tag so the
+Jobs UI / API can filter without parsing the name.
+
+**Schema names** preserve the long form (`spark_data_gen` / `native_data_gen`)
+so already-materialized schemas survive the job-name refactor:
+`{catalog}.{wh_db}_{exec_type}_{datagen_label}_{batched_label}_{sf}` —
+e.g. `main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_10`.
+SDP variants use `_SDP_{edition}_{datagen_label}_` instead.
+
+**Cleanup** runs as a final task on every benchmark workflow. A
+`delete_when_finished_TRUE_FALSE` `condition_task` gates a SQL notebook
+(`tools/cleanup_after_benchmark.sql`) that drops the run's `_stage` and
+final schemas. Setting the `delete_tables_when_finished` job parameter to
+`FALSE` short-circuits the gate so no cleanup compute spins up.
+
+**Auditable benchmark — incremental batches.** Key SQL files under
+`src/incremental_batches/`:
 
 - `bronze/*.sql` — file ingestion. Tables are read via `read_files(...
   fileNamePattern => "{Customer.txt,Customer_[0-9]*.txt}", schema => ...)`.
@@ -202,9 +256,11 @@ runs validation checks. Key SQL files under `src/incremental_batches/`:
   single `Customer.txt` (no suffix) and Spark's split `Customer_1.txt`,
   `Customer_2.txt`, etc., while excluding `Customer_audit.csv`. FINWIRE is
   special — DIGen names like `FINWIRE2017Q3` (no extension, year+quarter)
-  and Spark names like `FINWIRE_1.txt` are caught by `FINWIRE[12_][0-9]*`
-  (the `[12_]` class accepts year-1, year-2, or `_`; the `[0-9]` requirement
-  excludes `FINWIRE_audit.csv`).
+  and Spark names like `FINWIRE_1.txt` are caught by
+  `{FINWIRE[0-9][0-9][0-9][0-9]Q[1-4],FINWIRE_[0-9]*.txt}`. The same
+  brace pattern is used in `sdp_pipeline._BRONZE_TABLES_JSON` for the
+  SDP bronze table — without it, Spark's numbered FINWIRE files miss
+  the pattern and DimCompany/DimSecurity/Financial come out empty.
 - `silver/*.sql` — DimCustomer, DimAccount, DimTrade, FactWatches, etc.
   Each is an SCD2 / aggregate transformation.
 - `gold/*.sql` — FactCashBalances, FactMarketHistory.
@@ -237,11 +293,13 @@ databricks jobs run-now --profile tpc-di \
 - Job `1017619735160060` (cloned, faster cold-start).
 - Job `218882370760159` (original, has OOM-promotion flag — better for SF≥20000).
 - `regenerate_data=YES` wipes the SF directory and rebuilds.
-- These jobs target the **Spark** generator (notebook
-  `tools/spark_data_generator`). For the **DIGen.jar** path, regenerate the
-  datagen workflow from the Driver with `data_generator=digen` — that submits
-  a different workflow (template `datagen_workflow_digen.json`) running on a
-  classic single-node cluster, since Java subprocess can't run on serverless.
+- These jobs target the **Spark** generator (the unified entry point is
+  `tools/data_gen` which imports `spark_runner.py`). For the **DIGen.jar**
+  path, regenerate the datagen workflow from the Driver with
+  `data_generator=digen` — that posts a different builder
+  (`workflow_builders/datagen_digen.py`, no Jinja anymore) running on a
+  classic single-node DBR 15.4 + Photon cluster, since Java subprocess
+  can't run on serverless.
 
 ### Run the benchmark
 ```
@@ -258,7 +316,10 @@ every `*_audit.csv` using DIGen's exact counter semantics.
 
 ### Check audit failures after a benchmark
 ```sql
-SELECT * FROM main.shannon_barrow_tpcdi_cluster_${SF}.automated_audit_results
+-- Schema name pattern (single source of truth for schema label):
+--   {catalog}.{wh_db}_{exec_type}_{datagen_label}_{batched_label}_{sf}
+-- e.g. main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_10
+SELECT * FROM main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_${SF}.automated_audit_results
 WHERE result != 'OK' ORDER BY test, batch
 ```
 
@@ -301,11 +362,26 @@ This is non-negotiable BEFORE triggering any job. Workspace repo id
 
 ```
 src/
+  TPC-DI Driver.py                # entry-point notebook the user runs
   tools/
-    spark_data_generator.py       # Spark generator orchestrator notebook (default)
-    data_generator.py             # DIGen.jar wrapper notebook (legacy path)
-    generate_datagen_workflow.py  # builds the datagen workflow; dispatches spark|digen
+    data_gen.py                   # unified datagen notebook (Spark + DIGen)
+    spark_runner.py               # Spark generator orchestrator (called from data_gen)
+    digen_runner.py               # DIGen.jar wrapper (called from data_gen)
+    setup_context.py              # tpcdi_config bootstrap (api, cloud, defaults)
+    generate_datagen_workflow.py  # dispatches to workflow_builders.datagen_{spark,digen}
+    generate_benchmark_workflow.py# dispatches to workflow_builders for Cluster/DBSQL/SDP
+    cleanup_after_benchmark.sql   # final cleanup task (SQL — runs on warehouse too)
     regenerate_audits.py          # standalone audit recompute notebook
+    workflow_builders/
+      _workflow_common.py         # shared helpers (make_task, make_cleanup_tasks, …)
+      _node_picker.py             # cloud-aware ARM-preferred node selection
+      datagen_spark.py            # Spark datagen workflow JSON
+      datagen_digen.py            # DIGen.jar datagen workflow JSON
+      workflows_single_batch.py   # Cluster+DBSQL all-batches-at-once benchmark
+      workflows_incremental.py    # Cluster+DBSQL per-batch auditable benchmark
+      sdp_pipeline.py             # SDP pipeline definition (was dlt_pipeline)
+      sdp_workflow.py             # SDP wrapping workflow (was dlt_workflow)
+      warehouse.py                # DBSQL warehouse spec
     tpcdi_gen/
       audit.py                    # static-snapshot copy + dynamic regen
       config.py                   # ScaleConfig — all scaling constants
@@ -320,26 +396,60 @@ src/
       watch_history.py            # WatchHistory.txt with bijection
       static_audits/sf={SF}/      # pre-computed audit snapshots (committed)
     datagen/pdgf/                 # DIGen.jar + PDGF config (reference only)
-    jinja_templates/              # job workflow templates
   incremental_batches/
     bronze/                       # file → staging table SQL
     silver/                       # SCD2 dimension builds
     gold/                         # fact tables
     audit_validation/             # automated_audit.sql, batch_validation.sql, audit_alerts.sql
     dw_init.sql                   # schema + Audit table bootstrap
-  single_batch/SQL/               # all-batches-in-one variant of the pipeline
+  single_batch/
+    SQL/                          # all-batches-in-one variant (Cluster + DBSQL)
+    spark_declarative_pipelines/  # SDP notebooks (was delta_live_tables/)
+tests/
+  test_workflow_builders.py       # unit tests for workflow JSON shape + naming
+  smoke_run_workflows.py          # integration smoke test (creates+runs 4 jobs)
 ```
 
 ## Active branch
 
-`augmented_incremental`. The `main` branch holds the original DIGen-based
-pipeline. The `data_generator` widget merge is now in place on
-`augmented_incremental` — Driver dispatches to either the Spark generator
-or DIGen.jar based on the widget value. Eventual goal: merge
-augmented_incremental → main.
+`augmented_incremental`. PR #20 (`augmented_incremental → main`) is open
+and ready to merge — once merged, `main` becomes the single source of
+truth and `augmented_incremental` retires.
 
 ## Status of validated scale factors
 
 As of the most recent validation pass, the Spark generator + benchmark
-audits pass at SF=10/100/1000/5000. SF=10000 / SF=20000 validation in
-progress (see audit pass tally in conversation history).
+audits pass at SF=10/100/1000/5000/10000. End-to-end smoke
+(SF=10 × {Cluster/Inc, DBSQL/Single, SDP-CORE} × Spark) all SUCCEED.
+
+## DLT → SDP rename
+
+Databricks rebranded "Delta Live Tables" to "Spark Declarative Pipelines".
+This repo follows that rename:
+
+- workflow keys: `DLT-CORE/PRO/ADVANCED` → `SDP-CORE/PRO/ADVANCED`
+- schema labels: `..._DLT_{edition}_...` → `..._SDP_{edition}_...`
+- task keys: `TPC-DI-DLT-PIPELINE` → `TPC-DI-SDP-PIPELINE`
+- file/dir names: `dlt_pipeline.py`/`dlt_workflow.py` → `sdp_*.py`,
+  `single_batch/delta_live_tables/` → `single_batch/spark_declarative_pipelines/`
+- prose in README, Driver markdown, mermaid diagram
+
+The Python SDK module `dlt` (`import dlt`, `@dlt.table`, `dlt.apply_changes(...)`)
+is **not** renamed — that's still the actual library Databricks exposes.
+
+## SDP CustomerMgmt routing for Spark vs DIGen
+
+`sdp_pipeline.build()` decides whether `CustomerMgmtRaw` runs as a library
+inside the SDP pipeline (creating LIVE customermgmt) vs being read from a
+staging schema populated by an upstream task:
+
+- **Spark datagen, any SF** → in-pipeline (split XML files re-parse cheaply)
+- **DIGen, SF < 1000** → in-pipeline
+- **DIGen, SF ≥ 1000** → upstream `ingest_customermgmt_cluster` task
+  ingests the single big DIGen XML via the spark-xml maven library on a
+  SingleNode classic cluster, writes to `..._SDP_{edition}_..._stage`,
+  and the SDP pipeline reads from there.
+
+If you change either side, keep the `_libraries()` and `cust_mgmt_schema`
+decisions in sync — they currently both branch on
+`data_generator == "spark" or scale_factor < 1000`.
