@@ -70,8 +70,8 @@ def _is_writable(path: str) -> bool:
         return False
 
 
-def _pick_scratch_dir(scale_factor: int) -> str:
-    """Pick a writable scratch directory big enough for the chosen scale_factor.
+def _pick_scratch_dir(scale_factor: int) -> tuple[str, str | None]:
+    """Pick a writable scratch dir, returning (path, optional_warning_message).
 
     Prefers /local_disk0 (large fast NVMe). Falls back to /tmp only when the
     SF is small enough to fit in OS root. If /local_disk0 isn't writable AND
@@ -81,14 +81,16 @@ def _pick_scratch_dir(scale_factor: int) -> str:
     tmp_writable = _is_writable("/tmp")
 
     if local_disk_writable:
-        return "/local_disk0"
+        return "/local_disk0", None
 
     if tmp_writable and scale_factor <= _MAX_SCALE_FACTOR_FOR_TMP:
-        print(f"WARNING: /local_disk0 not writable (typical of USER_ISOLATION / "
-              f"SHARED clusters). Falling back to /tmp/ for scratch — OK for "
-              f"SF={scale_factor} (≤{_MAX_SCALE_FACTOR_FOR_TMP}) but consider "
-              f"switching to SINGLE_USER access mode for larger scale factors.")
-        return "/tmp"
+        warn = (
+            f"WARNING: /local_disk0 not writable (typical of USER_ISOLATION / "
+            f"SHARED clusters). Falling back to /tmp/ for scratch — OK for "
+            f"SF={scale_factor} (≤{_MAX_SCALE_FACTOR_FOR_TMP}) but consider "
+            f"switching to SINGLE_USER access mode for larger scale factors."
+        )
+        return "/tmp", warn
 
     if not local_disk_writable and scale_factor > _MAX_SCALE_FACTOR_FOR_TMP:
         _abort_digen(
@@ -123,13 +125,14 @@ def preflight(spark: Any, scale_factor: int) -> str:
         _abort_digen(f"cannot invoke `java` ({type(e).__name__}: {e})")
 
     # Scratch directory writable + big enough for the chosen scale_factor.
-    scratch = _pick_scratch_dir(scale_factor)
+    scratch, scratch_warn = _pick_scratch_dir(scale_factor)
 
     # DBR version ≤ 15.4.
     dbr = (
         spark.conf.get("spark.databricks.clusterUsageTags.sparkVersion", None)
         or os.environ.get("DATABRICKS_RUNTIME_VERSION", "")
     )
+    dbr_warn = None
     m = re.match(r"^(\d+)\.(\d+)", str(dbr))
     if m:
         major, minor = int(m.group(1)), int(m.group(2))
@@ -139,10 +142,17 @@ def preflight(spark: Any, scale_factor: int) -> str:
                 f"behaviors and the JAR has not been validated on newer runtimes."
             )
     else:
-        print(f"WARNING: could not parse DBR version from {dbr!r}; "
-              f"proceeding anyway (cluster looks non-serverless).")
+        dbr_warn = f"WARNING: could not parse DBR version from {dbr!r}; proceeding anyway."
 
-    print(f"DIGen pre-flight check OK: java available, scratch_dir={scratch}, DBR={dbr}")
+    print("DIGen pre-flight check OK:")
+    print("  Java:        available")
+    print(f"  scratch_dir: {scratch}")
+    print(f"  DBR:         {dbr}")
+    if scratch_warn:
+        print(f"  {scratch_warn}")
+    if dbr_warn:
+        print(f"  {dbr_warn}")
+    print()  # blank line before next section
     return scratch
 
 
@@ -153,18 +163,16 @@ def _move_file(source_location: str, target_location: str) -> None:
 
 
 def _copy_directory(source_dir: str, target_dir: str, overwrite: bool):
+    """Copy DIGen.jar + PDGF config from the workspace into the local scratch
+    directory. Silent on success; surfaces only the actionable error cases."""
     if os.path.exists(target_dir) and overwrite:
-        print(f"Overwrite set to true. Deleting: {target_dir}.")
         shutil.rmtree(target_dir)
-        print(f"Deleted {target_dir}.")
     try:
-        dst = shutil.copytree(source_dir, target_dir)
-        print(f"Copied {source_dir} to {target_dir} successfully!")
-        return dst
+        return shutil.copytree(source_dir, target_dir)
     except FileExistsError:
-        print(f"The folder you're trying to write to exists. Please delete it or set overwrite=True.")
+        print(f"  ERROR: target {target_dir} already exists and overwrite=False")
     except FileNotFoundError:
-        print(f"The folder you're trying to copy doesn't exist: {source_dir}")
+        print(f"  ERROR: source {source_dir} not found")
 
 
 def _path_exists(dbutils: Any, path: str) -> bool:
@@ -180,8 +188,9 @@ def _path_exists(dbutils: Any, path: str) -> bool:
 
 
 def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> None:
+    """Run DIGen.jar; suppress the long license preamble + PDGF banner,
+    keep the per-table generation progress that follows."""
     cmd = f"java -jar {digen_path}DIGen.jar -sf {scale_factor} -o {output_path}"
-    print(f"Generating data and outputting to {output_path}")
     args = shlex.split(cmd)
     p = subprocess.Popen(
         args,
@@ -194,19 +203,34 @@ def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> N
     # DIGen prompts for license acceptance; auto-acknowledge.
     p.stdin.write("\n"); p.stdin.flush()
     p.stdin.write("YES\n"); p.stdin.flush()
+
+    # Skip everything from the "By using this software" line through the PDGF
+    # banner until DIGen actually starts loading config. Anything before that
+    # is the (long) BANKMARK end-user license and the PDGF version banner —
+    # noise that pushes useful output past the notebook output truncation
+    # limit at higher scale factors.
+    in_preamble = False
     while True:
         output = p.stdout.readline()
         if p.poll() is not None and output == '':
             break
-        if output:
-            # DIGen sometimes emits progress with embedded \r (carriage return,
-            # no \n). If we just .strip() and print, those embedded \r's land
-            # in the Databricks log and overwrite text in the same line. Split
-            # on \r so each progress chunk lands on its own line.
-            for chunk in output.replace("\r\n", "\n").split("\r"):
-                chunk = chunk.rstrip()
-                if chunk:
-                    print(chunk)
+        if not output:
+            continue
+        # DIGen sometimes emits progress with embedded \r (carriage return,
+        # no \n) — split so each chunk lands on its own line in the log.
+        for chunk in output.replace("\r\n", "\n").split("\r"):
+            chunk = chunk.rstrip()
+            if not chunk:
+                continue
+            if not in_preamble and chunk.startswith("By using this software"):
+                in_preamble = True
+                continue  # this line and everything after is the license blob
+            if in_preamble:
+                if "Loading configuration files" in chunk:
+                    in_preamble = False  # license+banner done; print this and continue
+                else:
+                    continue
+            print(chunk)
     p.wait()
 
 
@@ -245,14 +269,17 @@ def run(
         os_blob_out_path = f"/dbfs{blob_out_path}"
         blob_out_path = f"dbfs:{blob_out_path}"
 
-    if _path_exists(dbutils, blob_out_path) and regenerate_data:
-        print(f"regenerate_data=YES; recursive delete of prior output at {blob_out_path}")
-        dbutils.fs.rm(blob_out_path, recurse=True)
-
+    # Decide path-existence handling before any tempdir creation.
     if _path_exists(dbutils, blob_out_path):
-        print(f"Data generation skipped since the raw data/directory {blob_out_path} "
-              f"already exists for this scale factor.")
-        return
+        if regenerate_data:
+            print(f"Job has requested to regenerate data — deleting from {blob_out_path}")
+            dbutils.fs.rm(blob_out_path, recurse=True)
+        else:
+            print(f"Data generation skipped since data already exists at {blob_out_path}. "
+                  f"Set regenerate_data=YES to overwrite.")
+            return
+    else:
+        print(f"Raw data directory {blob_out_path} does not exist yet.")
 
     # Fresh unique session dir under the scratch root. /tmp/ persists across
     # Databricks notebook sessions on long-lived clusters, and a prior session
@@ -261,17 +288,11 @@ def run(
     session_root = tempfile.mkdtemp(prefix="tpcdi_", dir=DRIVER_ROOT)
     driver_tmp_path = f"{session_root}/datagen/"
     driver_out_path = f"{session_root}/sf={scale_factor}"
-    print(f"  session scratch root: {session_root}")
 
     try:
-        print(f"Raw Data Directory {blob_out_path} does not exist yet. Proceeding to "
-              f"generate data for scale factor={scale_factor} into this directory")
+        print(f"Beginning data generation for scale factor: {scale_factor}")
         _copy_directory(f"{workspace_src_path}/tools/datagen", driver_tmp_path, overwrite=True)
-        print(f"Data generation for scale factor={scale_factor} is starting in directory: {driver_out_path}")
         _digen_subprocess(driver_tmp_path, scale_factor, driver_out_path)
-        print(f"Data generation for scale factor={scale_factor} has completed in directory: {driver_out_path}")
-        print(f"Moving generated files from Driver directory {driver_out_path} to "
-              f"Storage directory {blob_out_path}")
 
         if UC_enabled:
             catalog_exists = spark.sql(

@@ -60,8 +60,12 @@ if _tools_dir not in sys.path:
     sys.path.insert(0, _tools_dir)
 
 print(f"data_gen dispatch → {_choice!r}")
+print(f"  scale factor:     {_scale_factor}")
+print(f"  catalog:          {_catalog}")
 print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
-print(f"  regenerate_data={_regenerate}, log_level={_log_level}")
+print(f"  regenerate data:  {_regenerate}")
+print(f"  log level:        {_log_level}")
+print()  # blank line before the runner output begins
 
 # Both runner.run() functions take the same kwargs. log_level is consumed by
 # spark_runner and silently ignored by digen_runner via **_unused.
