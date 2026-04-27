@@ -91,6 +91,8 @@ def run_all() -> int:
 
     # ----- datagen_workflow_digen / datagen_workflow ----- already cut over
 
+    # ----- dlt_pipeline ----- already cut over
+
     print()
     if failures:
         print(f"FAILED: {failures} case(s) mismatched")

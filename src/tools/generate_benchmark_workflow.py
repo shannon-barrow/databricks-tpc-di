@@ -9,13 +9,13 @@ import json
 from typing import Callable, Optional
 
 from _workflow_utils import render_dag, submit_dag, template_path
+from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 _PIPELINES_API_ENDPOINT = "/api/2.0/pipelines"
 _WH_API_ENDPOINT = "/api/2.0/sql/warehouses"
 _WAREHOUSE_TEMPLATE = "warehouse_jinja_template.json"
-_DLT_PIPELINE_TEMPLATE = "dlt_pipeline.json"
 
 _WH_SCALE_FACTOR_MAP = {
     "10": "2X-Small",
@@ -219,10 +219,9 @@ Scale Factor:             {scale_factor}
     # --- DLT: create the pipeline first, then the wrapping workflow ---
     if sku[0] == "DLT":
         dag_args["edition"] = sku[1]
-        pipeline_template_path = template_path(workspace_src_path, _DLT_PIPELINE_TEMPLATE)
-        print(f"Rendering DLT Pipeline JSON via {_DLT_PIPELINE_TEMPLATE}")
-        pipeline_dag = render_dag(pipeline_template_path, dag_args)
-        print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")
+        print("Building DLT Pipeline JSON via workflow_builders.dlt_pipeline")
+        pipeline_dag = _dlt_pipeline_builder.build(**dag_args)
+        print("Submitting built DLT Pipeline JSON to Databricks Pipelines API")
         dag_args["pipeline_id"] = submit_dag(
             pipeline_dag, _PIPELINES_API_ENDPOINT, api_call, dag_type="pipeline")
 
