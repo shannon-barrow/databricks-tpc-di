@@ -2,16 +2,21 @@
 
 Two implementations are supported, selected by the ``data_generator`` arg:
 
-- ``"spark"`` (default): the distributed PySpark generator (`tools/spark_data_generator`)
-  running as a serverless notebook task. Outputs are split files like
-  ``Customer_1.txt``, ``Customer_2.txt``, etc.
+- ``"spark"`` (default): the distributed PySpark generator
+  (`tools/spark_runner`) invoked from the unified `tools/data_gen` notebook.
+  Runs on serverless. Outputs are split files like ``Customer_1.txt``,
+  ``Customer_2.txt``, etc.
 - ``"digen"``: the legacy single-threaded ``DIGen.jar`` utility wrapped by
-  ``tools/data_generator``, running on a small classic single-node cluster
-  (subprocess + Java can't run on serverless). Outputs are single files
-  named ``Customer.txt``, ``Trade.txt``, etc.
+  `tools/digen_runner` (also invoked from `tools/data_gen`). Forced
+  non-serverless DBR 15.4 + Photon cluster, with worker count scaling by
+  scale_factor. Outputs are single files named ``Customer.txt``, etc.
 
-Both paths render a Jinja template (`datagen_workflow.json` for Spark,
-`datagen_workflow_digen.json` for DIGen) and POST it to the Jobs API.
+Both jobs share a single notebook (`tools/data_gen`) that dispatches to
+the right runner via direct Python import — no `dbutils.notebook.run`
+indirection, no risk of a new cluster on serverless. The
+`spark_or_native_datagen` job parameter (default ``"spark"`` or ``"native"``
+depending on which builder created the job) selects the implementation
+and is overridable per run.
 """
 from typing import Callable, Optional
 

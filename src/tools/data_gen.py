@@ -3,22 +3,23 @@
 # MAGIC # TPC-DI Unified Data Generator (entry point)
 # MAGIC
 # MAGIC Single dispatch notebook for data generation. Reads the
-# MAGIC `spark_or_native_datagen` job parameter and routes to either:
+# MAGIC `spark_or_native_datagen` job parameter and runs **inline** in this
+# MAGIC notebook's process — both runners are imported as Python modules so
+# MAGIC there is no `dbutils.notebook.run` indirection, no child notebook
+# MAGIC context, and no risk of a new cluster being spun up on serverless.
 # MAGIC
-# MAGIC - **`spark`** (default) — `./spark_data_generator` (distributed PySpark
-# MAGIC   generator on serverless or any classic Photon cluster). Writes to
-# MAGIC   `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={SF}/`
-# MAGIC   so it doesn't clobber DIGen output.
-# MAGIC - **`native`** — `./data_generator` (legacy single-threaded DIGen.jar
-# MAGIC   wrapper). Writes to `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={SF}/`.
+# MAGIC Choices:
+# MAGIC - **`spark`** (default) — `tools/spark_runner.py` (distributed PySpark
+# MAGIC   generator). Runs on serverless or any classic Photon cluster. Output
+# MAGIC   goes under `tpcdi_volume/spark_datagen/sf={SF}/` to avoid clobbering
+# MAGIC   DIGen output.
+# MAGIC - **`native`** — `tools/digen_runner.py` (legacy DIGen.jar wrapper). Hard
+# MAGIC   pre-flight: requires non-serverless cluster + DBR ≤ 15.4 + Java; aborts
+# MAGIC   without touching the volume otherwise. Output goes to
+# MAGIC   `tpcdi_volume/sf={SF}/`.
 # MAGIC
-# MAGIC The output directory is computed inside this notebook from `catalog` +
-# MAGIC the generator choice — users do not pass it explicitly. The selection is
-# MAGIC purely a job parameter, so a single job (with a cluster that supports
-# MAGIC both implementations — e.g. classic Photon DBR 15.4) can flip between
-# MAGIC generators at run time. (Today DIGen.jar can't run on serverless; when
-# MAGIC that limitation is removed, the same job with the serverless config
-# MAGIC will be able to flip without any config change either.)
+# MAGIC The output directory is computed in this notebook from `catalog` + the
+# MAGIC generator choice — users do not pass it explicitly.
 
 # COMMAND ----------
 
@@ -34,36 +35,54 @@ dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"],
 
 # COMMAND ----------
 
+import sys
+
 # Normalize the generator choice — accept any case + leading/trailing whitespace.
-choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
-if choice not in ("spark", "native"):
+_choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
+if _choice not in ("spark", "native"):
     raise ValueError(
         f"spark_or_native_datagen must be 'spark' or 'native' "
         f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
     )
 
-catalog = dbutils.widgets.get("catalog")
-_volume_base = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+_catalog = dbutils.widgets.get("catalog")
+_scale_factor = int(dbutils.widgets.get("scale_factor"))
+_regenerate = dbutils.widgets.get("regenerate_data") == "YES"
+_log_level = dbutils.widgets.get("log_level")
 
-if choice == "spark":
-    tpcdi_directory = f"{_volume_base}spark_datagen/"
-    target = "./spark_data_generator"
+_volume_base = f"/Volumes/{_catalog}/tpcdi_raw_data/tpcdi_volume/"
+_tpcdi_directory = f"{_volume_base}spark_datagen/" if _choice == "spark" else _volume_base
+
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
+_tools_dir = f"{_workspace_src_path}/tools"
+if _tools_dir not in sys.path:
+    sys.path.insert(0, _tools_dir)
+
+print(f"data_gen dispatch → {_choice!r}")
+print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
+print(f"  regenerate_data={_regenerate}, log_level={_log_level}")
+
+if _choice == "spark":
+    from spark_runner import run as spark_run
+    spark_run(
+        scale_factor=_scale_factor,
+        catalog=_catalog,
+        tpcdi_directory=_tpcdi_directory,
+        regenerate_data=_regenerate,
+        log_level=_log_level,
+        workspace_src_path=_workspace_src_path,
+        dbutils=dbutils,
+        spark=spark,
+    )
 else:  # native
-    tpcdi_directory = _volume_base
-    target = "./data_generator"
-
-_args = {
-    "scale_factor": dbutils.widgets.get("scale_factor"),
-    "catalog": catalog,
-    "regenerate_data": dbutils.widgets.get("regenerate_data"),
-    "tpcdi_directory": tpcdi_directory,
-}
-if choice == "spark":
-    _args["log_level"] = dbutils.widgets.get("log_level")
-
-print(f"data_gen dispatch → {target} (spark_or_native_datagen={choice!r})")
-print(f"  output directory: {tpcdi_directory}sf={_args['scale_factor']}/")
-
-# timeout_seconds=0 → no timeout
-result = dbutils.notebook.run(target, timeout_seconds=0, arguments=_args)
-print(f"Child notebook completed (result preview: {result[:120] if isinstance(result, str) else result})")
+    from digen_runner import run as digen_run
+    digen_run(
+        scale_factor=_scale_factor,
+        catalog=_catalog,
+        tpcdi_directory=_tpcdi_directory,
+        regenerate_data=_regenerate,
+        workspace_src_path=_workspace_src_path,
+        dbutils=dbutils,
+        spark=spark,
+    )
