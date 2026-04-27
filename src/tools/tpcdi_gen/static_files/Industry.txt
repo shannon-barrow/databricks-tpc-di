@@ -1,0 +1,102 @@
+AA|Misc. Capital Goods|FN
+AC|Retail (Drugs)|TC
+AD|Schools|FN
+AE|Casinos & Gaming|CC
+AM|Aerospace & Defense|BM
+AP|Motion Pictures|SV
+AR|Food Processing|HC
+AT|Retail (Grocery)|BM
+AV|Photography|TC
+BA|Schools|BM
+BC|Airline|TC
+BD|Furniture & Fixtures|UT
+BN|Computer Networks|FN
+BS|Major Drugs|HC
+CA|Healthcare Facilities|TR
+CC|Railroads|TC
+CD|Constr. - Supplies & Fixtures|SV
+CE|Construction Services|TC
+CF|Air Courier|CN
+CG|Metal Mining|SV
+CH|Fish/Livestock|FN
+CK|Chemical Manufacturing|SV
+CL|Computer Storage Devices|TR
+CM|Constr. - Supplies & Fixtures|FN
+CN|Printing & Publishing|TC
+CO|Office Supplies|TR
+CP|Metal Mining|SV
+CR|Major Drugs|TC
+CS|Real Estate Operations|SV
+CT|S&Ls/Savings Banks|CC
+CU|Auto & Truck Manufacturers|TC
+CV|Natural Gas Utilities|SV
+CX|Trucking|TC
+DD|Construction Services|TR
+DR|Biotechnology & Drugs|SV
+EI|Retail (Grocery)|SV
+EU|Retail (Catalog & Mail Order)|BM
+FF|Beverages (Non-Alcoholic)|BM
+FL|Retail (Catalog & Mail Order)|CN
+FO|Computer Hardware|FN
+FP|Crops|TC
+FR|Money Center Banks|HC
+FW|Conglomerates|CC
+GR|Natural Gas Utilities|SV
+GS|Auto & Truck Parts|TR
+HF|Retail (Grocery)|EN
+HI|Furniture & Fixtures|EN
+HM|Computer Services|FN
+IA|Jewelry & Silverware|UT
+IL|Auto & Truck Manufacturers|SV
+IM|Waste Management Services|TC
+IP|Iron & Steel|TR
+IS|Airline|BM
+IV|Airline|SV
+JS|Photography|SV
+MC|Chemicals - Plastics & Rubber|HC
+MD|Containers & Packaging|FN
+ME|Constr. & Agric. Machinery|FN
+MF|Rental & Leasing|SV
+MG|Footwear|BM
+MH|Communications Services|TC
+MM|Retail (Drugs)|BM
+MP|Misc. Capital Goods|CC
+MS|Rental & Leasing|FN
+MT|Photography|BM
+NG|Biotechnology & Drugs|BM
+NM|Water Utilities|FN
+OE|Audio & Video Equipment|CN
+OI|Oil Well Services & Equipment|SV
+OO|Scientific & Technical Instr.|SV
+OS|Water Transportation|TR
+OW|Oil & Gas - Integrated|CN
+PA|Regional Banks|HC
+PG|Insurance (Miscellaneous)|BM
+PH|Paper & Paper Products|SV
+PP|Construction - Raw Materials|SV
+PR|Tobacco|EN
+PS|Beverages (Alcoholic)|HC
+RA|Containers & Packaging|FN
+RB|Jewelry & Silverware|CN
+RE|Motion Pictures|UT
+RL|Software & Programming|SV
+RM|Office Equipment|CG
+RN|Non-Metallic Mining|TC
+RP|Audio & Video Equipment|FN
+RR|Personal & Household Products|TR
+RS|Insurance (Life)|SV
+RT|Scientific & Technical Instr.|CC
+SB|Money Center Banks|BM
+SC|Broadcasting & Cable TV|FN
+SM|Personal & Household Products|CC
+SP|Recreational Products|EN
+SS|Motion Pictures|CC
+ST|Misc. Transportation|SV
+TH|Auto & Truck Parts|EN
+TI|Tires|HC
+TN|Software & Programming|CN
+TO|S&Ls/Savings Banks|SV
+TR|Misc. Capital Goods|BM
+WM|Insurance (Life)|CC
+WT|Retail (Speciality)|EN
+WU|Retail (Apparel)|CC

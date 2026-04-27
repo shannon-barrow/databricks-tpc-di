@@ -1,0 +1,5 @@
+DataSet, BatchID ,Date , Attribute , Value, DValue
+DimAccount,2,,CA_ADDACCT,70000,
+DimAccount,2,,CA_CLOSEACCT,18464,
+DimAccount,2,,CA_UPDACCT,19974,
+DimAccount,2,,CA_ID_HIST,-1,

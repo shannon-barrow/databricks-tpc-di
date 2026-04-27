@@ -39,7 +39,7 @@ with tradeincrementalraw as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "Trade.txt",
+    fileNamePattern => "{Trade.txt,Trade_[0-9]*.txt}",
     schema => "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE, t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE, tax DOUBLE"
   )
 ),
@@ -141,8 +141,8 @@ WITH Holdings as (
     inferSchema => False,
     header => False,
     sep => "|",
-    fileNamePattern => "HoldingHistory.txt",
-    schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+    fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
+    schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
   )
 )
 SELECT
@@ -163,8 +163,8 @@ FROM read_files(
   inferSchema => False,
   header => False,
   sep => "|",
-  fileNamePattern => "HoldingHistory.txt",
-  schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id INT, hh_t_id INT, hh_before_qty INT, hh_after_qty INT"
+  fileNamePattern => "{HoldingHistory.txt,HoldingHistory_[0-9]*.txt}",
+  schema => "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT, hh_before_qty INT, hh_after_qty INT"
 ) h
 JOIN ${catalog}.${wh_db}_${scale_factor}.DimTrade dt 
   ON 

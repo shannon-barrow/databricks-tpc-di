@@ -1,0 +1,9 @@
+DataSet, BatchID ,Date , Attribute , Value, DValue
+DimTradeHistory,1,,TH_Records,326791637,
+DimTradeHistory,1,,TH_TLBTrades,111412085,
+DimTradeHistory,1,,TH_TLSTrades,111383782,
+DimTradeHistory,1,,TH_TMBTrades,51999728,
+DimTradeHistory,1,,TH_TMSTrades,51996042,
+DimTradeHistory,1,,TH_CanceledLTrades,7620695,
+DimTradeHistory,1,,CT_Records,120449697,
+DimTradeHistory,1,,CT_Trades,120449697,

@@ -1,5 +1,5 @@
 -- Databricks notebook source
-CREATE TABLE IF NOT EXISTS IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt')
+CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '_stage.CustomerMgmt')
 PARTITIONED BY (ActionType) AS 
 SELECT 
   try_cast(Customer._C_ID as BIGINT) customerid, 
@@ -58,9 +58,9 @@ SELECT
   to_timestamp(_ActionTS) update_ts,
   _ActionType ActionType
 FROM read_files(
-  "${tpcdi_directory}sf=${scale_factor}/${path}",
+  "${tpcdi_directory}sf=${scale_factor}/Batch1",
   format => "xml",
-  inferSchema => False, 
+  inferSchema => False,
   rowTag => "TPCDI:Action",
-  fileNamePattern => "CustomerMgmt.xml"
+  fileNamePattern => "{CustomerMgmt.xml,CustomerMgmt_[0-9]*.xml}"
 );

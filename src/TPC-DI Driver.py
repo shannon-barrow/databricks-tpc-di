@@ -1,108 +1,169 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # MAGIC %md
 # MAGIC # Welcome to the TPC-DI Spec Implementation on Databricks!
 # MAGIC
-# MAGIC ## Please refer to the README for additional documentation!
+# MAGIC ## Please refer to the README for additional documentation.
 # MAGIC
-# MAGIC ### To Execute the benchmark please follow these instructions:  
-# MAGIC 1. **FIRST**, execute the first 2 cells after this initial documentation cell (the setup cell below and the widget generation cell).  
-# MAGIC 2. **THEN**, choose from the widgets above, starting with the WORKFLOW TYPE
+# MAGIC ## How to run
+# MAGIC 1. **First**, run the *Setup* cell below — it bootstraps `tpcdi_config` and imports the workflow generators.
+# MAGIC 2. **Then**, run the *Widgets* cell to render the dropdowns above the notebook.
+# MAGIC 3. **Pick your options**, starting with **Workflow Type**, then run the two cells at the bottom — they create:
+# MAGIC    - a **data-generation workflow** (Spark or DIGen.jar — see widget below)
+# MAGIC    - a **benchmark workflow** that ingests the generated data and builds the dimensional model.
 # MAGIC
-# MAGIC ### Workflow Types:
-# MAGIC - CLUSTER-based Workflow with Structured Streaming Notebooks  
-# MAGIC   - Leverage traditional cluster and do an incremental (benchmarked) run OR execute all batches in one pass. 
-# MAGIC - DBSQL WAREHOUSE-based Workflow with Structured Streaming Notebooks   
-# MAGIC   - Same as cluster approached above BUT against a DBSQL Warehouse. Do an incremental (benchmarked) run OR execute all batches in one pass. 
-# MAGIC - Delta Live Tables Pipeline: CORE Sku   
-# MAGIC   - Leverage DLT for simplified, cost-effective ETL pipelines 
-# MAGIC - Delta Live Tables Pipeline with SCD Type 1/2: PRO Sku   
-# MAGIC   - Leverage APPLY CHANGES INTO to Simplify Slowly Changing Dimensions Ingestion, with both Type 1 and Type 2 SCD. 
-# MAGIC - Delta Live Tables Pipeline with DQ: ADVANCED Sku   
-# MAGIC   - Easily add in Data Quality to your pipeline to either limit ingestion of poor data or gain insights into your DQ - or both!  
+# MAGIC Each cell prints a link to the created workflow when it finishes.
 # MAGIC
-# MAGIC ### Other widget options include:
-# MAGIC - **Scale Factor**:  
-# MAGIC         The value chosen correlates to HOW MUCH data will be processed.  The total number of files/tables, the DAG of the workflow, etc do NOT change based on the scale factor size selected.  What will be adjusted is the amount of data per file.  In general the change in scale factor is reflected by a linear change in total rows/data size. For example, a scale factor of 10 aligns to roughly 1GB of raw data. It's default to 10 if you don't see the scaling factor.
-# MAGIC - **Serverless**:  
-# MAGIC         Serverless workflows and DLT are in preview! Ensure your workspace is configured to leverage the serverless preview otherwise this notebook will fail to generate a workflow for you.
-# MAGIC - **Collective Batch or Incremental Batches**:  
-# MAGIC         The "formal" benchmark requires audit checks in between batches.  However, dbt, Delta Live Tables, and Streaming Tables/Materialized Views do NOT support an incremental batch nature in which the job stops to do "official audit checks" since they are more declarative in nature and ingest ALL available files at once.  Therefore the fastest and preferred method to run this for unofficial use is to run all batches in a single batch.  If you prefer to run the auditable version of the code that incrementally processes only 1 batch at a time then you will need to choose the 'Incremental Batches' option and make sure to choose a Workspace Cluster or DBSQL Warehouse execution flow type.  
-# MAGIC - **Predictive Optimization**:  
-# MAGIC         Predictive Optimization removes the need to manually manage maintenance operations for Delta tables on Databricks. You could choose to enable or disable it. With predictive optimization enabled, Databricks automatically identifies tables that would benefit from maintenance operations and runs them for the user. Maintenance operations are only run as necessary, eliminating both unnecessary runs for maintenance operations and the burden associated with tracking and troubleshooting performance.
-# MAGIC - **Job Name & Target Database**:  
-# MAGIC         The job name and target database name has the pattern of [firstname]-[lastname]-TPCDI,  you could change it to the preferred job name and target database name if required.
-# MAGIC - **Various cluster options**:  
-# MAGIC         If you do not choose serverless you can adjust the DBR and worker/driver type.  The dropdowns will automatically select the best default option BUT the widgets do allow flexibility in case you want to choose a different DBR or node type.
-# MAGIC - **Optimize For UC Features or Fastest Performance**:
-# MAGIC         In some cases this benchmark is used to test Databricks SKUs against one another. In which case, feel free to leave as 'Feature-Rich'.  However, in other cases this benchmark is used to compare Databricks against competitive platforms that can not or will not implement the same features that optimize the downstream user experience and performance. To ensure these competitive benchmarks test platforms on a 'like-to-like' set of features, choose 'Fastest Performance' in this widget. Choosing this removes some of the constraints that are checked at write time (which can adversely affect performance to a small degree), removes optimized writes (which coalesces small files into bigger files that improves downstream consumption), and removes some other constraint checks that help enable PK/FK relationship.  In normal production scenarios we encourag customers to leverage these Delta and Unity Catalog features.  Only choose to disable them here when comparing against competitive platforms that cannot or will not also perform the same optimizations which improve user experience at the cost of some ETL performance.
+# MAGIC ## Workflow Types
+# MAGIC - **Workspace Cluster Workflow** — classic-cluster (or serverless) job that runs the auditable, batch-aware ETL.
+# MAGIC - **DBSQL Warehouse Workflow** — same DAG, but backed by a serverless SQL Warehouse instead of a job cluster.
+# MAGIC - **Spark Declarative Pipelines (CORE)** — declarative SDP pipeline; simplest path.
+# MAGIC - **Spark Declarative Pipelines (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
+# MAGIC - **Spark Declarative Pipelines (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
 # MAGIC
-# MAGIC ### Many options are configurable from the workflow_builder EXCEPT the cluster or warehouse size.
-# MAGIC - Serverless clusters/DLT pipelines are dynamically autoscaled
-# MAGIC - Clusters and warehouses are sized to achieve the best TCO based on the scale factor chosen
-# MAGIC - If you prefer changing the cluster/WH size for your own testing then it can be manually modified from the Workflow created by this notebook
+# MAGIC ## Widget reference
+# MAGIC - **Workflow Type** — see above. Picks the benchmark workflow shape.
+# MAGIC - **Data Generator** (`spark_or_native_datagen` on the created job) — `spark` (default) or `native`.
+# MAGIC   - `spark` → distributed PySpark generator on serverless. Output goes to `…/tpcdi_volume/spark_datagen/sf={SF}/`.
+# MAGIC   - `native` → legacy single-threaded DIGen.jar wrapped in `tools/digen_runner`. Forces a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). Output goes to `…/tpcdi_volume/sf={SF}/`. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
+# MAGIC   - The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
+# MAGIC - **Scale Factor** — How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**.
+# MAGIC - **Collective Batch or Incremental Batches** — Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; SDP pipelines always run all batches in a single SDP pass.
+# MAGIC - **Serverless** — `YES` runs the benchmark on serverless compute (workflow or SDP). `NO` provisions a classic cluster sized by scale factor. Note: DBSQL is always serverless; DIGen datagen is always non-serverless regardless of this setting.
+# MAGIC - **Predictive Optimization** — `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
+# MAGIC - **Job Name & Target Database** — Pattern is `{firstname}-{lastname}-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
+# MAGIC - **Worker Type / Driver Type / DBR** — Only shown for non-serverless runs. Best defaults are auto-selected; the dropdowns let you override per cloud / per workspace.
+# MAGIC - **Optimize For UC Features or Fastest Performance** — `Feature-Rich` (default) keeps PK/FK constraints, optimized writes, and data-skipping indexes that improve the downstream user experience. `Fastest Performance` strips them to compare Databricks against platforms that can't or won't implement those features. In production scenarios we recommend leaving this as `Feature-Rich`.
+# MAGIC - **Regenerate Data** — On the *generated datagen job's* parameters (not on this Driver). `YES` wipes the existing volume output and regenerates from scratch; `NO` (default) skips if the SF directory already exists.
 # MAGIC
-# MAGIC **NOTE**: The following execution types have been removed, at least temporarily:
-# MAGIC 1. <a href="https://docs.getdbt.com/" target="_blank">dbt Core</a>  
-# MAGIC 2. <a href="https://docs.databricks.com/en/sql/language-manual/sql-ref-syntax-ddl-create-streaming-table.html" target="_blank">Streaming Tables</a> and <a href="https://docs.databricks.com/en/sql/user/materialized-views.html" target="_blank">Materialized Views</a>
+# MAGIC ## Cluster / warehouse sizing
+# MAGIC Serverless clusters and SDP pipelines auto-scale. Classic clusters and SQL Warehouses are sized for best TCO at the chosen scale factor. To override, edit the cluster spec on the workflow this Driver creates.
+# MAGIC
+# MAGIC The DIGen datagen job ignores the *Serverless* widget — it always provisions a non-serverless DBR 15.4 Photon cluster (DIGen.jar is a Java subprocess that can't run on serverless). The Spark datagen job is always serverless.
 
 # COMMAND ----------
 
-# DBTITLE 1,Setup: Declare defaults and find basic details about the cloud, DBR versions, and available node types
+# DBTITLE 1,Setup: bootstrap tpcdi_config + import workflow-generator functions
 # MAGIC %run ./tools/setup
 
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-dbutils.widgets.dropdown("workflow_type", default_workflow, workflow_vals, "Workflow Type")
+dbutils.widgets.dropdown("workflow_type", tpcdi_config.default_workflow, tpcdi_config.workflow_vals, "Workflow Type")
 dbutils.widgets.dropdown("batched", 'Single Collective Batch', ['Single Collective Batch', 'Incremental Batches'], "Collective batch or incremental batches")
 dbutils.widgets.dropdown("pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
-dbutils.widgets.dropdown("scale_factor", default_sf, default_sf_options, "Scale factor")
-dbutils.widgets.text("job_name", default_job_name, "Job Name")
-dbutils.widgets.text("wh_target", default_wh, 'Target Database')
-dbutils.widgets.text("catalog", default_catalog, 'Target Catalog')
-dbutils.widgets.dropdown("perf_or_features", features_or_perf[0], features_or_perf, 'Optimize For UC Features or Fastest Performance')
+dbutils.widgets.dropdown("scale_factor", tpcdi_config.default_sf, tpcdi_config.default_sf_options, "Scale factor")
+dbutils.widgets.text("job_name", tpcdi_config.default_job_name, "Job Name")
+dbutils.widgets.text("wh_target", tpcdi_config.default_wh, 'Target Database')
+dbutils.widgets.text("catalog", tpcdi_config.default_catalog, 'Target Catalog')
+dbutils.widgets.dropdown("perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, 'Optimize For UC Features or Fastest Performance')
+dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Generator")
 
-perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == features_or_perf[1] else False
+perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
 catalog           = dbutils.widgets.get("catalog")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
 workflow_type     = dbutils.widgets.get('workflow_type')
 pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
-wf_key            = list(workflows_dict)[workflow_vals.index(workflow_type)]
+wf_key            = list(tpcdi_config.workflows_dict)[tpcdi_config.workflow_vals.index(workflow_type)]
 sku               = wf_key.split('-')
-job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
-tpcdi_directory = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+data_generator    = dbutils.widgets.get("data_generator")
+_volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+tpcdi_directory   = f'{_volume_base}spark_datagen/' if data_generator == "spark" else _volume_base
 
-if not lighthouse:
-  dbutils.widgets.dropdown("serverless", default_serverless, ['YES', 'NO'], "Enable Serverless")
-  dbutils.widgets.dropdown("worker_type", default_worker_type, list(node_types.keys()), "Worker Type")
-  dbutils.widgets.dropdown("driver_type", default_driver_type, list(node_types.keys()), "Driver Type")
-  dbutils.widgets.dropdown("dbr", default_dbr, list(dbrs.values()), "Databricks Runtime")
-  serverless        = 'YES' if sku[0] not in ['CLUSTER','DLT'] else dbutils.widgets.get('serverless')
-  worker_node_type  = dbutils.widgets.get("worker_type")
-  driver_node_type  = dbutils.widgets.get("driver_type")
-  dbr_version_id    = list(dbrs.keys())[list(dbrs.values()).index(dbutils.widgets.get("dbr"))]
+dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 'NO'], "Enable Serverless")
+dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
+dbutils.widgets.dropdown("driver_type", tpcdi_config.default_driver_type, list(tpcdi_config.node_types.keys()), "Driver Type")
+dbutils.widgets.dropdown("dbr", tpcdi_config.default_dbr, list(tpcdi_config.dbrs.values()), "Databricks Runtime")
+serverless        = 'YES' if sku[0] not in ['CLUSTER','SDP'] else dbutils.widgets.get('serverless')
+worker_node_type  = dbutils.widgets.get("worker_type")
+driver_node_type  = dbutils.widgets.get("driver_type")
+dbr_version_id    = list(tpcdi_config.dbrs.keys())[list(tpcdi_config.dbrs.values()).index(dbutils.widgets.get("dbr"))]
 
-  if serverless == 'YES':
-    dbutils.widgets.remove('worker_type')
-    dbutils.widgets.remove('driver_type')
-    dbutils.widgets.remove('dbr')
-    
-  if sku[0] in ['DBSQL']:
-    dbutils.widgets.remove('serverless')
+if serverless == 'YES':
+  dbutils.widgets.remove('worker_type')
+  dbutils.widgets.remove('driver_type')
+  dbutils.widgets.remove('dbr')
+
+if sku[0] in ['DBSQL']:
+  dbutils.widgets.remove('serverless')
 
 if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('batched')
   dbutils.widgets.remove('perf_or_features')
   incremental = False
 
+# Build job_name(s) with suffixes after all widget logic settles incremental.
+# - Datagen job depends only on data_generator + SF (same output reused across
+#   all benchmark variants at that SF), so its name omits exec_type/batched.
+# - Benchmark job: batched + exec + gen suffixes. SDP has no batched concept,
+#   so omit that suffix there. The data_generator is also stamped on every
+#   created job as a `data_generator` tag so jobs are queryable by generator.
+# - `_datagen_label` (long form) is preserved for schema names — changing it
+#   would break already-materialized `..._spark_data_gen_*` schemas.
+_datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
+_gen_label       = "SparkGen" if data_generator == "spark" else "NativeGen"
+_batched_label   = "Incremental" if incremental else "SingleBatch"
+_exec_label      = "Cluster" if sku[0] == "CLUSTER" else wf_key
+_base_name       = dbutils.widgets.get('job_name')
+datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
+if sku[0] in ['CLUSTER','DBSQL']:
+  job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
+else:
+  job_name = f"{_base_name}-SF{scale_factor}-{_exec_label}-{_gen_label}"
+
 # COMMAND ----------
 
-# DBTITLE 1,Review Data Generation documentation in the README for more information about Data Generation
-# MAGIC %run ./tools/data_generator
+# DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
+datagen_job_id = generate_datagen_workflow(
+    job_name=datagen_job_name,
+    scale_factor=scale_factor,
+    catalog=catalog,
+    regenerate_data="NO",
+    log_level="INFO",
+    repo_src_path=tpcdi_config.repo_src_path,
+    workspace_src_path=tpcdi_config.workspace_src_path,
+    api_call=tpcdi_config.api_call,
+    data_generator=data_generator,
+    default_dbr_version=tpcdi_config.default_dbr_version,
+    default_worker_type=tpcdi_config.default_worker_type,
+    serverless=serverless,
+    node_types=tpcdi_config.node_types,
+    cloud_provider=tpcdi_config.cloud_provider,
+)
+displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 
 # COMMAND ----------
 
-# DBTITLE 1,Generate and submit the Databricks Workflow
-# MAGIC %run ./tools/generate_workflow
+# DBTITLE 1,Create the Benchmark Workflow (ingest + dim/fact pipeline)
+benchmark_job_id = generate_benchmark_workflow(
+    wf_key=wf_key,
+    workflow_type=workflow_type,
+    job_name=job_name,
+    catalog=catalog,
+    wh_target=wh_target,
+    scale_factor=scale_factor,
+    tpcdi_directory=tpcdi_directory,
+    repo_src_path=tpcdi_config.repo_src_path,
+    workspace_src_path=tpcdi_config.workspace_src_path,
+    cloud_provider=tpcdi_config.cloud_provider,
+    serverless=serverless,
+    pred_opt=pred_opt,
+    perf_opt_flg=perf_opt_flg,
+    incremental=incremental,
+    data_generator=data_generator,
+    api_call=tpcdi_config.api_call,
+    worker_node_type=worker_node_type if serverless != "YES" else None,
+    driver_node_type=driver_node_type if serverless != "YES" else None,
+    dbr_version_id=dbr_version_id if serverless != "YES" else None,
+    default_dbr_version=tpcdi_config.default_dbr_version,
+    default_worker_type=tpcdi_config.default_worker_type,
+    cust_mgmt_type=tpcdi_config.cust_mgmt_type,
+    worker_cores_mult=tpcdi_config.worker_cores_mult,
+    node_types=tpcdi_config.node_types,
+)
+displayHTML(f"<h2><a href=/#job/{benchmark_job_id}>Benchmark Workflow</a></h2>")

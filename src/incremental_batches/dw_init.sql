@@ -14,44 +14,38 @@
 
 SET timezone = Etc/UTC;
 DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor} cascade;
+DROP DATABASE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage cascade;
 CREATE DATABASE ${catalog}.${wh_db}_${scale_factor};
-CREATE DATABASE IF NOT EXISTS ${catalog}.${wh_db}_${scale_factor}_stage;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.finwire;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CustomerIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.ProspectIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.AccountIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.WatchIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.DailyMarketIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CashTransactionIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.TradeIncremental;
-DROP TABLE IF EXISTS ${catalog}.${wh_db}_${scale_factor}_stage.CompanyFinancialsStg;
+CREATE DATABASE ${catalog}.${wh_db}_${scale_factor}_stage;
 -- Enable Predictive Optimization for those workspaces that it is available
 ALTER DATABASE ${catalog}.${wh_db}_${scale_factor} ${pred_opt} PREDICTIVE OPTIMIZATION;
 
 -- COMMAND ----------
 
 -- MAGIC %md
--- MAGIC ## Just create a view over the top of the audit files - no reason to ingest
+-- MAGIC ## Load the audit files into a materialized Audit table
+-- MAGIC Previously this was a view over the CSV files. A view is fragile: if the
+-- MAGIC underlying `*_audit.csv` files are deleted (e.g., the next datagen run
+-- MAGIC wipes the volume), subsequent queries against `Audit` fail partway through
+-- MAGIC the benchmark. Materializing the rows into a Delta table decouples the
+-- MAGIC audit validation from the source file lifecycle.
 
 -- COMMAND ----------
 
-CREATE OR REPLACE VIEW ${catalog}.${wh_db}_${scale_factor}.Audit (
-  dataset COMMENT 'Component the data is associated with', 
-  batchid COMMENT 'BatchID the data is associated with', 
-  date COMMENT 'Date value corresponding to the Attribute', 
-  attribute COMMENT 'Attribute this row of data corresponds to', 
-  value COMMENT 'Integer value corresponding to the Attribute', 
-  dvalue COMMENT 'Decimal value corresponding to the Attribute'
-) AS SELECT *
-FROM 
+-- Delta RTAS (CREATE OR REPLACE TABLE ... AS SELECT) doesn't accept an
+-- inline schema spec. Schema is inferred from read_files' `schema =>`
+-- option, which gives identical types to what the view used to declare.
+CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Audit
+  COMMENT 'Audit counts emitted by the data generator; loaded from *_audit.csv'
+  AS SELECT *
+FROM
   read_files(
   "${tpcdi_directory}sf=${scale_factor}/*",
   format => "csv",
-  inferSchema => False, 
+  inferSchema => False,
   header => True,
   sep => ",",
-  fileNamePattern => "*_audit.csv", 
+  fileNamePattern => "*_audit.csv",
   schema => "dataset STRING, batchid INT, date DATE, attribute STRING, value BIGINT, dvalue DECIMAL(15,5)"
 )
 
@@ -119,8 +113,8 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.CashTransactio
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.HoldingIncremental (
-  hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row.',
-  hh_t_id INT COMMENT 'Trade Identifier of the current trade',
+  hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row.',
+  hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade',
   hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade.',
   hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade.',
   batchid INT COMMENT 'Batch ID when this record was inserted'
@@ -489,7 +483,7 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.Financial (
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.DimTrade (
-  tradeid INT NOT NULL COMMENT 'Trade identifier',
+  tradeid BIGINT NOT NULL COMMENT 'Trade identifier',
   sk_brokerid BIGINT COMMENT 'Surrogate key for BrokerID',
   sk_createdateid BIGINT COMMENT 'Surrogate key for date created',
   sk_createtimeid BIGINT COMMENT 'Surrogate key for time created',
@@ -527,8 +521,8 @@ PARTITIONED BY (closed);
 -- COMMAND ----------
 
 CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}.FactHoldings (
-  tradeid INT COMMENT 'Key for Orignial Trade Indentifier',
-  currenttradeid INT NOT NULL COMMENT 'Key for the current trade',
+  tradeid BIGINT COMMENT 'Key for Orignial Trade Indentifier',
+  currenttradeid BIGINT NOT NULL COMMENT 'Key for the current trade',
   sk_customerid BIGINT COMMENT 'Surrogate key for Customer Identifier',
   sk_accountid BIGINT COMMENT 'Surrogate key for Account Identifier',
   sk_securityid BIGINT COMMENT 'Surrogate key for Security Identifier',

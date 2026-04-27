@@ -135,7 +135,7 @@
       "filename":"TradeHistory.txt"
     },
     "HoldingHistory":{
-      "raw_schema":"hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "raw_schema":"hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
       "sep":"|",
       "header":"False",
       "path":"Batch1",
@@ -143,7 +143,7 @@
       "filename":"HoldingHistory.txt"
     },
     "HoldingIncremental":{
-      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
       "sep":"|",
       "header":"False",
       "path":"Batch[23]",
@@ -225,7 +225,7 @@
       "filename":"WatchHistory.txt"
     },
     "HoldingHistory":{
-      "raw_schema":"hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "raw_schema":"hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
       "sep":"|",
       "header":"False",
       "path":"Batch1",
@@ -277,7 +277,7 @@
       "db":"stage"
     },
     "HoldingIncremental":{
-      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id INT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id INT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
+      "raw_schema":"cdc_flag STRING COMMENT 'Denotes insert or update', cdc_dsn BIGINT COMMENT 'Database Sequence Number', hh_h_t_id BIGINT COMMENT 'Trade Identifier of the trade that originally created the holding row', hh_t_id BIGINT COMMENT 'Trade Identifier of the current trade', hh_before_qty INT COMMENT 'Quantity of this security held before the modifying trade', hh_after_qty INT COMMENT 'Quantity of this security held after the modifying trade'",
       "sep":"|",
       "header":"False",
       "path":"Batch[23]",
