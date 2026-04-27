@@ -294,7 +294,16 @@ def run(
         dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
 
     if threads is None:
-        threads = spark.sparkContext.defaultParallelism
+        # spark.sparkContext is blocked on USER_ISOLATION / SHARED clusters
+        # ([JVM_ATTRIBUTE_NOT_SUPPORTED]). Try it first; fall back to local
+        # CPU count, which is fine for the file-move thread pool — these
+        # threads do shutil.copyfile, not Spark work.
+        try:
+            threads = spark.sparkContext.defaultParallelism
+        except Exception:
+            threads = os.cpu_count() or 8
+            print(f"  using os.cpu_count()={threads} for file-move thread pool "
+                  f"(spark.sparkContext not accessible on this access mode).")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
         futures = []
