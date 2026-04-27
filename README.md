@@ -17,7 +17,7 @@ TPC-DI reference implementation. See [Data Generation](#data-generation) below.
 
 ## Flow at a glance
 
-<img src="/src/tools/readme_images/tpcdi_flow.svg" alt="TPC-DI execution flow — six-step end-user walkthrough" width="420">
+<img src="/src/tools/readme_images/tpcdi_flow.svg" alt="TPC-DI execution flow — Setup, Benchmark, and Audit groups" width="100%">
 
 (Vector SVG — stays sharp at any zoom. PNG fallback at `src/tools/readme_images/tpcdi_flow.png`.)
 
