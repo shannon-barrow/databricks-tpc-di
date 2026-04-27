@@ -223,12 +223,9 @@ def make_cleanup_task(
     Reads catalog / wh_db / scale_factor / delete_tables_when_finished from
     job parameters, all of which the workflow already exposes.
 
-    Always pins to non-warehouse compute by forcing ``exec_type='CLUSTER'`` —
-    `cleanup_after_benchmark` is a Python notebook (dbutils.widgets +
-    spark.sql), and SQL warehouses only execute SQL cells. For non-serverless
-    CLUSTER runs the task lands on the existing job cluster; for serverless
-    (CLUSTER serverless or DBSQL — DBSQL is always serverless) it runs on the
-    workspace's serverless compute.
+    The cleanup notebook is SQL (`cleanup_after_benchmark.sql`) so it runs
+    uniformly on the warehouse for DBSQL, on the job cluster for non-
+    serverless CLUSTER, or on serverless compute otherwise.
     """
     return make_task(
         task_key="cleanup",
@@ -241,10 +238,10 @@ def make_cleanup_task(
             "scale_factor": "{{job.parameters.scale_factor}}",
             "delete_tables_when_finished": "{{job.parameters.delete_tables_when_finished}}",
         },
-        exec_type="CLUSTER",
-        serverless="YES" if exec_type == "DBSQL" else serverless,
+        exec_type=exec_type,
+        serverless=serverless,
         job_name=job_name,
-        wh_id=None,
+        wh_id=wh_id,
     )
 
 
