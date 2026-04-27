@@ -89,6 +89,8 @@ def run_all() -> int:
 
     # ----- datagen_workflow_digen ----- (already cut over; Jinja removed)
 
+    # ----- datagen_workflow_digen / datagen_workflow ----- already cut over
+
     print()
     if failures:
         print(f"FAILED: {failures} case(s) mismatched")

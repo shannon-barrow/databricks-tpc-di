@@ -15,13 +15,13 @@ Both paths render a Jinja template (`datagen_workflow.json` for Spark,
 """
 from typing import Callable, Optional
 
-from _workflow_utils import render_and_submit, submit_dag, template_path
-from workflow_builders import datagen_digen
+from _workflow_utils import submit_dag
+from workflow_builders import datagen_digen, datagen_spark
 
 
-_TEMPLATES = {
-    "spark": "datagen_workflow.json",
-    # "digen" is handled by the Python builder below — no Jinja file needed.
+_BUILDERS = {
+    "spark": datagen_spark.build,
+    "digen": datagen_digen.build,
 }
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 
@@ -63,48 +63,29 @@ def generate_datagen_workflow(
         default_worker_type: Node type id for the DIGen path's classic cluster.
             Required when ``data_generator='digen'``.
     """
-    if data_generator == "digen":
-        if not default_dbr_version or not default_worker_type:
-            raise ValueError(
-                "data_generator='digen' requires default_dbr_version and "
-                "default_worker_type — DIGen.jar runs on a classic single-node "
-                "cluster (subprocess + Java can't run on serverless)."
-            )
-        print("Building Data Generation Workflow JSON via "
-              "workflow_builders.datagen_digen (Python builder)")
-        dag_dict = datagen_digen.build(
-            job_name=job_name,
-            scale_factor=scale_factor,
-            catalog=catalog,
-            regenerate_data=regenerate_data,
-            repo_src_path=repo_src_path,
-            default_dbr_version=default_dbr_version,
-            default_worker_type=default_worker_type,
-        )
-        print(f"Submitting built JSON to Databricks API {_JOBS_API_ENDPOINT}")
-        return submit_dag(dag_dict, _JOBS_API_ENDPOINT, api_call)
-
-    if data_generator not in _TEMPLATES:
+    if data_generator not in _BUILDERS:
         raise ValueError(
             f"Unknown data_generator={data_generator!r}; "
-            f"expected one of ['digen'] or {sorted(_TEMPLATES.keys())}"
+            f"expected one of {sorted(_BUILDERS.keys())}"
+        )
+    if data_generator == "digen" and (not default_dbr_version or not default_worker_type):
+        raise ValueError(
+            "data_generator='digen' requires default_dbr_version and "
+            "default_worker_type — DIGen.jar runs on a classic single-node "
+            "cluster (subprocess + Java can't run on serverless)."
         )
 
-    dag_args = {
-        "job_name": job_name,
-        "scale_factor": scale_factor,
-        "catalog": catalog,
-        "regenerate_data": regenerate_data,
-        "log_level": log_level,
-        "repo_src_path": repo_src_path,
-    }
-
-    template_name = _TEMPLATES[data_generator]
-    print(f"Rendering Data Generation Workflow JSON via {template_name} "
-          f"(data_generator={data_generator!r})")
-    return render_and_submit(
-        template_path(workspace_src_path, template_name),
-        dag_args,
-        _JOBS_API_ENDPOINT,
-        api_call,
+    print(f"Building Data Generation Workflow JSON via "
+          f"workflow_builders.datagen_{data_generator} (Python builder)")
+    dag_dict = _BUILDERS[data_generator](
+        job_name=job_name,
+        scale_factor=scale_factor,
+        catalog=catalog,
+        regenerate_data=regenerate_data,
+        log_level=log_level,
+        repo_src_path=repo_src_path,
+        default_dbr_version=default_dbr_version,
+        default_worker_type=default_worker_type,
     )
+    print(f"Submitting built JSON to Databricks API {_JOBS_API_ENDPOINT}")
+    return submit_dag(dag_dict, _JOBS_API_ENDPOINT, api_call)
