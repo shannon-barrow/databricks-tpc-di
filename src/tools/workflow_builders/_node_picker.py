@@ -68,7 +68,42 @@ def _has_local_disk(node_id: str, info: dict, cloud: str) -> bool:
         # (m7gd, m8gd, c6gd, r7gd, …). i-series storage-opt was caught above.
         m = re.match(r"^[a-z]+\d+([a-z]+)\.", nid)
         return bool(m and "d" in m.group(1))
-    return False  # GCP — rely on API field above; otherwise unknown
+    if cloud == "GCP":
+        # `-lssd` suffix indicates the bundled-local-SSD variant
+        # (e.g. c4a-standard-16-lssd). Without it we attach local SSDs
+        # via gcp_attributes.local_ssd_count from the caller.
+        return nid.endswith("-lssd")
+    return False
+
+
+def gcp_local_ssd_count(target_cores: int) -> int:
+    """Recommended number of 375 GB local SSDs to attach to a GCP node when
+    the picked node_type doesn't include them by default.
+
+    Rough rule: ~1 SSD per 4 cores. Sizing produced:
+      8 cores  → 2 SSDs (750 GB)
+      16 cores → 4 SSDs (1.5 TB)
+      32 cores → 8 SSDs (3 TB)
+      64 cores → 16 SSDs (6 TB)
+    """
+    return max(1, target_cores // 4)
+
+
+def apply_gcp_local_ssd_if_needed(
+    new_cluster: dict, node_id: str, info: dict, cloud: str, target_cores: int,
+) -> None:
+    """If running on GCP and the picked node has no built-in local SSD
+    (i.e. no `-lssd` suffix, not Storage Optimized), populate
+    `gcp_attributes.local_ssd_count` so Spark / DIGen still has fast local
+    storage for shuffle and tmp output. No-op for Azure / AWS / nodes that
+    already include local NVMe."""
+    if cloud != "GCP":
+        return
+    if _has_local_disk(node_id, info, cloud):
+        return
+    new_cluster.setdefault("gcp_attributes", {})["local_ssd_count"] = (
+        gcp_local_ssd_count(target_cores)
+    )
 
 
 def _gen_score(node_id: str, cloud: str) -> int:

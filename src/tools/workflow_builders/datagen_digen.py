@@ -48,7 +48,7 @@ def _digen_cluster_spec(scale_factor: int, node_types: dict, cloud_provider: str
         fallback=default_worker_type,
     )
 
-    return {
+    new_cluster = {
         "spark_version": _DIGEN_DBR,
         "spark_conf": {
             "spark.master": "local[*, 4]",
@@ -64,6 +64,12 @@ def _digen_cluster_spec(scale_factor: int, node_types: dict, cloud_provider: str
         # /local_disk0; without elastic disk small SF runs may OOM on root.
         "enable_elastic_disk": True,
     }
+    # On GCP, if the picked node isn't an `-lssd` variant, explicitly attach
+    # local SSDs via gcp_attributes.local_ssd_count (~1 SSD/4 cores).
+    _node_picker.apply_gcp_local_ssd_if_needed(
+        new_cluster, node, node_types.get(node, {}), cloud_provider, target_cores,
+    )
+    return new_cluster
 
 
 def build(*, job_name: str, scale_factor: int, catalog: str,
