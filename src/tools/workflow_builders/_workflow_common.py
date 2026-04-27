@@ -207,7 +207,7 @@ def make_customermgmt_task(
     )
 
 
-def make_cleanup_task(
+def make_cleanup_tasks(
     *,
     repo_src_path: str,
     job_name: str,
@@ -215,34 +215,57 @@ def make_cleanup_task(
     serverless: str,
     wh_id: str | None,
     depends_on: list[str],
-) -> dict:
-    """Final task: drops the run's schemas when `delete_tables_when_finished`
-    is TRUE (default). Always runs — `run_if=ALL_DONE` — so a partial-failure
-    upstream still has its debris cleaned up.
+) -> list[dict]:
+    """Final cleanup pair: a condition_task gate + the cleanup notebook task.
 
-    Reads catalog / wh_db / scale_factor / delete_tables_when_finished from
-    job parameters, all of which the workflow already exposes.
+    Returns two tasks:
+      1. ``delete_when_finished_TRUE_FALSE`` — condition_task that compares
+         ``{{job.parameters.delete_tables_when_finished}}`` to ``TRUE``.
+         Runs with ``run_if=ALL_DONE`` so the decision still happens after a
+         partial-failure upstream.
+      2. ``cleanup`` — runs the SQL notebook only when the gate evaluated to
+         true (``outcome="true"``). Skipped entirely when the param is
+         ``FALSE``, so no compute spins up just to no-op.
 
-    The cleanup notebook is SQL (`cleanup_after_benchmark.sql`) so it runs
-    uniformly on the warehouse for DBSQL, on the job cluster for non-
-    serverless CLUSTER, or on serverless compute otherwise.
+    The notebook is SQL (`cleanup_after_benchmark.sql`) so it runs uniformly
+    on the warehouse for DBSQL, on the job cluster for non-serverless CLUSTER,
+    or on serverless compute otherwise.
     """
-    return make_task(
+    GATE = "delete_when_finished_TRUE_FALSE"
+    gate = {
+        "task_key": GATE,
+        "depends_on": [{"task_key": d} for d in depends_on],
+        "run_if": "ALL_DONE",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{job.parameters.delete_tables_when_finished}}",
+            "right": "TRUE",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "notification_settings": dict(_DEFAULT_NOTIF),
+        "webhook_notifications": {},
+    }
+    cleanup = make_task(
         task_key="cleanup",
         notebook_path=f"{repo_src_path}/tools/cleanup_after_benchmark",
-        depends_on=depends_on,
-        run_if="ALL_DONE",
+        depends_on=[GATE],
+        run_if="ALL_SUCCESS",
         base_params={
             "catalog": "{{job.parameters.catalog}}",
             "wh_db": "{{job.parameters.wh_db}}",
             "scale_factor": "{{job.parameters.scale_factor}}",
-            "delete_tables_when_finished": "{{job.parameters.delete_tables_when_finished}}",
         },
         exec_type=exec_type,
         serverless=serverless,
         job_name=job_name,
         wh_id=wh_id,
     )
+    # depends_on for the cleanup needs `outcome="true"` so it skips when the
+    # gate evaluated false. make_task only emits `[{task_key: ...}]`, so patch
+    # in the outcome here.
+    cleanup["depends_on"] = [{"task_key": GATE, "outcome": "true"}]
+    return [gate, cleanup]
 
 
 def cleanup_param() -> dict:

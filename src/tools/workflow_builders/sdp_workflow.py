@@ -137,31 +137,48 @@ def _simple_pipeline_task(pipeline_id: int) -> list[dict]:
     }]
 
 
-def _cleanup_task(*, repo_src_path: str) -> dict:
-    """Final cleanup task — drops the run's schema if delete_tables_when_finished
-    is TRUE. run_if=ALL_DONE so partial-failure runs still get cleaned up."""
-    return {
-        "task_key": "cleanup",
+def _cleanup_tasks(*, repo_src_path: str) -> list[dict]:
+    """Condition gate + cleanup notebook task. Gate watches the SDP pipeline
+    with ALL_DONE so partial-failure runs still reach cleanup; the SQL only
+    fires when delete_tables_when_finished=TRUE."""
+    GATE = "delete_when_finished_TRUE_FALSE"
+    NOTIF = {
+        "no_alert_for_skipped_runs": False,
+        "no_alert_for_canceled_runs": False,
+        "alert_on_last_attempt": False,
+    }
+    gate = {
+        "task_key": GATE,
         "depends_on": [{"task_key": "TPC-DI-SDP-PIPELINE"}],
         "run_if": "ALL_DONE",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{job.parameters.delete_tables_when_finished}}",
+            "right": "TRUE",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "notification_settings": dict(NOTIF),
+        "webhook_notifications": {},
+    }
+    cleanup = {
+        "task_key": "cleanup",
+        "depends_on": [{"task_key": GATE, "outcome": "true"}],
+        "run_if": "ALL_SUCCESS",
         "notebook_task": {
             "notebook_path": f"{repo_src_path}/tools/cleanup_after_benchmark",
             "base_parameters": {
                 "catalog": "{{job.parameters.catalog}}",
                 "wh_db": "{{job.parameters.wh_db}}",
                 "scale_factor": "{{job.parameters.scale_factor}}",
-                "delete_tables_when_finished": "{{job.parameters.delete_tables_when_finished}}",
             },
             "source": "WORKSPACE",
         },
         "timeout_seconds": 0,
         "email_notifications": {},
-        "notification_settings": {
-            "no_alert_for_skipped_runs": False,
-            "no_alert_for_canceled_runs": False,
-            "alert_on_last_attempt": False,
-        },
+        "notification_settings": dict(NOTIF),
     }
+    return [gate, cleanup]
 
 
 def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
@@ -210,5 +227,5 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         )
     else:
         workflow["tasks"] = _simple_pipeline_task(pipeline_id)
-    workflow["tasks"].append(_cleanup_task(repo_src_path=repo_src_path))
+    workflow["tasks"].extend(_cleanup_tasks(repo_src_path=repo_src_path))
     return workflow

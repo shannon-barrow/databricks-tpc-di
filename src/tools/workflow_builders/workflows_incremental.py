@@ -402,10 +402,10 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             cloud_provider=cloud_provider,
         )]
 
-    # Final cleanup task — drops the run's schemas if delete_tables_when_finished=TRUE.
-    # automated_audit is the last "real" task; cleanup waits on ALL_DONE so a
-    # partial-failure run still gets cleaned up.
-    tasks.append(common.make_cleanup_task(
+    # Final cleanup pair — condition gate + SQL notebook. The gate watches
+    # automated_audit (last real task) with ALL_DONE so partial failures still
+    # reach cleanup; the SQL only fires when delete_tables_when_finished=TRUE.
+    tasks.extend(common.make_cleanup_tasks(
         repo_src_path=repo_src_path, job_name=job_name,
         exec_type=exec_type, serverless=serverless, wh_id=wh_id,
         depends_on=["automated_audit"],

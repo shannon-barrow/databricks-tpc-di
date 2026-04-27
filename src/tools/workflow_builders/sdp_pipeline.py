@@ -84,9 +84,16 @@ _ADVANCED_CONSTRAINTS = {
 }
 
 
-def _libraries(repo_src_path: str, edition: str, scale_factor: int) -> list[dict]:
+def _libraries(repo_src_path: str, edition: str, scale_factor: int,
+               data_generator: str) -> list[dict]:
     libs: list[dict] = []
-    if scale_factor < 1000:
+    # CustomerMgmtRaw runs inside the pipeline (creating LIVE customermgmt)
+    # whenever the XML can be re-parsed cheaply: always for Spark datagen
+    # (split XML files), and below SF=1000 for DIGen (single big XML).
+    # Above SF=1000 with DIGen, the wrapping workflow runs the maven-lib
+    # ingest as an upstream task that writes to the staging schema instead.
+    in_pipeline_xml = data_generator == "spark" or scale_factor < 1000
+    if in_pipeline_xml:
         libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/CustomerMgmtRaw"}})
     libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/bronze"}})
     libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/non-incremental"}})
@@ -100,13 +107,17 @@ def _libraries(repo_src_path: str, edition: str, scale_factor: int) -> list[dict
 
 def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
           datagen_label: str, scale_factor: int, repo_src_path: str,
-          tpcdi_directory: str, serverless: str,
+          tpcdi_directory: str, serverless: str, data_generator: str = "spark",
           sdp_worker_node_type: str | None = None,
           sdp_driver_node_type: str | None = None,
           sdp_worker_node_count: int | None = None,
           **_unused) -> dict:
+    # cust_mgmt_schema mirrors _libraries(): when CustomerMgmtRaw is in the
+    # pipeline, the table is LIVE; otherwise it's read from the upstream-
+    # populated staging schema.
+    in_pipeline_xml = data_generator == "spark" or scale_factor < 1000
     cust_mgmt_schema = (
-        "LIVE" if scale_factor < 1000
+        "LIVE" if in_pipeline_xml
         else f"{catalog}.{wh_target}_SDP_{edition}_{datagen_label}_{scale_factor}_stage"
     )
     dim_customer_stg = _DIM_CUSTOMER_STG_SCHEMA_CORE if edition == "CORE" else _DIM_CUSTOMER_STG_SCHEMA_NONCORE
@@ -158,7 +169,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         "catalog": catalog,
         "target": f"{wh_target}_SDP_{edition}_{datagen_label}_{scale_factor}",
         "data_sampling": False,
-        "libraries": _libraries(repo_src_path, edition, scale_factor),
+        "libraries": _libraries(repo_src_path, edition, scale_factor, data_generator),
     }
     if serverless == "YES":
         pipeline["serverless"] = True

@@ -401,10 +401,10 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             cloud_provider=cloud_provider,
         )]
 
-    # Final cleanup task — drops the run's schemas if delete_tables_when_finished=TRUE.
-    # Depends on every leaf so it's last; run_if=ALL_DONE means partial-failure
-    # runs still get cleaned up.
-    tasks.append(common.make_cleanup_task(
+    # Final cleanup pair — condition gate + SQL notebook. Depends on every
+    # leaf so it's last; ALL_DONE means partial-failure runs still reach the
+    # gate, and the SQL only fires when delete_tables_when_finished=TRUE.
+    tasks.extend(common.make_cleanup_tasks(
         repo_src_path=repo_src_path, job_name=job_name,
         exec_type=exec_type, serverless=serverless, wh_id=wh_id,
         depends_on=[

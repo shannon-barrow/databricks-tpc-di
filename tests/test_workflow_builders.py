@@ -204,6 +204,44 @@ def test_sdp_pipeline():
     _ok("no delta_live_tables/ leak")
 
 
+def test_sdp_pipeline_spark_high_sf():
+    print("\nsdp_pipeline.build() — Spark datagen at SF=10000 still includes CustomerMgmtRaw")
+    out = sdp_pipeline.build(
+        job_name="Smoke-TPCDI-SF10000-SDP-CORE-SparkGen",
+        catalog="main", wh_target=COMMON["wh_target"], edition="CORE",
+        datagen_label="spark_data_gen", scale_factor=10000,
+        repo_src_path=COMMON["repo_src_path"],
+        tpcdi_directory=COMMON["tpcdi_directory"],
+        serverless="YES", data_generator="spark",
+    )
+    lib_paths = [lib["notebook"]["path"] for lib in out["libraries"]]
+    assert any("CustomerMgmtRaw" in p for p in lib_paths), \
+        f"CustomerMgmtRaw missing from Spark+SF10000: {lib_paths}"
+    _ok("CustomerMgmtRaw present at SF=10000 (Spark)")
+    assert out["configuration"]["cust_mgmt_schema"] == "LIVE", \
+        f"cust_mgmt_schema should be LIVE for Spark, got {out['configuration']['cust_mgmt_schema']}"
+    _ok("cust_mgmt_schema = LIVE")
+
+
+def test_sdp_pipeline_digen_high_sf():
+    print("\nsdp_pipeline.build() — DIGen at SF=10000 routes through staging schema")
+    out = sdp_pipeline.build(
+        job_name="Smoke-TPCDI-SF10000-SDP-CORE-NativeGen",
+        catalog="main", wh_target=COMMON["wh_target"], edition="CORE",
+        datagen_label="native_data_gen", scale_factor=10000,
+        repo_src_path=COMMON["repo_src_path"],
+        tpcdi_directory=COMMON["tpcdi_directory"],
+        serverless="YES", data_generator="digen",
+    )
+    lib_paths = [lib["notebook"]["path"] for lib in out["libraries"]]
+    assert not any("CustomerMgmtRaw" in p for p in lib_paths), \
+        f"CustomerMgmtRaw must NOT be in DIGen+SF10000 pipeline: {lib_paths}"
+    _ok("CustomerMgmtRaw absent at SF=10000 (DIGen → upstream maven path)")
+    assert "_stage" in out["configuration"]["cust_mgmt_schema"], \
+        f"cust_mgmt_schema must point to staging for DIGen+SF10000"
+    _ok("cust_mgmt_schema → staging schema")
+
+
 def main():
     tests = [
         test_datagen_spark,
@@ -213,6 +251,8 @@ def main():
         test_cluster_incremental_native,
         test_sdp_workflow,
         test_sdp_pipeline,
+        test_sdp_pipeline_spark_high_sf,
+        test_sdp_pipeline_digen_high_sf,
     ]
     for t in tests:
         t()
