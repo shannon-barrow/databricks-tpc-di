@@ -29,9 +29,9 @@ class SetupContext:
     workflows_dict = {
         "CLUSTER":     "Workspace Cluster Workflow",
         "DBSQL":       "DBSQL Warehouse Workflow",
-        "DLT-CORE":    "CORE Delta Live Tables Pipeline",
-        "DLT-PRO":     "PRO Delta Live Tables Pipeline with SCD Type 1/2",
-        "DLT-ADVANCED":"ADVANCED Delta Live Tables Pipeline with DQ",
+        "SDP-CORE":    "CORE Spark Declarative Pipelines",
+        "SDP-PRO":     "PRO Spark Declarative Pipelines with SCD Type 1/2",
+        "SDP-ADVANCED":"ADVANCED Spark Declarative Pipelines with DQ",
     }
     min_dbr_version = 14.1
     invalid_dbr_list = [

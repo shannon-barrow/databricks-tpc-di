@@ -10,7 +10,7 @@
 # MAGIC Schemas dropped:
 # MAGIC - `{catalog}.{wh_db}_{scale_factor}` — final dimensional model.
 # MAGIC - `{catalog}.{wh_db}_{scale_factor}_stage` — staging tables (may not
-# MAGIC   exist for DLT runs at low SF; DROP IF EXISTS makes it a no-op).
+# MAGIC   exist for SDP runs at low SF; DROP IF EXISTS makes it a no-op).
 # MAGIC
 # MAGIC Runs `run_if=ALL_DONE` in the workflow, so a partial-failure run still
 # MAGIC has its debris cleaned up (default behavior). Set

@@ -1,9 +1,9 @@
-"""Builder for the DLT-wrapping multi-task workflow.
+"""Builder for the SDP-wrapping multi-task workflow.
 
-Replaces `jinja_templates/dlt_workflow.json`. This is the Jobs-API workflow
-that runs the DLT pipeline (created separately by `dlt_pipeline.build()`)
-plus, for the DIGen path at SF>100, an upfront SingleNode-cluster task
-that ingests CustomerMgmt.xml using the legacy spark-xml Maven library.
+This is the Jobs-API workflow that runs the SDP (Spark Declarative
+Pipelines) pipeline (created separately by `sdp_pipeline.build()`) plus,
+for the DIGen path at SF>100, an upfront SingleNode-cluster task that
+ingests CustomerMgmt.xml using the legacy spark-xml Maven library.
 """
 from __future__ import annotations
 
@@ -12,26 +12,28 @@ def _description(*, data_generator: str, edition: str, scale_factor: int,
                  catalog: str, wh_target: str, datagen_label: str,
                  tpcdi_directory: str) -> str:
     target = (
-        f"{catalog}.{wh_target}_DLT_{edition}_{datagen_label}_{scale_factor}"
+        f"{catalog}.{wh_target}_SDP_{edition}_{datagen_label}_{scale_factor}"
     )
     if data_generator == "spark":
         return (
-            f"TPC-DI Delta Live Tables {edition} pipeline (**Spark** data "
-            f"generator, SF={scale_factor}). Reads distributed PySpark output "
-            f"from `{tpcdi_directory}sf={scale_factor}/` (split files like "
-            f"`Customer_1.txt`, `Customer_2.txt`, ..., `CustomerMgmt_1.xml`, "
-            f"...). Materializes target schema `{target}`. All 3 TPC-DI "
-            f"batches are processed in a single DLT run. The CustomerMgmt XML "
-            f"re-ingestion gate is not used here — split XML files re-parse "
-            f"cheaply, so the pipeline always re-ingests."
+            f"TPC-DI Spark Declarative Pipelines {edition} pipeline (**Spark** "
+            f"data generator, SF={scale_factor}). Reads distributed PySpark "
+            f"output from `{tpcdi_directory}sf={scale_factor}/` (split files "
+            f"like `Customer_1.txt`, `Customer_2.txt`, ..., "
+            f"`CustomerMgmt_1.xml`, ...). Materializes target schema "
+            f"`{target}`. All 3 TPC-DI batches are processed in a single SDP "
+            f"run. The CustomerMgmt XML re-ingestion gate is not used here — "
+            f"split XML files re-parse cheaply, so the pipeline always "
+            f"re-ingests."
         )
     desc = (
-        f"TPC-DI Delta Live Tables {edition} pipeline (**DIGen.jar** native, "
-        f"legacy data generator, SF={scale_factor}). Reads single-threaded "
-        f"DIGen output from `{tpcdi_directory}sf={scale_factor}/` (one file "
-        f"per table — `Customer.txt`, `Trade.txt`, `CustomerMgmt.xml`). "
-        f"Materializes target schema `{target}`. All 3 TPC-DI batches are "
-        f"processed in a single DLT run."
+        f"TPC-DI Spark Declarative Pipelines {edition} pipeline "
+        f"(**DIGen.jar** native, legacy data generator, SF={scale_factor}). "
+        f"Reads single-threaded DIGen output from "
+        f"`{tpcdi_directory}sf={scale_factor}/` (one file per table — "
+        f"`Customer.txt`, `Trade.txt`, `CustomerMgmt.xml`). Materializes "
+        f"target schema `{target}`. All 3 TPC-DI batches are processed in a "
+        f"single SDP run."
     )
     if scale_factor > 100:
         desc += (
@@ -73,7 +75,7 @@ def _job_clusters(*, job_name: str, dbr: str,
 
 def _digen_high_sf_tasks(*, job_name: str, repo_src_path: str,
                          pipeline_id: int) -> list[dict]:
-    """Three-task DAG used only for digen + SF>100: condition → mavenlib → DLT."""
+    """Three-task DAG used only for digen + SF>100: condition → mavenlib → SDP."""
     return [
         {
             "task_key": "run_customermgmt_YES_NO",
@@ -112,7 +114,7 @@ def _digen_high_sf_tasks(*, job_name: str, repo_src_path: str,
             "webhook_notifications": {},
         },
         {
-            "task_key": "TPC-DI-DLT-PIPELINE",
+            "task_key": "TPC-DI-SDP-PIPELINE",
             "depends_on": [
                 {"task_key": "run_customermgmt_YES_NO", "outcome": "false"},
                 {"task_key": "ingest_customermgmt_cluster"},
@@ -127,7 +129,7 @@ def _digen_high_sf_tasks(*, job_name: str, repo_src_path: str,
 
 def _simple_pipeline_task(pipeline_id: int) -> list[dict]:
     return [{
-        "task_key": "TPC-DI-DLT-PIPELINE",
+        "task_key": "TPC-DI-SDP-PIPELINE",
         "run_if": "ALL_SUCCESS",
         "pipeline_task": {"pipeline_id": str(pipeline_id), "full_refresh": True},
         "timeout_seconds": 0,
@@ -140,7 +142,7 @@ def _cleanup_task(*, repo_src_path: str) -> dict:
     is TRUE. run_if=ALL_DONE so partial-failure runs still get cleaned up."""
     return {
         "task_key": "cleanup",
-        "depends_on": [{"task_key": "TPC-DI-DLT-PIPELINE"}],
+        "depends_on": [{"task_key": "TPC-DI-SDP-PIPELINE"}],
         "run_if": "ALL_DONE",
         "notebook_task": {
             "notebook_path": f"{repo_src_path}/tools/cleanup_after_benchmark",
@@ -176,7 +178,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
     parameters += [
         {"name": "catalog", "default": catalog},
         {"name": "scale_factor", "default": str(scale_factor)},
-        {"name": "wh_db", "default": f"{wh_target}_DLT_{edition}_{datagen_label}"},
+        {"name": "wh_db", "default": f"{wh_target}_SDP_{edition}_{datagen_label}"},
         {"name": "tpcdi_directory", "default": tpcdi_directory},
         {"name": "delete_tables_when_finished", "default": "TRUE"},
     ]

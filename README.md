@@ -46,16 +46,16 @@ The benchmark has been implemented in several ways to demonstrate the versatilit
 
 1. **Workspace Cluster Workflow** — classic-cluster (or serverless) job with the auditable, batch-aware ETL.
 2. **DBSQL Warehouse Workflow** — same DAG, executed against a serverless SQL Warehouse instead of a job cluster.
-3. **Delta Live Tables Pipeline (CORE)** — declarative DLT pipeline.
-4. **Delta Live Tables Pipeline (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
-5. **Delta Live Tables Pipeline (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
+3. **Spark Declarative Pipelines (CORE)** — declarative SDP pipeline.
+4. **Spark Declarative Pipelines (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
+5. **Spark Declarative Pipelines (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
 
 The following toggles apply across the deployment choices above:
 
 1. **Data Generator** (`spark_or_native_datagen`): `spark` (default, distributed PySpark on serverless) or `native` (legacy DIGen.jar wrapped by `tools/digen_runner`, runs on a non-serverless DBR 15.4 + Photon cluster). Output paths differ — `spark` writes under `…/tpcdi_volume/spark_datagen/sf={SF}/`, `native` writes to `…/tpcdi_volume/sf={SF}/`. The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
 2. **Scale Factor**: How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**. Defaults to 10.
-3. **Serverless**: Faster performance and startup with serverless Workflows / DLT pipelines (DLT includes Enzyme as a standard feature). DBSQL is always serverless. The DIGen native datagen ignores this widget — it always uses a non-serverless cluster.
-4. **Collective Batch or Incremental Batches**: Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; DLT pipelines always run all batches in a single DLT pass.
+3. **Serverless**: Faster performance and startup with serverless Workflows / SDP pipelines (SDP includes Enzyme as a standard feature). DBSQL is always serverless. The DIGen native datagen ignores this widget — it always uses a non-serverless cluster.
+4. **Collective Batch or Incremental Batches**: Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; SDP pipelines always run all batches in a single SDP pass.
 5. **Predictive Optimization**: `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
 6. **Job Name & Target Database**: Pattern is `[firstname]-[lastname]-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
 7. **Various cluster options**: When not choosing serverless, the DBR and worker/driver type dropdowns let you override the cloud-aware defaults the Driver picks for you.

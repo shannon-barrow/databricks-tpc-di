@@ -15,7 +15,7 @@
 -- MAGIC ### Staging Customer table unions the historical to the incremental
 -- MAGIC ~~1) Window results by customerid and order by the update timestamp~~  
 -- MAGIC ~~2) Then coalesce the current row to the last row and ignore nulls~~  
--- MAGIC 1) Leverage SCD Type 2 Native Capabilities in DLT to APPLY CHANGES INTO the table, keeping history and satisfying the effective/end dates natively using a generated column
+-- MAGIC 1) Leverage SCD Type 2 Native Capabilities in SDP to APPLY CHANGES INTO the table, keeping history and satisfying the effective/end dates natively using a generated column
 
 -- COMMAND ----------
 

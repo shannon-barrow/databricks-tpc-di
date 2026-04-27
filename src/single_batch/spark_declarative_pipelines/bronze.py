@@ -18,7 +18,7 @@ bronze_tables = json.loads(spark.conf.get('bronze_tables'))
 
 # MAGIC %md
 # MAGIC # Helper Functions to Build out the Autoloader Streaming Tables. 
-# MAGIC * Use the DLT Pipeline Config Parameters (in the JSON of the DLT Pipeine) to Provide Needed Properties of the table. 
+# MAGIC * Use the SDP Pipeline Config Parameters (in the JSON of the SDP Pipeline) to Provide Needed Properties of the table.
 # MAGIC * This makes the job metadata driven
 
 # COMMAND ----------
@@ -56,7 +56,7 @@ def generate_tables(tbl):
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Loop through each bronze table to create the DLT streaming table
+# MAGIC # Loop through each bronze table to create the SDP streaming table
 
 # COMMAND ----------
 

@@ -1,16 +1,16 @@
 """Create a TPC-DI benchmark workflow (the ingest → dim/fact pipeline).
 
-Dispatches across workflow types — CLUSTER / DBSQL / DLT variants — by picking
+Dispatches across workflow types — CLUSTER / DBSQL / SDP variants — by picking
 the appropriate Jinja template, building its ``dag_args``, optionally creating
-a warehouse or DLT pipeline first, then submitting the workflow to the Jobs
+a warehouse or SDP pipeline first, then submitting the workflow to the Jobs
 API. Returns the created ``job_id``.
 """
 import json
 from typing import Callable, Optional
 
 from _workflow_utils import submit_dag
-from workflow_builders import dlt_pipeline as _dlt_pipeline_builder
-from workflow_builders import dlt_workflow as _dlt_workflow_builder
+from workflow_builders import sdp_pipeline as _sdp_pipeline_builder
+from workflow_builders import sdp_workflow as _sdp_workflow_builder
 from workflow_builders import warehouse as _warehouse_builder
 from workflow_builders import workflows_single_batch as _single_batch_builder
 from workflow_builders import workflows_incremental as _incremental_builder
@@ -68,7 +68,7 @@ def generate_benchmark_workflow(
     incremental: bool,
     data_generator: str,
     api_call: Callable,
-    # optional compute — required for non-serverless CLUSTER and DLT paths
+    # optional compute — required for non-serverless CLUSTER and SDP paths
     worker_node_type: Optional[str] = None,
     driver_node_type: Optional[str] = None,
     dbr_version_id: Optional[str] = None,
@@ -80,15 +80,15 @@ def generate_benchmark_workflow(
 ) -> int:
     """Render the benchmark workflow template and submit it.
 
-    ``wf_key`` is the short key (e.g. ``CLUSTER``, ``DLT-CORE``, ``DBSQL``) and
+    ``wf_key`` is the short key (e.g. ``CLUSTER``, ``SDP-CORE``, ``DBSQL``) and
     ``workflow_type`` is the display label — both are derived by the Driver
     from setup's ``workflows_dict``.
     """
     sku = wf_key.split("-")
     workflow_template = _pick_workflow_template(sku[0], incremental)
 
-    if sku[0] == "DLT":
-        print("All 3 TPC-DI batches will be executed in a single DLT pipeline batch.")
+    if sku[0] == "SDP":
+        print("All 3 TPC-DI batches will be executed in a single SDP pipeline batch.")
     elif incremental:
         print("Each of the 3 TPC-DI batches will be executed incrementally with "
               "batches 2 and 3 performing merges.")
@@ -188,21 +188,21 @@ def generate_benchmark_workflow(
             f"If your workspace does not have access to Serverless the workflow "
             f"creation will potentially fail. If it does, select 'NO' for the "
             f"Serverless widget.")
-    elif sku[0] == "DLT":
+    elif sku[0] == "SDP":
         if not all([worker_node_type, driver_node_type, worker_cores_mult,
                     node_types]):
             raise ValueError(
-                "DLT workflow requires worker_node_type, driver_node_type, "
+                "SDP workflow requires worker_node_type, driver_node_type, "
                 "worker_cores_mult, and node_types")
-        dlt_count = max(1, round(
+        sdp_count = max(1, round(
             scale_factor * worker_cores_mult / node_types[worker_node_type]["num_cores"]))
-        dag_args["dlt_worker_node_type"] = worker_node_type
-        dag_args["dlt_driver_node_type"] = driver_node_type
-        dag_args["dlt_worker_node_count"] = dlt_count
+        dag_args["sdp_worker_node_type"] = worker_node_type
+        dag_args["sdp_driver_node_type"] = driver_node_type
+        dag_args["sdp_worker_node_count"] = sdp_count
         compute_summary = (
             f"Driver Type:              {driver_node_type}\n"
             f"Worker Type:              {worker_node_type}\n"
-            f"Worker Count:             {dlt_count}")
+            f"Worker Count:             {sdp_count}")
 
     print(f"""
 Workflow Name:            {job_name}
@@ -215,12 +215,12 @@ Raw Files Path:           {tpcdi_directory}
 Scale Factor:             {scale_factor}
 """)
 
-    # --- DLT: create the pipeline first, then the wrapping workflow ---
-    if sku[0] == "DLT":
+    # --- SDP: create the pipeline first, then the wrapping workflow ---
+    if sku[0] == "SDP":
         dag_args["edition"] = sku[1]
-        print("Building DLT Pipeline JSON via workflow_builders.dlt_pipeline")
-        pipeline_dag = _dlt_pipeline_builder.build(**dag_args)
-        print("Submitting built DLT Pipeline JSON to Databricks Pipelines API")
+        print("Building SDP Pipeline JSON via workflow_builders.sdp_pipeline")
+        pipeline_dag = _sdp_pipeline_builder.build(**dag_args)
+        print("Submitting built SDP Pipeline JSON to Databricks Pipelines API")
         dag_args["pipeline_id"] = submit_dag(
             pipeline_dag, _PIPELINES_API_ENDPOINT, api_call, dag_type="pipeline")
 
@@ -230,9 +230,9 @@ Scale Factor:             {scale_factor}
             dag_args["wh_name"], dag_args, workspace_src_path, api_call)
 
     # --- Submit the workflow itself ---
-    if sku[0] == "DLT":
-        print("Building DLT Workflow JSON via workflow_builders.dlt_workflow")
-        workflow_dag = _dlt_workflow_builder.build(**dag_args)
+    if sku[0] == "SDP":
+        print("Building SDP Workflow JSON via workflow_builders.sdp_workflow")
+        workflow_dag = _sdp_workflow_builder.build(**dag_args)
     elif incremental:
         print("Building Workflow JSON via workflow_builders.workflows_incremental")
         workflow_dag = _incremental_builder.build(**dag_args)

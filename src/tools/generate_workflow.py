@@ -11,10 +11,10 @@ try:
   pipeline_api_endpoint  = "/api/2.0/pipelines"
   wh_api_endpoint        = "/api/2.0/sql/warehouses"
   wh_config_api_endpoint = "/api/2.0/sql/config/warehouses"
-  DLT_PIPELINE_TEMPLATE  = "dlt_pipeline.json" 
-  if sku[0] == 'DLT':
-    WORKFLOW_TEMPLATE    = "dlt_workflow.json"
-    print("All 3 TPC-DI batches will be executed in a single DLT pipeline batch.")
+  SDP_PIPELINE_TEMPLATE  = "sdp_pipeline.json"
+  if sku[0] == 'SDP':
+    WORKFLOW_TEMPLATE    = "sdp_workflow.json"
+    print("All 3 TPC-DI batches will be executed in a single SDP pipeline batch.")
   elif incremental:
     WORKFLOW_TEMPLATE    = "workflows_incremental.json"
     print("Each of the 3 TPC-DI batches will be executed incrementally with batches 2 and 3 performing merges.")
@@ -80,13 +80,13 @@ try:
     compute = f"""Warehouse Name:           {wh_name}\nWarehouse Size:           {wh_size}"""
   elif serverless == 'YES':
     compute = f"Serverless {sku[0]} selected. \nIf your workspace does not have access to Serverless then the workflow creation will potentially fail. \nIf workflow creation fails for this reason please select 'NO' for the Serverless widget."
-  elif sku[0] in ['DLT']:
-    dlt_worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores'])
-    if dlt_worker_node_count == 0: dlt_worker_node_count = 1
-    dag_args['dlt_worker_node_type'] = worker_node_type
-    dag_args['dlt_driver_node_type'] = driver_node_type
-    dag_args['dlt_worker_node_count'] = dlt_worker_node_count
-    compute = f"""Driver Type:              {driver_node_type}\nWorker Type:              {worker_node_type}\nWorker Count:             {dlt_worker_node_count}"""     
+  elif sku[0] in ['SDP']:
+    sdp_worker_node_count = round(scale_factor * worker_cores_mult / node_types[worker_node_type]['num_cores'])
+    if sdp_worker_node_count == 0: sdp_worker_node_count = 1
+    dag_args['sdp_worker_node_type'] = worker_node_type
+    dag_args['sdp_driver_node_type'] = driver_node_type
+    dag_args['sdp_worker_node_count'] = sdp_worker_node_count
+    compute = f"""Driver Type:              {driver_node_type}\nWorker Type:              {worker_node_type}\nWorker Count:             {sdp_worker_node_count}"""     
 except NameError: 
   dbutils.notebook.exit(f"This notebook cannot be executed standalone and MUST be called from the workflow_builder notebook!")
 
@@ -140,12 +140,12 @@ def get_warehouse_id():
 # COMMAND ----------
 
 def generate_workflow():
-  if sku[0] == 'DLT':
-    jinja_template_path = f"{json_templates_path}{DLT_PIPELINE_TEMPLATE}"
+  if sku[0] == 'SDP':
+    jinja_template_path = f"{json_templates_path}{SDP_PIPELINE_TEMPLATE}"
     dag_args['edition'] = sku[1]
-    print(f"Rendering DLT Pipeline JSON via jinja template located at {jinja_template_path}")
+    print(f"Rendering SDP Pipeline JSON via jinja template located at {jinja_template_path}")
     rendered_pipeline_dag = generate_dag(jinja_template_path, dag_args)
-    print("Submitting rendered DLT Pipeline JSON to Databricks Pipelines API")
+    print("Submitting rendered SDP Pipeline JSON to Databricks Pipelines API")
     dag_args['pipeline_id'] = submit_dag(rendered_pipeline_dag, pipeline_api_endpoint, 'pipeline')
   if sku[0] in ['DBT', 'STMV', 'DBSQL']:
     dag_args['wh_id'] = get_warehouse_id()

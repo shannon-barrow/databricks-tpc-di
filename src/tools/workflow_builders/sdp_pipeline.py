@@ -1,12 +1,11 @@
-"""Builder for the DLT pipeline definition.
+"""Builder for the SDP (Spark Declarative Pipelines) pipeline definition.
 
-Replaces `jinja_templates/dlt_pipeline.json`. Submitted to the
-`/api/2.0/pipelines` endpoint (not Jobs API).
+Submitted to the `/api/2.0/pipelines` endpoint (not the Jobs API).
 """
 from __future__ import annotations
 
 
-# Bronze table descriptors used by the DLT bronze notebook. JSON-encoded as a
+# Bronze table descriptors used by the SDP bronze notebook. JSON-encoded as a
 # single string and read back inside the notebook via json.loads. Identical to
 # the value the Jinja template emitted; kept as one literal blob so future
 # schema edits happen here in one place.
@@ -88,27 +87,27 @@ _ADVANCED_CONSTRAINTS = {
 def _libraries(repo_src_path: str, edition: str, scale_factor: int) -> list[dict]:
     libs: list[dict] = []
     if scale_factor < 1000:
-        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/CustomerMgmtRaw"}})
-    libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/bronze"}})
-    libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/non-incremental"}})
+        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/CustomerMgmtRaw"}})
+    libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/bronze"}})
+    libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/non-incremental"}})
     if edition == "CORE":
-        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/incremental"}})
+        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/incremental"}})
     else:
-        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/incremental_apply_changes_into"}})
-        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/delta_live_tables/Apply Changes ONCE Flow"}})
+        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/incremental_apply_changes_into"}})
+        libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/Apply Changes ONCE Flow"}})
     return libs
 
 
 def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
           datagen_label: str, scale_factor: int, repo_src_path: str,
           tpcdi_directory: str, serverless: str,
-          dlt_worker_node_type: str | None = None,
-          dlt_driver_node_type: str | None = None,
-          dlt_worker_node_count: int | None = None,
+          sdp_worker_node_type: str | None = None,
+          sdp_driver_node_type: str | None = None,
+          sdp_worker_node_count: int | None = None,
           **_unused) -> dict:
     cust_mgmt_schema = (
         "LIVE" if scale_factor < 1000
-        else f"{catalog}.{wh_target}_DLT_{edition}_{datagen_label}_{scale_factor}_stage"
+        else f"{catalog}.{wh_target}_SDP_{edition}_{datagen_label}_{scale_factor}_stage"
     )
     dim_customer_stg = _DIM_CUSTOMER_STG_SCHEMA_CORE if edition == "CORE" else _DIM_CUSTOMER_STG_SCHEMA_NONCORE
 
@@ -157,7 +156,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         "channel": "PREVIEW",
         "photon": True,
         "catalog": catalog,
-        "target": f"{wh_target}_DLT_{edition}_{datagen_label}_{scale_factor}",
+        "target": f"{wh_target}_SDP_{edition}_{datagen_label}_{scale_factor}",
         "data_sampling": False,
         "libraries": _libraries(repo_src_path, edition, scale_factor),
     }
@@ -169,9 +168,9 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
         pipeline["clusters"] = [{
             "label": "default",
             "spark_conf": {"spark.sql.shuffle.partitions": "auto"},
-            "node_type_id": dlt_worker_node_type,
-            "driver_node_type_id": dlt_driver_node_type,
-            "num_workers": dlt_worker_node_count,
+            "node_type_id": sdp_worker_node_type,
+            "driver_node_type_id": sdp_driver_node_type,
+            "num_workers": sdp_worker_node_count,
         }]
     pipeline["configuration"] = configuration
     return pipeline

@@ -20,9 +20,9 @@
 # MAGIC ## Workflow Types
 # MAGIC - **Workspace Cluster Workflow** — classic-cluster (or serverless) job that runs the auditable, batch-aware ETL.
 # MAGIC - **DBSQL Warehouse Workflow** — same DAG, but backed by a serverless SQL Warehouse instead of a job cluster.
-# MAGIC - **Delta Live Tables Pipeline (CORE)** — declarative DLT pipeline; simplest path.
-# MAGIC - **Delta Live Tables Pipeline (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
-# MAGIC - **Delta Live Tables Pipeline (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
+# MAGIC - **Spark Declarative Pipelines (CORE)** — declarative SDP pipeline; simplest path.
+# MAGIC - **Spark Declarative Pipelines (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
+# MAGIC - **Spark Declarative Pipelines (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
 # MAGIC
 # MAGIC ## Widget reference
 # MAGIC - **Workflow Type** — see above. Picks the benchmark workflow shape.
@@ -31,8 +31,8 @@
 # MAGIC   - `native` → legacy single-threaded DIGen.jar wrapped in `tools/digen_runner`. Forces a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). Output goes to `…/tpcdi_volume/sf={SF}/`. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
 # MAGIC   - The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
 # MAGIC - **Scale Factor** — How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**.
-# MAGIC - **Collective Batch or Incremental Batches** — Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; DLT pipelines always run all batches in a single DLT pass.
-# MAGIC - **Serverless** — `YES` runs the benchmark on serverless compute (workflow or DLT). `NO` provisions a classic cluster sized by scale factor. Note: DBSQL is always serverless; DIGen datagen is always non-serverless regardless of this setting.
+# MAGIC - **Collective Batch or Incremental Batches** — Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; SDP pipelines always run all batches in a single SDP pass.
+# MAGIC - **Serverless** — `YES` runs the benchmark on serverless compute (workflow or SDP). `NO` provisions a classic cluster sized by scale factor. Note: DBSQL is always serverless; DIGen datagen is always non-serverless regardless of this setting.
 # MAGIC - **Predictive Optimization** — `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
 # MAGIC - **Job Name & Target Database** — Pattern is `{firstname}-{lastname}-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
 # MAGIC - **Worker Type / Driver Type / DBR** — Only shown for non-serverless runs. Best defaults are auto-selected; the dropdowns let you override per cloud / per workspace.
@@ -40,7 +40,7 @@
 # MAGIC - **Regenerate Data** — On the *generated datagen job's* parameters (not on this Driver). `YES` wipes the existing volume output and regenerates from scratch; `NO` (default) skips if the SF directory already exists.
 # MAGIC
 # MAGIC ## Cluster / warehouse sizing
-# MAGIC Serverless clusters and DLT pipelines auto-scale. Classic clusters and SQL Warehouses are sized for best TCO at the chosen scale factor. To override, edit the cluster spec on the workflow this Driver creates.
+# MAGIC Serverless clusters and SDP pipelines auto-scale. Classic clusters and SQL Warehouses are sized for best TCO at the chosen scale factor. To override, edit the cluster spec on the workflow this Driver creates.
 # MAGIC
 # MAGIC The DIGen datagen job ignores the *Serverless* widget — it always provisions a non-serverless DBR 15.4 Photon cluster (DIGen.jar is a Java subprocess that can't run on serverless). The Spark datagen job is always serverless.
 
@@ -79,7 +79,7 @@ dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 
 dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
 dbutils.widgets.dropdown("driver_type", tpcdi_config.default_driver_type, list(tpcdi_config.node_types.keys()), "Driver Type")
 dbutils.widgets.dropdown("dbr", tpcdi_config.default_dbr, list(tpcdi_config.dbrs.values()), "Databricks Runtime")
-serverless        = 'YES' if sku[0] not in ['CLUSTER','DLT'] else dbutils.widgets.get('serverless')
+serverless        = 'YES' if sku[0] not in ['CLUSTER','SDP'] else dbutils.widgets.get('serverless')
 worker_node_type  = dbutils.widgets.get("worker_type")
 driver_node_type  = dbutils.widgets.get("driver_type")
 dbr_version_id    = list(tpcdi_config.dbrs.keys())[list(tpcdi_config.dbrs.values()).index(dbutils.widgets.get("dbr"))]
@@ -100,7 +100,7 @@ if sku[0] not in ['CLUSTER','DBSQL']:
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across
 #   all benchmark variants at that SF), so its name omits exec_type/batched.
-# - Benchmark job: batched + exec + gen suffixes. DLT has no batched concept,
+# - Benchmark job: batched + exec + gen suffixes. SDP has no batched concept,
 #   so omit that suffix there. The data_generator is also stamped on every
 #   created job as a `data_generator` tag so jobs are queryable by generator.
 # - `_datagen_label` (long form) is preserved for schema names — changing it
