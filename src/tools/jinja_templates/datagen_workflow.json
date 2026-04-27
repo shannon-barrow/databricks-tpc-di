@@ -1,6 +1,6 @@
 {
   "name": "{{ job_name }}_DataGen",
-  "description": "TPC-DI data generation workflow. Runs the distributed Spark data generator as a single serverless notebook task.",
+  "description": "TPC-DI **Spark** data-generation workflow (SF={{ scale_factor }}). Distributed PySpark generator running as a single serverless notebook task. Writes raw input files to `/Volumes/{{ catalog }}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={{ scale_factor }}/`. Outputs are split files like `Customer_1.txt`, `Customer_2.txt`, ... (matched by the benchmark via `{Customer.txt,Customer_[0-9]*.txt}`-style globs). Set `regenerate_data=YES` to wipe and rebuild; defaults to `NO` (no-op if output already exists).",
   "email_notifications": {
     "no_alert_for_skipped_runs": false
   },

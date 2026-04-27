@@ -67,6 +67,7 @@ def generate_benchmark_workflow(
     pred_opt: str,
     perf_opt_flg: bool,
     incremental: bool,
+    data_generator: str,
     api_call: Callable,
     # optional compute — required for non-serverless CLUSTER and DLT paths
     worker_node_type: Optional[str] = None,
@@ -110,6 +111,11 @@ def generate_benchmark_workflow(
     # — including the generator-specific subdir (spark_datagen/ for Spark, none
     # for DIGen) — so we pass it through unchanged. Downstream notebooks append
     # sf=${scale_factor}/ themselves.
+    # Suffixes appended to wh_db (and embedded in templates' descriptions) so
+    # the Spark and DIGen runs at the same SF/exec_type don't share a schema.
+    datagen_label = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
+    batched_label = "incremental" if incremental else "single_batch"
+
     dag_args = {
         "catalog": catalog,
         "wh_target": wh_target,
@@ -126,6 +132,9 @@ def generate_benchmark_workflow(
         "perf_opt_flg": perf_opt_flg,
         "opt_write": opt_write,
         "index_cols": index_cols,
+        "data_generator": data_generator,
+        "datagen_label": datagen_label,
+        "batched_label": batched_label,
     }
 
     # --- Compute selection ---

@@ -75,7 +75,6 @@ pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
 wf_key            = list(tpcdi_config.workflows_dict)[tpcdi_config.workflow_vals.index(workflow_type)]
 sku               = wf_key.split('-')
-job_name          = f"{dbutils.widgets.get('job_name')}-SF{scale_factor}-{wf_key}"
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
 data_generator    = dbutils.widgets.get("data_generator")
 _volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
@@ -103,11 +102,25 @@ if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('perf_or_features')
   incremental = False
 
+# Build job_name(s) with suffixes after all widget logic settles incremental.
+# - Datagen job depends only on data_generator + SF (same output reused across
+#   all benchmark variants at that SF), so its name omits exec_type/batched.
+# - Benchmark job: full identifying suffixes. DLT has no batched concept, so
+#   omit that suffix there.
+_datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
+_batched_label   = "incremental" if incremental else "single_batch"
+_base_name       = dbutils.widgets.get('job_name')
+datagen_job_name = f"{_base_name}-SF{scale_factor}-{_datagen_label}"
+if sku[0] in ['CLUSTER','DBSQL']:
+  job_name = f"{_base_name}-SF{scale_factor}-{wf_key}-{_datagen_label}-{_batched_label}"
+else:
+  job_name = f"{_base_name}-SF{scale_factor}-{wf_key}-{_datagen_label}"
+
 # COMMAND ----------
 
 # DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
 datagen_job_id = generate_datagen_workflow(
-    job_name=job_name,
+    job_name=datagen_job_name,
     scale_factor=scale_factor,
     catalog=catalog,
     regenerate_data="NO",
@@ -139,6 +152,7 @@ benchmark_job_id = generate_benchmark_workflow(
     pred_opt=pred_opt,
     perf_opt_flg=perf_opt_flg,
     incremental=incremental,
+    data_generator=data_generator,
     api_call=tpcdi_config.api_call,
     worker_node_type=worker_node_type if serverless != "YES" else None,
     driver_node_type=driver_node_type if serverless != "YES" else None,

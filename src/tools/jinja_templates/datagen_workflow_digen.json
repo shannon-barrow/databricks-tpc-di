@@ -1,6 +1,6 @@
 {
   "name": "{{ job_name }}_DataGen",
-  "description": "TPC-DI data generation workflow. Runs the legacy single-threaded DIGen.jar utility on a small classic single-node cluster (Java subprocess can't run on serverless).",
+  "description": "TPC-DI **DIGen.jar** (native, legacy) data-generation workflow (SF={{ scale_factor }}). Single-threaded Java utility running on a small classic single-node cluster (subprocess + Java can't run on serverless). Writes raw input files to `/Volumes/{{ catalog }}/tpcdi_raw_data/tpcdi_volume/sf={{ scale_factor }}/`. Outputs are single files per table (`Customer.txt`, `Trade.txt`, etc.). Set `regenerate_data=YES` to wipe and rebuild; defaults to `NO` (no-op if output already exists).",
   "email_notifications": {
     "no_alert_for_skipped_runs": false
   },

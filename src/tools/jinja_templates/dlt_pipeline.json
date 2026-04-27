@@ -7,7 +7,7 @@
     "channel": "PREVIEW",
     "photon": true,
     "catalog": "{{ catalog }}",
-    "target": "{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}",
+    "target": "{{ wh_target }}_DLT_{{ edition }}_{{ datagen_label }}_{{ scale_factor }}",
     "data_sampling": false,
     "libraries": [
         {% if scale_factor < 1000 %}
@@ -96,7 +96,7 @@
         {% if scale_factor < 1000 %}
         "cust_mgmt_schema": "LIVE",
         {% else %}
-        "cust_mgmt_schema": "{{ catalog }}.{{ wh_target }}_DLT_{{ edition }}_{{ scale_factor }}_stage",
+        "cust_mgmt_schema": "{{ catalog }}.{{ wh_target }}_DLT_{{ edition }}_{{ datagen_label }}_{{ scale_factor }}_stage",
         {% endif %}
         {% if edition == "ADVANCED" %}
         "DimCustomer.constraints": "CONSTRAINT invalid_customer_tier EXPECT (tier IN (1,2,3) AND tier is NOT null)",

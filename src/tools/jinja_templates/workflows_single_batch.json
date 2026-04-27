@@ -1,6 +1,6 @@
 {
   "name": "{{ job_name }}",
-  "description": "TPC-DI single batch workflow. Ingests all source data in parallel after dw_init, then builds dimension and fact tables.",
+  "description": "TPC-DI single-batch workflow on {{ exec_type }} ({{ datagen_label }}, SF={{ scale_factor }}). Reads raw input from `{{ tpcdi_directory }}sf={{ scale_factor }}/`, writes to schema `{{ catalog }}.{{ wh_target }}_{{ exec_type }}_{{ datagen_label }}_single_batch_{{ scale_factor }}` (and `..._stage`). All 3 TPC-DI batches are ingested in parallel after dw_init, then dimension and fact tables are built. NOTE: official audit checks are NOT run in single-batch mode — use the incremental variant for audit validation.",
   "email_notifications": {
     "no_alert_for_skipped_runs": false
   },
@@ -22,7 +22,7 @@
     },
     {
       "name": "wh_db",
-      "default": "{{ wh_target }}_{{ exec_type }}"
+      "default": "{{ wh_target }}_{{ exec_type }}_{{ datagen_label }}_{{ batched_label }}"
     },
     {
       "name": "predictive_optimization",
