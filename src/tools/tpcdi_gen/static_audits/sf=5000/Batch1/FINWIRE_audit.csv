@@ -1,0 +1,7 @@
+DataSet, BatchID ,Date , Attribute , Value, DValue
+DimSecurity,1,,FW_SEC,4118522,
+DimSecurity,1,,FW_SEC_DUP,-1,
+DimCompany,1,,FW_CMP,2574149,
+DimCompany,1,,FW_CMP_DUP,-1,
+Financial,1,,FW_FIN,237677147,
+Financial,1,,FW_FIN_DUP,-1,
