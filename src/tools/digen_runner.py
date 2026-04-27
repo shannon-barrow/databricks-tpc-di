@@ -27,6 +27,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tempfile
 from typing import Any
 
 # Force flush on every print so logs in the Databricks notebook output stream
@@ -237,11 +238,14 @@ def run(
     DRIVER_ROOT = preflight(spark, scale_factor)
 
     UC_enabled = catalog != "hive_metastore"
-    # Use a stable subdir under whatever scratch root the preflight picked
-    # (either /local_disk0 or /tmp). Avoid `/{root}/tmp/...` since `/tmp` may
-    # be the root itself.
-    driver_tmp_path = f"{DRIVER_ROOT}/tpcdi/datagen/"
-    driver_out_path = f"{DRIVER_ROOT}/tpcdi/sf={scale_factor}"
+    # Use a fresh unique session dir under the scratch root rather than a
+    # shared `/tpcdi/` path — `/tmp/` persists across Databricks notebook
+    # sessions on long-lived clusters, and a prior session running under a
+    # different uid would leave behind un-deletable directories.
+    session_root = tempfile.mkdtemp(prefix="tpcdi_", dir=DRIVER_ROOT)
+    driver_tmp_path = f"{session_root}/datagen/"
+    driver_out_path = f"{session_root}/sf={scale_factor}"
+    print(f"  session scratch root: {session_root}")
     blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
 
     if UC_enabled:
