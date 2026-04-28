@@ -73,7 +73,13 @@ sku               = wf_key.split('-')
 incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
 data_generator    = dbutils.widgets.get("data_generator")
 _volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
-tpcdi_directory   = f'{_volume_base}spark_datagen/' if data_generator == "spark" else _volume_base
+# AUGMENTED variants read from the volume root (their staging tree
+# `augmented_incremental/_staging/sf={sf}/` is path-appended inside the
+# notebooks). Other Spark-datagen variants point at `spark_datagen/`.
+if sku[0] == "AUGMENTED":
+  tpcdi_directory = _volume_base
+else:
+  tpcdi_directory = f'{_volume_base}spark_datagen/' if data_generator == "spark" else _volume_base
 
 dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 'NO'], "Enable Serverless")
 dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
@@ -97,6 +103,12 @@ if sku[0] not in ['CLUSTER','DBSQL']:
   dbutils.widgets.remove('perf_or_features')
   incremental = False
 
+# AUGMENTED variants always use the Spark generator's staged data; the
+# data_generator widget doesn't apply.
+if sku[0] == "AUGMENTED":
+  dbutils.widgets.remove('data_generator')
+  data_generator = "spark"
+
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across
 #   all benchmark variants at that SF), so its name omits exec_type/batched.
@@ -113,29 +125,47 @@ _base_name       = dbutils.widgets.get('job_name')
 datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
 if sku[0] in ['CLUSTER','DBSQL']:
   job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
+elif sku[0] == "AUGMENTED":
+  # AUGMENTED creates parent + child (+ pipeline for SDP). job_name here
+  # is the PARENT name; the dispatcher derives child by stripping
+  # `-Parent` and pipeline (SDP only) by appending `-Pipeline`.
+  _aug_variant = "Cluster" if sku[1] == "CLUSTER" else "SDP"
+  job_name = f"{_base_name}-SF{scale_factor}-AugmentedIncremental-{_aug_variant}-Parent"
 else:
   job_name = f"{_base_name}-SF{scale_factor}-{_exec_label}-{_gen_label}"
 
 # COMMAND ----------
 
 # DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
-datagen_job_id = generate_datagen_workflow(
-    job_name=datagen_job_name,
-    scale_factor=scale_factor,
-    catalog=catalog,
-    regenerate_data="NO",
-    log_level="INFO",
-    repo_src_path=tpcdi_config.repo_src_path,
-    workspace_src_path=tpcdi_config.workspace_src_path,
-    api_call=tpcdi_config.api_call,
-    data_generator=data_generator,
-    default_dbr_version=tpcdi_config.default_dbr_version,
-    default_worker_type=tpcdi_config.default_worker_type,
-    serverless=serverless,
-    node_types=tpcdi_config.node_types,
-    cloud_provider=tpcdi_config.cloud_provider,
-)
-displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
+# AUGMENTED variants consume pre-staged per-day files from the shared
+# `tpcdi_incremental_staging_{sf}` schema (built once-per-SF by the
+# Phase B file-splitting tools), so they don't need a datagen workflow.
+if sku[0] == "AUGMENTED":
+  displayHTML(
+    "<h2>Data Generation Workflow — skipped for AUGMENTED variants</h2>"
+    "<p>The augmented benchmark reads from the shared staging schema "
+    f"<code>{catalog}.tpcdi_incremental_staging_{scale_factor}</code>. "
+    "If that schema isn't populated for this SF, run the file-splitting "
+    "tools under <code>src/tools/incremental_file_splitting/</code> first.</p>"
+  )
+else:
+  datagen_job_id = generate_datagen_workflow(
+      job_name=datagen_job_name,
+      scale_factor=scale_factor,
+      catalog=catalog,
+      regenerate_data="NO",
+      log_level="INFO",
+      repo_src_path=tpcdi_config.repo_src_path,
+      workspace_src_path=tpcdi_config.workspace_src_path,
+      api_call=tpcdi_config.api_call,
+      data_generator=data_generator,
+      default_dbr_version=tpcdi_config.default_dbr_version,
+      default_worker_type=tpcdi_config.default_worker_type,
+      serverless=serverless,
+      node_types=tpcdi_config.node_types,
+      cloud_provider=tpcdi_config.cloud_provider,
+  )
+  displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 
 # COMMAND ----------
 

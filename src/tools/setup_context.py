@@ -27,11 +27,13 @@ class SetupContext:
 
     # Static catalogs (don't need cluster info to populate)
     workflows_dict = {
-        "CLUSTER":     "Workspace Cluster Workflow",
-        "DBSQL":       "DBSQL Warehouse Workflow",
-        "SDP-CORE":    "CORE Spark Declarative Pipelines",
-        "SDP-PRO":     "PRO Spark Declarative Pipelines with SCD Type 1/2",
-        "SDP-ADVANCED":"ADVANCED Spark Declarative Pipelines with DQ",
+        "CLUSTER":          "Workspace Cluster Workflow",
+        "DBSQL":            "DBSQL Warehouse Workflow",
+        "SDP-CORE":         "CORE Spark Declarative Pipelines",
+        "SDP-PRO":          "PRO Spark Declarative Pipelines with SCD Type 1/2",
+        "SDP-ADVANCED":     "ADVANCED Spark Declarative Pipelines with DQ",
+        "AUGMENTED-CLUSTER":"Augmented Incremental Workflow (Cluster) — 730-day streaming pipeline",
+        "AUGMENTED-SDP":    "Augmented Incremental Workflow (SDP) — 730-day streaming pipeline",
     }
     min_dbr_version = 14.1
     invalid_dbr_list = [
