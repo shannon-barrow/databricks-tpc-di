@@ -338,8 +338,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
         if cfg.augmented_incremental:
+            # Align Delta column names with the canonical Trade.txt schema (downstream stage_tables / stage_files SQL is written against the file shape).
+            out_p = out.toDF(
+                "t_id", "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
+                "t_s_symb", "quantity", "bidprice", "t_ca_id", "executedby",
+                "tradeprice", "fee", "commission", "tax")
             from .utils import write_delta
-            out_p = out.withColumn(
+            out_p = out_p.withColumn(
                 "stg_target",
                 F.when(F.col("t_dts") < F.lit("2015-07-06"), F.lit("tables"))
                  .otherwise(F.lit("files")))
@@ -392,11 +397,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
         if cfg.augmented_incremental:
-            from .utils import write_delta
-            th_p = th_df.withColumn(
+            # Align Delta column names with the canonical TradeHistory.txt schema.
+            th_p = th_df.toDF("tradeid", "th_dts", "status")
+            th_p = th_p.withColumn(
                 "stg_target",
                 F.when(F.col("th_dts") < F.lit("2015-07-06"), F.lit("tables"))
                  .otherwise(F.lit("files")))
+            from .utils import write_delta
             write_delta(th_p, cfg=cfg, dataset="tradehistory",
                         partition_cols=["stg_target"])
         else:
@@ -456,11 +463,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # Batch1: settlement strictly before cutoff. Half-open [begin, cutoff) so a timestamp of exactly batch_cutoff_s (2017-07-08 00:00:00) falls into Batch 2, never Batch 1 — otherwise the same (accountid, to_date(ct_dts)) would appear in both batches and the FactCashBalances pipeline would emit two rows for one source pair.
         ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         if cfg.augmented_incremental:
-            from .utils import write_delta
-            ct_p = ct_b1.withColumn(
+            # Align Delta column names with the canonical CashTransaction.txt schema.
+            ct_p = ct_b1.toDF("accountid", "ct_dts", "ct_amt", "ct_name")
+            ct_p = ct_p.withColumn(
                 "stg_target",
                 F.when(F.col("ct_dts") < F.lit("2015-07-06"), F.lit("tables"))
                  .otherwise(F.lit("files")))
+            from .utils import write_delta
             write_delta(ct_p, cfg=cfg, dataset="cashtransaction",
                         partition_cols=["stg_target"])
         else:

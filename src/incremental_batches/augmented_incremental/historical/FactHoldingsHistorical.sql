@@ -48,7 +48,8 @@ SELECT
   sk_closetimeid sk_timeid,
   tradeprice currentprice,
   hh_after_qty currentholding
-FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawholdings' || :scale_factor) h
-JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade') dt 
+-- Source: spark-gen temp Delta holdinghistory{sf}; filter stg_target='tables' (= _complete_ts < 2015-07-06).
+FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.holdinghistory' || :scale_factor) h
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade') dt
   ON tradeid = hh_t_id
-WHERE h.event_dt < '2015-07-06'
+WHERE h.stg_target = 'tables'

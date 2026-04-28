@@ -36,6 +36,7 @@ TBLPROPERTIES (
 
 -- COMMAND ----------
 
+-- Source: spark-gen temp Delta cashtransaction{sf} (CashTransaction.txt shape, partitioned by stg_target). Filter stg_target='tables' (= ct_dts < 2015-07-06).
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.currentaccountbalances')
 SELECT
   *,
@@ -45,8 +46,8 @@ FROM (
     to_date(max(ct_dts)) ct_date,
     accountid,
     cast(sum(ct_amt) as DECIMAL(15,2)) current_account_cash
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawcashtransaction' || :scale_factor)
-  WHERE event_dt < '2015-07-06'
+  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+  WHERE stg_target = 'tables'
   GROUP BY ALL
 )
 
@@ -62,8 +63,8 @@ WITH dailycash as (
       accountid,
       to_date(ct_dts) datevalue,
       cast(sum(ct_amt) as DECIMAL(15,2)) account_daily_total
-    FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawcashtransaction' || :scale_factor)
-    WHERE event_dt < '2015-07-06'
+    FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+    WHERE stg_target = 'tables'
     GROUP BY ALL
   ) c
 )

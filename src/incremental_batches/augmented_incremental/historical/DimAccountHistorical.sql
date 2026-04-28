@@ -30,66 +30,28 @@ TBLPROPERTIES (
 
 -- COMMAND ----------
 
+-- Source: spark-gen temp Delta tpcdi_raw_data.customermgmt{sf}. Account-touching ActionTypes are NEW / ADDACCT / UPDACCT / CLOSEACCT (NOT UPDCUST or INACT — those don't carry account fields). Status is already decoded; rows are dense, so the windowed last_value IGNORE NULLS pass present in the DIGen splitter version is unnecessary.
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimAccount')
-WITH rawaccount AS (
+WITH acct_updates AS (
   SELECT
     accountid,
     customerid,
     accountdesc,
     taxstatus,
     brokerid,
-    decode(status, 
-      'ACTV',	'Active',
-      'CMPT','Completed',
-      'CNCL','Canceled',
-      'PNDG','Pending',
-      'SBMT','Submitted',
-      'INAC','Inactive') status,
-    update_dt
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawaccount' || :scale_factor) a
-  WHERE update_dt < '2015-07-06' 
-),
-acct_updates AS (
-  SELECT
-    accountid,
-    customerid,
-    coalesce(
-      accountdesc,
-      last_value(accountdesc) IGNORE NULLS OVER (
-        PARTITION BY accountid
-        ORDER BY update_dt
-      )
-    ) accountdesc,
-    coalesce(
-      taxstatus,
-      last_value(taxstatus) IGNORE NULLS OVER (
-        PARTITION BY accountid
-        ORDER BY update_dt
-      )
-    ) taxstatus,
-    coalesce(
-      brokerid,
-      last_value(brokerid) IGNORE NULLS OVER (
-        PARTITION BY accountid
-        ORDER BY update_dt
-      )
-    ) brokerid,
-    coalesce(
-      status,
-      last_value(status) IGNORE NULLS OVER (
-        PARTITION BY accountid
-        ORDER BY update_dt
-      )
-    ) status,
-    update_dt effectivedate,
+    status,
+    date(update_ts) effectivedate,
     nvl(
-      lead(update_dt) OVER (
-        PARTITION BY accountid
-        ORDER BY update_dt
-      ),
+      lead(date(update_ts)) OVER (PARTITION BY accountid ORDER BY update_ts),
       date('9999-12-31')
-    ) enddate
-  FROM rawaccount a
+    ) enddate,
+    row_number() OVER (PARTITION BY accountid, date(update_ts) ORDER BY update_ts DESC) rn
+  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.customermgmt' || :scale_factor)
+  WHERE stg_target = 'tables'
+    AND ActionType IN ('NEW', 'ADDACCT', 'UPDACCT', 'CLOSEACCT')
+),
+acct_updates_dedup AS (
+  SELECT * EXCEPT(rn) FROM acct_updates WHERE rn = 1
 ),
 add_cust_updates AS (
   SELECT
@@ -101,8 +63,8 @@ add_cust_updates AS (
       a.effectivedate
     ) effectivedate,
     if(a.enddate > c.enddate, c.enddate, a.enddate) enddate
-  FROM acct_updates a
-  FULL OUTER JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c 
+  FROM acct_updates_dedup a
+  FULL OUTER JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer') c
     ON 
       a.customerid = c.customerid
       AND c.enddate > a.effectivedate

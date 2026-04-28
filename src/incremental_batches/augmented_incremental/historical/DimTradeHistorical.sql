@@ -47,41 +47,44 @@ TBLPROPERTIES (
 
 -- COMMAND ----------
 
+-- Source: spark-gen temp Delta tradehistory{sf} (status transitions) joined to trade{sf} (final-state fields). The DIGen splitter version produced rawtrade{sf} = (TH JOIN Trade) with cdc_flag synthesized; we apply that join inline. Filter stg_target='tables' on TH (= th_dts < 2015-07-06); pick the latest pre-cutoff TH per tradeid; tradeprice/fee/commission/tax are CMPT-only per DIGen splitter convention.
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade')
 with rawtrade as (
   SELECT
-    tradeid,
-    t_dts,
-    min(case when cdc_flag = 'I' then t_dts end) over (partition by tradeid) create_ts,
-    case when status IN ("CMPT", "CNCL") then t_dts end close_ts,
-    decode(status, 
+    th.tradeid,
+    th.th_dts t_dts,
+    min(th.th_dts) over (partition by th.tradeid) create_ts,
+    case when th.status IN ('CMPT', 'CNCL') then th.th_dts end close_ts,
+    decode(th.status,
       'ACTV',	'Active',
       'CMPT','Completed',
       'CNCL','Canceled',
       'PNDG','Pending',
       'SBMT','Submitted',
       'INAC','Inactive') status,
-    decode(t_tt_id,
+    decode(t.t_tt_id,
       'TMB', 'Market Buy',
       'TMS', 'Market Sell',
       'TSL', 'Stop Loss',
       'TLS', 'Limit Sell',
       'TLB', 'Limit Buy'
     ) type,
-    if(cashflag = 1, TRUE, FALSE) cashflag,
-    t_s_symb,
-    quantity,
-    bidprice,
-    t_ca_id,
-    executedby,
-    tradeprice,
-    fee,
-    commission,
-    tax
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawtrade' || :scale_factor) a
-  WHERE event_dt < '2015-07-06'
-  QUALIFY row_number() over (partition by tradeid order by t_dts desc) = 1
-) 
+    if(t.t_is_cash = 1, TRUE, FALSE) cashflag,
+    t.t_s_symb,
+    t.quantity,
+    t.bidprice,
+    t.t_ca_id,
+    t.executedby,
+    case when th.status = 'CMPT' then t.tradeprice end tradeprice,
+    case when th.status = 'CMPT' then t.fee end fee,
+    case when th.status = 'CMPT' then t.commission end commission,
+    case when th.status = 'CMPT' then t.tax end tax
+  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.tradehistory' || :scale_factor) th
+  JOIN IDENTIFIER(:catalog || '.tpcdi_raw_data.trade' || :scale_factor) t
+    ON th.tradeid = t.t_id
+  WHERE th.stg_target = 'tables'
+  QUALIFY row_number() over (partition by th.tradeid order by th.th_dts desc) = 1
+)
 SELECT
   trade.tradeid,
   da.sk_brokerid,

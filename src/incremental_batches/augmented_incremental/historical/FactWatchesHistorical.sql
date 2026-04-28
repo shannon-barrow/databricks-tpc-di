@@ -36,8 +36,9 @@ with watches as (
     w_s_symb symbol,        
     min(case when w_action = 'ACTV' then date(w_dts) end) dateplaced,
     max(case when w_action = 'CNCL' then date(w_dts) end) dateremoved
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawwatches' || :scale_factor) a
-  WHERE event_dt < '2015-07-06'
+  -- Source: spark-gen temp Delta watchhistory{sf}; filter stg_target='tables' (= w_dts < 2015-07-06).
+  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.watchhistory' || :scale_factor) a
+  WHERE stg_target = 'tables'
   GROUP BY ALL
 )
 select

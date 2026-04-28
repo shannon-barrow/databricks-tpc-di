@@ -45,215 +45,28 @@ TBLPROPERTIES (
 
 -- COMMAND ----------
 
+-- Source: spark-gen temp Delta tpcdi_raw_data.customermgmt{sf} (CustomerMgmtRaw shape, partitioned by ActionType + stg_target). status is already decoded; phone1/2/3 are already concatenated; rows are dense (no sparse-XML nulls), so the windowed last_value IGNORE NULLS pass present in the DIGen splitter version is unnecessary here.
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
-with cust as (
+with cust_updates as (
   SELECT
     customerid,
     taxid,
-    decode(status, 
-      'ACTV',	'Active',
-      'CMPT','Completed',
-      'CNCL','Canceled',
-      'PNDG','Pending',
-      'SBMT','Submitted',
-      'INAC','Inactive') status,
-    lastname,
-    firstname,
-    middleinitial,
-    gender,
-    tier,
-    dob,
-    addressline1,
-    addressline2,
-    postalcode,
-    city,
-    stateprov,
-    country,
-    nvl2(
-      c_local_1,
-      concat(
-        nvl2(c_ctry_1, '+' || c_ctry_1 || ' ', ''),
-        nvl2(c_area_1, '(' || c_area_1 || ') ', ''),
-        c_local_1,
-        nvl(c_ext_1, '')),
-      c_local_1) phone1,
-    nvl2(
-      c_local_2,
-      concat(
-        nvl2(c_ctry_2, '+' || c_ctry_2 || ' ', ''),
-        nvl2(c_area_2, '(' || c_area_2 || ') ', ''),
-        c_local_2,
-        nvl(c_ext_2, '')),
-      c_local_2) phone2,
-    nvl2(
-      c_local_3,
-      concat(
-        nvl2(c_ctry_3, '+' || c_ctry_3 || ' ', ''),
-        nvl2(c_area_3, '(' || c_area_3 || ') ', ''),
-        c_local_3,
-        nvl(c_ext_3, '')),
-      c_local_3) phone3,
-    email1,
-    email2,
-    lcl_tx_id,
-    nat_tx_id,
-    update_dt
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.rawcustomer' || :scale_factor)
-  WHERE update_dt < '2015-07-06' 
-),
-cust_updates as (
-  SELECT
-    customerid,
-    coalesce(
-      taxid,
-      last_value(taxid) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) taxid,
     status,
+    lastname, firstname, middleinitial,
+    gender, tier, dob,
+    addressline1, addressline2, postalcode, city, stateprov, country,
+    phone1, phone2, phone3,
+    email1, email2,
+    lcl_tx_id, nat_tx_id,
+    date(update_ts) effectivedate,
     coalesce(
-      lastname,
-      last_value(lastname) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) lastname,
-    coalesce(
-      firstname,
-      last_value(firstname) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) firstname,
-    coalesce(
-      middleinitial,
-      last_value(middleinitial) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) middleinitial,
-    coalesce(
-      gender,
-      last_value(gender) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) gender,
-    coalesce(
-      tier,
-      last_value(tier) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) tier,
-    coalesce(
-      dob,
-      last_value(dob) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) dob,
-    coalesce(
-      addressline1,
-      last_value(addressline1) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) addressline1,
-    coalesce(
-      addressline2,
-      last_value(addressline2) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) addressline2,
-    coalesce(
-      postalcode,
-      last_value(postalcode) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) postalcode,
-    coalesce(
-      CITY,
-      last_value(CITY) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) CITY,
-    coalesce(
-      stateprov,
-      last_value(stateprov) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) stateprov,
-    coalesce(
-      country,
-      last_value(country) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) country,
-    coalesce(
-      phone1,
-      last_value(phone1) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) phone1,
-    coalesce(
-      phone2,
-      last_value(phone2) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) phone2,
-    coalesce(
-      phone3,
-      last_value(phone3) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) phone3,
-    coalesce(
-      email1,
-      last_value(email1) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) email1,
-    coalesce(
-      email2,
-      last_value(email2) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) email2,
-    coalesce(
-      lcl_tx_id,
-      last_value(lcl_tx_id) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) lcl_tx_id,
-    coalesce(
-      nat_tx_id,
-      last_value(nat_tx_id) IGNORE NULLS OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      )
-    ) nat_tx_id,
-    update_dt effectivedate,
-    coalesce(
-      lead(update_dt) OVER (
-        PARTITION BY customerid
-        ORDER BY update_dt
-      ),
+      lead(date(update_ts)) OVER (PARTITION BY customerid ORDER BY update_ts),
       date('9999-12-31')
-    ) enddate
-  FROM cust
+    ) enddate,
+    row_number() OVER (PARTITION BY customerid, date(update_ts) ORDER BY update_ts DESC) rn
+  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.customermgmt' || :scale_factor)
+  WHERE stg_target = 'tables'
+    AND ActionType IN ('NEW', 'INACT', 'UPDCUST')
 )
 SELECT
   bigint(concat(date_format(c.effectivedate, 'yyyyMMdd'), customerid)) sk_customerid,
@@ -285,7 +98,8 @@ SELECT
   c.enddate,
   if(enddate = date('9999-12-31'), true, false) iscurrent
 FROM cust_updates c
-JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_lcl 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_lcl
   ON c.lcl_tx_id = r_lcl.TX_ID
-JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_nat 
+JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.TaxRate') r_nat
   ON c.nat_tx_id = r_nat.TX_ID
+WHERE c.rn = 1
