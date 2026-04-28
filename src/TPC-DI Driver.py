@@ -17,21 +17,43 @@
 # MAGIC
 # MAGIC Each cell prints a link to the created workflow when it finishes.
 # MAGIC
-# MAGIC ## Workflow Types
-# MAGIC - **Workspace Cluster Workflow** — classic-cluster (or serverless) job that runs the auditable, batch-aware ETL.
-# MAGIC - **DBSQL Warehouse Workflow** — same DAG, but backed by a serverless SQL Warehouse instead of a job cluster.
-# MAGIC - **Spark Declarative Pipelines (CORE)** — declarative SDP pipeline; simplest path.
-# MAGIC - **Spark Declarative Pipelines (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
-# MAGIC - **Spark Declarative Pipelines (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
+# MAGIC ## Choosing a workflow — SKU × Batch Type
+# MAGIC The Driver splits the workflow choice into two widgets so the dropdown
+# MAGIC stays short. Pick a **SKU** (compute shape) and a **Batch Type** (how
+# MAGIC the TPC-DI data is fed in). Combinations the SKU doesn't support are
+# MAGIC hidden automatically.
+# MAGIC
+# MAGIC | SKU \\ Batch Type | Single Batch | Incremental | Augmented Incremental |
+# MAGIC |---|:-:|:-:|:-:|
+# MAGIC | **Cluster** (classic / serverless job cluster) | ✓ | ✓ | ✓ |
+# MAGIC | **DBSQL** (serverless SQL warehouse) | ✓ | ✓ | — |
+# MAGIC | **SDP** (Spark Declarative Pipelines) | ✓ + edition | — | ✓ |
+# MAGIC
+# MAGIC When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown
+# MAGIC appears: CORE (declarative SDP pipeline), PRO (adds `APPLY CHANGES
+# MAGIC INTO` for SCD Type 1/2), ADVANCED (adds Data Quality constraints).
+# MAGIC
+# MAGIC **Augmented Incremental** is a 730-day daily-streaming variant — see
+# MAGIC `src/incremental_batches/augmented_incremental/` and CLAUDE.md for
+# MAGIC details. It assumes the shared staging schema
+# MAGIC `tpcdi_incremental_staging_{sf}` is already populated; if not, run the
+# MAGIC tools under `src/tools/incremental_file_splitting/` first. Only
+# MAGIC SF=20000 is staged today.
 # MAGIC
 # MAGIC ## Widget reference
-# MAGIC - **Workflow Type** — see above. Picks the benchmark workflow shape.
+# MAGIC - **SKU** — Cluster / DBSQL / SDP. Picks the compute shape.
+# MAGIC - **Batch Type** — Single Batch / Incremental / Augmented Incremental.
+# MAGIC   Options dynamically filter to what the SKU supports.
+# MAGIC - **SDP Edition** (only when SKU=SDP × Single Batch) — CORE / PRO / ADVANCED.
 # MAGIC - **Data Generator** (`spark_or_native_datagen` on the created job) — `spark` (default) or `native`.
 # MAGIC   - `spark` → distributed PySpark generator on serverless. Output goes to `…/tpcdi_volume/spark_datagen/sf={SF}/`.
 # MAGIC   - `native` → legacy single-threaded DIGen.jar wrapped in `tools/digen_runner`. Forces a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). Output goes to `…/tpcdi_volume/sf={SF}/`. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
 # MAGIC   - The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
 # MAGIC - **Scale Factor** — How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**.
-# MAGIC - **Collective Batch or Incremental Batches** — Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; SDP pipelines always run all batches in a single SDP pass.
+# MAGIC - **Batch Type** detail:
+# MAGIC   - **Single Batch** — all 3 TPC-DI batches in one pass (faster, **no audit checks**).
+# MAGIC   - **Incremental** — batches sequentially with audit checks at each boundary (spec validation; CLUSTER + DBSQL only).
+# MAGIC   - **Augmented Incremental** — 730-day daily streaming pipeline (CLUSTER + SDP only). Skips the datagen workflow; reads pre-staged per-day files.
 # MAGIC - **Serverless** — `YES` runs the benchmark on serverless compute (workflow or SDP). `NO` provisions a classic cluster sized by scale factor. Note: DBSQL is always serverless; DIGen datagen is always non-serverless regardless of this setting.
 # MAGIC - **Predictive Optimization** — `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
 # MAGIC - **Job Name & Target Database** — Pattern is `{firstname}-{lastname}-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
@@ -52,8 +74,45 @@
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-dbutils.widgets.dropdown("workflow_type", tpcdi_config.default_workflow, tpcdi_config.workflow_vals, "Workflow Type")
-dbutils.widgets.dropdown("batched", 'Single Collective Batch', ['Single Collective Batch', 'Incremental Batches'], "Collective batch or incremental batches")
+# SKU + Batch Type are split into two widgets so the user doesn't scroll
+# through a giant combined dropdown. `batch_type` options are dynamically
+# constrained to what each SKU actually supports — DBSQL has no Augmented
+# Incremental variant, SDP has no per-day Incremental variant.
+dbutils.widgets.dropdown("sku", "Cluster", ["Cluster", "DBSQL", "SDP"], "SKU")
+_sku_choice = dbutils.widgets.get("sku")
+
+if _sku_choice == "SDP":
+  _batch_options = ["Single Batch", "Augmented Incremental"]
+elif _sku_choice == "DBSQL":
+  _batch_options = ["Single Batch", "Incremental"]
+else:  # Cluster
+  _batch_options = ["Single Batch", "Incremental", "Augmented Incremental"]
+dbutils.widgets.dropdown("batch_type", _batch_options[0], _batch_options, "Batch Type")
+batch_type = dbutils.widgets.get("batch_type")
+# Guard: if SKU changed under us, batch_type might still hold the old value.
+if batch_type not in _batch_options:
+  batch_type = _batch_options[0]
+
+# SDP edition (CORE / PRO / ADVANCED) only applies to SDP × Single Batch.
+if _sku_choice == "SDP" and batch_type == "Single Batch":
+  dbutils.widgets.dropdown("edition", "CORE", ["CORE", "PRO", "ADVANCED"], "SDP Edition")
+  _edition = dbutils.widgets.get("edition")
+else:
+  try: dbutils.widgets.remove("edition")
+  except Exception: pass
+  _edition = "CORE"  # placeholder — only consumed when SDP × Single Batch
+
+# Compute wf_key in the format the dispatcher expects.
+if batch_type == "Augmented Incremental":
+  wf_key = f"AUGMENTED-{_sku_choice.upper()}"
+elif _sku_choice == "SDP":
+  wf_key = f"SDP-{_edition}"
+else:
+  wf_key = _sku_choice.upper()  # CLUSTER or DBSQL
+workflow_type = tpcdi_config.workflows_dict.get(wf_key, wf_key)
+sku           = wf_key.split('-')
+incremental   = (batch_type == "Incremental")
+
 dbutils.widgets.dropdown("pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
 dbutils.widgets.dropdown("scale_factor", tpcdi_config.default_sf, tpcdi_config.default_sf_options, "Scale factor")
 dbutils.widgets.text("job_name", tpcdi_config.default_job_name, "Job Name")
@@ -65,12 +124,8 @@ dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Ge
 perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
 catalog           = dbutils.widgets.get("catalog")
 scale_factor      = int(dbutils.widgets.get("scale_factor"))
-workflow_type     = dbutils.widgets.get('workflow_type')
 pred_opt          = dbutils.widgets.get('pred_opt')
 wh_target         = dbutils.widgets.get("wh_target")
-wf_key            = list(tpcdi_config.workflows_dict)[tpcdi_config.workflow_vals.index(workflow_type)]
-sku               = wf_key.split('-')
-incremental       = True if dbutils.widgets.get("batched") == 'Incremental Batches' else False
 data_generator    = dbutils.widgets.get("data_generator")
 _volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
 # AUGMENTED variants read from the volume root (their staging tree
@@ -99,9 +154,7 @@ if sku[0] in ['DBSQL']:
   dbutils.widgets.remove('serverless')
 
 if sku[0] not in ['CLUSTER','DBSQL']:
-  dbutils.widgets.remove('batched')
   dbutils.widgets.remove('perf_or_features')
-  incremental = False
 
 # AUGMENTED variants always use the Spark generator's staged data; the
 # data_generator widget doesn't apply.
