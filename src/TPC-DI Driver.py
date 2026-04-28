@@ -171,10 +171,18 @@ if sku[0] not in ["CLUSTER","DBSQL"]:
   except Exception: pass
 
 # AUGMENTED variants always use Spark-staged data; data_generator widget doesn't apply.
+# Also: only SF=20000 has the per-day staged files today (the staging
+# tools live under src/tools/incremental_file_splitting/ but haven't been
+# generalized to produce SFs other than 20000 yet — Phase B work).
+# Hide the scale_factor widget and hardcode to 20000 to prevent picking
+# an SF that has no daily files to consume.
 if sku[0] == "AUGMENTED":
   try: dbutils.widgets.remove("data_generator")
   except Exception: pass
   data_generator = "spark"
+  try: dbutils.widgets.remove("scale_factor")
+  except Exception: pass
+  scale_factor = 20000
 
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across all benchmark variants at that SF), so its name omits exec_type/batched.
