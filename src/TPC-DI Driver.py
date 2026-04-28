@@ -74,12 +74,26 @@
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-# SKU + Batch Type are split into two widgets so the user doesn't scroll
-# through a giant combined dropdown. `batch_type` options are dynamically
-# constrained to what each SKU actually supports — DBSQL has no Augmented
-# Incremental variant, SDP has no per-day Incremental variant.
-dbutils.widgets.dropdown("sku", "Cluster", ["Cluster", "DBSQL", "SDP"], "SKU")
-_sku_choice = dbutils.widgets.get("sku")
+# Databricks notebook UI sorts widgets alphabetically by NAME, not by
+# creation order. Number-prefixing the names forces the visual order:
+# What → Where → How → Tuning. Labels (4th arg) stay human-readable.
+#
+# One-shot reset of any unprefixed widgets left over from prior versions
+# of this notebook. Safe to keep — no-op once the workspace state is
+# clean.
+for _legacy in ("workflow_type", "batched", "sku", "batch_type", "edition",
+                "pred_opt", "scale_factor", "job_name", "wh_target",
+                "catalog", "perf_or_features", "data_generator",
+                "serverless", "worker_type", "driver_type", "dbr"):
+  try: dbutils.widgets.remove(_legacy)
+  except Exception: pass
+
+# --- 01_sku / 02_batch_type / 03_edition (What) ---
+# `batch_type` options are dynamically constrained to what each SKU
+# actually supports: DBSQL has no Augmented Incremental, SDP has no
+# per-day Incremental. `edition` only appears for SDP × Single Batch.
+dbutils.widgets.dropdown("01_sku", "Cluster", ["Cluster", "DBSQL", "SDP"], "SKU")
+_sku_choice = dbutils.widgets.get("01_sku")
 
 if _sku_choice == "SDP":
   _batch_options = ["Single Batch", "Augmented Incremental"]
@@ -87,18 +101,16 @@ elif _sku_choice == "DBSQL":
   _batch_options = ["Single Batch", "Incremental"]
 else:  # Cluster
   _batch_options = ["Single Batch", "Incremental", "Augmented Incremental"]
-dbutils.widgets.dropdown("batch_type", _batch_options[0], _batch_options, "Batch Type")
-batch_type = dbutils.widgets.get("batch_type")
-# Guard: if SKU changed under us, batch_type might still hold the old value.
+dbutils.widgets.dropdown("02_batch_type", _batch_options[0], _batch_options, "Batch Type")
+batch_type = dbutils.widgets.get("02_batch_type")
 if batch_type not in _batch_options:
   batch_type = _batch_options[0]
 
-# SDP edition (CORE / PRO / ADVANCED) only applies to SDP × Single Batch.
 if _sku_choice == "SDP" and batch_type == "Single Batch":
-  dbutils.widgets.dropdown("edition", "CORE", ["CORE", "PRO", "ADVANCED"], "SDP Edition")
-  _edition = dbutils.widgets.get("edition")
+  dbutils.widgets.dropdown("03_edition", "CORE", ["CORE", "PRO", "ADVANCED"], "SDP Edition")
+  _edition = dbutils.widgets.get("03_edition")
 else:
-  try: dbutils.widgets.remove("edition")
+  try: dbutils.widgets.remove("03_edition")
   except Exception: pass
   _edition = "CORE"  # placeholder — only consumed when SDP × Single Batch
 
@@ -113,53 +125,62 @@ workflow_type = tpcdi_config.workflows_dict.get(wf_key, wf_key)
 sku           = wf_key.split('-')
 incremental   = (batch_type == "Incremental")
 
-dbutils.widgets.dropdown("pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
-dbutils.widgets.dropdown("scale_factor", tpcdi_config.default_sf, tpcdi_config.default_sf_options, "Scale factor")
-dbutils.widgets.text("job_name", tpcdi_config.default_job_name, "Job Name")
-dbutils.widgets.text("wh_target", tpcdi_config.default_wh, 'Target Database')
-dbutils.widgets.text("catalog", tpcdi_config.default_catalog, 'Target Catalog')
-dbutils.widgets.dropdown("perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, 'Optimize For UC Features or Fastest Performance')
-dbutils.widgets.dropdown("data_generator", "spark", ["spark", "digen"], "Data Generator")
+# --- 04 / 05 / 06 / 07 / 08 (more What + Where) ---
+dbutils.widgets.dropdown("04_scale_factor", tpcdi_config.default_sf, tpcdi_config.default_sf_options, "Scale Factor")
+dbutils.widgets.dropdown("05_data_generator", "spark", ["spark", "digen"], "Data Generator")
+dbutils.widgets.text("06_catalog", tpcdi_config.default_catalog, "Target Catalog")
+dbutils.widgets.text("07_wh_target", tpcdi_config.default_wh, "Target Database")
+dbutils.widgets.text("08_job_name", tpcdi_config.default_job_name, "Job Name")
 
-perf_opt_flg      = True if dbutils.widgets.get("perf_or_features") == tpcdi_config.features_or_perf[1] else False
-catalog           = dbutils.widgets.get("catalog")
-scale_factor      = int(dbutils.widgets.get("scale_factor"))
-pred_opt          = dbutils.widgets.get('pred_opt')
-wh_target         = dbutils.widgets.get("wh_target")
-data_generator    = dbutils.widgets.get("data_generator")
-_volume_base      = f'/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/'
+scale_factor   = int(dbutils.widgets.get("04_scale_factor"))
+data_generator = dbutils.widgets.get("05_data_generator")
+catalog        = dbutils.widgets.get("06_catalog")
+wh_target      = dbutils.widgets.get("07_wh_target")
+
+_volume_base = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
 # AUGMENTED variants read from the volume root (their staging tree
 # `augmented_incremental/_staging/sf={sf}/` is path-appended inside the
 # notebooks). Other Spark-datagen variants point at `spark_datagen/`.
 if sku[0] == "AUGMENTED":
   tpcdi_directory = _volume_base
 else:
-  tpcdi_directory = f'{_volume_base}spark_datagen/' if data_generator == "spark" else _volume_base
+  tpcdi_directory = f"{_volume_base}spark_datagen/" if data_generator == "spark" else _volume_base
 
-dbutils.widgets.dropdown("serverless", tpcdi_config.default_serverless, ['YES', 'NO'], "Enable Serverless")
-dbutils.widgets.dropdown("worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
-dbutils.widgets.dropdown("driver_type", tpcdi_config.default_driver_type, list(tpcdi_config.node_types.keys()), "Driver Type")
-dbutils.widgets.dropdown("dbr", tpcdi_config.default_dbr, list(tpcdi_config.dbrs.values()), "Databricks Runtime")
-serverless        = 'YES' if sku[0] not in ['CLUSTER','SDP'] else dbutils.widgets.get('serverless')
-worker_node_type  = dbutils.widgets.get("worker_type")
-driver_node_type  = dbutils.widgets.get("driver_type")
-dbr_version_id    = list(tpcdi_config.dbrs.keys())[list(tpcdi_config.dbrs.values()).index(dbutils.widgets.get("dbr"))]
+# --- 09 / 10 / 11 / 12 (How — compute) ---
+dbutils.widgets.dropdown("09_serverless", tpcdi_config.default_serverless, ["YES", "NO"], "Enable Serverless")
+dbutils.widgets.dropdown("10_worker_type", tpcdi_config.default_worker_type, list(tpcdi_config.node_types.keys()), "Worker Type")
+dbutils.widgets.dropdown("11_driver_type", tpcdi_config.default_driver_type, list(tpcdi_config.node_types.keys()), "Driver Type")
+dbutils.widgets.dropdown("12_dbr", tpcdi_config.default_dbr, list(tpcdi_config.dbrs.values()), "Databricks Runtime")
+serverless       = "YES" if sku[0] not in ["CLUSTER","SDP"] else dbutils.widgets.get("09_serverless")
+worker_node_type = dbutils.widgets.get("10_worker_type")
+driver_node_type = dbutils.widgets.get("11_driver_type")
+dbr_version_id   = list(tpcdi_config.dbrs.keys())[list(tpcdi_config.dbrs.values()).index(dbutils.widgets.get("12_dbr"))]
 
-if serverless == 'YES':
-  dbutils.widgets.remove('worker_type')
-  dbutils.widgets.remove('driver_type')
-  dbutils.widgets.remove('dbr')
+# --- 13 / 14 (Tuning) ---
+dbutils.widgets.dropdown("13_perf_or_features", tpcdi_config.features_or_perf[0], tpcdi_config.features_or_perf, "Optimize For UC Features or Fastest Performance")
+dbutils.widgets.dropdown("14_pred_opt", "DISABLE", ["ENABLE", "DISABLE"], "Predictive Optimization")
+perf_opt_flg = (dbutils.widgets.get("13_perf_or_features") == tpcdi_config.features_or_perf[1])
+pred_opt     = dbutils.widgets.get("14_pred_opt")
 
-if sku[0] in ['DBSQL']:
-  dbutils.widgets.remove('serverless')
+# --- Conditional widget hide-on-irrelevant ---
+if serverless == "YES":
+  for _w in ("10_worker_type", "11_driver_type", "12_dbr"):
+    try: dbutils.widgets.remove(_w)
+    except Exception: pass
 
-if sku[0] not in ['CLUSTER','DBSQL']:
-  dbutils.widgets.remove('perf_or_features')
+if sku[0] == "DBSQL":
+  try: dbutils.widgets.remove("09_serverless")
+  except Exception: pass
 
-# AUGMENTED variants always use the Spark generator's staged data; the
-# data_generator widget doesn't apply.
+if sku[0] not in ["CLUSTER","DBSQL"]:
+  try: dbutils.widgets.remove("13_perf_or_features")
+  except Exception: pass
+
+# AUGMENTED variants always use Spark-staged data; data_generator widget
+# doesn't apply.
 if sku[0] == "AUGMENTED":
-  dbutils.widgets.remove('data_generator')
+  try: dbutils.widgets.remove("05_data_generator")
+  except Exception: pass
   data_generator = "spark"
 
 # Build job_name(s) with suffixes after all widget logic settles incremental.
@@ -174,7 +195,7 @@ _datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_da
 _gen_label       = "SparkGen" if data_generator == "spark" else "NativeGen"
 _batched_label   = "Incremental" if incremental else "SingleBatch"
 _exec_label      = "Cluster" if sku[0] == "CLUSTER" else wf_key
-_base_name       = dbutils.widgets.get('job_name')
+_base_name       = dbutils.widgets.get('08_job_name')
 datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
 if sku[0] in ['CLUSTER','DBSQL']:
   job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
