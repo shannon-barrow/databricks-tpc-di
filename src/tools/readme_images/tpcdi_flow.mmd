@@ -2,31 +2,35 @@ flowchart LR
     subgraph Setup ["Setup — NOT scored"]
         direction LR
         S1["1. TPC-DI Driver notebook<br/>(entry point)"]
-        S2["2. Build execution pattern<br/>scale factor, exec type, generator<br/>→ creates 2 workflows"]
-        subgraph Gen ["3. Generate Data (pick one)"]
+        S2["2. Pick SKU + Batch Type<br/>→ creates 1-3 workflows"]
+        subgraph DataPrep ["3. Prepare Data (pick one)"]
             direction TB
-            G1["Native DIGen<br/>legacy, single-threaded<br/>⚠ non-serverless DBR 15.4 + Photon required"]
-            G2["Spark Distributed Generator<br/>✓ serverless, parallel, scales linearly"]
+            G1["Standard: Spark or DIGen<br/>generates raw files per SF"]
+            G2["Augmented: pre-staged<br/>per-day files (730 days,<br/>tpcdi_incremental_staging_{sf})"]
             G1 ~~~ G2
         end
-        S1 --> S2 --> Gen
+        S1 --> S2 --> DataPrep
     end
 
     subgraph Bench ["4. Benchmark Workflow — SCORED"]
         direction TB
         B1["Cluster — Single Batch"]
         B2["Cluster — Incremental"]
-        B3["DBSQL — Single Batch"]
-        B4["DBSQL — Incremental"]
-        B5["SDP — Single Batch"]
-        B1 ~~~ B2 ~~~ B3 ~~~ B4 ~~~ B5
+        B3["Cluster — Augmented Incremental"]
+        B4["DBSQL — Single Batch"]
+        B5["DBSQL — Incremental"]
+        B6["SDP — Single Batch<br/>(CORE / PRO / ADVANCED)"]
+        B7["SDP — Augmented Incremental"]
+        B1 ~~~ B2 ~~~ B3 ~~~ B4 ~~~ B5 ~~~ B6 ~~~ B7
     end
 
-    Gen --> Bench
+    DataPrep --> Bench
 
-    subgraph Audit ["5. Automated Audit Checks — NOT scored"]
+    subgraph Audit ["5. Audit Checks — NOT scored"]
         direction TB
-        A1["Runs after the benchmark<br/>not included in benchmark timing"]
+        A1["Standard variants: audits<br/>vs *_audit.csv reference values"]
+        A2["Augmented variants: no audits<br/>(daily streaming model)"]
+        A1 ~~~ A2
     end
 
     Bench --> Audit
@@ -35,10 +39,10 @@ flowchart LR
     classDef benchNode fill:#dceefb,stroke:#3a7ec0,stroke-width:2px
     classDef auditNode fill:#f5f5f5,stroke:#888,stroke-width:1px
     class S1,S2,G1,G2 setupNode
-    class B1,B2,B3,B4,B5 benchNode
-    class A1 auditNode
+    class B1,B2,B3,B4,B5,B6,B7 benchNode
+    class A1,A2 auditNode
 
     style Setup fill:#fafafa,stroke:#666,stroke-dasharray: 4 4
     style Bench fill:#eef6ff,stroke:#1e5fa8,stroke-width:2px
     style Audit fill:#fafafa,stroke:#666,stroke-dasharray: 4 4
-    style Gen fill:#ffffff,stroke:#999
+    style DataPrep fill:#ffffff,stroke:#999

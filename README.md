@@ -1,189 +1,162 @@
 # Databricks TPC-DI
 
-Databricks TPC-DI (Data Integration) is an implementation of specifications derived from the [TPC-DI](http://tpc.org/tpcdi/default5.asp) Benchmark.  
-This repo includes multiple implementations and interpretations of the **TPC-DI v1.1.0**.  We suggest executing any of the workflow types on the Databricks Runtime **14.1** or higher. 
+A Databricks-native implementation of the [TPC-DI](http://tpc.org/tpcdi/default5.asp) data-integration benchmark, designed to run end-to-end on the Databricks Lakehouse platform across multiple compute SKUs (job clusters, SQL warehouses, Spark Declarative Pipelines) and multiple data-load shapes (single-batch, incremental, and a 730-day daily-streaming "Augmented Incremental" variant).
 
-## Note About Data Generation
-**Data generation defaults to a distributed PySpark implementation** that runs
-on **Databricks Serverless** and scales across the executor pool so large scale
-factors finish in a fraction of the time the original DIGen.jar required. The
-legacy single-threaded **DIGen.jar** path is still available — selectable via
-the Driver's `Data Generator` widget (parameter `spark_or_native_datagen`,
-values `spark` or `native`) — for byte-compatible output with the upstream
-TPC-DI reference implementation. See [Data Generation](#data-generation) below.
+This repo follows the [TPC-DI v1.1.0 spec](https://www.tpc.org/TPC_Documents_Current_Versions/pdf/TPC-DI_v1.1.0.pdf) for business rules and table outputs; the spec itself does not provide code, only requirements. This project is the implementation.
 
-[![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
+[![DatabricksRuntime](https://img.shields.io/badge/Databricks%20Runtime-14.1+-orange)](https://docs.databricks.com/release-notes/runtime/releases.html)
 [![Benchmark](https://img.shields.io/badge/Benchmark-TPC--DI%20v1.1.0-blue)](http://tpc.org/tpcdi/default5.asp)
+
+## Notable changes vs the original DIGen-only pipeline
+
+- **Distributed Spark data generator** (`src/tools/spark_data_generator.py` + `src/tools/tpcdi_gen/`) — replaces the single-threaded `DIGen.jar` with a parallel PySpark implementation that runs on Databricks Serverless. Linear scaling across executors; large scale factors (SF=10000+) finish in a fraction of the JAR's time. The DIGen.jar path is preserved for byte-compatible reference output.
+- **SDP** (Spark Declarative Pipelines) — the runtime previously branded "DLT". Library names, schema labels, and prose all reflect the rename.
+- **Augmented Incremental benchmark** — a 730-day daily-streaming reshaping of TPC-DI (2015-07-06 → 2017-07-05) that exercises CDC + SCD2 maintenance under a real production-shaped daily load instead of a single bulk import. Available for Cluster and SDP.
+- **Python workflow builders** — every job/pipeline JSON is built by a Python module under `src/tools/workflow_builders/`. Jinja templates retired.
+- **Static audit snapshots** — pre-computed `*_audit.csv` snapshots committed to the repo at every common SF, so audit values are instant rather than recomputed each run.
+- **Skills-asset positioning** — this repo is deliberately curated for use by AI agents (Claude, Databricks Genie). See [`CLAUDE.md`](CLAUDE.md) at repo root for architecture context, gotchas, and load-bearing decisions.
 
 ## Flow at a glance
 
-<img src="/src/tools/readme_images/tpcdi_flow.svg" alt="TPC-DI execution flow — Setup, Benchmark, and Audit groups" width="100%">
+![TPC-DI execution flow — Setup → Benchmark → Audit, including standard and Augmented Incremental variants](src/tools/readme_images/tpcdi_flow.svg)
 
-## Summary
-Historically, the process of synchronizing a decision support system with data from operational systems has been referred to as Extract, Transform, Load (ETL) and the tools supporting such process have been referred to as ETL tools. Recently, ETL was replaced by the more comprehensive acronym, data integration (DI). DI describes the process of extracting and combining data from a variety of data source formats, transforming that data into a unified data model representation and loading it into a data store. The TPC-DI benchmark combines and transforms data extracted from an On-Line Transaction Processing (OTLP) system along with other sources of data, and loads it into a data warehouse. The source and destination data models, data transformations and implementation rules have been designed to be broadly representative of modern data integration requirements.
+## Choosing a workflow — SKU × Batch Type
 
-* The current TPC-DI specification can be found on the [TPC Documentation Webpage](https://www.tpc.org/tpc_documents_current_versions/current_specifications5.asp).  
-* The current implementation follows the [TPC-DI v1.1.0 spec](https://www.tpc.org/TPC_Documents_Current_Versions/pdf/TPC-DI_v1.1.0.pdf). 
+The Driver splits the workflow choice into two widgets so the dropdown stays short. Pick a **SKU** (compute shape) and a **Batch Type** (how data is fed in). Combinations the SKU doesn't support are hidden automatically.
 
-The TPC-DI spec does not provide code, instead relying on documenting business rules and requirements of the eventual table outputs of the data warehouse.   
-This repo is an implementation of the spec only - one that executes only on the cloud-based Databricks platform.   
+| SKU \\ Batch Type | Single Batch | Incremental | Augmented Incremental |
+|---|:-:|:-:|:-:|
+| **Cluster** (job cluster, classic or serverless) | ✓ | ✓ | ✓ |
+| **DBSQL** (serverless SQL warehouse) | ✓ | ✓ | — |
+| **SDP** (Spark Declarative Pipelines) | ✓ + edition | — | ✓ |
 
-### LIMITATIONS
-* The code base is implemented to execute on the Databricks platform.
-* This code requires:
-  * Databricks E2 Deployment. 
-  * Databricks Repos functionality. 
-  * Access to GitHub via public internet access. 
-* Serverless has been introduced as an optional execution mechanism but requires access to serverless compute
-* Unity Catalog will be required to use a catalog outside of hive_metastore. Additionally, UC is a prerequisite for lineage and primary/foreign key constraints
-* The legacy DIGen.jar (native) data-generation path requires a non-serverless cluster with **DBR 15.4** and Photon. The Driver creates this cluster automatically when you choose `native`. The Spark generator path runs on serverless and has no DBR restrictions.
+When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown appears: `CORE`, `PRO` (adds `APPLY CHANGES INTO` for SCD Type 1/2), or `ADVANCED` (adds Data Quality constraints).
 
-### Notes on Scoring/Metrics and Publication
-As of writing, the TPC-DI has not modified its submittal/scoring metrics to accomodate cloud-based platforms and infrastructure. Furthermore, as of writing, there has never been an official submission to this benchmark.  Therefore, no throughput metrics are mentioned or discussed in this code repository.  Databricks is attempting to work with the TPC to amend the rules for submission and modernize the throughput metrics for a future "official submittal" to be published by the TPC.  Until then, this code has been opened for demonstrating how such a Data Integration ETL application could be built upon the Databricks Lakehouse - without any performance metrics being published.
+### Batch Type detail
 
-# Execution Mechanisms
-The benchmark has been implemented in several ways to demonstrate the versatility of the Databricks Lakehouse platform. Users can reference each implementation side-by-side to better enable them to build other similar data engineering pipelines:
+- **Single Batch** — all 3 TPC-DI batches in one pass (faster, **no audit checks**).
+- **Incremental** — batches sequentially with audit checks at each boundary (spec validation, CLUSTER + DBSQL only).
+- **Augmented Incremental** — 730-day daily streaming pipeline (CLUSTER + SDP only). Skips the datagen workflow; reads pre-staged per-day files from `tpcdi_incremental_staging_{sf}` (currently populated only at SF=20000). Run the tools under `src/tools/incremental_file_splitting/` to populate other SFs.
 
-1. **Workspace Cluster Workflow** — classic-cluster (or serverless) job with the auditable, batch-aware ETL.
-2. **DBSQL Warehouse Workflow** — same DAG, executed against a serverless SQL Warehouse instead of a job cluster.
-3. **Spark Declarative Pipelines (CORE)** — declarative SDP pipeline.
-4. **Spark Declarative Pipelines (PRO)** — adds `APPLY CHANGES INTO` for SCD Type 1/2 ingestion.
-5. **Spark Declarative Pipelines (ADVANCED)** — adds Data Quality constraints to the PRO pipeline.
+## How to run
 
-The following toggles apply across the deployment choices above:
+1. Open `src/TPC-DI Driver` in your Databricks workspace.
+2. Run the first cell to bootstrap defaults (cloud detection, node-type catalog, DBR list, user-prefixed schema names).
+3. Set the widgets:
+   - **SKU** + **Batch Type** + (if SDP × Single Batch) **Edition**
+   - **Scale Factor** (`10` / `100` / `1000` / `5000` / `10000` / `20000`)
+   - **Job Name**, **Target Catalog**, **Target Database** — reasonable defaults.
+   - **Data Generator** (`spark` default; `digen` for the legacy single-threaded path) — hidden for Augmented variants since they always use Spark-staged data.
+   - **Serverless** (`YES` default) — on for everything except `Cluster` non-serverless and SDP non-serverless.
+   - **Predictive Optimization**, **Optimize For UC Features or Fastest Performance**.
+4. Run the next cells. The Driver creates:
+   - One **datagen** job (skipped for Augmented variants).
+   - One **benchmark** job (CLUSTER, DBSQL, or SDP single-batch / incremental).
+   - **Or** a **parent + child + (pipeline)** trio for Augmented variants.
 
-1. **Data Generator** (`spark_or_native_datagen`): `spark` (default, distributed PySpark on serverless) or `native` (legacy DIGen.jar wrapped by `tools/digen_runner`, runs on a non-serverless DBR 15.4 + Photon cluster). Output paths differ — `spark` writes under `…/tpcdi_volume/spark_datagen/sf={SF}/`, `native` writes to `…/tpcdi_volume/sf={SF}/`. The benchmark reads either format via `{Customer.txt,Customer_[0-9]*.txt}`-style globs, so the rest of the pipeline is identical.
-2. **Scale Factor**: How much data to generate. Total file/table count and DAG shape are unchanged; only per-file row counts scale. Roughly **SF=10 ≈ 1 GB raw**, **SF=100 ≈ 10 GB**, **SF=1000 ≈ 100 GB**, **SF=10000 ≈ 1 TB**. Defaults to 10.
-3. **Serverless**: Faster performance and startup with serverless Workflows / SDP pipelines (SDP includes Enzyme as a standard feature). DBSQL is always serverless. The DIGen native datagen ignores this widget — it always uses a non-serverless cluster.
-4. **Collective Batch or Incremental Batches**: Single-batch runs all 3 TPC-DI batches in one pass (faster, **no audit checks**). Incremental processes batches sequentially with audit checks at each batch boundary — required for spec validation. Only available for `CLUSTER` and `DBSQL` workflow types; SDP pipelines always run all batches in a single SDP pass.
-5. **Predictive Optimization**: `ENABLE` lets Databricks auto-run maintenance ops (OPTIMIZE / VACUUM) on the result tables based on usage. `DISABLE` to opt out.
-6. **Job Name & Target Database**: Pattern is `[firstname]-[lastname]-TPCDI`. The benchmark workflow appends `-SF{N}-{exec_type}-{datagen}-{batched}` to the job name and `_{exec_type}_{datagen}_{batched}` to `wh_db` so concurrent variants don't collide.
-7. **Various cluster options**: When not choosing serverless, the DBR and worker/driver type dropdowns let you override the cloud-aware defaults the Driver picks for you.
+Each cell prints a clickable link to the created job(s).
 
+### Job naming convention
 
-## Components of Execution
-The TPC-DI has an initial "setup" step, followed by the benchmark execution.  
+`{base}-SF{sf}-{Batched}-{Exec}-{Gen}` for standard variants; `{base}-SF{sf}-AugmentedIncremental-{Cluster|SDP}-Parent` for the augmented parent. Each job carries a `data_generator: spark|native_jar` tag so they're filterable without parsing the name.
 
-![Execution Journey](/src/tools/readme_images/tpcdi_execution_journey.png "Execution Journey")
+## Compute & sizing
 
-### Step 1) Setup: Data Generation and Workflow Generation  
-This portion is **NOT benchmarked**.  The sole purpose of this step is to:
-1. Create the necessary raw data and store them in UNITY CATALOG
-2. Create a Databricks Workflow (this created workflow is what executes the ingestion and transformations for the benchmark).  
+### Serverless (default)
+SDP pipelines, augmented variants, and the Spark datagen all run on serverless with `performance_target: PERFORMANCE_OPTIMIZED`. No DBR / node-type / cluster restrictions.
 
-#### Data Generation
-Two interchangeable implementations are supported, selected via the Driver's
-**Data Generator** widget (job parameter `spark_or_native_datagen`):
+### Non-serverless Cluster (when `Serverless=NO`)
+The Driver picks an ARM-preferred, local-NVMe-preferred node and sizes the cluster by SF. Cloud-aware (Azure D_v6 / L_v3, AWS Graviton m8g/m8gd/i7i, GCP c4a-lssd):
 
-- **`spark` (default)** — distributed PySpark generator. The unified entry
-  notebook (`src/tools/data_gen.py`) imports `spark_runner` (which calls into
-  `src/tools/tpcdi_gen/`) and runs everything inline on serverless. Outputs
-  are split files like `Customer_1.txt`, `Customer_2.txt`, etc.
-- **`native`** — the legacy single-threaded DIGen.jar wrapped by
-  `src/tools/digen_runner.py` (also invoked from `data_gen.py`). Forced to
-  a non-serverless DBR 15.4 + Photon cluster (a Java subprocess can't run
-  on serverless). Worker count scales with SF: single-node up to SF=1000;
-  +1 worker per 1000 of SF above that. Outputs are single files per table
-  (`Customer.txt`, `Trade.txt`, etc.).
+| Scale Factor | Total Raw Data | Suggested Cluster |
+|---|---|---|
+| 10 | ~1 GB | single-node 8-core |
+| 100 | ~10 GB | single-node 8-core |
+| 1000 | ~100 GB | single-node 16-core |
+| 5000 | ~500 GB | 32-core driver + 5 × 16-core workers |
+| 10000 | ~1 TB | 64-core driver + 10 × 16-core workers |
+| 20000 | ~2 TB | 64-core driver + 20 × 16-core workers |
 
-The benchmark ingestion code reads either format via brace-alternation globs
-of the form `{Customer.txt,Customer_[0-9]*.txt}`, so the rest of the pipeline
-is identical.
+### DBSQL Warehouses
+Auto-created if missing (serverless, sized by SF). Names are generic so multiple users can share:
 
-##### Interface
-The Driver creates a datagen job with parameters:
-  - `spark_or_native_datagen` — `spark` (default) or `native` (case-insensitive, trimmed)
-  - `scale_factor` — `10`, `100`, `1000`, `5000`, `10000`, `20000`
-  - `catalog` — target catalog for the output volume (default `main`)
-  - `regenerate_data` — `YES` to wipe and regenerate; `NO` (default) to no-op if output already exists
-  - `log_level` — `DEBUG` / `INFO` / `WARN` (consumed by the Spark runner; ignored by DIGen)
+| SF | Warehouse |
+|---|---|
+| 10 / 100 | `TPCDI_2X-Small` |
+| 1000 | `TPCDI_Small` |
+| 5000 | `TPCDI_Large` |
+| 10000 | `TPCDI_X-Large` |
 
-Output path:
-  - `spark` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/sf={scale_factor}/`
-  - `native` → `/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/sf={scale_factor}/`
+### Native DIGen.jar
+Forced to a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). The Driver provisions this automatically. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
 
-Native pre-flight: before any volume side effect, `digen_runner` verifies (a)
-`java` is callable, (b) a writable scratch directory is available
-(`/local_disk0` preferred; `/tmp` fallback for SF≤100), and (c) DBR ≤ 15.4.
-If any check fails the job hard-aborts with a clear "switch the cluster to
-SINGLE_USER access mode" hint and **no volume data is touched**.
+## Data generation paths
 
-![Type of Raw Data Generated](/src/tools/readme_images/data_gen.png "Type of Raw Data Generated")
+| | Spark (default) | Native (DIGen.jar) |
+|---|---|---|
+| Engine | Distributed PySpark | Single-threaded Java |
+| Compute | Serverless | Non-serverless DBR 15.4 + Photon |
+| Output path | `…/tpcdi_volume/spark_datagen/sf={SF}/` | `…/tpcdi_volume/sf={SF}/` |
+| File shape | Split (`Customer_1.txt`, `Customer_2.txt`, …) | Single (`Customer.txt`) |
+| Determinism | Same SF → same row counts + audit values | Reference (byte-compatible upstream) |
+| Scaling | Linear across executors | Bound by single-node throughput |
 
-##### Architecture highlights
-- **Dependency-graph scheduling** — Reference / HR / FINWIRE / Prospect start
-  concurrently; CustomerMgmt starts as soon as HR publishes the `_brokers`
-  temp view; Trade / DailyMarket / WatchHistory start as soon as FINWIRE
-  publishes `_symbols` (via an early threading-event + Parquet-staged view).
-  On serverless this means all four heavy phases overlap.
-- **Serverless-compatible caching** — Spark Connect forbids `persist()` /
-  `UNCACHE TABLE`, so large intermediates are staged to Parquet in
-  `_staging/` and read back. `cleanup_staging` removes these at end of run.
-- **Bijection-based ID scheduling** — CustomerMgmt C_IDs and CA_IDs for
-  INACT / CLOSEACCT / UPDCUST / UPDACCT / ADDACCT actions are pre-computed
-  at the driver via a numpy-vectorised implementation of DIGen's
-  `GrowingOffsetPermutation` (pool bijection with skip-resolution over
-  cumulative deletions). Row counts match DIGen exactly at every scale.
-- **FINWIRE split + repartition** — CMP, SEC, and FIN subsets write to
-  independent staging dirs in parallel instead of being union'd into a
-  single 244 M-row stream. FIN is repartitioned to `max(8, sf // 25)`
-  partitions ahead of the cross-join so it fans out across the executor
-  pool instead of stacking on spark.range default partitioning.
-- **Static audit snapshots** — pre-computed `*_audit.csv` files for the
-  common scale factors live at `src/tools/tpcdi_gen/static_audits/sf={sf}/`
-  and are copied at the end of a run instead of being regenerated. Unknown
-  scale factors fall back to dynamic audit regeneration.
-- **FUSE-hardened file concat** — output parts bin-packed into ~128 MB
-  files via pure-Python `shutil.copyfileobj` with per-source retries
-  (handles `EAGAIN` from the UC Volume FUSE mount under heavy parallel I/O).
+The benchmark reads either format via brace-alternation globs (`{Customer.txt,Customer_[0-9]*.txt}`) so the rest of the pipeline is identical.
 
-##### Notes
-- The generator is deterministic — same scale factor always yields the
-  same row counts and audit values.
-- Partition sizing has been tuned per phase (Prospect, FINWIRE/FIN,
-  CustomerMgmt schedule DF) to avoid spill on serverless while leaving
-  executor capacity for concurrent phases.
-- If the target scale factor directory already exists and
-  `regenerate_data=NO`, the step is a no-op (safe to re-run).
+Pre-flight on the native path: before any volume side effect, `digen_runner` verifies (a) `java` is callable, (b) writable scratch dir exists (`/local_disk0` preferred, `/tmp` fallback for SF≤100), (c) DBR ≤ 15.4. Hard-aborts with a "switch to SINGLE_USER access mode" hint if any check fails — no volume data is touched.
 
-#### Workflow Creation
-The Databricks TPC-DI is developed in a way to make the execution simple and easy.  
-- The TPC-DI Driver will provide simple default dropdown widgets. These widgets are populated based on your environment after running the setup command in the first cell.
-  - Some are set to defaults that we suggest changing - such as workflow type and serverless.
-  - Others are set to the suggested values and pre-populated with the actual options available.  These include DBR, Worker/Driver Type, Job Name, Target Catalog (we suggest only changing this one in cases where you don't have permissions to create a catalog), and target database
-- If you prefer to change some values such as DBR, Worker/Driver Types, Scale Factor, etc, then the widgets give you the flexibility to do so.
-  - Note that the widgets are dynamic and are added, removed, and populated based on your Databricks workspace configuration, cluster configuration, workflow type chosen, and whether Serverless is chosen.  For example, worker/driver type and DBR are removed as widgets if choosing serverless.
-- Workflow creation should take less than 1 second.  When complete you will be given a link to open your workflow.
+## Augmented Incremental — what's different
 
-##### CLUSTER/WAREHOUSE SIZING
-###### DBSQL Warehouse Size
-- A ***SERVERLESS*** DBSQL Warehouse will **automatically** be generated for you, if one doesn't exist already.
-- Additionally, to keep down on the number of warehouses created if multiple users will be launching this benchmark in the workspace, the warehouse names are generic and are intended to be shared across other users.
-- All created warehouses are only as big as they need to be and are configured with an extremelely low auto-terminate value of 1 minute to keep costs as low as possible.
-- The names and sizes are below:  
-  | Scale Factor | Name and Size  |
-  | ------------ | -------------- |
-  | 10           | TPCDI_2X-Small |
-  | 100          | TPCDI_2X-Small |
-  | 1000         | TPCDI_Small    |
-  | 5000         | TPCDI_Large    |
-  | 10000        | TPCDI_X-Large  |
+Standard TPC-DI is heavily skewed to a single bulk historical load — Batch 2 and Batch 3 are tiny by comparison. Augmented Incremental reshapes this into 730 daily increments (2015-07-06 → 2017-07-05), exercising CDC + SCD2 maintenance + cumulative compaction the way a production daily pipeline does.
 
-###### Cluster Size
-*The following applies only when **not choosing SERVERLESS** as the compute choice. Serverless will automatically scale to meet the demands of the job*
-- The workflow that is created by running these notebooks will size the cluster according to your scale factor and node type selected.  
-- To reduce complexity in making this "generic" approach to creating a dynamic job, we abstracted away the sizing of the cluster (number of worker nodes).  Repeated tests have revealed the optimal number of cores per scale factor to achieve the BEST TCO (not necessarily the fastest job but the cheapest way to execute - which is the goal of the benchmark).  A single node cluster could handle all the way up to a scale factor of 5000, depending on the size of that node.  The chart is below.
-    | Scale Factor | Total Raw Data | Optimal Worker Cores|
-    | ------------ | -------------- | ------------------- |
-    | 10           | .961 GB        | As low as 1         |
-    | 100          | 9.66 GB        | As low as 2         |
-    | 1000         | 97 GB          | 16                  |
-    | 10000        | 970 GB         | 144                 |
-- **IF** you truly want to change these values, we suggest building your workflow using the workflow_builder and then changing the cluster configuration from the workflow created.  
+- **Setup** clones the static dimension tables from `tpcdi_incremental_staging_{sf}` (a shared per-SF staging schema), creates per-user `_dailybatches/{wh_db}_{sf}/` and `_checkpoints/{wh_db}_{sf}/` directories, and emits a 730-day list as a job task value.
+- **Loop** (via Databricks `for_each_task`): each iteration runs `simulate_filedrops` (drops one day's pre-staged files into the Autoloader watch dir) → bronze ingest fan-out → silver/gold MERGE incrementals.
+- **Cleanup** is gated by a `delete_when_finished_TRUE_FALSE` condition_task; default is `FALSE` because a full 730-day run takes ~a week and you'll typically want to inspect the result tables. Set the parameter to `TRUE` per-run if you want to drop them.
+- **No audit step** — the standard TPC-DI audit checks don't apply to a daily streaming model. (Future work: add row-count parity vs a known-good staged result.)
 
-### Step 2) TPC-DI Workflow Execution
-- After opening the link provided for your workflow, to begin execution click the **Run** button. To watch execution, open the new Job Run.  
+The SDP variant uses a library-swap trick (`update_pipeline_notebook`) to bulk-load history with `dlt_historical` first, then swap to `dlt_incremental` for the streaming loop. Same physical pipeline, different libraries between phases.
 
-# Footnote Disclaimer
-As the Databricks implementation of the TPC-DI is an unpublished TPC Benchmark, the following is required legalese per TPC Fair Use Policy:  
-*The Databricks TPC-DI is derived from the TPC-DI and as such is not comparable to published TPC-DI results.  The current scoring metrics for the TPC-DI preclude any official submission for cloud-based execution and therefore The Databricks TPC-DI can not OFFIALLY be submitted under current scoring metrics.  Databricks withholds the ability to submit an official submission to the TPC for this benchmark upon future revision of its scoring metrics. Prior to that, we maintain that this implementation follows all guidelines, rules, and audits required of the official TPC-DI specification.*
+## Repo layout (high level)
+
+```
+src/
+  TPC-DI Driver.py                            entry-point notebook
+  tools/
+    data_gen.py                               unified datagen notebook (spark + digen)
+    spark_runner.py / digen_runner.py         per-generator runners
+    setup_context.py                          tpcdi_config bootstrap
+    workflow_builders/                        Python builders, no Jinja
+      datagen_{spark,digen}.py
+      workflows_{single_batch,incremental}.py
+      sdp_{pipeline,workflow}.py
+      augmented_{classic,sdp}.py
+      warehouse.py
+    cleanup_after_benchmark.sql               final cleanup task
+    tpcdi_gen/                                Spark data-generator modules
+      static_audits/sf={sf}/                  pre-computed audit snapshots
+    incremental_file_splitting/               (Phase B) tools to populate _staging
+  incremental_batches/                        Cluster + DBSQL benchmark SQL
+    bronze/ / silver/ / gold/ / audit_validation/
+    augmented_incremental/                    Augmented benchmark (Cluster + SDP)
+  single_batch/
+    SQL/                                      single-batch Cluster + DBSQL
+    spark_declarative_pipelines/              SDP variant
+tests/
+  test_workflow_builders.py                   builder unit tests
+  smoke_run_workflows.py                      integration smoke
+CLAUDE.md                                     architecture context for AI agents
+```
+
+## Limitations
+
+- Databricks E2 deployment + Repos required.
+- Unity Catalog required for any non-`hive_metastore` catalog (and for lineage / PK-FK constraints).
+- Serverless is optional but assumed for most paths; non-serverless variants need an appropriately sized cluster.
+- The native DIGen.jar path requires DBR 15.4 + Photon and a `SINGLE_USER` cluster access mode for `/local_disk0` scratch.
+- Augmented Incremental currently has only SF=20000 staged; other SFs need the file-splitting tools to run first.
+
+## Notes on scoring
+
+The TPC-DI scoring metrics haven't been modernized for cloud-native execution, and there has never been an official submission. This implementation does not publish throughput numbers. From the TPC Fair Use Policy:
+
+> The Databricks TPC-DI is derived from the TPC-DI and as such is not comparable to published TPC-DI results. The current scoring metrics for the TPC-DI preclude any official submission for cloud-based execution and therefore the Databricks TPC-DI cannot OFFICIALLY be submitted under current scoring metrics. Databricks withholds the ability to submit an official submission to the TPC for this benchmark upon future revision of its scoring metrics. Prior to that, we maintain that this implementation follows all guidelines, rules, and audits required of the official TPC-DI specification.
