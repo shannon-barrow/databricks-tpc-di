@@ -183,7 +183,12 @@ if _tools_dir not in sys.path:
 print(f"data_gen dispatch → {_choice!r}")
 print(f"  scale factor:     {_scale_factor}")
 print(f"  catalog:          {_catalog}")
-print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
+if _choice == "augmented_incremental":
+    print(f"  output target:    Delta tables at "
+          f"{_catalog}.tpcdi_raw_data.{{dataset}}{_scale_factor} "
+          f"(no volume files)")
+else:
+    print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
 print(f"  regenerate data:  {_regenerate}")
 print(f"  log level:        {_log_level}")
 print()  # blank line before the runner output begins
