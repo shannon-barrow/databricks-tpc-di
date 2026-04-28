@@ -553,9 +553,7 @@ write_audit([
     audit_row("Financial",   1, "FW_FIN_DUP", -1),
 ], f"{b1}/FINWIRE_audit.csv")
 
-# Prospect P_C_MATCHING is the count of prospects matching DimCustomer rows.
-# It's not directly derivable from Prospect.csv alone — DIGen sets it to
-# round(prospect_total * P_MATCH_PCT). Match P_MATCH_PCT=0.25.
+# Prospect P_C_MATCHING is the count of prospects matching DimCustomer rows. It's not directly derivable from Prospect.csv alone — DIGen sets it to round(prospect_total * P_MATCH_PCT). Match P_MATCH_PCT=0.25.
 p_total_b1 = prospect_counts[1]
 p_match_b1 = int(p_total_b1 * 0.25)  # DIGen P_MATCH_PCT
 write_audit([

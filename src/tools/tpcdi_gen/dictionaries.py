@@ -117,8 +117,7 @@ def load_all(dict_dir: str = None) -> dict:
         "/Workspace/Users/shannon.barrow@databricks.com/tpc-di/tpcdi_gen/dicts/tpc-e",
     ])
 
-    # Find first valid path: must be a directory containing last_names.dict.
-    # OSError is caught because /Workspace paths raise OSError on newer DBR versions.
+    # Find first valid path: must be a directory containing last_names.dict. OSError is caught because /Workspace paths raise OSError on newer DBR versions.
     base = None
     for p in search_paths:
         try:

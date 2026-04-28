@@ -378,9 +378,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
         ) + [common.cleanup_param()],
     }
 
-    # Cluster: serverless+digen+SF>100 → SingleNode for mavenlib;
-    # not serverless → classic Photon used by all tasks; serverless and
-    # not digen-high-SF → no job_clusters block.
+    # Cluster: serverless+digen+SF>100 → SingleNode for mavenlib; not serverless → classic Photon used by all tasks; serverless and not digen-high-SF → no job_clusters block.
     digen_high_sf_serverless = (
         data_generator == "digen" and scale_factor > 100 and serverless == "YES"
     )
@@ -399,9 +397,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             cloud_provider=cloud_provider,
         )]
 
-    # Final cleanup pair — condition gate + SQL notebook. Depends on every
-    # leaf so it's last; ALL_DONE means partial-failure runs still reach the
-    # gate, and the SQL only fires when delete_tables_when_finished=TRUE.
+    # Final cleanup pair — condition gate + SQL notebook. Depends on every leaf so it's last; ALL_DONE means partial-failure runs still reach the gate, and the SQL only fires when delete_tables_when_finished=TRUE.
     tasks.extend(common.make_cleanup_tasks(
         repo_src_path=repo_src_path, job_name=job_name,
         exec_type=exec_type, serverless=serverless, wh_id=wh_id,

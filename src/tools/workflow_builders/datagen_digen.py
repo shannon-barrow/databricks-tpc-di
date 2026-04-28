@@ -58,13 +58,10 @@ def _digen_cluster_spec(scale_factor: int, node_types: dict, cloud_provider: str
         "data_security_mode": "SINGLE_USER",
         "runtime_engine": "PHOTON",
         "num_workers": 0,
-        # Auto-attach EBS / managed disks if the chosen node has no local NVMe
-        # (e.g. AWS m8g without 'd' suffix). DIGen writes its tmp output to
-        # /local_disk0; without elastic disk small SF runs may OOM on root.
+        # Auto-attach EBS / managed disks if the chosen node has no local NVMe (e.g. AWS m8g without 'd' suffix). DIGen writes its tmp output to /local_disk0; without elastic disk small SF runs may OOM on root.
         "enable_elastic_disk": True,
     }
-    # On GCP, if the picked node isn't an `-lssd` variant, explicitly attach
-    # local SSDs via gcp_attributes.local_ssd_count (~1 SSD/4 cores).
+    # On GCP, if the picked node isn't an `-lssd` variant, explicitly attach local SSDs via gcp_attributes.local_ssd_count (~1 SSD/4 cores).
     _node_picker.apply_gcp_local_ssd_if_needed(
         new_cluster, node, node_types.get(node, {}), cloud_provider, target_cores,
     )

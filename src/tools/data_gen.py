@@ -181,8 +181,7 @@ print(f"  regenerate data:  {_regenerate}")
 print(f"  log level:        {_log_level}")
 print()  # blank line before the runner output begins
 
-# Both runner.run() functions take the same kwargs. log_level is consumed by
-# spark_runner and silently ignored by digen_runner via **_unused.
+# Both runner.run() functions take the same kwargs. log_level is consumed by spark_runner and silently ignored by digen_runner via **_unused.
 _run_kwargs = dict(
     scale_factor=_scale_factor,
     catalog=_catalog,

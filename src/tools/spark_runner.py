@@ -56,13 +56,7 @@ def run(
 
     _tlog(f"spark_runner.run() entered (scale_factor={scale_factor}, catalog={catalog})")
 
-    # Raise broadcast-join thresholds. The CustomerMgmt schedule DF alone is
-    # ~180MB at SF=5000 and scales with SF; default (10MB static / 30MB AQE)
-    # forces Spark into shuffle joins that materialize the 25M-row all_df
-    # across executors. Bumping to 250MB lets Spark broadcast the schedule
-    # without the shuffle storm. NB: on Spark Connect / serverless the very
-    # first spark.conf.set() is the first remote call of the session, so
-    # initial JVM + Unity-Catalog session init time is charged here.
+    # Raise broadcast-join thresholds. The CustomerMgmt schedule DF alone is ~180MB at SF=5000 and scales with SF; default (10MB static / 30MB AQE) forces Spark into shuffle joins that materialize the 25M-row all_df across executors. Bumping to 250MB lets Spark broadcast the schedule without the shuffle storm. NB: on Spark Connect / serverless the very first spark.conf.set() is the first remote call of the session, so initial JVM + Unity-Catalog session init time is charged here.
     _tlog("setting spark.sql.autoBroadcastJoinThreshold=250m (first spark-connect call — warmup)")
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "250m")
     _tlog("setting spark.databricks.adaptive.autoBroadcastJoinThreshold=250m")
@@ -104,9 +98,7 @@ def run(
     else:
         _tlog("no prior output to delete")
 
-    # Resolve module source. Try workspace path first (works on SINGLE_USER clusters);
-    # fall back to a Volume copy for USER_ISOLATION/SHARED clusters where /Workspace
-    # paths aren't accessible via Python file I/O.
+    # Resolve module source. Try workspace path first (works on SINGLE_USER clusters); fall back to a Volume copy for USER_ISOLATION/SHARED clusters where /Workspace paths aren't accessible via Python file I/O.
     _tools_dir = f"{workspace_src_path}/tools"
     _vol_module_dir = f"{tpcdi_directory}_module"
     _vol_tools_dir = f"{_vol_module_dir}/tools"
@@ -167,8 +159,7 @@ def run(
     print(f"Scale Factor: {scale_factor} ")
     print(f"Output: {cfg.volume_path}")
 
-    # Second recursive delete (redundant with the first one above, but harmless
-    # since the first already cleaned anything present).
+    # Second recursive delete (redundant with the first one above, but harmless since the first already cleaned anything present).
     _utlog(f"[Init] redundant cleanup of {cfg.volume_path}", "DEBUG")
     try:
         dbutils.fs.rm(cfg.volume_path, recurse=True)
@@ -184,8 +175,7 @@ def run(
     register_dict_views(spark, dicts)
     _utlog("[Init] dictionary views registered", "DEBUG")
 
-    # Dependency-graph scheduling: each dataset starts as soon as its
-    # specific dependencies are met, maximizing parallelism.
+    # Dependency-graph scheduling: each dataset starts as soon as its specific dependencies are met, maximizing parallelism.
     from tpcdi_gen import reference_tables, hr, finwire, customer
     from tpcdi_gen import market_data, trade, prospect, watch_history
 
@@ -223,10 +213,7 @@ def run(
             return market_data.generate(spark, cfg, dbutils)
         f_dm = executor.submit(run_daily_market)
 
-        # Tier 2: Trade no longer depends on CustomerMgmt or HR (when static
-        # audits are available). n_valid and n_brokers come from cfg analytically;
-        # t_ca_id uses the hash-derived _va_idx directly. Trade only waits for HR
-        # in the dynamic audit regen path (where we need exact _brokers count).
+        # Tier 2: Trade no longer depends on CustomerMgmt or HR (when static audits are available). n_valid and n_brokers come from cfg analytically; t_ca_id uses the hash-derived _va_idx directly. Trade only waits for HR in the dynamic audit regen path (where we need exact _brokers count).
         from tpcdi_gen.audit import static_audits_available as _sa_avail
 
         def run_trade():

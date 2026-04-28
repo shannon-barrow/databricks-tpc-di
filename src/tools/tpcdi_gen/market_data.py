@@ -96,12 +96,10 @@ def _gen_daily_market(spark, cfg, dbutils):
     dm_begin_date = DM_BEGIN_DATE.strftime("%Y-%m-%d")
     dm_end_date = DM_END_DATE.strftime("%Y-%m-%d")
 
-    # _symbols temp view was created by finwire.generate() in Wave 1.
-    # Contains: Symbol, creation_quarter, deactivation_quarter, _idx
+    # _symbols temp view was created by finwire.generate() in Wave 1. Contains: Symbol, creation_quarter, deactivation_quarter, _idx
     symbols_df = spark.table("_symbols")
 
-    # Build symbols with creation/deactivation dates converted from quarter IDs
-    # to calendar dates, then clamp to the DailyMarket date window.
+    # Build symbols with creation/deactivation dates converted from quarter IDs to calendar dates, then clamp to the DailyMarket date window.
     syms_df = (symbols_df
         .select(
             F.col("_idx").alias("sym_id"),
@@ -110,9 +108,7 @@ def _gen_daily_market(spark, cfg, dbutils):
             F.col("deactivation_quarter"))
         .withColumn("_create_date", _quarter_to_date_expr(F.col("creation_quarter")))
         .withColumn("_deact_date", _quarter_to_date_expr(F.col("deactivation_quarter")))
-        # Clamp to DM date range: symbol active on [max(create, DM_BEGIN), min(deact-1, DM_END)]
-        # Deactivation date is exclusive — the security is NOT active on the deactivation day.
-        # Use date_sub to get the last active day before deactivation.
+        # Clamp to DM date range: symbol active on [max(create, DM_BEGIN), min(deact-1, DM_END)] Deactivation date is exclusive — the security is NOT active on the deactivation day. Use date_sub to get the last active day before deactivation.
         .withColumn("_start_date", F.greatest(F.col("_create_date"), F.lit(dm_begin_date).cast("date")))
         .withColumn("_end_date", F.least(F.date_sub(F.col("_deact_date"), 1), F.lit(dm_end_date).cast("date")))
         # Only include symbols that have at least one valid day
@@ -120,10 +116,7 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # --- Sequence + Explode pattern ---
-    # Generate a date array per symbol using F.sequence(), then explode into rows.
-    # Repartition BEFORE explode so the sequence generation runs in parallel across
-    # executors. Without this, a single partition would expand all rows sequentially.
-    # Partition count scales with SF: e.g. SF=1000 -> 250 partitions.
+    # Generate a date array per symbol using F.sequence(), then explode into rows. Repartition BEFORE explode so the sequence generation runs in parallel across executors. Without this, a single partition would expand all rows sequentially. Partition count scales with SF: e.g. SF=1000 -> 250 partitions.
     num_partitions = max(2, int(0.25 * cfg.sf))
     dm_df = (syms_df
         .repartition(num_partitions)
@@ -135,9 +128,7 @@ def _gen_daily_market(spark, cfg, dbutils):
     )
 
     # --- Price generation ---
-    # Each price field uses a distinct hash salt so (day_id, sym_id) produces
-    # independent pseudo-random values for close, high, low, and volume.
-    # dm_close is the base; dm_high and dm_low are derived as multipliers of dm_close.
+    # Each price field uses a distinct hash salt so (day_id, sym_id) produces independent pseudo-random values for close, high, low, and volume. dm_close is the base; dm_high and dm_low are derived as multipliers of dm_close.
     dm_df = (dm_df
         .withColumn("_seed_c", F.hash(F.col("day_id"), F.col("sym_id"), F.lit(seed_for("DM", "c"))).cast("long"))
         # dm_close: uniform in [0.50, 1000.00] (99951 discrete values at 0.01 granularity)
@@ -158,9 +149,7 @@ def _gen_daily_market(spark, cfg, dbutils):
     # Write batch 1 (historical): pipe-delimited flat file
     write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
                scale_factor=cfg.sf)
-    # Analytical estimate: sec_total × dm_days × 0.95 (0.95 accounts for symbols
-    # deactivated mid-window on average). Exact count only computed when we
-    # need it for dynamic audit regeneration at an unknown SF.
+    # Analytical estimate: sec_total × dm_days × 0.95 (0.95 accounts for symbols deactivated mid-window on average). Exact count only computed when we need it for dynamic audit regeneration at an unknown SF.
     dm_count_est = int(cfg.sec_total * cfg.dm_days * 0.95)
     counts = {("DailyMarket", 1): dm_count_est}
     log(f"[DailyMarket] ~{dm_count_est:,} historical ({cfg.dm_days} days × {cfg.sec_total} syms, minus deactivations)")
@@ -168,9 +157,7 @@ def _gen_daily_market(spark, cfg, dbutils):
         counts[("DailyMarket", 1)] = dm_df.count()
 
     # --- Incremental batches (batch 2, 3, ...) ---
-    # Each incremental batch covers a single calendar day. Only securities whose
-    # creation_date <= inc_date < deactivation_date are included. Output is in
-    # CDC format: cdc_flag='I' (insert), cdc_dsn = sequential row number.
+    # Each incremental batch covers a single calendar day. Only securities whose creation_date <= inc_date < deactivation_date are included. Output is in CDC format: cdc_flag='I' (insert), cdc_dsn = sequential row number.
     for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
         inc_date = (FIRST_BATCH_DATE + timedelta(days=batch_id - 2)).strftime("%Y-%m-%d")
 
@@ -185,9 +172,7 @@ def _gen_daily_market(spark, cfg, dbutils):
                 (F.col("_deact_date") > F.lit(inc_date).cast("date")))
         )
 
-        # Generate one row per active symbol for this single day, using the same
-        # price formulas but with different hash salts ("inc_c", "inc_h", etc.)
-        # to produce different values than the historical batch.
+        # Generate one row per active symbol for this single day, using the same price formulas but with different hash salts ("inc_c", "inc_h", etc.) to produce different values than the historical batch.
         inc_df = (active_syms
             .withColumn("cdc_flag", F.lit("I"))
             .withColumn("cdc_dsn", F.col("sym_id").cast("long") + 1)

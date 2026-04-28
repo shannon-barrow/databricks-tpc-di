@@ -91,8 +91,7 @@ from .utils import write_file, seed_for, hash_key, log
 from .audit import static_audits_available
 
 
-# 80% of each update's rows are ACTV (new watches), 20% are CNCL (cancellations).
-# This ratio is hardcoded in the original DIGen WatchHistoryBlackBox.
+# 80% of each update's rows are ACTV (new watches), 20% are CNCL (cancellations). This ratio is hardcoded in the original DIGen WatchHistoryBlackBox.
 WH_ACTIVE_PCT = 0.8
 
 
@@ -129,19 +128,15 @@ def _compute_cp_params(cfg):
     Returns a dict with all parameters needed by _gen_historical and _gen_incremental.
     """
     internal_sf = cfg.internal_sf
-    # CustomerMgmt update sizing — mirrors DIGen's CMUpdateLastID derivation.
-    # cust_per_update / acct_per_update are the total customer/account operations
-    # per update round; fractions below split them into new/update/deactivate.
+    # CustomerMgmt update sizing — mirrors DIGen's CMUpdateLastID derivation. cust_per_update / acct_per_update are the total customer/account operations per update round; fractions below split them into new/update/deactivate.
     cust_per_update = int(0.005 * internal_sf)
     acct_per_update = int(0.01 * internal_sf)
     new_custs = int(cust_per_update * 0.7)
     new_accts = int(acct_per_update * 0.7)
-    # rpu (rows per update) = total CustomerMgmt rows generated per update round:
-    #   new_accts + updated_accts(20%) + deactivated_accts(10%) + updated_custs(20%) + deactivated_custs(10%)
+    # rpu (rows per update) = total CustomerMgmt rows generated per update round: new_accts + updated_accts(20%) + deactivated_accts(10%) + updated_custs(20%) + deactivated_custs(10%)
     rpu = new_accts + int(acct_per_update * 0.2) + int(acct_per_update * 0.1) + int(cust_per_update * 0.2) + int(cust_per_update * 0.1)
     cm_final = cfg.cm_final_row_count
-    # cm_update_last_id = number of update generations. The initial load (hist_size)
-    # plus cm_update_last_id * rpu rows = cm_final total rows.
+    # cm_update_last_id = number of update generations. The initial load (hist_size) plus cm_update_last_id * rpu rows = cm_final total rows.
     cm_update_last_id = (cm_final - new_accts) // rpu
     hist_size = cm_final - cm_update_last_id * rpu
 
@@ -154,9 +149,7 @@ def _compute_cp_params(cfg):
     del_per_update = wh_rows_per_update - new_per_update
 
     # --- Deactivation quarters: how many security quarters elapse before customers ---
-    # Securities start appearing at FW_BEGIN_DATE; customers start at CM_BEGIN_DATE.
-    # The gap in quarters determines how many securities are "pre-loaded" (start_right)
-    # vs spread across customer generations (growth_right).
+    # Securities start appearing at FW_BEGIN_DATE; customers start at CM_BEGIN_DATE. The gap in quarters determines how many securities are "pre-loaded" (start_right) vs spread across customer generations (growth_right).
     fw_begin_ms = int(FW_BEGIN_DATE.timestamp() * 1000)
     cm_begin_ms = int(CM_BEGIN_DATE.timestamp() * 1000)
     # Subtract 2 because DIGen skips the first and last partial quarters.
@@ -164,8 +157,7 @@ def _compute_cp_params(cfg):
 
     # sec_q1 = securities in the first quarter (total minus growth over remaining quarters).
     sec_q1 = cfg.sec_total - (cfg.fw_quarters - 1) * cfg.sec_per_quarter
-    # hist_sec_ids = total securities available when customer updates begin.
-    # This becomes start_right — the initial right dimension of the cross-product.
+    # hist_sec_ids = total securities available when customer updates begin. This becomes start_right — the initial right dimension of the cross-product.
     if sec_updates_before_cust <= 0:
         hist_sec_ids = 0
     elif sec_updates_before_cust == 1:
@@ -173,8 +165,7 @@ def _compute_cp_params(cfg):
     else:
         hist_sec_ids = sec_q1 + (sec_updates_before_cust - 1) * cfg.sec_per_quarter
 
-    # Remaining security quarters are spread evenly across customer generations
-    # to give growth_right — how many new securities are added per generation.
+    # Remaining security quarters are spread evenly across customer generations to give growth_right — how many new securities are added per generation.
     remaining_sec_updates = max(0, cfg.fw_quarters - sec_updates_before_cust)
     spread_sec = int(remaining_sec_updates * cfg.sec_per_quarter / wh_update_last_id) if wh_update_last_id > 0 else 0
 
@@ -229,20 +220,11 @@ def _gen_historical(spark, cfg, dbutils):
     n_cncl = del_pu * total_updates
     wh_total_hist = wh_rpu * total_updates
 
-    # Precompute generation sizes (Python side — only ~435 values).
-    # Also precompute bijective permutation parameters (b, c) per generation
-    # so each generation's ACTV records map to UNIQUE pair_ids via the LCG
-    # f(x) = (b*x + c) % new_cp_size (DIGen-style). This eliminates the hash
-    # collisions that previously caused ~5-25% WH_ACTIVE drift vs DIGen as
-    # scale grew — each record now gets a distinct pair instead of colliding
-    # with other records' hashes. `b` must be coprime with new_cp_size; we
-    # start from a large odd prime-ish candidate and step until gcd==1.
+    # Precompute generation sizes (Python side — only ~435 values). Also precompute bijective permutation parameters (b, c) per generation so each generation's ACTV records map to UNIQUE pair_ids via the LCG f(x) = (b*x + c) % new_cp_size (DIGen-style). This eliminates the hash collisions that previously caused ~5-25% WH_ACTIVE drift vs DIGen as scale grew — each record now gets a distinct pair instead of colliding with other records' hashes. `b` must be coprime with new_cp_size; we start from a large odd prime-ish candidate and step until gcd==1.
     import math as _math
     import random as _rand
     _bc_rng = _rand.Random(seed_for("WH", "bcperm"))
-    # Photon evaluates `pos_in_update * bij_b + bij_c` in signed bigint. At SF>=20000
-    # with naive `b` in [1, modulus), `b * max_pos` overflows 2^63-1 and Photon raises
-    # ARITHMETIC_OVERFLOW under ANSI. Cap `b` so `b * max_pos + c` stays in bigint.
+    # Photon evaluates `pos_in_update * bij_b + bij_c` in signed bigint. At SF>=20000 with naive `b` in [1, modulus), `b * max_pos` overflows 2^63-1 and Photon raises ARITHMETIC_OVERFLOW under ANSI. Cap `b` so `b * max_pos + c` stays in bigint.
     _LONG_SAFE = 1 << 62  # headroom for +bij_c (bij_c <= modulus < 2^62)
     def _bij_params(modulus: int, max_pos: int) -> tuple:
         if modulus < 3:
@@ -285,18 +267,14 @@ def _gen_historical(spark, cfg, dbutils):
     total_right = sr + gr * max_gen
     log(f"[WatchHistory] Final dimensions: {total_left} custs x {total_right} secs = {total_left * total_right} total CP space", "DEBUG")
 
-    # Timestamp range: spread evenly across WH_BEGIN_DATE to WH_END_DATE.
-    # Each generation gets a secs_per_update-wide time window, and records within
-    # a generation are interpolated within that window by position.
+    # Timestamp range: spread evenly across WH_BEGIN_DATE to WH_END_DATE. Each generation gets a secs_per_update-wide time window, and records within a generation are interpolated within that window by position.
     wh_begin_s = int(WH_BEGIN_DATE.timestamp())
     wh_end_s = int(WH_END_DATE.timestamp())
     wh_range_s = wh_end_s - wh_begin_s
     secs_per_update = wh_range_s // max(1, total_updates)
 
     # === Build generation lookup as broadcast DataFrame ===
-    # This small DataFrame (~435 rows) is broadcast-joined to every WH record
-    # so each record knows its generation's cross-product geometry and its
-    # bijective permutation parameters.
+    # This small DataFrame (~435 rows) is broadcast-joined to every WH record so each record knows its generation's cross-product geometry and its bijective permutation parameters.
     gen_rows = [(g, int(ls), int(rs), int(pls), int(prs), int(pcp), int(tcp), int(ncp),
                  int(bb), int(bc))
                 for g, ls, rs, pls, prs, pcp, tcp, ncp, bb, bc in gen_info]
@@ -305,10 +283,7 @@ def _gen_historical(spark, cfg, dbutils):
          "prev_total_cp", "total_cp", "new_cp_size", "bij_b", "bij_c"])
 
     # === Step 1: Generate ONLY ACTV records ===
-    # Optimization: CNCL records are regenerated from sampling ACTV in Step 6, so
-    # generating all wh_total_hist rows (including CNCL slots) wastes ~20% of compute
-    # on pair decomposition, symbol joins, and timestamps for rows that are discarded.
-    # Instead, generate only the ACTV slots: new_pu per generation × total_updates.
+    # Optimization: CNCL records are regenerated from sampling ACTV in Step 6, so generating all wh_total_hist rows (including CNCL slots) wastes ~20% of compute on pair decomposition, symbol joins, and timestamps for rows that are discarded. Instead, generate only the ACTV slots: new_pu per generation × total_updates.
     n_actv_slots = new_pu * total_updates
     all_df = (spark.range(0, n_actv_slots).withColumnRenamed("id", "actv_id")
         .withColumn("update_id", (F.col("actv_id") / F.lit(new_pu)).cast("int"))
@@ -322,13 +297,7 @@ def _gen_historical(spark, cfg, dbutils):
     all_df = all_df.join(gen_df, all_df["update_id"] == gen_df["gen_id"], "left")
 
     # === Step 2: Assign unique pair within generation via bijective LCG ===
-    # f(x) = (b*x + c) % modulus  — where b coprime with modulus (guarantees
-    # bijection on [0, modulus)). Replaces hash-based selection which had
-    # collisions scaling with new_pu²/new_cp_size. pos_in_update (= rid in
-    # generation) ranges [0, new_pu); new_pu ≤ new_cp_size so the mapping
-    # is injective over the used domain.
-    #   Gen 0: modulus = total_cp (initial cross-product); no offset.
-    #   Gen g>0: modulus = new_cp_size; offset by prev_total_cp for global pair space.
+    # f(x) = (b*x + c) % modulus  — where b coprime with modulus (guarantees bijection on [0, modulus)). Replaces hash-based selection which had collisions scaling with new_pu²/new_cp_size. pos_in_update (= rid in generation) ranges [0, new_pu); new_pu ≤ new_cp_size so the mapping is injective over the used domain. Gen 0: modulus = total_cp (initial cross-product); no offset. Gen g>0: modulus = new_cp_size; offset by prev_total_cp for global pair space.
     all_df = (all_df
         .withColumn("_pair_id",
             F.when(F.col("update_id") == 0,
@@ -341,23 +310,13 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # === Step 3: Decompose pair_id into (cust_idx, sec_idx) ===
-    # GrowingCrossProductLong.getPair() logic:
-    # The flat pair_id must be decomposed back into 2D coordinates (customer, security).
-    # The cross-product has three regions with different decomposition rules:
+    # GrowingCrossProductLong.getPair() logic: The flat pair_id must be decomposed back into 2D coordinates (customer, security). The cross-product has three regions with different decomposition rules:
     #
-    # Region A (pair_id < start_left * start_right):
-    #   Generation 0's initial rectangle. Simple row-major: cust = pair_id / sr, sec = pair_id % sr.
+    # Region A (pair_id < start_left * start_right): Generation 0's initial rectangle. Simple row-major: cust = pair_id / sr, sec = pair_id % sr.
     #
-    # Region B (within "existing customers x new securities"):
-    #   x = pair_id - prev_total_cp (offset into this generation's new pairs)
-    #   If x < prev_left_size * growth_right, the pair is in the "existing x new" rectangle:
-    #     cust_idx = x % prev_left_size  (cycles through existing customers)
-    #     sec_idx  = x / prev_left_size + prev_right_size  (indexes into the new securities)
+    # Region B (within "existing customers x new securities"): x = pair_id - prev_total_cp (offset into this generation's new pairs) If x < prev_left_size * growth_right, the pair is in the "existing x new" rectangle: cust_idx = x % prev_left_size  (cycles through existing customers) sec_idx  = x / prev_left_size + prev_right_size  (indexes into the new securities)
     #
-    # Region C (within "new customers x all securities"):
-    #   Otherwise the pair is in the "new x all" rectangle:
-    #     cust_idx = (x - left_part_offset) / right_size + prev_left_size  (new customer)
-    #     sec_idx  = pair_id % right_size  (any security in the current generation)
+    # Region C (within "new customers x all securities"): Otherwise the pair is in the "new x all" rectangle: cust_idx = (x - left_part_offset) / right_size + prev_left_size  (new customer) sec_idx  = pair_id % right_size  (any security in the current generation)
     hist_cp = F.lit(sl).cast("long") * F.lit(sr).cast("long")
     x_expr = F.col("_pair_id") - F.col("prev_total_cp").cast("long")
     left_part_offset = F.col("prev_left_size").cast("long") * F.lit(gr)
@@ -389,11 +348,7 @@ def _gen_historical(spark, cfg, dbutils):
     # Map _cust_idx to w_c_id (string customer ID)
     all_df = all_df.withColumn("w_c_id", F.col("_cust_idx").cast("string"))
 
-    # Compute _sym_join_idx (the modulo-wrapped security index for symbol lookup).
-    # Duplicates in (w_c_id, w_s_symb) arise entirely from this modulo wrap — different
-    # _sec_idx values mapping to the same symbol. Deduplicating on the integer keys
-    # (w_c_id, _sym_join_idx) BEFORE the symbol join is much cheaper than deduplicating
-    # on string keys after the join: smaller shuffle payload and fewer rows to join.
+    # Compute _sym_join_idx (the modulo-wrapped security index for symbol lookup). Duplicates in (w_c_id, w_s_symb) arise entirely from this modulo wrap — different _sec_idx values mapping to the same symbol. Deduplicating on the integer keys (w_c_id, _sym_join_idx) BEFORE the symbol join is much cheaper than deduplicating on string keys after the join: smaller shuffle payload and fewer rows to join.
     all_df = all_df.withColumn("_sym_join_idx", (F.col("_sec_idx") % F.lit(num_sec)).cast("long"))
 
     # === Step 4: Timestamps ===
@@ -407,10 +362,7 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # === Step 5: Deduplicate on INTEGER keys before symbol join ===
-    # Dedup on (w_c_id, _sym_join_idx) instead of string (w_c_id, w_s_symb). This is
-    # equivalent (same _sym_join_idx always maps to same symbol) but the shuffle carries
-    # integer keys instead of strings, and the symbol broadcast join runs on the smaller
-    # deduped result (~905M rows instead of ~1.2B at SF=5000).
+    # Dedup on (w_c_id, _sym_join_idx) instead of string (w_c_id, w_s_symb). This is equivalent (same _sym_join_idx always maps to same symbol) but the shuffle carries integer keys instead of strings, and the symbol broadcast join runs on the smaller deduped result (~905M rows instead of ~1.2B at SF=5000).
     deduped_df = all_df.dropDuplicates(["w_c_id", "_sym_join_idx"])
 
     # Now join symbols on the smaller deduped DataFrame
@@ -439,22 +391,11 @@ def _gen_historical(spark, cfg, dbutils):
     )
 
     # === Step 5b: Dedup on (w_c_id, w_s_symb) after symbol join ===
-    # The step-5 dedup is on _sym_join_idx; after the join, multiple distinct
-    # _sym_join_idx values can fall back to the same _sym0 symbol, producing
-    # duplicate (w_c_id, w_s_symb) pairs. The ETL's FactWatches Historical
-    # silver loader does GROUP BY (w_c_id, w_s_symb), collapsing such dupes,
-    # so our audit WH_ACTIVE/WH_RECORDS must reflect the post-ETL count.
-    # Dedup here so the file matches what ETL will load.
+    # The step-5 dedup is on _sym_join_idx; after the join, multiple distinct _sym_join_idx values can fall back to the same _sym0 symbol, producing duplicate (w_c_id, w_s_symb) pairs. The ETL's FactWatches Historical silver loader does GROUP BY (w_c_id, w_s_symb), collapsing such dupes, so our audit WH_ACTIVE/WH_RECORDS must reflect the post-ETL count. Dedup here so the file matches what ETL will load.
     deduped_df = deduped_df.dropDuplicates(["w_c_id", "w_s_symb"])
 
     # === Step 6: ACTV + CNCL generation using deterministic hash-based selection ===
-    # Previously used .sample(fraction).limit(target) which is stochastic per-partition
-    # and produces slightly different row counts on each re-evaluation (groupBy.count()
-    # vs. write_file). That divergence over-counts WH_RECORDS in the audit file by
-    # a few hundred rows vs. the actual file, breaking the automated_audit check
-    # "FactWatches active watches" (Row count + Inactive watches == cumulative WH_RECORDS).
-    # Replacing with a deterministic hash filter: pick rows where hash(c_id|symbol)
-    # mod M < cutoff. Count and write see identical rows.
+    # Previously used .sample(fraction).limit(target) which is stochastic per-partition and produces slightly different row counts on each re-evaluation (groupBy.count() vs. write_file). That divergence over-counts WH_RECORDS in the audit file by a few hundred rows vs. the actual file, breaking the automated_audit check "FactWatches active watches" (Row count + Inactive watches == cumulative WH_RECORDS). Replacing with a deterministic hash filter: pick rows where hash(c_id|symbol) mod M < cutoff. Count and write see identical rows.
     actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
     n_actv = cfg.wh_actv_count
     target_total = cfg.wh_total
@@ -537,30 +478,21 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
 
     # DSN continues from where the historical batch left off.
     dsn_base = cfg.wh_total + batch_offset * inc_rows
-    # Customer pool expands each batch: historical customers + all update-generation
-    # customers + incremental-batch customers up to this batch.
+    # Customer pool expands each batch: historical customers + all update-generation customers + incremental-batch customers up to this batch.
     total_customers = cp["hist_size"] + cp["cm_update_last_id"] * cp["new_custs"]
     total_customers += (batch_offset + 1) * cp["new_custs"]
 
     # All incremental records share a single date for this batch.
     batch_date = (FIRST_BATCH_DATE + timedelta(days=batch_id - 1)).strftime("%Y-%m-%d")
 
-    # Build the incremental DataFrame: sequential range, hash-based customer/security
-    # assignment, same 80/20 ACTV/CNCL split as historical.
-    # CNCL rows reuse the same (w_c_id, _sym_idx) pair as the first del_pu
-    # ACTV rows so the ETL's FactWatches silver loader (GROUP BY
-    # (c_id, symbol)) pairs them up. Without this, randomly-picked CNCL
-    # pairs wouldn't match any prior ACTV and the ETL drops them, leaving
-    # our audit WH_RECORDS over-counting by ~del_pu rows per batch.
+    # Build the incremental DataFrame: sequential range, hash-based customer/security assignment, same 80/20 ACTV/CNCL split as historical. CNCL rows reuse the same (w_c_id, _sym_idx) pair as the first del_pu ACTV rows so the ETL's FactWatches silver loader (GROUP BY (c_id, symbol)) pairs them up. Without this, randomly-picked CNCL pairs wouldn't match any prior ACTV and the ETL drops them, leaving our audit WH_RECORDS over-counting by ~del_pu rows per batch.
     inc_df = (spark.range(0, inc_rows).withColumnRenamed("id", "rid")
         .withColumn("cdc_flag", F.lit("I"))
         .withColumn("cdc_dsn", (F.lit(dsn_base) + F.col("rid")).cast("string"))
         .withColumn("w_action",
             F.when(F.col("rid") < F.lit(new_pu), F.lit("ACTV"))
              .otherwise(F.lit("CNCL")))
-        # For ACTV rows: use rid directly. For CNCL rows: reuse the
-        # rid of an ACTV row (CNCL rid = rid - new_pu, wrapped) so
-        # hash inputs match that ACTV's (c_id, symbol).
+        # For ACTV rows: use rid directly. For CNCL rows: reuse the rid of an ACTV row (CNCL rid = rid - new_pu, wrapped) so hash inputs match that ACTV's (c_id, symbol).
         .withColumn("_pair_rid",
             F.when(F.col("w_action") == "ACTV", F.col("rid"))
              .otherwise((F.col("rid") - F.lit(new_pu)) % F.lit(max(1, new_pu))))
@@ -572,8 +504,7 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
         .drop("_pair_rid")
     )
 
-    # Map _sym_idx to w_s_symb with temporal validity check.
-    # FW_BEGIN_DATE, ONE_QUARTER_MS, FIRST_BATCH_DATE already imported via "from .config import *"
+    # Map _sym_idx to w_s_symb with temporal validity check. FW_BEGIN_DATE, ONE_QUARTER_MS, FIRST_BATCH_DATE already imported via "from .config import *"
     fw_begin_s = int(FW_BEGIN_DATE.timestamp())
     quarter_secs = ONE_QUARTER_MS / 1000
     batch_dt = FIRST_BATCH_DATE + timedelta(days=batch_id - 1)
@@ -595,13 +526,7 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
 
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
-    # Dedup ACTV rows on (w_c_id, w_s_symb) — the ETL's FactWatches silver
-    # loader GROUP BYs on these, collapsing any duplicates. CNCL is also
-    # deduped so our audit WH_RECORDS/cncl count matches the ETL's
-    # 'Inactive watches' count (which is one-per-pair, not one-per-row).
-    # Without CNCL dedup, rare (c_id, symb) collisions leak extra rows
-    # into our audit total that the ETL doesn't count, breaking the
-    # FactWatches active watches audit check.
+    # Dedup ACTV rows on (w_c_id, w_s_symb) — the ETL's FactWatches silver loader GROUP BYs on these, collapsing any duplicates. CNCL is also deduped so our audit WH_RECORDS/cncl count matches the ETL's 'Inactive watches' count (which is one-per-pair, not one-per-row). Without CNCL dedup, rare (c_id, symb) collisions leak extra rows into our audit total that the ETL doesn't count, breaking the FactWatches active watches audit check.
     actv_part = inc_df.filter(F.col("w_action") == "ACTV").dropDuplicates(["w_c_id", "w_s_symb"])
     cncl_part = inc_df.filter(F.col("w_action") == "CNCL").dropDuplicates(["w_c_id", "w_s_symb"])
     inc_df = actv_part.unionByName(cncl_part)

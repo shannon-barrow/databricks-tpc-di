@@ -139,14 +139,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     # =====================================================================
     # CMP: Company records
     # =====================================================================
-    # DIGen pattern: large initial burst in Q0, then steady rate per quarter.
-    # ~60% of companies appear in Q0 (historical backfill), rest spread across
-    # later quarters at a rate of cmp_per_quarter.
+    # DIGen pattern: large initial burst in Q0, then steady rate per quarter. ~60% of companies appear in Q0 (historical backfill), rest spread across later quarters at a rate of cmp_per_quarter.
     cmp_df = (spark.range(0, cfg.cmp_total).withColumnRenamed("id", "cmp_id")
-        # Exact DIGen formula (verified at SF=10,100,1000):
-        # cmp_per_quarter = cmp_total // (fw_quarters + 1)
-        # Q0 gets: cmp_total - fw_quarters * cmp_per_quarter (the remainder)
-        # Q1-Q201 each get: cmp_per_quarter
+        # Exact DIGen formula (verified at SF=10,100,1000): cmp_per_quarter = cmp_total // (fw_quarters + 1) Q0 gets: cmp_total - fw_quarters * cmp_per_quarter (the remainder) Q1-Q201 each get: cmp_per_quarter
         .withColumn("quarter_id",
             F.when(F.col("cmp_id") < F.lit(cfg.cmp_total - cfg.fw_quarters * cfg.cmp_per_quarter), F.lit(0))
             .otherwise(
@@ -156,24 +151,20 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
                     F.lit(cfg.fw_quarters - 1))))
         # CIK: zero-padded 10-digit company identifier (natural key)
         .withColumn("CIK", F.lpad(F.col("cmp_id").cast("string"), 10, "0"))
-        # Prefix with "C" to ensure name is never all-numeric. If the name were all
-        # digits, ingest_finwire would misclassify FIN_NAME records as FIN_COMPANYID,
-        # causing the Financial->DimCompany join to fail on those records.
+        # Prefix with "C" to ensure name is never all-numeric. If the name were all digits, ingest_finwire would misclassify FIN_NAME records as FIN_COMPANYID, causing the Financial->DimCompany join to fail on those records.
         .withColumn("CompanyName", F.concat(F.lit("C"), F.substring(F.md5(F.concat(F.col("cmp_id").cast("string"), F.lit("cname"))), 1, 14)))
         # Status: 97% ACTV (active), 3% INAC (inactive) — matches DIGen's distribution
         .withColumn("Status", F.when(hash_key(F.col("cmp_id"), seed_for("CMP", "st")) % 100 < 97, F.lit("ACTV")).otherwise(F.lit("INAC")))
     )
 
-    # PTS: uniformly distributed within the calendar quarter of quarter_id.
-    # See _add_calendar_quarter_timing for why this must be calendar-aligned.
+    # PTS: uniformly distributed within the calendar quarter of quarter_id. See _add_calendar_quarter_timing for why this must be calendar-aligned.
     cmp_df = _add_calendar_quarter_timing(cmp_df)
     cmp_df = (cmp_df
         .withColumn("_q_offset", hash_key(F.col("cmp_id"), seed_for("CMP", "pts")) % F.col("_q_duration_s"))
         .withColumn("PTS", F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
         .drop("_q_start_s", "_q_duration_s", "_q_offset"))
 
-    # Dictionary columns via broadcast join: pick values from pre-loaded dictionaries
-    # using hash-based indexing for deterministic, reproducible assignment.
+    # Dictionary columns via broadcast join: pick values from pre-loaded dictionaries using hash-based indexing for deterministic, reproducible assignment.
     cmp_df = dict_join(cmp_df, "industry_ids", hash_key(F.col("cmp_id"), seed_for("CMP", "ind")), "IndustryID")
     cmp_df = dict_join(cmp_df, "address_lines", hash_key(F.col("cmp_id"), seed_for("CMP", "addr")), "AddrLine1")
     cmp_df = dict_join(cmp_df, "zip_codes", hash_key(F.col("cmp_id"), seed_for("CMP", "zip")), "PostalCode")
@@ -200,12 +191,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     )
 
     # --- CMP CHANGE and DELETE records (matches DIGen's 97% new / 1% change / 2% delete) ---
-    # DIGen generates CHANGE records that modify an existing CIK's attributes (new PTS,
-    # possibly different IndustryID/SPrating) and DELETE records that deactivate a CIK
-    # (Status=INAC). These create multiple SCD2 versions per CIK in DimCompany.
-    # We sample 3% of cmp_ids (1% change + 2% delete) and emit additional rows with
-    # same CIK + later quarter_id. Attributes are regenerated with new seeds so the
-    # SCD2 versions have meaningfully different values.
+    # DIGen generates CHANGE records that modify an existing CIK's attributes (new PTS, possibly different IndustryID/SPrating) and DELETE records that deactivate a CIK (Status=INAC). These create multiple SCD2 versions per CIK in DimCompany. We sample 3% of cmp_ids (1% change + 2% delete) and emit additional rows with same CIK + later quarter_id. Attributes are regenerated with new seeds so the SCD2 versions have meaningfully different values.
     _cmp_pct = hash_key(F.col("cmp_id"), seed_for("CMP", "action_pct")) % 100
     _is_change = _cmp_pct < F.lit(1)
     _is_delete = (_cmp_pct >= F.lit(1)) & (_cmp_pct < F.lit(3))
@@ -223,8 +209,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         # For DELETE: Status=INAC. For CHANGE: keep ACTV (attribute-only change).
         .withColumn("Status",
             F.when(F.col("_action") == "DELETE", F.lit("INAC")).otherwise(F.lit("ACTV")))
-        # Regenerate attributes with action-specific salt so CHANGE rows have
-        # different values from the original (otherwise SCD2 versions are identical).
+        # Regenerate attributes with action-specific salt so CHANGE rows have different values from the original (otherwise SCD2 versions are identical).
         .withColumn("_chg_salt",
             F.when(F.col("_action") == "CHANGE",
                 hash_key(F.col("cmp_id"), seed_for("CMP", "change_salt"))).otherwise(F.lit(0)))
@@ -240,8 +225,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .drop("_q_start_s", "_q_duration_s", "_q_offset", "_chg_salt"))
 
     # --- Persist _cmp_refs temp view (BEFORE unioning extras) ---
-    # _cmp_refs must have one row per cmp_id (the creation event), not one per
-    # CMP record. SEC/FIN use this for temporal integrity checks on creation.
+    # _cmp_refs must have one row per cmp_id (the creation event), not one per CMP record. SEC/FIN use this for temporal integrity checks on creation.
     cmp_ref = cmp_df.select(
         F.col("cmp_id").alias("_idx"),
         "CIK", "CompanyName",
@@ -287,11 +271,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     ex_arr = F.array([F.lit(e) for e in EXCHANGES])
     it_arr = F.array([F.lit(t) for t in ISSUE_TYPES])
 
-    # SEC quarterly distribution (exact DIGen formula):
-    # sec_per_quarter = sec_total // fw_quarters (divided across 202 quarters)
-    # Q0 = 0 (no securities before market opens)
-    # Q1 = sec_total - (fw_quarters - 1) * sec_per_quarter (absorbs remainder)
-    # Q2+ = sec_per_quarter each
+    # SEC quarterly distribution (exact DIGen formula): sec_per_quarter = sec_total // fw_quarters (divided across 202 quarters) Q0 = 0 (no securities before market opens) Q1 = sec_total - (fw_quarters - 1) * sec_per_quarter (absorbs remainder) Q2+ = sec_per_quarter each
     sec_q1 = cfg.sec_total - (cfg.fw_quarters - 1) * cfg.sec_per_quarter
 
     sec_df = (spark.range(0, cfg.sec_total).withColumnRenamed("id", "sec_id")
@@ -315,8 +295,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .withColumn("FirstTradeExchg", F.date_format(F.date_add(F.lit("1880-01-01"),
             (hash_key(F.col("sec_id"), seed_for("SEC", "fte")) % 36500).cast("int")), "yyyyMMdd"))
         .withColumn("Dividend", F.format_string("%.2f", (hash_key(F.col("sec_id"), seed_for("SEC", "div")) % 300) / 100.0))
-        # CoNameOrCIK: reference a CMP that was created BEFORE this SEC record (temporal integrity).
-        # Map sec_id to a candidate cmp_id; the join below validates temporal ordering.
+        # CoNameOrCIK: reference a CMP that was created BEFORE this SEC record (temporal integrity). Map sec_id to a candidate cmp_id; the join below validates temporal ordering.
         .withColumn("_cmp_ref_idx", hash_key(F.col("sec_id"), seed_for("SEC", "ref")) % cmp_count)
     )
 
@@ -327,8 +306,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .withColumn("PTS", F.date_format((F.col("_q_start_s") + F.col("_q_offset")).cast("timestamp"), "yyyyMMdd-HHmmss"))
         .drop("_q_start_s", "_q_duration_s", "_q_offset"))
 
-    # Join to _cmp_refs to resolve the company reference.
-    # Broadcast join since _cmp_refs is small (one row per company).
+    # Join to _cmp_refs to resolve the company reference. Broadcast join since _cmp_refs is small (one row per company).
     sec_df = sec_df.join(
         spark.table("_cmp_refs").select(
             F.col("_idx").alias("_cmp_ref_idx"),
@@ -337,10 +315,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
             F.col("creation_quarter").alias("_ref_cq")),
         on="_cmp_ref_idx", how="left")
 
-    # Temporal integrity enforcement: if the referenced company was created AFTER
-    # this SEC record's quarter, fall back to CMP 0 (always exists in Q0).
-    # 50/50 split between using CIK (numeric) vs CompanyName (string) as the reference.
-    # Company 0's actual name (used as temporal fallback for name-based references)
+    # Temporal integrity enforcement: if the referenced company was created AFTER this SEC record's quarter, fall back to CMP 0 (always exists in Q0). 50/50 split between using CIK (numeric) vs CompanyName (string) as the reference. Company 0's actual name (used as temporal fallback for name-based references)
     _cmp0_name = F.concat(F.lit("C"), F.substring(F.md5(F.concat(F.lit("0"), F.lit("cname"))), 1, 14))
     sec_df = sec_df.withColumn("CoNameOrCIK",
         F.when(hash_key(F.col("sec_id"), seed_for("SEC", "cn")) % 100 < 50,
@@ -350,10 +325,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
                 _cmp0_name), 60, " ")))
 
     # --- SEC CHANGE and DELETE records (matches DIGen's 97% new / 1% change / 2% delete) ---
-    # Creates multiple DimSecurity SCD2 versions per Symbol. CHANGE keeps Status=ACTV,
-    # DELETE sets Status=INAC. All extras have quarter_id > creation quarter_id.
-    # Note: the _symbols view filters to ACTV before groupBy, so DELETE records don't
-    # affect creation_quarter tracking — but they do produce Inactive DimSecurity versions.
+    # Creates multiple DimSecurity SCD2 versions per Symbol. CHANGE keeps Status=ACTV, DELETE sets Status=INAC. All extras have quarter_id > creation quarter_id. Note: the _symbols view filters to ACTV before groupBy, so DELETE records don't affect creation_quarter tracking — but they do produce Inactive DimSecurity versions.
     _sec_pct = hash_key(F.col("sec_id"), seed_for("SEC", "action_pct")) % 100
     _sec_is_change = _sec_pct < F.lit(1)
     _sec_is_delete = (_sec_pct >= F.lit(1)) & (_sec_pct < F.lit(3))
@@ -379,9 +351,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .drop("_q_start_s", "_q_duration_s", "_q_offset"))
 
     # --- Persist _symbols temp view (BEFORE unioning extras) ---
-    # Built from NEW sec_df only; creation_quarter = each symbol's NEW record's quarter_id.
-    # The deactivation model here is approximate — SEC DELETE records (added below) also
-    # deactivate symbols, but the hash-based model gives a deterministic total_deact count.
+    # Built from NEW sec_df only; creation_quarter = each symbol's NEW record's quarter_id. The deactivation model here is approximate — SEC DELETE records (added below) also deactivate symbols, but the hash-based model gives a deterministic total_deact count.
     total_deact = int(0.02 * cfg.sec_per_quarter * cfg.fw_quarters)
     symbols = (sec_df
         .filter(F.col("Status") == "ACTV")
@@ -396,39 +366,21 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
                     (F.abs(hash_key(F.col("_sec_id"), seed_for("SEC", "deact_q"))) %
                      F.greatest(F.lit(1), F.lit(cfg.fw_quarters) - F.col("creation_quarter"))))
             .otherwise(F.lit(cfg.fw_quarters + 1)))
-        # Order _idx by creation_quarter so WatchHistory's cross-product
-        # decomposition picks temporally-valid symbols: gen 0 pairs use
-        # _sec_idx in [0, hist_sec_ids), which must map to the oldest
-        # symbols (created before customer updates begin). Later gens
-        # extend into symbols created in their quarter window. Prior
-        # alphabetical ordering caused ~25% of WH ACTV pairs to fall back
-        # to _sym0 at SF=5000+, producing a -24.5% drift vs DIGen.
-        # _idx cast to long here: downstream consumers (Trade, WatchHistory,
-        # DailyMarket) compare this to hash_key(...) expressions that return
-        # long. If _idx stayed int, Spark's analyzer inserts a cast(_idx as
-        # bigint) into the join condition — that cast can prevent the
-        # optimizer from auto-broadcasting _symbols even when it's well under
-        # the autoBroadcastJoinThreshold.
+        # Order _idx by creation_quarter so WatchHistory's cross-product decomposition picks temporally-valid symbols: gen 0 pairs use _sec_idx in [0, hist_sec_ids), which must map to the oldest symbols (created before customer updates begin). Later gens extend into symbols created in their quarter window. Prior alphabetical ordering caused ~25% of WH ACTV pairs to fall back to _sym0 at SF=5000+, producing a -24.5% drift vs DIGen. _idx cast to long here: downstream consumers (Trade, WatchHistory, DailyMarket) compare this to hash_key(...) expressions that return long. If _idx stayed int, Spark's analyzer inserts a cast(_idx as bigint) into the join condition — that cast can prevent the optimizer from auto-broadcasting _symbols even when it's well under the autoBroadcastJoinThreshold.
         .withColumn("_idx", (F.row_number().over(
             Window.orderBy("creation_quarter", "Symbol")) - 1).cast("long"))
         .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
 
-    # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read
-    # it independently of the remaining FINWIRE compute (CMP/FIN union + the
-    # 10-25 min text write). This detaches downstream start time from the
-    # overall FINWIRE wallclock — previously they waited on f_fw.result(),
-    # now they wait on symbols_ready_event set right below.
+    # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read it independently of the remaining FINWIRE compute (CMP/FIN union + the 10-25 min text write). This detaches downstream start time from the overall FINWIRE wallclock — previously they waited on f_fw.result(), now they wait on symbols_ready_event set right below.
     symbols, _sym_cleanup = disk_cache(symbols, spark, "FINWIRE symbols",
                                         volume_path=cfg.volume_path, dbutils=dbutils)
     symbols.createOrReplaceTempView("_symbols")
-    # Estimate — symbols is a groupBy on SEC NEW records' Symbol; ~sec_total after
-    # dedup by Symbol (slight shrinkage from Symbol collisions across quarters).
+    # Estimate — symbols is a groupBy on SEC NEW records' Symbol; ~sec_total after dedup by Symbol (slight shrinkage from Symbol collisions across quarters).
     log(f"[FINWIRE] Active symbols: ~{cfg.sec_total:,} -> _symbols view (downstream unblocked)")
     if symbols_ready_event is not None:
         symbols_ready_event.set()
 
-    # Union NEW + CHANGE/DELETE records, aligned by column name. Done AFTER _symbols
-    # is built so extras don't affect creation_quarter/deactivation_quarter tracking.
+    # Union NEW + CHANGE/DELETE records, aligned by column name. Done AFTER _symbols is built so extras don't affect creation_quarter/deactivation_quarter tracking.
     sec_df = sec_df.unionByName(sec_extras)
 
     # Format SEC as fixed-width line
@@ -465,37 +417,24 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
 
     # Model DIGen's UpdateBlackBox (97% new, 1% change, 2% delete) for FIN generation:
     # - Q0 companies: all genuinely new (active), so they all produce FIN records
-    # - Q1+ companies: ~87.5% are new active companies at SF=10 (95% at SF=1000)
-    #   The effective "active" rate accounts for: 3% non-new CMP records + cumulative
-    #   deactivation of existing companies by the 2% delete mechanism.
-    # Derived from DIGen: net_per_q / cmp_per_quarter ≈ 0.875 at SF=10, 0.95 at SF=1000
-    # Use formula: active_rate = 1.0 - max(3, cmp_per_quarter * 0.05) / cmp_per_quarter
+    # - Q1+ companies: ~87.5% are new active companies at SF=10 (95% at SF=1000) The effective "active" rate accounts for: 3% non-new CMP records + cumulative deactivation of existing companies by the 2% delete mechanism.
+    # Derived from DIGen: net_per_q / cmp_per_quarter ≈ 0.875 at SF=10, 0.95 at SF=1000 Use formula: active_rate = 1.0 - max(3, cmp_per_quarter * 0.05) / cmp_per_quarter
     _loss_per_q = max(3, int(cfg.cmp_per_quarter * 0.05))
     _active_pct = int(100 * (cfg.cmp_per_quarter - _loss_per_q) / cfg.cmp_per_quarter)
 
-    # Mark which Q1+ companies are "genuinely new active" for FIN purposes.
-    # Q0 companies are always active; Q1+ companies pass with probability _active_pct%.
+    # Mark which Q1+ companies are "genuinely new active" for FIN purposes. Q0 companies are always active; Q1+ companies pass with probability _active_pct%.
     cmp_quarters = cmp_quarters.withColumn("_is_active_for_fin",
         F.when(F.col("creation_quarter") == 0, F.lit(True))  # Q0: all active
          .otherwise(hash_key(F.col("cmp_id"), seed_for("CMP", "is_active")) % 100 < _active_pct))
 
-    # Repartition cmp_quarters BEFORE the crossJoin so the downstream
-    # fan-out (each row × fw_quarters) runs across the executor pool. The
-    # default spark.range() partitioning that cmp_df inherits is small
-    # (8-16 parts on serverless), so without this each task holds 10-15 GB
-    # of in-memory FIN data at SF=10000 and spills.
+    # Repartition cmp_quarters BEFORE the crossJoin so the downstream fan-out (each row × fw_quarters) runs across the executor pool. The default spark.range() partitioning that cmp_df inherits is small (8-16 parts on serverless), so without this each task holds 10-15 GB of in-memory FIN data at SF=10000 and spills.
     #
-    # Target partitions = max(8, cfg.sf / 25). Sized so FIN data distributes
-    # enough to avoid spill (~1 GB/partition at SF=5000, ~1.2 GB at SF=10000)
-    # without monopolising the executor pool — the writer's maxRecordsPerFile
-    # option still splits each partition into multiple ~128 MB output files.
+    # Target partitions = max(8, cfg.sf / 25). Sized so FIN data distributes enough to avoid spill (~1 GB/partition at SF=5000, ~1.2 GB at SF=10000) without monopolising the executor pool — the writer's maxRecordsPerFile option still splits each partition into multiple ~128 MB output files.
     fin_target_parts = max(8, cfg.sf // 25)
     log(f"[FINWIRE] repartitioning cmp_quarters to {fin_target_parts} partitions ahead of crossJoin", "DEBUG")
     cmp_quarters = cmp_quarters.repartition(fin_target_parts)
 
-    # Cross join: only active companies x quarters after creation.
-    # Each active company produces one FIN record for every quarter after its creation.
-    # quarters_df is small (~202 rows) — optimizer will auto-broadcast under the 200MB threshold.
+    # Cross join: only active companies x quarters after creation. Each active company produces one FIN record for every quarter after its creation. quarters_df is small (~202 rows) — optimizer will auto-broadcast under the 200MB threshold.
     fin_base = (cmp_quarters
         .filter(F.col("_is_active_for_fin"))
         .crossJoin(quarters_df)
@@ -503,11 +442,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .withColumn("quarter_id", F.col("fin_quarter_id"))
     )
 
-    # PTS: uniformly distributed within the calendar quarter of quarter_id.
-    # Matches DIGen's FinwirePTSGenerator exactly — each quarter_id maps to one
-    # calendar quarter, so Year/Quarter/QtrStartDate derived from pts_ts are
-    # always consistent per (cmp_id, quarter_id) → Financial has unique
-    # (sk_companyid, quarter, year) keys (no FactMarketHistory fan-out).
+    # PTS: uniformly distributed within the calendar quarter of quarter_id. Matches DIGen's FinwirePTSGenerator exactly — each quarter_id maps to one calendar quarter, so Year/Quarter/QtrStartDate derived from pts_ts are always consistent per (cmp_id, quarter_id) → Financial has unique (sk_companyid, quarter, year) keys (no FactMarketHistory fan-out).
     fin_base = _add_calendar_quarter_timing(fin_base)
     fin_df = (fin_base
         .withColumn("_fin_seed", F.hash(F.col("cmp_id"), F.col("quarter_id")).cast("long"))
@@ -518,25 +453,20 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         .withColumn("_rev", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "rev"))).cast("long")) % 10000000000).cast("double") + 1.0)
         # Earnings ratio: 0-70% of revenue
         .withColumn("_earn_r", (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "er"))).cast("long")) % 70) / 100.0)
-        # Share counts: used both in EPS calc and in the ShOut/DilutedShOut
-        # output columns so FI_BASIC_EPS ≈ FI_NET_EARN / FI_OUT_BASIC (the
-        # automated_audit 'Financial EPS' check enforces a ±0.4 tolerance).
+        # Share counts: used both in EPS calc and in the ShOut/DilutedShOut output columns so FI_BASIC_EPS ≈ FI_NET_EARN / FI_OUT_BASIC (the automated_audit 'Financial EPS' check enforces a ±0.4 tolerance).
         .withColumn("_sh_out",
             (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "sh"))).cast("long")) % 999900000 + 100000).cast("double"))
         .withColumn("_dil_sh_out",
             (F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "dsh"))).cast("long")) % 999900000 + 100000).cast("double"))
         .withColumn("_earn", F.col("_rev") * F.col("_earn_r"))
-        # CoNameOrCIK: reference this FIN's own company (temporal integrity guaranteed
-        # since CMP exists by this quarter — FIN is always after creation_quarter)
+        # CoNameOrCIK: reference this FIN's own company (temporal integrity guaranteed since CMP exists by this quarter — FIN is always after creation_quarter)
         .withColumn("CoNameOrCIK",
             F.when(F.abs(F.hash(F.col("cmp_id"), F.col("quarter_id"), F.lit(seed_for("FIN", "cn"))).cast("long")) % 100 < 50,
                 F.rpad(F.col("CIK"), 60, " "))
             .otherwise(F.rpad(F.col("CompanyName"), 60, " ")))
     )
 
-    # Format FIN as fixed-width line. Fields include: Year, Quarter, QtrStartDate,
-    # PostingDate, Revenue, Earnings, EPS, DilutedEPS, Margin, Inventory, Assets,
-    # Liabilities, ShOut, DilutedShOut, CoNameOrCIK
+    # Format FIN as fixed-width line. Fields include: Year, Quarter, QtrStartDate, PostingDate, Revenue, Earnings, EPS, DilutedEPS, Margin, Inventory, Assets, Liabilities, ShOut, DilutedShOut, CoNameOrCIK
     fin_lines = fin_df.select(
         F.rtrim(F.concat(
             F.rpad(F.col("PTS"), 15, " "), F.rpad(F.lit("FIN"), 3, " "),
@@ -567,21 +497,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     # =====================================================================
     # Write CMP / SEC / FIN as separate staging dirs (in parallel).
     # =====================================================================
-    # The bronze-layer FINWIRE ingest reads all FINWIRE_*.txt files as a
-    # single globbed input and distinguishes record type by the 3-char type
-    # code at byte position 16, so it's indifferent to which file contains
-    # which subset — we don't need to union CMP/SEC/FIN into one output
-    # stream. Splitting lets the 3 writes fan out across executors in
-    # parallel, and avoids a 244M-row union + columnar→row that previously
-    # dominated the FINWIRE stage.
+    # The bronze-layer FINWIRE ingest reads all FINWIRE_*.txt files as a single globbed input and distinguishes record type by the 3-char type code at byte position 16, so it's indifferent to which file contains which subset — we don't need to union CMP/SEC/FIN into one output stream. Splitting lets the 3 writes fan out across executors in parallel, and avoids a 244M-row union + columnar→row that previously dominated the FINWIRE stage.
     max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
 
-    # FIN repartition happens earlier, right on cmp_quarters before the
-    # crossJoin — see the block there. Doing it here (just before .write)
-    # would shuffle after the in-memory 475M-row compute had already been
-    # forced onto the narrow spark.range default partitioning, which is
-    # what causes the 15GB/task spill. CMP/SEC are small enough to use
-    # default partitioning and write directly.
+    # FIN repartition happens earlier, right on cmp_quarters before the crossJoin — see the block there. Doing it here (just before .write) would shuffle after the in-memory 475M-row compute had already been forced onto the narrow spark.range default partitioning, which is what causes the 15GB/task spill. CMP/SEC are small enough to use default partitioning and write directly.
     def _write_subset(df, label):
         staging = f"{cfg.batch_path(1)}/FINWIRE_{label}.txt__staging"
         _cleanup(staging, dbutils)
@@ -598,28 +517,20 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
         }
         staging_dirs = {k: f.result() for k, f in futs.items()}
 
-    # Copy to final FINWIRE_{N}.txt using a shared counter so numbering never
-    # collides across the three subsets. Order here is arbitrary — downstream
-    # reads all files at once.
+    # Copy to final FINWIRE_{N}.txt using a shared counter so numbering never collides across the three subsets. Order here is arbitrary — downstream reads all files at once.
     next_idx = 1
     for subset in ("cmp", "sec", "fin"):
         _, next_idx = register_copies_from_staging(
             staging_dirs[subset], f"{cfg.batch_path(1)}/FINWIRE.txt",
             dbutils, start_idx=next_idx)
 
-    # Analytical estimates for FW_CMP / FW_SEC / FW_FIN audit attributes:
-    #   CMP ≈ cmp_total × 1.03 (NEW + ~3% CHANGE/DELETE extras, excludes last quarter)
-    #   SEC ≈ sec_total × 1.03
-    #   FIN ≈ _active_pct × cmp_per_quarter × fw_quarters × (fw_quarters-1)/2 / fw_quarters
-    #         + cmp_q0_count × (fw_quarters-1)
-    # For dynamic audit regeneration, compute exact values below.
+    # Analytical estimates for FW_CMP / FW_SEC / FW_FIN audit attributes: CMP ≈ cmp_total × 1.03 (NEW + ~3% CHANGE/DELETE extras, excludes last quarter) SEC ≈ sec_total × 1.03 FIN ≈ _active_pct × cmp_per_quarter × fw_quarters × (fw_quarters-1)/2 / fw_quarters + cmp_q0_count × (fw_quarters-1) For dynamic audit regeneration, compute exact values below.
     last_q_exclusion = (cfg.fw_quarters - 1) / cfg.fw_quarters  # ~99.5%
     fw_cmp_extras_est = int(cfg.cmp_total * 0.03 * last_q_exclusion)
     fw_sec_extras_est = int(cfg.sec_total * 0.03 * last_q_exclusion)
     fw_cmp_exact = cfg.cmp_total + fw_cmp_extras_est
     fw_sec_exact = cfg.sec_total + fw_sec_extras_est
-    # Active-FIN analytical span: Q0 companies (all active, all fw_quarters-1 FIN
-    # records each) + Qk companies (active_pct% each, averaging fewer FIN rows).
+    # Active-FIN analytical span: Q0 companies (all active, all fw_quarters-1 FIN records each) + Qk companies (active_pct% each, averaging fewer FIN rows).
     cmp_q0_count = cfg.cmp_total - cfg.fw_quarters * cfg.cmp_per_quarter
     _loss_per_q = max(3, int(cfg.cmp_per_quarter * 0.05))
     _active_pct = (cfg.cmp_per_quarter - _loss_per_q) / max(1, cfg.cmp_per_quarter)
@@ -629,9 +540,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     total = fw_cmp_exact + fw_sec_exact + fw_fin_exact
 
     if not static_audits_available(cfg):
-        # Dynamic audit regeneration: exact counts. Extras counts are over
-        # tiny DFs (~3% of cmp_total/sec_total); the FIN analytical aggregation
-        # scans cmp_total rows instead of fin_total (10+ min savings).
+        # Dynamic audit regeneration: exact counts. Extras counts are over tiny DFs (~3% of cmp_total/sec_total); the FIN analytical aggregation scans cmp_total rows instead of fin_total (10+ min savings).
         log("[FINWIRE] dynamic audit path — computing exact CMP/SEC extras + FIN span", "DEBUG")
         fw_cmp_extras = cmp_extras.count()
         fw_sec_extras = sec_extras.count()

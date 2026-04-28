@@ -74,13 +74,9 @@
 # COMMAND ----------
 
 # DBTITLE 1,Declare Widgets and Assign to Variables EXCEPT Worker Count
-# Databricks notebook UI sorts widgets alphabetically by NAME, not by
-# creation order. Number-prefixing the names forces the visual order:
-# What → Where → How → Tuning. Labels (4th arg) stay human-readable.
+# Databricks notebook UI sorts widgets alphabetically by NAME, not by creation order. Number-prefixing the names forces the visual order: What → Where → How → Tuning. Labels (4th arg) stay human-readable.
 #
-# One-shot reset of any unprefixed widgets left over from prior versions
-# of this notebook. Safe to keep — no-op once the workspace state is
-# clean.
+# One-shot reset of any unprefixed widgets left over from prior versions of this notebook. Safe to keep — no-op once the workspace state is clean.
 for _legacy in ("workflow_type", "batched", "sku", "batch_type", "edition",
                 "pred_opt", "scale_factor", "job_name", "wh_target",
                 "catalog", "perf_or_features", "data_generator",
@@ -89,9 +85,7 @@ for _legacy in ("workflow_type", "batched", "sku", "batch_type", "edition",
   except Exception: pass
 
 # --- 01_sku / 02_batch_type / 03_edition (What) ---
-# `batch_type` options are dynamically constrained to what each SKU
-# actually supports: DBSQL has no Augmented Incremental, SDP has no
-# per-day Incremental. `edition` only appears for SDP × Single Batch.
+# `batch_type` options are dynamically constrained to what each SKU actually supports: DBSQL has no Augmented Incremental, SDP has no per-day Incremental. `edition` only appears for SDP × Single Batch.
 dbutils.widgets.dropdown("01_sku", "Cluster", ["Cluster", "DBSQL", "SDP"], "SKU")
 _sku_choice = dbutils.widgets.get("01_sku")
 
@@ -138,9 +132,7 @@ catalog        = dbutils.widgets.get("06_catalog")
 wh_target      = dbutils.widgets.get("07_wh_target")
 
 _volume_base = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
-# AUGMENTED variants read from the volume root (their staging tree
-# `augmented_incremental/_staging/sf={sf}/` is path-appended inside the
-# notebooks). Other Spark-datagen variants point at `spark_datagen/`.
+# AUGMENTED variants read from the volume root (their staging tree `augmented_incremental/_staging/sf={sf}/` is path-appended inside the notebooks). Other Spark-datagen variants point at `spark_datagen/`.
 if sku[0] == "AUGMENTED":
   tpcdi_directory = _volume_base
 else:
@@ -176,21 +168,16 @@ if sku[0] not in ["CLUSTER","DBSQL"]:
   try: dbutils.widgets.remove("13_perf_or_features")
   except Exception: pass
 
-# AUGMENTED variants always use Spark-staged data; data_generator widget
-# doesn't apply.
+# AUGMENTED variants always use Spark-staged data; data_generator widget doesn't apply.
 if sku[0] == "AUGMENTED":
   try: dbutils.widgets.remove("05_data_generator")
   except Exception: pass
   data_generator = "spark"
 
 # Build job_name(s) with suffixes after all widget logic settles incremental.
-# - Datagen job depends only on data_generator + SF (same output reused across
-#   all benchmark variants at that SF), so its name omits exec_type/batched.
-# - Benchmark job: batched + exec + gen suffixes. SDP has no batched concept,
-#   so omit that suffix there. The data_generator is also stamped on every
-#   created job as a `data_generator` tag so jobs are queryable by generator.
-# - `_datagen_label` (long form) is preserved for schema names — changing it
-#   would break already-materialized `..._spark_data_gen_*` schemas.
+# - Datagen job depends only on data_generator + SF (same output reused across all benchmark variants at that SF), so its name omits exec_type/batched.
+# - Benchmark job: batched + exec + gen suffixes. SDP has no batched concept, so omit that suffix there. The data_generator is also stamped on every created job as a `data_generator` tag so jobs are queryable by generator.
+# - `_datagen_label` (long form) is preserved for schema names — changing it would break already-materialized `..._spark_data_gen_*` schemas.
 _datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
 _gen_label       = "SparkGen" if data_generator == "spark" else "NativeGen"
 _batched_label   = "Incremental" if incremental else "SingleBatch"
@@ -200,9 +187,7 @@ datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
 if sku[0] in ['CLUSTER','DBSQL']:
   job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
 elif sku[0] == "AUGMENTED":
-  # AUGMENTED creates parent + child (+ pipeline for SDP). job_name here
-  # is the PARENT name; the dispatcher derives child by stripping
-  # `-Parent` and pipeline (SDP only) by appending `-Pipeline`.
+  # AUGMENTED creates parent + child (+ pipeline for SDP). job_name here is the PARENT name; the dispatcher derives child by stripping `-Parent` and pipeline (SDP only) by appending `-Pipeline`.
   _aug_variant = "Cluster" if sku[1] == "CLUSTER" else "SDP"
   job_name = f"{_base_name}-SF{scale_factor}-AugmentedIncremental-{_aug_variant}-Parent"
 else:
@@ -211,9 +196,7 @@ else:
 # COMMAND ----------
 
 # DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
-# AUGMENTED variants consume pre-staged per-day files from the shared
-# `tpcdi_incremental_staging_{sf}` schema (built once-per-SF by the
-# Phase B file-splitting tools), so they don't need a datagen workflow.
+# AUGMENTED variants consume pre-staged per-day files from the shared `tpcdi_incremental_staging_{sf}` schema (built once-per-SF by the Phase B file-splitting tools), so they don't need a datagen workflow.
 if sku[0] == "AUGMENTED":
   displayHTML(
     "<h2>Data Generation Workflow — skipped for AUGMENTED variants</h2>"

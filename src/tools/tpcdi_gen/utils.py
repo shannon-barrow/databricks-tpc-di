@@ -45,9 +45,7 @@ def safe_unpersist(df, cleanup_info=None):
     was never supported (disk_cache staged to Parquet instead, and the
     staging dir is already cleaned up by ``cleanup_staging``).
     """
-    # Serverless has no persist semantics to reverse. UNCACHE TABLE raises
-    # NOT_SUPPORTED_WITH_SERVERLESS; skip the call entirely to avoid noisy
-    # query-error logs.
+    # Serverless has no persist semantics to reverse. UNCACHE TABLE raises NOT_SUPPORTED_WITH_SERVERLESS; skip the call entirely to avoid noisy query-error logs.
     try:
         spark = df.sparkSession
         if _detect_serverless(spark):
@@ -221,9 +219,7 @@ def seed_for(table_name: str, col_name: str = "", base_seed: int = 1234567890) -
 # ---------------------------------------------------------------------------
 # Dictionary views
 # ---------------------------------------------------------------------------
-# Dictionaries are small lists of string values (e.g., first names, last names,
-# street suffixes, country codes) loaded from text files. They are registered as
-# Spark temporary views so they can be broadcast-joined into large DataFrames.
+# Dictionaries are small lists of string values (e.g., first names, last names, street suffixes, country codes) loaded from text files. They are registered as Spark temporary views so they can be broadcast-joined into large DataFrames.
 
 _dict_counts = {}
 
@@ -392,13 +388,8 @@ def hash_key(col_expr, seed: int) -> "F.Column":
 # ---------------------------------------------------------------------------
 # Deferred file copy registry
 # ---------------------------------------------------------------------------
-# Generators write DataFrames to temporary staging directories (via Spark's
-# DataFrameWriter) and then register (source, target) path pairs here.
-# This "deferred copy" pattern exists because:
-#   1. Spark writes to a directory of part files, not a single named file.
-#   2. Renaming/copying files one-at-a-time during generation would serialize I/O.
-#   3. By deferring all copies to the end, we can execute them in parallel with
-#      a thread pool, significantly reducing total wall-clock time.
+# Generators write DataFrames to temporary staging directories (via Spark's DataFrameWriter) and then register (source, target) path pairs here. This "deferred copy" pattern exists because:
+#   1. Spark writes to a directory of part files, not a single named file. 2. Renaming/copying files one-at-a-time during generation would serialize I/O. 3. By deferring all copies to the end, we can execute them in parallel with a thread pool, significantly reducing total wall-clock time.
 # At the end of the generation run, bulk_copy_all() processes all pending copies.
 
 _pending_copies = []  # legacy: rarely used; new register_copies_from_staging
@@ -528,11 +519,7 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
     targets = []
     idx = start_idx
 
-    # Large parts: kick off a per-dataset async copy immediately so this
-    # dataset can start copying as soon as write_file returns, without
-    # waiting for a global drain. The thread is tracked in
-    # `_background_threads` so orchestrator can wait_for_background_copies()
-    # before cleanup_staging.
+    # Large parts: kick off a per-dataset async copy immediately so this dataset can start copying as soon as write_file returns, without waiting for a global drain. The thread is tracked in `_background_threads` so orchestrator can wait_for_background_copies() before cleanup_staging.
     large_copies = []
     for pf in large:
         target = f"{base}_{idx}{ext}"
@@ -542,15 +529,7 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
     if large_copies:
         _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
 
-    # Small parts: cat-pack on driver into ~128MB chunks.
-    # FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily
-    # unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds
-    # of concat operations across TradeHistory/CashTransaction/HH/etc.
-    # running simultaneously through the dep-graph scheduler and xargs cat's
-    # 5-retry loop wasn't enough.
-    # Switched to pure-Python concat with per-source retry: open dst once,
-    # copy each src via shutil.copyfileobj; if a source read hits OSError
-    # (EAGAIN wraps up as such), back off and retry that source only.
+    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
     if bins:
         import shutil, time
         for bin_files in bins:
@@ -613,8 +592,7 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
     by_dataset = defaultdict(lambda: {"count": 0, "dir": ""})
     for _, tgt in copies:
         fname = os.path.basename(tgt)
-        # Extract dataset name: strip numeric suffix (e.g., "Trade_1.txt" → "Trade")
-        # and strip year/quarter from FINWIRE (e.g., "FINWIRE1967Q1_1" → "FINWIRE")
+        # Extract dataset name: strip numeric suffix (e.g., "Trade_1.txt" → "Trade") and strip year/quarter from FINWIRE (e.g., "FINWIRE1967Q1_1" → "FINWIRE")
         base = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
         dataset = re.sub(r'\d{4}Q\d$', '', base)  # FINWIRE1967Q1 → FINWIRE
         batch_dir = os.path.dirname(tgt)

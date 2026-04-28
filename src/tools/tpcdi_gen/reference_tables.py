@@ -53,13 +53,11 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     counts = {}
 
     # --- Resolve static file source path ---
-    # Static files live in tpcdi_gen/static_files/ relative to this module.
-    # Use __file__ to resolve the path regardless of how the module was imported.
+    # Static files live in tpcdi_gen/static_files/ relative to this module. Use __file__ to resolve the path regardless of how the module was imported.
     _this_dir = os.path.dirname(os.path.abspath(__file__))
     ws_base = os.path.join(_this_dir, "static_files")
 
-    # Static reference files with their known row counts (fixed by TPC-DI spec).
-    # These counts are used for audit file generation.
+    # Static reference files with their known row counts (fixed by TPC-DI spec). These counts are used for audit file generation.
     static_files = {
         "StatusType.txt": 6,
         "TaxRate.txt": 320,
@@ -89,8 +87,7 @@ def generate_all(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             log(f"[Reference] WARNING: failed to copy {filename}: {e}")
 
     # --- BatchDate: one row per batch with the batch date ---
-    # Each batch directory gets a BatchDate.txt containing a single date string.
-    # These dates are fixed constants defined by the TPC-DI spec.
+    # Each batch directory gets a BatchDate.txt containing a single date string. These dates are fixed constants defined by the TPC-DI spec.
     batch_dates = [
         (1, "2017-07-07"),
         (2, "2017-07-08"),

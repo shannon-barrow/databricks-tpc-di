@@ -48,9 +48,7 @@ def _generate_augmented(*, variant: str, parent_job_name: str,
     label = "Cluster" if variant == "CLUSTER" else "SDP"
     wh_db = f"{wh_target}_AugmentedIncremental_{label}"
 
-    # parent_job_name comes from the Driver as
-    # ``{base}-SF{sf}-AugmentedIncremental-{Cluster|SDP}-Parent``
-    # — derive child + pipeline names by stripping/replacing the suffix.
+    # parent_job_name comes from the Driver as ``{base}-SF{sf}-AugmentedIncremental-{Cluster|SDP}-Parent`` — derive child + pipeline names by stripping/replacing the suffix.
     child_job_name = parent_job_name[:-len("-Parent")] if parent_job_name.endswith("-Parent") else parent_job_name
     pipeline_name  = f"{child_job_name}-Pipeline"
 
@@ -155,10 +153,7 @@ def generate_benchmark_workflow(
     """
     sku = wf_key.split("-")
 
-    # AUGMENTED variants take an early-exit path. They don't use the
-    # CLUSTER/DBSQL/SDP compute selection, always use Spark-staged data,
-    # and create multiple resources (parent + child + optional pipeline)
-    # rather than a single workflow.
+    # AUGMENTED variants take an early-exit path. They don't use the CLUSTER/DBSQL/SDP compute selection, always use Spark-staged data, and create multiple resources (parent + child + optional pipeline) rather than a single workflow.
     if sku[0] == "AUGMENTED":
         return _generate_augmented(
             variant=sku[1],
@@ -190,12 +185,7 @@ def generate_benchmark_workflow(
         opt_write = "'delta.autoOptimize.optimizeWrite'=True"
         index_cols = ""
 
-    # The Driver builds tpcdi_directory up to (but not including) sf={scale_factor}/
-    # — including the generator-specific subdir (spark_datagen/ for Spark, none
-    # for DIGen) — so we pass it through unchanged. Downstream notebooks append
-    # sf=${scale_factor}/ themselves.
-    # Suffixes appended to wh_db (and embedded in templates' descriptions) so
-    # the Spark and DIGen runs at the same SF/exec_type don't share a schema.
+    # The Driver builds tpcdi_directory up to (but not including) sf={scale_factor}/ — including the generator-specific subdir (spark_datagen/ for Spark, none for DIGen) — so we pass it through unchanged. Downstream notebooks append sf=${scale_factor}/ themselves. Suffixes appended to wh_db (and embedded in templates' descriptions) so the Spark and DIGen runs at the same SF/exec_type don't share a schema.
     datagen_label = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
     batched_label = "incremental" if incremental else "single_batch"
 

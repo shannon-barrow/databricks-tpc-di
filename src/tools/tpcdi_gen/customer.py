@@ -169,9 +169,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     broker_count = brokers_df.count()
 
     # === Exact DIGen formulas (verified against audit at SF=10) ===
-    # These scaling constants (CScaling=0.005, AScaling=0.01) come from DIGen.jar's
-    # CustomerMgmtScheduler class, controlling how many customer and account actions
-    # are generated per update cycle at each scale factor.
+    # These scaling constants (CScaling=0.005, AScaling=0.01) come from DIGen.jar's CustomerMgmtScheduler class, controlling how many customer and account actions are generated per update cycle at each scale factor.
     internal_sf = cfg.internal_sf
     cust_per_update = int(0.005 * internal_sf)  # CScaling * SF
     acct_per_update = int(0.01 * internal_sf)   # AScaling * SF
@@ -186,18 +184,14 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     change_accts = int(acct_per_update * 0.2)  # DIGen TARGET count for UPDACCT per update
     del_accts = int(acct_per_update * 0.1)
 
-    # Per update: NEW = new_custs, ADDACCT = new_accts - new_custs
-    # Each NEW creates one customer AND one account, so the remaining new_accts are ADDACCTs
-    # (additional accounts for already-existing customers).
+    # Per update: NEW = new_custs, ADDACCT = new_accts - new_custs Each NEW creates one customer AND one account, so the remaining new_accts are ADDACCTs (additional accounts for already-existing customers).
     addaccts_per_update = new_accts - new_custs  # DIGen TARGET count for ADDACCT per update
 
     # Per DIGen's CMRowsPerUpdate formula: sum of all per-update action counts.
     rows_per_update = (new_custs + addaccts_per_update + change_accts
                        + del_accts + change_custs + del_custs)
 
-    # Historical (update 0) + regular updates
-    # CMHistoricalSize and CMUpdateLastID from the scaling formulas.
-    # We derive update_last_id such that hist_size + update_last_id * rows_per_update = cm_final.
+    # Historical (update 0) + regular updates CMHistoricalSize and CMUpdateLastID from the scaling formulas. We derive update_last_id such that hist_size + update_last_id * rows_per_update = cm_final.
     cm_final = cfg.cm_final_row_count
     update_last_id = (cm_final - new_accts) // rows_per_update  # derived to match total
     hist_size = cm_final - update_last_id * rows_per_update
@@ -207,21 +201,17 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     log(f"[CustomerMgmt] Per update: NEW={new_custs}, ADDACCT={addaccts_per_update}, UPDACCT={change_accts}, "
         f"CLOSEACCT={del_accts}, UPDCUST={change_custs}, INACT={del_custs}", "DEBUG")
 
-    # Timestamp range: the entire CustomerMgmt timeline is divided into equal-width
-    # windows, one per update. Within each window, actions are spaced evenly.
+    # Timestamp range: the entire CustomerMgmt timeline is divided into equal-width windows, one per update. Within each window, actions are spaced evenly.
     cm_begin_s = int(CM_BEGIN_DATE.timestamp())
     cm_range_s = int((CM_END_DATE - CM_BEGIN_DATE).total_seconds())
     secs_per_update = cm_range_s // (update_last_id + 1)
 
     # === Build DataFrame: one row per action ===
-    # Each row knows its update_id and position within that update.
-    # Update 0: rows 0..hist_size-1 (all NEW)
-    # Update k (k>=1): rows hist_size + (k-1)*rows_per_update .. hist_size + k*rows_per_update - 1
+    # Each row knows its update_id and position within that update. Update 0: rows 0..hist_size-1 (all NEW) Update k (k>=1): rows hist_size + (k-1)*rows_per_update .. hist_size + k*rows_per_update - 1
 
     all_df = spark.range(0, total).withColumnRenamed("id", "global_seq")
 
-    # Determine update_id and position within update.
-    # Update 0 contains the historical batch (all NEWs), updates 1+ are regular CDC updates.
+    # Determine update_id and position within update. Update 0 contains the historical batch (all NEWs), updates 1+ are regular CDC updates.
     all_df = (all_df
         .withColumn("update_id",
             F.when(F.col("global_seq") < F.lit(hist_size), F.lit(0))
@@ -231,11 +221,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
              .otherwise((F.col("global_seq") - F.lit(hist_size)) % F.lit(rows_per_update)))
     )
 
-    # Permute position within each update using row_number with random sort (true bijection).
-    # This guarantees each position 0..rows_per_update-1 is assigned exactly once per update.
-    # The shuffle randomizes which action types land on which rows, while preserving
-    # the exact count of each action type per update. Update 0 is not shuffled because
-    # all its rows are NEW actions (shuffling NEWs among themselves has no effect).
+    # Permute position within each update using row_number with random sort (true bijection). This guarantees each position 0..rows_per_update-1 is assigned exactly once per update. The shuffle randomizes which action types land on which rows, while preserving the exact count of each action type per update. Update 0 is not shuffled because all its rows are NEW actions (shuffling NEWs among themselves has no effect).
     all_df = all_df.withColumn("_rand_sort", hash_key(F.col("global_seq"), seed_for("CM", "perm")))
     all_df = all_df.withColumn("shuffled_pos",
         F.when(F.col("update_id") == 0, F.col("pos_in_update"))  # historical: no shuffle, all NEW
@@ -244,14 +230,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                 Window.partitionBy("update_id").orderBy("_rand_sort")) - 1))
 
     # === Assign action type based on shuffled position within each update ===
-    # The position ranges within each update map to action types in this fixed order,
-    # matching DIGen's CustomerAccountBlackBox:
-    #   [0 .. new_custs)                                        -> NEW
-    #   [new_custs .. new_accts)                                -> ADDACCT
-    #   [new_accts .. new_accts+change_accts)                   -> UPDACCT
-    #   [new_accts+change_accts .. +del_accts)                  -> CLOSEACCT
-    #   [... +del_accts .. +change_custs)                       -> UPDCUST
-    #   [... +change_custs .. +del_custs)                       -> INACT
+    # The position ranges within each update map to action types in this fixed order, matching DIGen's CustomerAccountBlackBox: [0 .. new_custs)                                        -> NEW [new_custs .. new_accts)                                -> ADDACCT [new_accts .. new_accts+change_accts)                   -> UPDACCT [new_accts+change_accts .. +del_accts)                  -> CLOSEACCT [... +del_accts .. +change_custs)                       -> UPDCUST [... +change_custs .. +del_custs)                       -> INACT
     all_df = all_df.withColumn("ActionType",
         F.when(F.col("update_id") == 0, F.lit("NEW"))  # historical: all NEW
          .when(F.col("shuffled_pos") < F.lit(new_custs), F.lit("NEW"))
@@ -262,41 +241,19 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
          .otherwise(F.lit("INACT")))
 
     # === DIGen-style bijection + INACT/CLOSEACCT schedules ===
-    # DIGen's CustomerAccountBlackBox uses BijectivePermutation (random but
-    # unique picks) + GrowingOffsetPermutation (pool excludes already
-    # deleted IDs). We replicate this in two pieces:
+    # DIGen's CustomerAccountBlackBox uses BijectivePermutation (random but unique picks) + GrowingOffsetPermutation (pool excludes already deleted IDs). We replicate this in two pieces:
     #
-    # 1. Per-update bijection (b_g, c_g) for UPDCUST/UPDACCT picks: gives
-    #    unique C_IDs within a single update so same-day dedup becomes a
-    #    no-op. Different action types use disjoint ranges of the
-    #    bijection so they don't overlap within an update.
-    # 2. Pre-computed INACT and CLOSEACCT schedules (driver-side): each
-    #    eventually-inactivated customer and eventually-closed account is
-    #    assigned to a specific update upfront via scan-bijection that
-    #    respects the "entity must exist before being deleted" constraint
-    #    AND ensures no duplicates across updates. This eliminates the
-    #    global one-INACT-per-customer / one-CLOSEACCT-per-account dedup
-    #    losses (~14% at SF=5000).
+    # 1. Per-update bijection (b_g, c_g) for UPDCUST/UPDACCT picks: gives unique C_IDs within a single update so same-day dedup becomes a no-op. Different action types use disjoint ranges of the bijection so they don't overlap within an update.
+    # 2. Pre-computed INACT and CLOSEACCT schedules (driver-side): each eventually-inactivated customer and eventually-closed account is assigned to a specific update upfront via scan-bijection that respects the "entity must exist before being deleted" constraint AND ensures no duplicates across updates. This eliminates the global one-INACT-per-customer / one-CLOSEACCT-per-account dedup losses (~14% at SF=5000).
     log("[CustomerMgmt] computing _atype_pos via row_number over (update_id, ActionType)", "DEBUG")
     _atype_win = Window.partitionBy("update_id", "ActionType").orderBy("global_seq")
     all_df = all_df.withColumn("_atype_pos",
         F.row_number().over(_atype_win) - F.lit(1))
 
     # === DIGen-style GrowingOffsetPermutation schedules ===
-    # DIGen picks IDs from a bijection over the "alive" pool at each update:
-    # pool size = total IDs created so far - IDs already deleted. This guarantees
-    # picks never land on deleted entities, so Rule 1/3 filters drop zero.
-    # We replicate it at the driver: process updates in order, maintain sorted
-    # lists of cumulative deletions, and resolve virtual indices to actual IDs
-    # via bisect-and-skip over the deletions.
+    # DIGen picks IDs from a bijection over the "alive" pool at each update: pool size = total IDs created so far - IDs already deleted. This guarantees picks never land on deleted entities, so Rule 1/3 filters drop zero. We replicate it at the driver: process updates in order, maintain sorted lists of cumulative deletions, and resolve virtual indices to actual IDs via bisect-and-skip over the deletions.
     #
-    # Per-action-type pool rules (mirrors DIGen's action-order semantics):
-    #   INACT    pool = prior-alive customers (excludes INACTs in updates 1..g-1)
-    #   CLOSE    pool = prior-alive accounts  (excludes CLOSEs in updates 1..g-1)
-    #   UPDCUST  pool = prior-alive customers (same-update INACT comes AFTER UPDCUST)
-    #   UPDACCT  pool = prior-alive accounts  (same-update CLOSE comes AFTER UPDACCT)
-    #   ADDACCT  pool = prior-alive customers MINUS same-update INACTs
-    #            (no new accounts for a customer being deactivated this same update)
+    # Per-action-type pool rules (mirrors DIGen's action-order semantics): INACT    pool = prior-alive customers (excludes INACTs in updates 1..g-1) CLOSE    pool = prior-alive accounts  (excludes CLOSEs in updates 1..g-1) UPDCUST  pool = prior-alive customers (same-update INACT comes AFTER UPDCUST) UPDACCT  pool = prior-alive accounts  (same-update CLOSE comes AFTER UPDACCT) ADDACCT  pool = prior-alive customers MINUS same-update INACTs (no new accounts for a customer being deactivated this same update)
     import math as _math
     import random as _rand
     import numpy as _np
@@ -331,8 +288,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     _updacct_seed = seed_for("CM", "updacct_sched")
     _addacct_seed = seed_for("CM", "addacct_sched")
 
-    # Action-type codes for the unified schedule DataFrame — match ActionType
-    # strings in all_df so a single join resolves all non-NEW picks.
+    # Action-type codes for the unified schedule DataFrame — match ActionType strings in all_df so a single join resolves all non-NEW picks.
     ACT_INACT, ACT_CLOSE, ACT_UPDCUST, ACT_UPDACCT, ACT_ADDACCT = 0, 1, 2, 3, 4
 
     # Pre-allocate unified schedule buffers (exact sizes known up front).
@@ -402,13 +358,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             virtual = (b * ps + c) % addacct_pool
             _append_picks(ACT_ADDACCT, g, _resolve_skip_vec(virtual, combined_inacts))
 
-        # UPDCUST picks (pool: prior-alive customers MINUS this-update INACTs).
-        # Excluding this-update INACTs prevents UPDCUST and INACT from both
-        # picking the same customer in the same update — those would emit two
-        # CustomerMgmt actions for the same C_ID on the same day, which silver
-        # collapses via `WHERE effectivedate < enddate` and breaks the
-        # 'DimCustomer row count' check (audit count > silver row count).
-        # ADDACCT already does this above (line ~397) using combined_inacts.
+        # UPDCUST picks (pool: prior-alive customers MINUS this-update INACTs). Excluding this-update INACTs prevents UPDCUST and INACT from both picking the same customer in the same update — those would emit two CustomerMgmt actions for the same C_ID on the same day, which silver collapses via `WHERE effectivedate < enddate` and breaks the 'DimCustomer row count' check (audit count > silver row count). ADDACCT already does this above (line ~397) using combined_inacts.
         upd_pool = pool_cust - len(combined_inacts)
         if upd_pool >= max(3, change_custs):
             rng = _rand.Random((_updcust_seed << 16) ^ g)
@@ -442,9 +392,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         f"(INACT={n_inact} CLOSE={n_close} UPDCUST={n_updcust} "
         f"UPDACCT={n_updacct} ADDACCT={n_addacct})", "DEBUG")
 
-    # Convert to Spark via Arrow-backed pandas path (vastly faster than
-    # createDataFrame on a list of Python tuples). Single unified DF means a
-    # single join against all_df instead of five chained joins.
+    # Convert to Spark via Arrow-backed pandas path (vastly faster than createDataFrame on a list of Python tuples). Single unified DF means a single join against all_df instead of five chained joins.
     log("[CustomerMgmt] building pandas DataFrame from numpy buffers", "DEBUG")
     _sched_pdf = _pd.DataFrame({
         "_sched_update": sched_update,
@@ -459,14 +407,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     schedule_df = spark.createDataFrame(_sched_pdf)
     del _sched_pdf
 
-    # Collapse Arrow batch partitions into a small number of writers. With
-    # Arrow enabled, createDataFrame(pandas) produces one partition per
-    # arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at
-    # SF=20000. Without this, Photon's writer auto-rotates files at ~217K
-    # rows (per-file byte budget), producing 320+ tiny files written
-    # serially by one task — ~7 min wall-clock for a 584 MB output.
-    # coalesce (not repartition) because we only need to reduce fan-out;
-    # a shuffle would be wasted work.
+    # Collapse Arrow batch partitions into a small number of writers. With Arrow enabled, createDataFrame(pandas) produces one partition per arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at SF=20000. Without this, Photon's writer auto-rotates files at ~217K rows (per-file byte budget), producing 320+ tiny files written serially by one task — ~7 min wall-clock for a 584 MB output. coalesce (not repartition) because we only need to reduce fan-out; a shuffle would be wasted work.
     _sched_target_parts = max(8, cfg.sf // 2500)
     schedule_df = schedule_df.coalesce(_sched_target_parts)
 
@@ -487,10 +428,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # === Assign C_ID ===
     # NEW actions get sequentially allocated C_IDs. The allocation is cumulative:
-    #   - Update 0 (historical): C_IDs 0 .. hist_size-1
-    #   - Update k (k>=1): C_IDs hist_size + (k-1)*new_custs .. hist_size + k*new_custs - 1
-    # Non-NEW actions use the per-update bijection to reference existing C_IDs
-    # without collisions.
+    #   - Update 0 (historical): C_IDs 0 .. hist_size-1 - Update k (k>=1): C_IDs hist_size + (k-1)*new_custs .. hist_size + k*new_custs - 1
+    # Non-NEW actions use the per-update bijection to reference existing C_IDs without collisions.
     new_window = Window.partitionBy("update_id").orderBy("global_seq")
 
     # Count NEW actions before this row within same update to get the NEW index
@@ -501,9 +440,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                 .orderBy("global_seq")) - 1)
          .otherwise(F.lit(-1)))
 
-    # Single join to the unified schedule DF — replaces five chained joins.
-    # Each non-NEW row picks up its pre-computed `_sched_id` (C_ID for
-    # INACT/UPDCUST/ADDACCT, CA_ID for UPDACCT/CLOSEACCT).
+    # Single join to the unified schedule DF — replaces five chained joins. Each non-NEW row picks up its pre-computed `_sched_id` (C_ID for INACT/UPDCUST/ADDACCT, CA_ID for UPDACCT/CLOSEACCT).
     all_df = (all_df
         .join(schedule_df,
               (F.col("update_id") == F.col("_sched_update")) &
@@ -512,8 +449,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
               "left")
         .drop("_sched_update", "_sched_action", "_sched_pos"))
 
-    # C_ID assignment. Every non-NEW action uses its pre-computed schedule ID.
-    # UPDACCT and CLOSEACCT derive C_ID from CA_ID below (via _owner_cid).
+    # C_ID assignment. Every non-NEW action uses its pre-computed schedule ID. UPDACCT and CLOSEACCT derive C_ID from CA_ID below (via _owner_cid).
     all_df = all_df.withColumn("C_ID",
         F.when((F.col("ActionType") == "NEW") & (F.col("update_id") == 0),
             F.col("_new_idx_in_update"))  # historical: 0..hist_size-1
@@ -525,16 +461,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # === Assign CA_ID ===
     # NEW and ADDACCT get sequentially allocated CA_IDs. The allocation is cumulative:
-    #   - Update 0: CA_IDs 0 .. hist_size-1 (one per NEW)
-    #   - Update k: CA_IDs hist_size + (k-1)*new_accts .. hist_size + k*new_accts - 1
-    #     (first new_custs are for NEW actions, next addaccts_per_update are for ADDACCT)
-    # UPDACCT and CLOSEACCT reference existing CA_IDs from prior updates via hash.
-    # UPDCUST and INACT have CA_ID = -1 (no account involvement).
-    # Order NEWs before ADDACCTs so that NEW rows get _acct_idx 0..new_custs-1.
-    # This ensures _first_acct (used by UPDACCT/CLOSEACCT) correctly maps C_ID to
-    # the customer's NEW account CA_ID. Without this ordering, NEWs and ADDACCTs
-    # interleave by global_seq, causing _acct_idx != _new_idx and making _first_acct
-    # reference wrong CA_IDs (some of which are ADDACCT holes from INACT filtering).
+    #   - Update 0: CA_IDs 0 .. hist_size-1 (one per NEW) - Update k: CA_IDs hist_size + (k-1)*new_accts .. hist_size + k*new_accts - 1 (first new_custs are for NEW actions, next addaccts_per_update are for ADDACCT)
+    # UPDACCT and CLOSEACCT reference existing CA_IDs from prior updates via hash. UPDCUST and INACT have CA_ID = -1 (no account involvement). Order NEWs before ADDACCTs so that NEW rows get _acct_idx 0..new_custs-1. This ensures _first_acct (used by UPDACCT/CLOSEACCT) correctly maps C_ID to the customer's NEW account CA_ID. Without this ordering, NEWs and ADDACCTs interleave by global_seq, causing _acct_idx != _new_idx and making _first_acct reference wrong CA_IDs (some of which are ADDACCT holes from INACT filtering).
     all_df = all_df.withColumn("_acct_idx_in_update",
         F.when(F.col("ActionType").isin("NEW", "ADDACCT"),
             F.row_number().over(
@@ -544,11 +472,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                     "global_seq")) - 1)
          .otherwise(F.lit(-1)))
 
-    # CA_ID assignment:
-    #   NEW/ADDACCT: sequential within each update's account span
-    #   UPDACCT:     pre-scheduled from updacct_schedule
-    #   CLOSEACCT:   pre-scheduled from close_schedule
-    #   UPDCUST/INACT: -1 (no account involvement)
+    # CA_ID assignment: NEW/ADDACCT: sequential within each update's account span UPDACCT:     pre-scheduled from updacct_schedule CLOSEACCT:   pre-scheduled from close_schedule UPDCUST/INACT: -1 (no account involvement)
     all_df = all_df.withColumn("CA_ID",
         F.when((F.col("ActionType").isin("NEW", "ADDACCT")) & (F.col("update_id") == 0),
             F.col("_acct_idx_in_update"))  # historical
@@ -557,13 +481,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
          .when(F.col("ActionType").isin("UPDACCT", "CLOSEACCT"), F.col("_sched_id"))
          .otherwise(F.lit(-1)))
 
-    # UPDACCT / CLOSEACCT: derive owning C_ID by inverting the account→customer
-    # formula. CA_ID < hist_size → historical customer owns it directly. For
-    # update-k accounts, off = (CA_ID - hist_size) % new_accts; off < new_custs
-    # is a NEW account (owner = hist_size + (k-1)*new_custs + off). ADDACCT
-    # slots have no closed-form inverse since owners were schedule-picked —
-    # we approximate with hist_size + (k-1)*new_custs (the ETL keys on CA_ID
-    # for account operations, so C_ID only needs to reference *some* customer).
+    # UPDACCT / CLOSEACCT: derive owning C_ID by inverting the account→customer formula. CA_ID < hist_size → historical customer owns it directly. For update-k accounts, off = (CA_ID - hist_size) % new_accts; off < new_custs is a NEW account (owner = hist_size + (k-1)*new_custs + off). ADDACCT slots have no closed-form inverse since owners were schedule-picked — we approximate with hist_size + (k-1)*new_custs (the ETL keys on CA_ID for account operations, so C_ID only needs to reference *some* customer).
     _ca_from_hist = F.col("CA_ID") < F.lit(hist_size)
     _update_of_ca = ((F.col("CA_ID") - F.lit(hist_size)) / F.lit(new_accts)).cast("int")
     _off_in_ca_update = (F.col("CA_ID") - F.lit(hist_size)) % F.lit(new_accts)
@@ -580,19 +498,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
              .otherwise(F.col("C_ID")))
         .drop("_sched_id"))
 
-    # Rule 1/3 filters removed: the per-update schedules already pool from alive
-    # entities only, so no UPDCUST/UPDACCT/ADDACCT picks can land on an INACT'd
-    # customer or CLOSE'd account. Every scheduled action survives, matching
-    # DIGen's GrowingOffsetPermutation count fidelity.
+    # Rule 1/3 filters removed: the per-update schedules already pool from alive entities only, so no UPDCUST/UPDACCT/ADDACCT picks can land on an INACT'd customer or CLOSE'd account. Every scheduled action survives, matching DIGen's GrowingOffsetPermutation count fidelity.
 
     # === Assign timestamp ===
     # Each update gets a time window of secs_per_update seconds. Within each update:
-    #   1. NEWs come first (ordered by C_ID) — ensures Rule 1 and Rule 5
-    #   2. ADDACCTs next (ordered by CA_ID) — ensures CA_ID created after customer
-    #   3. Then UPDACCT, CLOSEACCT, UPDCUST, INACT (any order)
-    # This ordering is enforced via a composite sort key that the timestamp is derived from.
-    # The sort key encodes: update_id (millions), action_order (hundred-thousands),
-    # and a sub-sort within each action type (entity ID or positional index).
+    #   1. NEWs come first (ordered by C_ID) — ensures Rule 1 and Rule 5 2. ADDACCTs next (ordered by CA_ID) — ensures CA_ID created after customer 3. Then UPDACCT, CLOSEACCT, UPDCUST, INACT (any order)
+    # This ordering is enforced via a composite sort key that the timestamp is derived from. The sort key encodes: update_id (millions), action_order (hundred-thousands), and a sub-sort within each action type (entity ID or positional index).
     action_order = (
         F.when(F.col("ActionType") == "NEW", F.lit(0))
          .when(F.col("ActionType") == "ADDACCT", F.lit(1))
@@ -601,21 +512,14 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
          .when(F.col("ActionType") == "UPDCUST", F.lit(4))
          .otherwise(F.lit(5)))  # INACT
 
-    # Multipliers must exceed rows_per_update so action_order buckets never
-    # overlap. At SF=20000, rows_per_update = 230,000 — a 100K multiplier would
-    # let pos_in_update (up to 229,999) spill into the next action_order bucket,
-    # breaking the within-update ordering (e.g., UPDCUSTs landing AFTER INACTs).
-    # Use 10M for update_id and 1M for action_order (max update_id ~500, so
-    # 500 * 10M = 5*10^9 stays well within long range).
+    # Multipliers must exceed rows_per_update so action_order buckets never overlap. At SF=20000, rows_per_update = 230,000 — a 100K multiplier would let pos_in_update (up to 229,999) spill into the next action_order bucket, breaking the within-update ordering (e.g., UPDCUSTs landing AFTER INACTs). Use 10M for update_id and 1M for action_order (max update_id ~500, so 500 * 10M = 5*10^9 stays well within long range).
     all_df = all_df.withColumn("_sort_key",
         F.col("update_id").cast("long") * 10000000 + action_order * 1000000 +
         F.when(F.col("ActionType") == "NEW", F.col("C_ID") % 1000000)
          .when(F.col("ActionType") == "ADDACCT", F.col("CA_ID") % 1000000)
          .otherwise(F.col("pos_in_update")))
 
-    # Compute sequential position within update based on the sort key.
-    # This ordered position is then used to derive evenly-spaced timestamps
-    # within the update's time window.
+    # Compute sequential position within update based on the sort key. This ordered position is then used to derive evenly-spaced timestamps within the update's time window.
     all_df = all_df.withColumn("_ordered_pos",
         F.row_number().over(Window.partitionBy("update_id").orderBy("_sort_key")) - 1)
 
@@ -634,9 +538,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     )
 
     # === Add customer/account attributes via dictionary joins ===
-    # Each attribute is derived deterministically from C_ID or CA_ID using hash_key
-    # with domain-specific seeds. This ensures the same C_ID always produces the same
-    # name, address, etc., regardless of which action references it.
+    # Each attribute is derived deterministically from C_ID or CA_ID using hash_key with domain-specific seeds. This ensures the same C_ID always produces the same name, address, etc., regardless of which action references it.
     all_df = all_df.withColumn("C_TAX_ID", F.concat(
         F.lpad((hash_key(F.col("C_ID"), seed_for("CM", "t1")) % 999).cast("string"), 3, "0"), F.lit("-"),
         F.lpad((hash_key(F.col("C_ID"), seed_for("CM", "t2")) % 99).cast("string"), 2, "0"), F.lit("-"),
@@ -658,8 +560,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .otherwise(F.concat(F.lit("Apt. "), (hash_key(F.col("C_ID"), seed_for("CM", "apt")) % 999 + 1).cast("string"))))
     all_df = all_df.withColumn("C_CTRY",
         F.when(hash_key(F.col("C_ID"), seed_for("CM", "ctry")) % 100 < 80, F.lit("United States of America")).otherwise(F.lit("Canada")))
-    # Phone 1: country code, area code, local, extension
-    # Use null (not empty string) for empty fields so XML writer omits them
+    # Phone 1: country code, area code, local, extension Use null (not empty string) for empty fields so XML writer omits them
     all_df = all_df.withColumn("C_CTRY_1", F.lit("1"))
     all_df = all_df.withColumn("C_AREA_1", (hash_key(F.col("C_ID"), seed_for("CM", "ar1")) % 900 + 100).cast("string"))
     all_df = all_df.withColumn("C_LOCAL_1", F.concat(
@@ -684,9 +585,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .otherwise(F.when(hash_key(F.col("CA_ID"), seed_for("CM", "can")) % 100 < 5, F.lit(None).cast("string"))
         .otherwise(F.substring(F.md5(F.concat(F.col("CA_ID").cast("string"), F.lit("ca"))), 1, 30))))
 
-    # Dictionary-based attribute lookups: batch all lookups into fewer joins.
-    # Using dict_join_batch computes all join keys in one pass, then performs one
-    # join per unique dictionary instead of 10 sequential broadcast joins.
+    # Dictionary-based attribute lookups: batch all lookups into fewer joins. Using dict_join_batch computes all join keys in one pass, then performs one join per unique dictionary instead of 10 sequential broadcast joins.
     all_df = dict_join_batch(all_df, [
         ("hr_family_names", hash_key(F.col("C_ID"), seed_for("CM", "ln")), "C_L_NAME"),
         ("hr_given_names",  hash_key(F.col("C_ID"), seed_for("CM", "fn")), "C_F_NAME"),
@@ -716,10 +615,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             .otherwise(F.concat(F.col("C_F_NAME"), F.lit("."), F.col("C_L_NAME"), F.lit("@"), F.col("_mp2")))))
 
     # === UPDCUST-specific values ===
-    # UPDCUST sparse fields must represent actual CHANGES, not repeat the original values.
-    # Generate different values using global_seq (unique per action) instead of C_ID
-    # (same for all actions on the same customer). This ensures that when a field is
-    # populated in UPDCUST, the value differs from the customer's current attributes.
+    # UPDCUST sparse fields must represent actual CHANGES, not repeat the original values. Generate different values using global_seq (unique per action) instead of C_ID (same for all actions on the same customer). This ensures that when a field is populated in UPDCUST, the value differs from the customer's current attributes.
     all_df = dict_join_batch(all_df, [
         ("address_lines",  hash_key(F.col("global_seq"), seed_for("CM", "upd_a1v")), "_upd_ADLINE1"),
         ("zip_codes",      hash_key(F.col("global_seq"), seed_for("CM", "upd_zipv")), "_upd_ZIPCODE"),
@@ -750,8 +646,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         return F.when(F.coalesce(F.col(col), F.lit("")) == "", F.lit(f"\t\t\t\t<{tag}/>")) \
                 .otherwise(F.concat(F.lit(f"\t\t\t\t<{tag}>"), F.col(col), F.lit(f"</{tag}>")))
 
-    # Phones 2 and 3 are always empty in the initial NEW action (only phone 1 is populated).
-    # They may get values later via UPDCUST sparse updates.
+    # Phones 2 and 3 are always empty in the initial NEW action (only phone 1 is populated). They may get values later via UPDCUST sparse updates.
     ph23 = ("\t\t\t\t<C_PHONE_2>\n\t\t\t\t\t<C_CTRY_CODE/>\n\t\t\t\t\t<C_AREA_CODE/>\n"
             "\t\t\t\t\t<C_LOCAL/>\n\t\t\t\t\t<C_EXT/>\n\t\t\t\t</C_PHONE_2>\n"
             "\t\t\t\t<C_PHONE_3>\n\t\t\t\t\t<C_CTRY_CODE/>\n\t\t\t\t\t<C_AREA_CODE/>\n"
@@ -773,14 +668,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     ft = F.lit("\t</TPCDI:Action>")
 
     # === UPDCUST: sparse update matching DIGen pattern ===
-    # DIGen always includes Address + ContactInfo container blocks in UPDCUST,
-    # but each individual field within those blocks independently has a ~50% chance
-    # of being populated (CMFieldUpdatePct = 50 from DIGen configuration).
-    # Unpopulated fields appear as empty self-closing XML elements (e.g. ``<C_CITY/>``),
-    # signaling to the downstream ETL that those fields were NOT changed and should
-    # retain their previous values. This is the "sparse update" pattern.
-    # Customer-level attributes (C_TIER, C_GNDR, C_DOB) rarely appear in updates
-    # (~20% for C_TIER, omitted for C_GNDR and C_DOB in UPDCUST).
+    # DIGen always includes Address + ContactInfo container blocks in UPDCUST, but each individual field within those blocks independently has a ~50% chance of being populated (CMFieldUpdatePct = 50 from DIGen configuration). Unpopulated fields appear as empty self-closing XML elements (e.g. ``<C_CITY/>``), signaling to the downstream ETL that those fields were NOT changed and should retain their previous values. This is the "sparse update" pattern. Customer-level attributes (C_TIER, C_GNDR, C_DOB) rarely appear in updates (~20% for C_TIER, omitted for C_GNDR and C_DOB in UPDCUST).
 
     # Address block with sparse fields (~50% chance each field appears)
     def _sparse(tag, col, seq, field_seed):
@@ -795,8 +683,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                 .otherwise(F.lit(f"\t\t\t\t<{tag}/>"))
 
     gs = F.col("global_seq")
-    # UPDCUST address uses _upd_* columns (different values from NEW) so updates
-    # represent actual changes to the customer's address, not repeats of originals.
+    # UPDCUST address uses _upd_* columns (different values from NEW) so updates represent actual changes to the customer's address, not repeats of originals.
     ad_upd = F.concat(F.lit("\t\t\t<Address>\n"),
         _sparse("C_ADLINE1", "_upd_ADLINE1", gs, seed_for("CM", "upd_a1")), F.lit("\n"),
         _sparse("C_ADLINE2", "_upd_ADLINE2", gs, seed_for("CM", "upd_a2")), F.lit("\n"),
@@ -806,11 +693,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         _sparse("C_CTRY", "_upd_CTRY", gs, seed_for("CM", "upd_ctry")), F.lit("\n"),
         F.lit("\t\t\t</Address>\n"))
 
-    # ContactInfo block with sparse fields and phone blocks matching DIGen patterns:
-    # PHONE_1: ~97% has data, PHONE_2: ~74%, PHONE_3: ~30%
-    # Values: C_CTRY_CODE="1" (~50% when phone has data), C_AREA_CODE=3-digit (~50%),
-    #         C_LOCAL="NNN-NNNN" (always when phone has data), C_EXT=5-digit (~10%)
-    # Each phone uses DIFFERENT values (not all sharing C_AREA_1/C_LOCAL_1)
+    # ContactInfo block with sparse fields and phone blocks matching DIGen patterns: PHONE_1: ~97% has data, PHONE_2: ~74%, PHONE_3: ~30% Values: C_CTRY_CODE="1" (~50% when phone has data), C_AREA_CODE=3-digit (~50%), C_LOCAL="NNN-NNNN" (always when phone has data), C_EXT=5-digit (~10%) Each phone uses DIFFERENT values (not all sharing C_AREA_1/C_LOCAL_1)
     def _phone_upd(n, gs, data_pct):
         """Generate a sparse phone block for UPDCUST with per-phone independent values.
 
@@ -834,8 +717,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             F.lit("-"),
             (hash_key(gs, seed_for("CM", f"upd_ph{n}_loc2")) % 9000 + 1000).cast("string"))
         ext = F.lpad((hash_key(gs, seed_for("CM", f"upd_ph{n}_ext")) % 99999 + 1).cast("string"), 5, "0")
-        # Area code must be present when country code is present, otherwise the
-        # pipeline produces "+1 NNN-NNNN" which fails phone format validation.
+        # Area code must be present when country code is present, otherwise the pipeline produces "+1 NNN-NNNN" which fails phone format validation.
         _has_area = has_data & (hash_key(gs, seed_for("CM", f"upd_ph{n}a")) % 100 < 50)
         _has_ctry = _has_area & (hash_key(gs, seed_for("CM", f"upd_ph{n}c")) % 100 < 50)
         return F.concat(
@@ -858,9 +740,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         _phone_upd(3, gs, 30),
         F.lit("\t\t\t</ContactInfo>\n"))
 
-    # Optional Customer-level attributes (C_TIER appears ~20% of time on updates per DIGen).
-    # Unlike NEW actions which always include C_TAX_ID, C_GNDR, C_TIER, C_DOB as XML
-    # attributes, UPDCUST only conditionally includes C_TIER (~20%) and omits the others.
+    # Optional Customer-level attributes (C_TIER appears ~20% of time on updates per DIGen). Unlike NEW actions which always include C_TAX_ID, C_GNDR, C_TIER, C_DOB as XML attributes, UPDCUST only conditionally includes C_TIER (~20%) and omits the others.
     cust_attrs_upd = F.concat(F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"),
         F.when(hash_key(gs, seed_for("CM", "upd_tier")) % 100 < 20,
             F.concat(F.lit('" C_TIER="'), F.col("C_TIER"))).otherwise(F.lit("")),
@@ -869,13 +749,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     updcust_body = F.concat(ah, cust_attrs_upd, ad_upd, ci_upd, F.lit("\t\t</Customer>\n"), ft)
 
     # === Assemble final XML body per action type ===
-    # Each action type has a different XML structure:
-    #   NEW:       Full Customer element with Name, Address, ContactInfo, TaxInfo, and Account
-    #   ADDACCT:   Minimal Customer wrapper (C_ID only) with a full Account element
-    #   UPDACCT:   Customer wrapper (C_ID) with Account element (updated broker/name/tax)
-    #   CLOSEACCT: Customer wrapper (C_ID) with minimal Account element (CA_ID only)
-    #   UPDCUST:   Customer wrapper (C_ID, optional C_TIER) with sparse Address + ContactInfo
-    #   INACT:     Customer wrapper (C_ID only), no child elements
+    # Each action type has a different XML structure: NEW:       Full Customer element with Name, Address, ContactInfo, TaxInfo, and Account ADDACCT:   Minimal Customer wrapper (C_ID only) with a full Account element UPDACCT:   Customer wrapper (C_ID) with Account element (updated broker/name/tax) CLOSEACCT: Customer wrapper (C_ID) with minimal Account element (CA_ID only) UPDCUST:   Customer wrapper (C_ID, optional C_TIER) with sparse Address + ContactInfo INACT:     Customer wrapper (C_ID only), no child elements
     xml_body = (
         F.when(F.col("ActionType") == "NEW",
             F.concat(ah, cf, nm, ad, ci, tx, ac, F.lit("\t\t</Customer>\n"), ft))
@@ -890,24 +764,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             F.concat(ah, F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('">\n'), ac, F.lit("\t\t</Customer>\n"), ft))
     )
 
-    # Same-day (C_ID, day) and (CA_ID, day) dedups are no longer needed:
-    # the per-update bijection (see _bij_pos/C_ID assignment above) guarantees
-    # UPDCUST/INACT/UPDACCT/CLOSEACCT pick unique C_IDs within each update,
-    # so they cannot collide on the same day. NEW/ADDACCT use sequential
-    # allocation for C_IDs/CA_IDs that never reuse existing IDs, and
-    # different updates are 8+ days apart so cross-update same-day
-    # collisions are also impossible.
+    # Same-day (C_ID, day) and (CA_ID, day) dedups are no longer needed: the per-update bijection (see _bij_pos/C_ID assignment above) guarantees UPDCUST/INACT/UPDACCT/CLOSEACCT pick unique C_IDs within each update, so they cannot collide on the same day. NEW/ADDACCT use sequential allocation for C_IDs/CA_IDs that never reuse existing IDs, and different updates are 8+ days apart so cross-update same-day collisions are also impossible.
     all_df = all_df.withColumn("_day", F.substring(F.col("ActionTS"), 1, 10))
 
-    # Global one-INACT-per-customer and one-CLOSEACCT-per-account dedups are
-    # no longer needed: inact_schedule and close_schedule pre-pick unique
-    # C_IDs/CA_IDs across all updates by construction (scan-bijection with
-    # set exclusion). No duplicates can exist.
+    # Global one-INACT-per-customer and one-CLOSEACCT-per-account dedups are no longer needed: inact_schedule and close_schedule pre-pick unique C_IDs/CA_IDs across all updates by construction (scan-bijection with set exclusion). No duplicates can exist.
 
     # === Filter out ADDACCTs on the same day as their customer's INACT ===
-    # An ADDACCT and INACT for the same customer on the same day would create
-    # a same-day conflict when we generate the synthetic CLOSEACCT. Remove the
-    # ADDACCT — no point creating an account for a customer being deactivated.
+    # An ADDACCT and INACT for the same customer on the same day would create a same-day conflict when we generate the synthetic CLOSEACCT. Remove the ADDACCT — no point creating an account for a customer being deactivated.
     inact_days = (all_df
         .filter(F.col("ActionType") == "INACT")
         .select(F.col("C_ID").alias("_inact_cid"),
@@ -921,84 +784,35 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
               "left_anti")
         .drop("_day_tmp", "_inact_cid", "_inact_day"))
 
-    # No cascade CLOSEACCT for INACT'd customers — DIGen's
-    # CustomerAccountBlackBox generates Customer DELETE (INACT) and Account
-    # DELETE (CLOSEACCT) as independent streams; INACT does not imply that
-    # the customer's accounts are closed. Adding cascade closes produced
-    # ~+51% CA_CLOSEACCT drift vs DIGen and indirectly suppressed UPDACCTs
-    # (Rule 3: no UPDACCT after CLOSEACCT) causing -29.7% CA_UPDACCT drift.
+    # No cascade CLOSEACCT for INACT'd customers — DIGen's CustomerAccountBlackBox generates Customer DELETE (INACT) and Account DELETE (CLOSEACCT) as independent streams; INACT does not imply that the customer's accounts are closed. Adding cascade closes produced ~+51% CA_CLOSEACCT drift vs DIGen and indirectly suppressed UPDACCTs (Rule 3: no UPDACCT after CLOSEACCT) causing -29.7% CA_UPDACCT drift.
 
-    # Cache all_df — it's used to derive 4 views + the XML write + incrementals.
-    # Classic: persist; serverless: Parquet staging.
-    # Target ~100MB per XML file — the Databricks native XML reader cannot
-    # split XML files, so one file = one ingest task. 128MB files push task
-    # runtime too high (7+ min at SF=5000); 100MB keeps ingest parallelism
-    # reasonable. maxRecordsPerFile on both parquet staging (for read-back
-    # partitioning) and final XML write ensures bounded sizes without an
-    # explicit repartition.
-    # 580 bytes/row avg at SF=5000, with ~1.35x variance across partitions
-    # (largest file observed 157MB vs 116MB avg). To keep MAX file <=128MB
-    # we need max_records * worst-case-bytes <= 128MB → 128K records with
-    # ~1000 B/row worst case, producing avg ~74MB and max ~120MB. Favors
-    # file-count over file-size to stay safely under the XML reader's
-    # single-task constraint.
+    # Cache all_df — it's used to derive 4 views + the XML write + incrementals. Classic: persist; serverless: Parquet staging. Target ~100MB per XML file — the Databricks native XML reader cannot split XML files, so one file = one ingest task. 128MB files push task runtime too high (7+ min at SF=5000); 100MB keeps ingest parallelism reasonable. maxRecordsPerFile on both parquet staging (for read-back partitioning) and final XML write ensures bounded sizes without an explicit repartition. 580 bytes/row avg at SF=5000, with ~1.35x variance across partitions (largest file observed 157MB vs 116MB avg). To keep MAX file <=128MB we need max_records * worst-case-bytes <= 128MB → 128K records with ~1000 B/row worst case, producing avg ~74MB and max ~120MB. Favors file-count over file-size to stay safely under the XML reader's single-task constraint.
     _xml_records_per_file = 128 * 1024  # 131K rows → ~75MB avg / ~120MB max
     all_df, _all_df_cleanup = disk_cache(all_df, spark, "CustomerMgmt actions",
                                           volume_path=cfg.volume_path, dbutils=dbutils,
                                           max_records_per_file=_xml_records_per_file)
 
     # === _account_owners temp view ===
-    # Maps each created CA_ID to its owning C_ID. Used by incremental Batch2/3
-    # to (a) force INAC candidates to ACTV when they have no accounts, (b)
-    # drop U rows referencing non-existent CA_IDs, and (c) emit cascade INAC
-    # account rows for newly-inactive customers. Not used by Trade.
+    # Maps each created CA_ID to its owning C_ID. Used by incremental Batch2/3 to (a) force INAC candidates to ACTV when they have no accounts, (b) drop U rows referencing non-existent CA_IDs, and (c) emit cascade INAC account rows for newly-inactive customers. Not used by Trade.
     _acct_creating = all_df.filter(F.col("ActionType").isin("NEW", "ADDACCT"))
     acct_owners = _acct_creating.select(
         F.col("CA_ID").cast("string").alias("ca_id"),
         F.col("C_ID").cast("string").alias("owner_cid"))
-    # Derived view: filter+select on already-materialized all_df. On serverless
-    # we skip materialization (materialize=False) — re-reading a column-pruned
-    # subset of all_df's temp table is cheap. On classic, persist() runs normally.
+    # Derived view: filter+select on already-materialized all_df. On serverless we skip materialization (materialize=False) — re-reading a column-pruned subset of all_df's temp table is cheap. On classic, persist() runs normally.
     acct_owners, _ = disk_cache(acct_owners, spark, "_account_owners", materialize=False)
     acct_owners.createOrReplaceTempView("_account_owners")
 
-    # Trade's account pool is computed analytically from cfg (see
-    # Config.n_available_accounts). CA_IDs are sequential 0..n_available-1 and
-    # Trade picks via hash % n_available, using the hash directly as CA_ID.
-    # So no view or DataFrame is built here — Trade doesn't depend on CM.
+    # Trade's account pool is computed analytically from cfg (see Config.n_available_accounts). CA_IDs are sequential 0..n_available-1 and Trade picks via hash % n_available, using the hash directly as CA_ID. So no view or DataFrame is built here — Trade doesn't depend on CM.
     log(f"[CustomerMgmt] {cfg.n_available_accounts} valid accounts (analytical, via cfg.n_available_accounts)")
 
     # === Create _customer_dates temp view ===
-    # Track the lifecycle of each customer: when they were created (NEW) and when they
-    # were inactivated (INACT, if ever). This is used by watch_history.py to ensure
-    # watch items only reference customers during their active window.
-    # For customers with multiple INACT actions (shouldn't happen after dedup, but
-    # defensively), we take the earliest inactivation timestamp.
+    # Track the lifecycle of each customer: when they were created (NEW) and when they were inactivated (INACT, if ever). This is used by watch_history.py to ensure watch items only reference customers during their active window. For customers with multiple INACT actions (shouldn't happen after dedup, but defensively), we take the earliest inactivation timestamp.
     cust_new = (all_df
         .filter(F.col("ActionType") == "NEW")
         .select(F.col("C_ID").alias("cust_id"),
                 F.col("ActionTS").alias("cust_create_ts"),
                 F.col("update_id").alias("cust_create_update")))
-    # Determine each customer's final status at end of historical batch. The
-    # CustomerMgmtRaw ETL decodes ActionType to status as:
-    #   NEW/ADDACCT/UPDACCT/UPDCUST -> Active
-    #   CLOSEACCT/INACT             -> Inactive
-    # A customer's DimCustomer iscurrent row reflects their LAST action status.
-    # So "inactive at B1 end" = customers whose last action is CLOSEACCT or
-    # INACT. Using only INACT misses CLOSEACCT-only inactivations, leaving
-    # _prior_inact incomplete; B2 then emits INAC for already-Inactive
-    # customers, double-counting in the audit vs the ETL delta.
-    # Silver/DimCustomer Historical filters CustomerMgmt actions to NEW/INACT/UPDCUST
-    # before computing SCD2 history (silver/DimCustomer Historical.sql:159). So
-    # `last_action` for our `_customer_dates` view must use the same filter,
-    # otherwise an UPDACCT/ADDACCT/CLOSEACCT on a deactivated customer's
-    # account would mask their INACT (those rows have the account's owning
-    # C_ID and a later ActionTS than the INACT). That broke the B3
-    # 'DimCustomer inactive customers' audit at SF=10: customer 1044 had
-    # NEW(2008-02-28), INACT(2008-11-05), UPDACCT(2011-05-25 — owns the account
-    # being updated). max_by picked UPDACCT as last; cust_inact didn't match;
-    # _prior_inact didn't include 1044; B3 emitted a re-INAC row that silver
-    # made into a duplicate Inactive SCD2 row, inflating audit C_INACT.
+    # Determine each customer's final status at end of historical batch. The CustomerMgmtRaw ETL decodes ActionType to status as: NEW/ADDACCT/UPDACCT/UPDCUST -> Active CLOSEACCT/INACT             -> Inactive A customer's DimCustomer iscurrent row reflects their LAST action status. So "inactive at B1 end" = customers whose last action is CLOSEACCT or INACT. Using only INACT misses CLOSEACCT-only inactivations, leaving _prior_inact incomplete; B2 then emits INAC for already-Inactive customers, double-counting in the audit vs the ETL delta. Silver/DimCustomer Historical filters CustomerMgmt actions to NEW/INACT/UPDCUST before computing SCD2 history (silver/DimCustomer Historical.sql:159). So `last_action` for our `_customer_dates` view must use the same filter, otherwise an UPDACCT/ADDACCT/CLOSEACCT on a deactivated customer's account would mask their INACT (those rows have the account's owning C_ID and a later ActionTS than the INACT). That broke the B3 'DimCustomer inactive customers' audit at SF=10: customer 1044 had NEW(2008-02-28), INACT(2008-11-05), UPDACCT(2011-05-25 — owns the account being updated). max_by picked UPDACCT as last; cust_inact didn't match; _prior_inact didn't include 1044; B3 emitted a re-INAC row that silver made into a duplicate Inactive SCD2 row, inflating audit C_INACT.
     last_action = (all_df
         .filter(F.col("ActionType").isin("NEW", "INACT", "UPDCUST"))
         .groupBy(F.col("C_ID").alias("cust_id"))
@@ -1011,16 +825,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Analytical: NEW rows = hist_size + update_last_id × new_custs.
     log(f"[CustomerMgmt] {hist_size + update_last_id * new_custs:,} customers -> _customer_dates view", "DEBUG")
 
-    # Signal that views are ready — Trade can now start while we continue
-    # writing XML and incremental files.
+    # Signal that views are ready — Trade can now start while we continue writing XML and incremental files.
     if views_ready_event is not None:
         views_ready_event.set()
 
     # === Write XML body as plain text, then concat header/footer via filesystem ===
-    # Avoids mapInPandas which caused 17 min overhead from Photon columnar↔row
-    # conversions + Python interpreter on multi-worker clusters.
-    # Step 1: Spark writes XML body lines as plain text (fast, no Python UDF)
-    # Step 2: Filesystem cat prepends header + appends footer per file (kernel I/O)
+    # Avoids mapInPandas which caused 17 min overhead from Photon columnar↔row conversions + Python interpreter on multi-worker clusters. Step 1: Spark writes XML body lines as plain text (fast, no Python UDF) Step 2: Filesystem cat prepends header + appends footer per file (kernel I/O)
     xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line")
 
     tmp_path = f"{cfg.batch_path(1)}/CustomerMgmt.xml__tmp"
@@ -1029,25 +839,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     except:
         pass
 
-    # Cap XML output at ~100MB per file — Databricks native XML reader
-    # cannot split XML files, so one file = one ingest task and we want
-    # parallelism. Combined with the parquet-staging record cap in
-    # disk_cache above, this gives us both high partition count on
-    # read-back and bounded XML file sizes without an explicit repartition.
+    # Cap XML output at ~100MB per file — Databricks native XML reader cannot split XML files, so one file = one ingest task and we want parallelism. Combined with the parquet-staging record cap in disk_cache above, this gives us both high partition count on read-back and bounded XML file sizes without an explicit repartition.
     xml_df.write.mode("overwrite").option(
         "maxRecordsPerFile", _xml_records_per_file
     ).text(tmp_path)
     log(f"[CustomerMgmt] XML body written to staging")
 
-    # Step 2: Concat header + body + footer per file using pure-Python I/O.
-    # Previously this shelled out to `bash -c "cat hdr src ftr > dst"`; at
-    # SF=20000 with ~800 files concat'd in parallel, UC Volume FUSE throws
-    # EAGAIN ("Resource temporarily unavailable") on both reads and the
-    # output redirect. shell-level retries can't recover a half-written
-    # redirect once cat has already failed. Mirror the retry pattern used
-    # in utils.py register_copies_from_staging: open dst once, write
-    # header bytes, copyfileobj the source in 4MB chunks with per-source
-    # retry on OSError, then write footer bytes.
+    # Step 2: Concat header + body + footer per file using pure-Python I/O. Previously this shelled out to `bash -c "cat hdr src ftr > dst"`; at SF=20000 with ~800 files concat'd in parallel, UC Volume FUSE throws EAGAIN ("Resource temporarily unavailable") on both reads and the output redirect. shell-level retries can't recover a half-written redirect once cat has already failed. Mirror the retry pattern used in utils.py register_copies_from_staging: open dst once, write header bytes, copyfileobj the source in 4MB chunks with per-source retry on OSError, then write footer bytes.
     xml_header_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">\n'
     xml_footer_bytes = b'\n</TPCDI:Actions>\n'
     import shutil, time as _time
@@ -1091,12 +889,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Per-ActionType counts for Batch1 CustomerMgmt_audit.csv. Known
-    # analytically from schedule allocation — no need to groupBy all_df's
-    # 5×internal_sf rows. NEW rows = historical batch (all NEW) + per-update
-    # NEW allocation × update count. Other action types are exact from the
-    # pre-computed schedules (INACT/CLOSEACCT) or the fixed per-update slot
-    # allocation that the bijection join resolves to (UPDCUST/UPDACCT/ADDACCT).
+    # Per-ActionType counts for Batch1 CustomerMgmt_audit.csv. Known analytically from schedule allocation — no need to groupBy all_df's 5×internal_sf rows. NEW rows = historical batch (all NEW) + per-update NEW allocation × update count. Other action types are exact from the pre-computed schedules (INACT/CLOSEACCT) or the fixed per-update slot allocation that the bijection join resolves to (UPDCUST/UPDACCT/ADDACCT).
     new_total = hist_size + update_last_id * new_custs
     audit_counts = {
         ("CM_ADDACCT", 1):   n_addacct,
@@ -1105,18 +898,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         ("CM_NEW", 1):       new_total,
         ("CM_UPDCUST", 1):   n_updcust,
         ("CM_INACT", 1):     n_inact,
-        # Our generator never deliberately injects invalid DOB / tier values,
-        # so these are zero. The ETL pipeline will see zero alerts, which
-        # matches zero in the audit → automated_audit checks pass.
+        # Our generator never deliberately injects invalid DOB / tier values, so these are zero. The ETL pipeline will see zero alerts, which matches zero in the audit → automated_audit checks pass.
         ("CM_DOB_TO", 1):    0,
         ("CM_DOB_TY", 1):    0,
         ("CM_TIER_INV", 1):  0,
     }
 
-    # Cannot unpersist all_df here: _account_owners / _closed_accounts /
-    # _created_accounts / _customer_dates are materialize=False views over it
-    # and are still consumed by generate_incremental and watch_history.
-    # Caller unpersists after both finish.
+    # Cannot unpersist all_df here: _account_owners / _closed_accounts / _created_accounts / _customer_dates are materialize=False views over it and are still consumed by generate_incremental and watch_history. Caller unpersists after both finish.
 
     return {"counts": {("CustomerMgmt", 1): total, **audit_counts},
             "all_df": all_df, "cleanup_info": _all_df_cleanup}
@@ -1165,8 +953,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
     new_custs = int(cust_per_update * 0.7)
     new_accts = int(acct_per_update * 0.7)
 
-    # Historical sizing (matching generate_customermgmt) — we need these to compute
-    # the ID and DSN continuation points for incremental batches.
+    # Historical sizing (matching generate_customermgmt) — we need these to compute the ID and DSN continuation points for incremental batches.
     rows_per_update = new_accts + int(acct_per_update * 0.2) + int(acct_per_update * 0.1) + int(cust_per_update * 0.2) + int(cust_per_update * 0.1)
     cm_final = cfg.cm_final_row_count
     update_last_id = (cm_final - new_accts) // rows_per_update
@@ -1176,20 +963,12 @@ def generate_incremental(spark, cfg, dicts, dbutils):
     n_hist_customers = hist_size + update_last_id * new_custs
     n_hist_accounts = hist_size + update_last_id * new_accts
 
-    # CDC_DSN bases (continues from historical sequence).
-    # The DSN is a monotonically increasing sequence number that spans across all
-    # batches, allowing the ETL to determine the global ordering of CDC events.
+    # CDC_DSN bases (continues from historical sequence). The DSN is a monotonically increasing sequence number that spans across all batches, allowing the ETL to determine the global ordering of CDC events.
     cust_dsn_base = hist_size + update_last_id * cust_per_update
     acct_dsn_base = hist_size + update_last_id * acct_per_update
 
     counts = {}
-    # Accumulator for customer IDs already inactivated by any prior batch
-    # (Batch 1 CM.xml + any preceding incremental batch). The current-batch
-    # INAC rows downgrade to ACTV if they target an ID in this set —
-    # otherwise the ETL sees the INAC, finds the customer is already
-    # inactive, and refuses to create a second inactive DimCustomer row,
-    # leaving our audit C_INACT higher than the DIMessages delta.
-    # Start from CustomerMgmt.xml's INACT set.
+    # Accumulator for customer IDs already inactivated by any prior batch (Batch 1 CM.xml + any preceding incremental batch). The current-batch INAC rows downgrade to ACTV if they target an ID in this set — otherwise the ETL sees the INAC, finds the customer is already inactive, and refuses to create a second inactive DimCustomer row, leaving our audit C_INACT higher than the DIMessages delta. Start from CustomerMgmt.xml's INACT set.
     _prior_inact = (spark.table("_customer_dates")
                     .filter(F.col("cust_inact_ts").isNotNull())
                     .select(F.col("cust_id").cast("string").alias("_prior_inact_cid")))
@@ -1199,17 +978,14 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         batch_offset = batch_id - 2  # 0 for Batch2, 1 for Batch3
 
         # === Customer.txt ===
-        # 70% inserts (new C_IDs continuing from historical max), 30% updates
-        # (referencing existing C_IDs via hash). Each row has ALL fields populated
-        # (no sparse updates — this is a full-row CDC extract).
+        # 70% inserts (new C_IDs continuing from historical max), 30% updates (referencing existing C_IDs via hash). Each row has ALL fields populated (no sparse updates — this is a full-row CDC extract).
         n_cust_insert = new_custs  # same as per-update new customer count
         n_cust_update = cust_per_update - n_cust_insert
 
         cust_df = (spark.range(0, cust_per_update).withColumnRenamed("id", "rid")
             .withColumn("_is_insert", F.col("rid") < F.lit(n_cust_insert))
             .withColumn("cdc_flag", F.when(F.col("_is_insert"), F.lit("I")).otherwise(F.lit("U")))
-            # CDC_DSN: sequential, continuing from where the historical batch left off.
-            # Batch2 starts at cust_dsn_base, Batch3 continues from Batch2's end.
+            # CDC_DSN: sequential, continuing from where the historical batch left off. Batch2 starts at cust_dsn_base, Batch3 continues from Batch2's end.
             .withColumn("cdc_dsn", (F.lit(cust_dsn_base) + F.lit(batch_offset * cust_per_update) + F.col("rid")).cast("string"))
             # C_ID: inserts get new sequential IDs, updates reference existing ones.
             .withColumn("c_id",
@@ -1221,12 +997,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                 F.lpad((hash_key(F.col("rid"), bs+1) % 999).cast("string"), 3, "0"), F.lit("-"),
                 F.lpad((hash_key(F.col("rid"), bs+2) % 99).cast("string"), 2, "0"), F.lit("-"),
                 F.lpad((hash_key(F.col("rid"), bs+3) % 9999).cast("string"), 4, "0")))
-            # c_st_id: inserts=ACTV, updates use the UpdateActionType pattern
-            # In DIGen: NEW/CHANGE->ACTV, DELETE->INAC. For incremental updates,
-            # ~67% remain ACTV and ~33% become INAC (matching DIGen's observed 90%/10% overall
-            # since 70% inserts are all ACTV + 30% updates with 67%/33% split).
-            # _candidate_inac marks updates that WOULD be INAC — actual INAC assignment
-            # is deferred until after c_id is computed, so we can verify the customer has accounts.
+            # c_st_id: inserts=ACTV, updates use the UpdateActionType pattern In DIGen: NEW/CHANGE->ACTV, DELETE->INAC. For incremental updates, ~67% remain ACTV and ~33% become INAC (matching DIGen's observed 90%/10% overall since 70% inserts are all ACTV + 30% updates with 67%/33% split). _candidate_inac marks updates that WOULD be INAC — actual INAC assignment is deferred until after c_id is computed, so we can verify the customer has accounts.
             .withColumn("_candidate_inac",
                 (~F.col("_is_insert")) & (hash_key(F.col("rid"), bs+4) % 100 >= 67))
             .withColumn("c_st_id", F.when(F.col("_is_insert"), F.lit("ACTV"))
@@ -1234,20 +1005,14 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                 .otherwise(F.lit("ACTV")))
             .withColumn("c_m_name", F.when(hash_key(F.col("rid"), bs+7) % 100 < 25, F.lit("")).otherwise(
                 F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), (hash_key(F.col("rid"), bs+70) % 26 + 1).cast("int"), 1)))
-            # c_gndr: DIGen overall ~52.6% empty across inserts+updates.
-            # NullGenerator(PERCENT_NULL=5%) wraps ProbabilityGenerator(98% mMfF, 2% error).
-            # But the 52% empty comes from the CustomerMgmt XML sparse update pattern where
-            # gender is only populated ~48% of the time. The CDC extract carries forward these values.
-            # For simplicity: 52% empty, then 98% of rest = mMfF, 2% = error char
+            # c_gndr: DIGen overall ~52.6% empty across inserts+updates. NullGenerator(PERCENT_NULL=5%) wraps ProbabilityGenerator(98% mMfF, 2% error). But the 52% empty comes from the CustomerMgmt XML sparse update pattern where gender is only populated ~48% of the time. The CDC extract carries forward these values. For simplicity: 52% empty, then 98% of rest = mMfF, 2% = error char
             .withColumn("c_gndr",
                 F.when(hash_key(F.col("rid"), bs+8) % 1000 < 526, F.lit(""))
                  .when(hash_key(F.col("rid"), bs+8) % 1000 < 990,
                     F.array(*[F.lit(g) for g in ["M","F","m","f"]])[(hash_key(F.col("rid"), bs+71) % 4).cast("int")])
                  .otherwise(F.substring(F.lit("ABCDEGHIJKLNOPQRSTUVWXYZabcdeghijklnopqrstuvwxyz"),
                     (hash_key(F.col("rid"), bs+72) % 48 + 1).cast("int"), 1)))
-            # c_tier: DIGen uses NullGenerator(5%) then ProbabilityGenerator
-            # tier 1=~10%, tier 2=~30%, tier 3=~60% (after NULL removal)
-            # Combined: 5% NULL, ~9.5% tier1, ~28.5% tier2, ~57% tier3
+            # c_tier: DIGen uses NullGenerator(5%) then ProbabilityGenerator tier 1=~10%, tier 2=~30%, tier 3=~60% (after NULL removal) Combined: 5% NULL, ~9.5% tier1, ~28.5% tier2, ~57% tier3
             .withColumn("c_tier",
                 F.when(hash_key(F.col("rid"), bs+9) % 1000 < 50, F.lit(None))
                  .when(hash_key(F.col("rid"), bs+9) % 1000 < 145, F.lit("1"))
@@ -1265,8 +1030,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                     F.when(hash_key(F.col("rid"), bs+17) % 1000 < 50, F.lit(None))
                      .when(hash_key(F.col("rid"), bs+17) % 1000 < 810, F.lit("United States of America"))
                      .otherwise(F.lit("Canada"))))
-            # Phone 1: country code requires area code (otherwise pipeline produces
-            # "+1 NNN-NNNN" which fails phone format validation)
+            # Phone 1: country code requires area code (otherwise pipeline produces "+1 NNN-NNNN" which fails phone format validation)
             .withColumn("c_area_1", F.when(hash_key(F.col("rid"), bs+31) % 100 < 50,
                 (hash_key(F.col("rid"), bs+18) % 900 + 100).cast("string")).otherwise(F.lit("")))
             .withColumn("c_ctry_1", F.when(
@@ -1316,9 +1080,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                 F.concat(F.col("c_l_name"), F.lit("."), F.col("c_f_name"), F.lit("@"), F.col("_mp2")))
              .otherwise(F.lit("")))
 
-        # Force INAC candidates back to ACTV if they have no accounts in _account_owners.
-        # This prevents the audit failure where an inactive customer has zero accounts.
-        # (Incremental insert customers don't automatically get accounts like historical NEWs.)
+        # Force INAC candidates back to ACTV if they have no accounts in _account_owners. This prevents the audit failure where an inactive customer has zero accounts. (Incremental insert customers don't automatically get accounts like historical NEWs.)
         _owners = spark.table("_account_owners")
         cust_df = (cust_df
             .join(_owners.select(F.col("owner_cid").alias("_has_acct_cid")).distinct(),
@@ -1328,23 +1090,14 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                  .otherwise(F.col("c_st_id")))
             .drop("_has_acct_cid"))
 
-        # Drop U rows targeting already-inactive customers. The ETL's
-        # DimCustomer MERGE would still create SCD2 versions for them
-        # (INAC rows no-op the iscurrent-inactive count; ACTV rows
-        # DECREMENT it via reactivation), breaking the 'DimCustomer
-        # inactive customers' audit check which expects the cumulative
-        # delta to equal our running sum of C_INACT. Dropping these U
-        # rows is simpler than tracking reactivations in the audit.
-        # _prior_inact accumulates across the for loop — see above.
+        # Drop U rows targeting already-inactive customers. The ETL's DimCustomer MERGE would still create SCD2 versions for them (INAC rows no-op the iscurrent-inactive count; ACTV rows DECREMENT it via reactivation), breaking the 'DimCustomer inactive customers' audit check which expects the cumulative delta to equal our running sum of C_INACT. Dropping these U rows is simpler than tracking reactivations in the audit. _prior_inact accumulates across the for loop — see above.
         cust_df = (cust_df
             .join(_prior_inact,
                   F.col("c_id") == F.col("_prior_inact_cid"), "left")
             .filter(~((F.col("cdc_flag") == "U") & F.col("_prior_inact_cid").isNotNull()))
             .drop("_prior_inact_cid"))
 
-        # Dedup on c_id: U rows pick victims via hash(rid) % pool_size, which
-        # collides ~7% per batch at SF=100 and grows with scale. Delta MERGE
-        # rejects multiple source rows matching the same target c_id.
+        # Dedup on c_id: U rows pick victims via hash(rid) % pool_size, which collides ~7% per batch at SF=100 and grows with scale. Delta MERGE rejects multiple source rows matching the same target c_id.
         cust_df = cust_df.dropDuplicates(["c_id"])
 
         # Select columns in the exact order expected by the TPC-DI Customer.txt schema.
@@ -1355,12 +1108,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             "c_ctry_2","c_area_2","c_local_2","c_ext_2",
             "c_ctry_3","c_area_3","c_local_3","c_ext_3",
             "c_email_1","c_email_2","c_lcl_tx_id","c_nat_tx_id")
-        # Write first, then count from staging (native Spark part files). The
-        # dropDuplicates above is non-deterministic in row selection across
-        # re-evaluations at scale (SF=5000+), so counting cust_df before write
-        # yields different numbers than what actually lands on disk. Reading
-        # staging once it's written gives the authoritative count that matches
-        # the ETL's view of the file. Same pattern as WatchHistory historical.
+        # Write first, then count from staging (native Spark part files). The dropDuplicates above is non-deterministic in row selection across re-evaluations at scale (SF=5000+), so counting cust_df before write yields different numbers than what actually lands on disk. Reading staging once it's written gives the authoritative count that matches the ETL's view of the file. Same pattern as WatchHistory historical.
         staging_cust = f"{bp}/Customer.txt__staging"
         write_file(cust_df, f"{bp}/Customer.txt", "|", dbutils, scale_factor=cfg.sf)
 
@@ -1373,8 +1121,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             F.sum(F.when(F.col("c_st_id") == "INAC", 1).otherwise(0)).alias("c_inact"),
             F.sum(F.when(F.col("c_tier").isNull() | (~F.col("c_tier").isin("1", "2", "3")), 1).otherwise(0)).alias("c_tier_inv"),
         ).collect()[0]
-        # Accumulate this batch's inactivated customer IDs so the next batch
-        # doesn't re-inactivate them.
+        # Accumulate this batch's inactivated customer IDs so the next batch doesn't re-inactivate them.
         _prior_inact = _prior_inact.unionByName(
             spark.read.csv(staging_cust, sep="|", header=False, schema=_cust_min_schema)
                  .filter(F.col("c_st_id") == "INAC")
@@ -1388,8 +1135,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         counts[("CI_TIER_INV", batch_id)] = _cust_agg["c_tier_inv"] or 0
 
         # === Account.txt ===
-        # 70% inserts (new CA_IDs continuing from historical max), 30% updates.
-        # Similar structure to Customer.txt but for brokerage accounts.
+        # 70% inserts (new CA_IDs continuing from historical max), 30% updates. Similar structure to Customer.txt but for brokerage accounts.
         n_acct_insert = new_accts
         n_acct_update = acct_per_update - n_acct_insert
         total_existing_accounts = n_hist_accounts + batch_offset * n_acct_insert
@@ -1417,8 +1163,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
                 F.when(hash_key(F.col("rid"), bs+102) % 100 < 10, F.lit("0"))
                 .when(hash_key(F.col("rid"), bs+102) % 100 < 80, F.lit("1"))
                 .otherwise(F.lit("2")))
-            # ca_st_id: inserts=ACTV. Updates: 67% ACTV / 33% INAC
-            # (gives 70%x100% + 30%x67% = 90% ACTV overall, matching DIGen exactly)
+            # ca_st_id: inserts=ACTV. Updates: 67% ACTV / 33% INAC (gives 70%x100% + 30%x67% = 90% ACTV overall, matching DIGen exactly)
             .withColumn("ca_st_id", F.when(F.col("_is_insert"), F.lit("ACTV")).otherwise(
                 F.when(hash_key(F.col("rid"), bs+103) % 100 < 67, F.lit("ACTV")).otherwise(F.lit("INAC"))))
             .withColumn("_broker_idx", hash_key(F.col("rid"), bs+101) % broker_count)
@@ -1428,28 +1173,19 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             on="_broker_idx", how="left")
 
         # --- Drop 'U' rows referencing non-existent CA_IDs (ADDACCT dedup holes) ---
-        # Update ca_ids are hash % total_existing_accounts which includes ~6% holes
-        # where the ADDACCT was filtered by INACT dedup in the historical batch.
-        # These rows would become phantom DimAccount entries (pipeline MERGE always
-        # INSERTs from all_incr_updates). Left-semi-join to _account_owners keeps
-        # only 'U' rows whose ca_id references a real account. 'I' rows are always
-        # kept (they reference brand-new CA_IDs not yet in _account_owners).
+        # Update ca_ids are hash % total_existing_accounts which includes ~6% holes where the ADDACCT was filtered by INACT dedup in the historical batch. These rows would become phantom DimAccount entries (pipeline MERGE always INSERTs from all_incr_updates). Left-semi-join to _account_owners keeps only 'U' rows whose ca_id references a real account. 'I' rows are always kept (they reference brand-new CA_IDs not yet in _account_owners).
         _valid_ca_ids = spark.table("_account_owners").select("ca_id").distinct()
         acct_df = (acct_df.filter(F.col("_is_insert"))
             .unionByName(acct_df.filter(~F.col("_is_insert"))
                 .join(_valid_ca_ids, on="ca_id", how="left_semi")))
 
         # --- Add INAC account rows for customers deactivated in this batch ---
-        # When a customer's c_st_id becomes INAC, their accounts must also be closed.
-        # Use _account_owners (historical + prior incremental inserts) to find all
-        # accounts belonging to INAC'd customers.
+        # When a customer's c_st_id becomes INAC, their accounts must also be closed. Use _account_owners (historical + prior incremental inserts) to find all accounts belonging to INAC'd customers.
         inac_custs = (cust_df
             .filter(F.col("c_st_id") == "INAC")
             .select(F.col("c_id").alias("_inac_cid")))
         acct_owners = spark.table("_account_owners")
-        # Assign a valid broker to INAC closures so they survive the DimBroker
-        # INNER JOIN in the pipeline. The specific broker doesn't matter (account
-        # is being closed), but an empty broker causes the row to be dropped.
+        # Assign a valid broker to INAC closures so they survive the DimBroker INNER JOIN in the pipeline. The specific broker doesn't matter (account is being closed), but an empty broker causes the row to be dropped.
         _first_broker = brokers_df.select("broker_id").first()[0]
         inac_acct_rows = (inac_custs
             .join(acct_owners, F.col("_inac_cid") == F.col("owner_cid"), "inner")
@@ -1462,12 +1198,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             .withColumn("ca_st_id", F.lit("INAC"))
             .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id"))
 
-        # Remove random account updates that conflict with INAC closures.
-        # A random update might pick the same ca_id that an INAC closure targets,
-        # producing two rows for the same account with different customers.
-        # The INAC closure takes priority.
-        # Note: join(on="ca_id", ...) moves ca_id to position 0 — re-select to
-        # restore schema order, then unionByName to align columns by name.
+        # Remove random account updates that conflict with INAC closures. A random update might pick the same ca_id that an INAC closure targets, producing two rows for the same account with different customers. The INAC closure takes priority. Note: join(on="ca_id", ...) moves ca_id to position 0 — re-select to restore schema order, then unionByName to align columns by name.
         inac_ca_ids = inac_acct_rows.select("ca_id").distinct()
         acct_no_conflict = (acct_df
             .select("cdc_flag","cdc_dsn","ca_id","ca_b_id","ca_c_id","ca_name","ca_tax_st","ca_st_id")
@@ -1476,14 +1207,10 @@ def generate_incremental(spark, cfg, dicts, dbutils):
 
         acct_final = acct_no_conflict.unionByName(inac_acct_rows)
 
-        # Dedup on ca_id: U rows pick victims via hash(rid) % pool_size, which
-        # collides probabilistically and grows with scale. Delta MERGE rejects
-        # multiple source rows matching the same target ca_id. Same class of
-        # bug as the Customer.txt dedup above.
+        # Dedup on ca_id: U rows pick victims via hash(rid) % pool_size, which collides probabilistically and grows with scale. Delta MERGE rejects multiple source rows matching the same target ca_id. Same class of bug as the Customer.txt dedup above.
         acct_final = acct_final.dropDuplicates(["ca_id"])
 
-        # Write first, then count from staging. Same dropDuplicates non-determinism
-        # rationale as Customer.txt above.
+        # Write first, then count from staging. Same dropDuplicates non-determinism rationale as Customer.txt above.
         staging_acct = f"{bp}/Account.txt__staging"
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
         _acct_min_schema = "cdc_flag STRING, cdc_dsn BIGINT, ca_id STRING, ca_b_id STRING, ca_c_id STRING, ca_name STRING, ca_tax_st STRING, ca_st_id STRING"
@@ -1498,8 +1225,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         counts[("AI_CLOSEACCT", batch_id)] = _acct_agg["ca_closeacct"] or 0
         counts[("AI_UPDACCT", batch_id)]   = _acct_agg["ca_updacct"] or 0
 
-        # Update _account_owners with this batch's insert accounts so the next batch
-        # can close them if the customer becomes INAC later.
+        # Update _account_owners with this batch's insert accounts so the next batch can close them if the customer becomes INAC later.
         new_owners = (acct_df
             .filter(F.col("_is_insert"))
             .select(F.col("ca_id"), F.col("ca_c_id").alias("owner_cid")))

@@ -126,8 +126,7 @@ def make_task(
     }
     if base_params is not None:
         notebook_task["base_parameters"] = base_params
-    # Tasks pinned to a job cluster (e.g. the mavenlib customermgmt path) run
-    # there, not on the SQL warehouse — skip warehouse_id even on DBSQL.
+    # Tasks pinned to a job cluster (e.g. the mavenlib customermgmt path) run there, not on the SQL warehouse — skip warehouse_id even on DBSQL.
     if exec_type == "DBSQL" and job_cluster_key_override is None:
         notebook_task["warehouse_id"] = wh_id
 
@@ -151,8 +150,7 @@ def make_task(
     task["email_notifications"] = {}
     task["notification_settings"] = dict(_DEFAULT_NOTIF)
 
-    # Stable notebook_task key ordering (notebook_path, base_parameters,
-    # warehouse_id, source) so the JSON diffs cleanly across runs.
+    # Stable notebook_task key ordering (notebook_path, base_parameters, warehouse_id, source) so the JSON diffs cleanly across runs.
     ordered_notebook: dict[str, Any] = {"notebook_path": notebook_task["notebook_path"]}
     if "base_parameters" in notebook_task:
         ordered_notebook["base_parameters"] = notebook_task["base_parameters"]
@@ -261,9 +259,7 @@ def make_cleanup_tasks(
         job_name=job_name,
         wh_id=wh_id,
     )
-    # depends_on for the cleanup needs `outcome="true"` so it skips when the
-    # gate evaluated false. make_task only emits `[{task_key: ...}]`, so patch
-    # in the outcome here.
+    # depends_on for the cleanup needs `outcome="true"` so it skips when the gate evaluated false. make_task only emits `[{task_key: ...}]`, so patch in the outcome here.
     cleanup["depends_on"] = [{"task_key": GATE, "outcome": "true"}]
     return [gate, cleanup]
 

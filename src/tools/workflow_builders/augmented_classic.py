@@ -35,19 +35,14 @@ _RETRY_POLICY = {
     "retry_on_timeout": True,
 }
 
-# Bronze ingestion is parameterized by `Table` — same notebook
-# (`bronze/ingest_bronze`) handles all 7. Names match the bronze table
-# names (e.g. "account" → bronzeaccount table) and the staged file names
-# under `_dailybatches/{wh_db}_{sf}/{date}/Account.txt` etc.
+# Bronze ingestion is parameterized by `Table` — same notebook (`bronze/ingest_bronze`) handles all 7. Names match the bronze table names (e.g. "account" → bronzeaccount table) and the staged file names under `_dailybatches/{wh_db}_{sf}/{date}/Account.txt` etc.
 _BRONZE_TABLES = ["account", "cashtransaction", "customer", "dailymarket",
                   "holdings", "trade", "watches"]
 
 # Workspace path prefix shared by all augmented_incremental notebooks.
 _AUG_PATH = "incremental_batches/augmented_incremental"
 
-# Standard set of params every augmented notebook reads. The job declares
-# these at the top level; for tasks driven by the parent's for_each loop,
-# `batch_date` is overridden per iteration via {{input}}.
+# Standard set of params every augmented notebook reads. The job declares these at the top level; for tasks driven by the parent's for_each loop, `batch_date` is overridden per iteration via {{input}}.
 _COMMON_PARAMS = {
     "catalog":         "{{job.parameters.catalog}}",
     "scale_factor":    "{{job.parameters.scale_factor}}",
@@ -171,8 +166,7 @@ def build_child(
             base_params=dict(_COMMON_PARAMS, Table=tbl),
         ))
 
-    # 3. account_updates_from_customer — derives account-side updates from
-    #    bronzecustomer (cross-table edge); append-writes to bronzeaccount.
+    # 3. account_updates_from_customer — derives account-side updates from bronzecustomer (cross-table edge); append-writes to bronzeaccount.
     tasks.append(_make_task(
         task_key="account_updates_from_customer",
         notebook_path=f"{aug}/bronze/account_updates_from_customer",
@@ -245,8 +239,7 @@ def build_child(
         "email_notifications": {"no_alert_for_skipped_runs": False},
         "webhook_notifications": {},
         "timeout_seconds": 0,
-        # Parent's for_each fans out per-date child runs; high cap allows
-        # manual debug runs to coexist with an in-flight loop.
+        # Parent's for_each fans out per-date child runs; high cap allows manual debug runs to coexist with an in-flight loop.
         "max_concurrent_runs": 1000,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
@@ -323,10 +316,7 @@ def build_parent(
         "webhook_notifications": {},
     }
 
-    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure
-    # runs still reach it; outcome=true on cleanup so it skips entirely
-    # (no compute spin-up) when the user keeps `delete_tables_when_finished`
-    # at its default of FALSE.
+    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure runs still reach it; outcome=true on cleanup so it skips entirely (no compute spin-up) when the user keeps `delete_tables_when_finished` at its default of FALSE.
     GATE = "delete_when_finished_TRUE_FALSE"
     gate_task: dict[str, Any] = {
         "task_key": GATE,
