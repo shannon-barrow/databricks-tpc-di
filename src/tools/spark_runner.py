@@ -93,23 +93,18 @@ def run(
                   f"COMMENT 'TPC-DI Raw Files'")
         _tlog("schema + volume ready")
 
-    if augmented_incremental:
-        # No volume output to check — Delta saveAsTable handles overwrite via mode("overwrite") on every run, so the temp tpcdi_raw_data.{dataset}{sf} tables are always rebuilt fresh. regenerate_data is moot here.
-        _tlog("augmented_incremental: skipping volume-existence early-exit "
-              "(Delta tables are always overwritten)")
-    else:
-        _tlog(f"dbutils.fs.ls check on {blob_out_path}")
-        if _path_exists(dbutils, blob_out_path):
-            if regenerate_data:
-                _tlog(f"regenerate_data=YES; recursive delete of prior output begins")
-                dbutils.fs.rm(blob_out_path, recurse=True)
-                _tlog("prior output deleted")
-            else:
-                print(f"Data generation skipped since {blob_out_path} already exists. "
-                      f"Set regenerate_data=YES to overwrite.")
-                return
+    _tlog(f"dbutils.fs.ls check on {blob_out_path}")
+    if _path_exists(dbutils, blob_out_path):
+        if regenerate_data:
+            _tlog(f"regenerate_data=YES; recursive delete of prior output begins")
+            dbutils.fs.rm(blob_out_path, recurse=True)
+            _tlog("prior output deleted")
         else:
-            _tlog("no prior output to delete")
+            print(f"Data generation skipped since {blob_out_path} already exists. "
+                  f"Set regenerate_data=YES to overwrite.")
+            return
+    else:
+        _tlog("no prior output to delete")
 
     # Resolve module source. Try workspace path first (works on SINGLE_USER clusters); fall back to a Volume copy for USER_ISOLATION/SHARED clusters where /Workspace paths aren't accessible via Python file I/O.
     _tools_dir = f"{workspace_src_path}/tools"
@@ -177,19 +172,16 @@ def run(
     print(f"Scale Factor: {scale_factor} ")
     print(f"Output: {cfg.volume_path}")
 
-    if not augmented_incremental:
-        # Second recursive delete (redundant with the first one above, but harmless since the first already cleaned anything present). Skipped in augmented mode — no volume output to clean.
-        _utlog(f"[Init] redundant cleanup of {cfg.volume_path}", "DEBUG")
-        try:
-            dbutils.fs.rm(cfg.volume_path, recurse=True)
-        except Exception:
-            pass
-        _utlog("[Init] output dir cleaned", "DEBUG")
+    # Second recursive delete (redundant with the first one above, but harmless since the first already cleaned anything present).
+    _utlog(f"[Init] redundant cleanup of {cfg.volume_path}", "DEBUG")
+    try:
+        dbutils.fs.rm(cfg.volume_path, recurse=True)
+    except Exception:
+        pass
+    _utlog("[Init] output dir cleaned", "DEBUG")
 
-        _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
-        make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
-    else:
-        _utlog("[Init] augmented_incremental: no volume cleanup or batch dirs", "DEBUG")
+    _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
+    make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
     _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
     dicts = dictionaries.load_all()
     _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")

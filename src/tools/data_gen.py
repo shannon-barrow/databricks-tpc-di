@@ -167,12 +167,13 @@ _regenerate = dbutils.widgets.get("regenerate_data") == "YES"
 _log_level = dbutils.widgets.get("log_level")
 
 _volume_base = f"/Volumes/{_catalog}/tpcdi_raw_data/tpcdi_volume/"
-# Augmented-Incremental writes only Delta tables (no files), but we still pass a tpcdi_directory so audit-file emit / volume bookkeeping have a path. Use the spark_datagen subdir to stay out of DIGen's space.
-_tpcdi_directory = (
-    f"{_volume_base}spark_datagen/"
-    if _choice in ("spark", "augmented_incremental")
-    else _volume_base
-)
+# Per-mode target directory drives spark_runner's "skip if already exists" early-exit. - spark    → spark_datagen/sf={sf}/   (raw .txt/.xml/.csv files) - native   → sf={sf}/                (DIGen-native layout) - augmented → augmented_incremental/_staging/sf={sf}/   (Phase 2 per-day files; presence means the full augmented pipeline has already produced the persisted artifacts and stage 0 can short-circuit. Stage 0's temp Delta tables in tpcdi_raw_data are dropped by cleanup_stage0 anyway, so they aren't a useful marker)
+if _choice == "augmented_incremental":
+    _tpcdi_directory = f"{_volume_base}augmented_incremental/_staging/"
+elif _choice == "spark":
+    _tpcdi_directory = f"{_volume_base}spark_datagen/"
+else:
+    _tpcdi_directory = _volume_base
 
 _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 _workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
