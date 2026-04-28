@@ -161,10 +161,11 @@ if _choice not in ("spark", "native", "augmented_incremental"):
         f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
     )
 
-_catalog = dbutils.widgets.get("catalog")
-_scale_factor = int(dbutils.widgets.get("scale_factor"))
-_regenerate = dbutils.widgets.get("regenerate_data") == "YES"
-_log_level = dbutils.widgets.get("log_level")
+# Job-level parameters are free-form text on retrigger — strip whitespace and normalize case before comparing against literal sentinels so 'Yes', ' yes ', 'YES' all do the right thing.
+_catalog = dbutils.widgets.get("catalog").strip()
+_scale_factor = int(dbutils.widgets.get("scale_factor").strip())
+_regenerate = dbutils.widgets.get("regenerate_data").strip().upper() == "YES"
+_log_level = dbutils.widgets.get("log_level").strip().upper()
 
 _volume_base = f"/Volumes/{_catalog}/tpcdi_raw_data/tpcdi_volume/"
 # Per-mode target directory drives spark_runner's "skip if already exists" early-exit. - spark    → spark_datagen/sf={sf}/   (raw .txt/.xml/.csv files) - native   → sf={sf}/                (DIGen-native layout) - augmented → augmented_incremental/_staging/sf={sf}/   (Phase 2 per-day files; presence means the full augmented pipeline has already produced the persisted artifacts and stage 0 can short-circuit. Stage 0's temp Delta tables in tpcdi_raw_data are dropped by cleanup_stage0 anyway, so they aren't a useful marker)
