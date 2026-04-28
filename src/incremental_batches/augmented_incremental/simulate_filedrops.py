@@ -28,7 +28,21 @@ threads         = len(filenames)
 def copy_file(source_file, target_file):
   # shutil.copyfile(source_file, target_file)
   dbutils.fs.cp(source_file, target_file)
-  return f"Successfully moved {source_file} to {target_file}"  
+  return f"Successfully moved {source_file} to {target_file}"
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Clear prior day's files before staging the new batch
+# MAGIC Autoloader checkpoints already track what's been processed, so removing
+# MAGIC the prior day's files is safe and keeps the volume size bounded over a
+# MAGIC 730-day run.
+
+# COMMAND ----------
+
+if os.path.exists(batches_dir):
+  dbutils.fs.rm(batches_dir, recurse=True)
+dbutils.fs.mkdirs(batches_dir)
 
 # COMMAND ----------
 
