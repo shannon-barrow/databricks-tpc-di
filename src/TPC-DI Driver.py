@@ -183,6 +183,21 @@ if sku[0] == "AUGMENTED":
   try: dbutils.widgets.remove("scale_factor")
   except Exception: pass
   scale_factor = 20000
+  displayHTML(
+    '<div style="background:#fff3cd;border-left:4px solid #ffc107;'
+    'padding:12px;margin:8px 0;font-family:sans-serif;">'
+    '<strong>⚠ UNDER CONSTRUCTION — DATA NOT AVAILABLE OUTSIDE THIS DEV ENV</strong><br/>'
+    'AUGMENTED variants consume pre-staged per-day files at '
+    '<code>/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/augmented_incremental/_staging/sf={SF}/</code>. '
+    'Today only <strong>SF=20000</strong> is staged in this workspace; '
+    'until the file-splitting tools under '
+    '<code>src/tools/incremental_file_splitting/</code> are generalized to '
+    'produce daily files at any SF (Phase B), this benchmark cannot be '
+    'reproduced outside this dev environment. The Scale Factor widget is '
+    'hidden and locked to 20000 to prevent picking an SF with no daily '
+    'files to consume.'
+    '</div>'
+  )
 
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across all benchmark variants at that SF), so its name omits exec_type/batched.
