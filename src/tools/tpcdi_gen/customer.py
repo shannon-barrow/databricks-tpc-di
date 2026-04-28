@@ -829,6 +829,81 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     if views_ready_event is not None:
         views_ready_event.set()
 
+    # === Augmented-Incremental staging: write all_df as Delta in CustomerMgmtRaw shape ===
+    # Skip XML write entirely. Project the in-memory action-rows DataFrame into the exact column set produced by `single_batch/SQL/CustomerMgmtRaw.sql` (i.e. what that notebook produces by reading and unpacking CustomerMgmt.xml). Downstream silver SQL (DimCustomer / DimAccount + augmented historical/*.sql) consumes this table directly — no separate Customer.txt/Account.txt splitter step needed.
+    if cfg.augmented_incremental:
+        from .utils import write_delta
+
+        def _phone_concat(local, ctry, area, ext):
+            """Match CustomerMgmtRaw.sql's phone concat: '+CTRY (AREA) LOCALEXT' (skip
+            empty parts, NULL when local is NULL). Returns a Column expression."""
+            local_ok = F.col(local).isNotNull() & (F.col(local) != "")
+            ctry_part = F.when(F.col(ctry).isNotNull() & (F.col(ctry) != ""),
+                               F.concat(F.lit("+"), F.col(ctry), F.lit(" "))).otherwise(F.lit(""))
+            area_part = F.when(F.col(area).isNotNull() & (F.col(area) != ""),
+                               F.concat(F.lit("("), F.col(area), F.lit(") "))).otherwise(F.lit(""))
+            ext_part = F.coalesce(F.col(ext), F.lit(""))
+            return F.when(local_ok,
+                F.concat(ctry_part, area_part, F.col(local), ext_part)
+            ).otherwise(F.lit(None).cast("string"))
+
+        def _nz(c):
+            """nullif(col, '') — empty string -> NULL."""
+            return F.when(F.col(c) == "", F.lit(None)).otherwise(F.col(c))
+
+        cm_df = all_df.select(
+            F.col("C_ID").cast("bigint").alias("customerid"),
+            F.col("CA_ID").cast("bigint").alias("accountid"),
+            F.col("CA_B_ID").cast("bigint").alias("brokerid"),
+            _nz("C_TAX_ID").alias("taxid"),
+            _nz("CA_NAME").alias("accountdesc"),
+            F.col("CA_TAX_ST").cast("tinyint").alias("taxstatus"),
+            F.when(F.col("ActionType").isin("NEW", "ADDACCT", "UPDACCT", "UPDCUST"), F.lit("Active"))
+             .when(F.col("ActionType").isin("CLOSEACCT", "INACT"), F.lit("Inactive"))
+             .alias("status"),
+            _nz("C_L_NAME").alias("lastname"),
+            _nz("C_F_NAME").alias("firstname"),
+            _nz("C_M_NAME").alias("middleinitial"),
+            F.when(F.upper(F.col("C_GNDR")) == "", F.lit(None)).otherwise(F.upper(F.col("C_GNDR"))).alias("gender"),
+            F.col("C_TIER").cast("tinyint").alias("tier"),
+            F.col("C_DOB").cast("date").alias("dob"),
+            _nz("C_ADLINE1").alias("addressline1"),
+            _nz("C_ADLINE2").alias("addressline2"),
+            _nz("C_ZIPCODE").alias("postalcode"),
+            _nz("C_CITY").alias("city"),
+            _nz("C_STATE_PROV").alias("stateprov"),
+            _nz("C_CTRY").alias("country"),
+            _phone_concat("C_LOCAL_1", "C_CTRY_1", "C_AREA_1", "C_EXT_1").alias("phone1"),
+            _phone_concat("C_LOCAL_2", "C_CTRY_2", "C_AREA_2", "C_EXT_2").alias("phone2"),
+            _phone_concat("C_LOCAL_3", "C_CTRY_3", "C_AREA_3", "C_EXT_3").alias("phone3"),
+            _nz("C_PRIM_EMAIL").alias("email1"),
+            _nz("C_ALT_EMAIL").alias("email2"),
+            _nz("C_LCL_TX_ID").alias("lcl_tx_id"),
+            _nz("C_NAT_TX_ID").alias("nat_tx_id"),
+            F.to_timestamp(F.col("ActionTS")).alias("update_ts"),
+            F.col("ActionType"),
+            F.when(F.col("ActionTS") < F.lit("2015-07-06"), F.lit("tables"))
+             .otherwise(F.lit("files")).alias("stg_target"),
+        )
+
+        write_delta(cm_df, cfg=cfg, dataset="customermgmt",
+                    partition_cols=["ActionType", "stg_target"])
+
+        new_total = hist_size + update_last_id * new_custs
+        audit_counts = {
+            ("CM_ADDACCT", 1):   n_addacct,
+            ("CM_CLOSEACCT", 1): n_close,
+            ("CM_UPDACCT", 1):   n_updacct,
+            ("CM_NEW", 1):       new_total,
+            ("CM_UPDCUST", 1):   n_updcust,
+            ("CM_INACT", 1):     n_inact,
+            ("CM_DOB_TO", 1):    0,
+            ("CM_DOB_TY", 1):    0,
+            ("CM_TIER_INV", 1):  0,
+        }
+        return {"counts": {("CustomerMgmt", 1): total, **audit_counts},
+                "all_df": all_df, "cleanup_info": _all_df_cleanup}
+
     # === Write XML body as plain text, then concat header/footer via filesystem ===
     # Avoids mapInPandas which caused 17 min overhead from Photon columnar↔row conversions + Python interpreter on multi-worker clusters. Step 1: Spark writes XML body lines as plain text (fast, no Python UDF) Step 2: Filesystem cat prepends header + appends footer per file (kernel I/O)
     xml_df = all_df.withColumn("xml_line", xml_body).select("xml_line")
@@ -1252,7 +1327,8 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=N
     counts = {}
     cm_result = generate_customermgmt(spark, cfg, dicts, dbutils, views_ready_event)
     counts.update(cm_result["counts"])
-    counts.update(generate_incremental(spark, cfg, dicts, dbutils))
+    if not cfg.augmented_incremental:
+        counts.update(generate_incremental(spark, cfg, dicts, dbutils))
     # Release all_df now that both historical XML and incremental batches are done.
     safe_unpersist(cm_result["all_df"], cm_result["cleanup_info"])
     log("[CustomerMgmt] Generation complete")

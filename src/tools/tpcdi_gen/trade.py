@@ -115,7 +115,7 @@ leading columns: cdc_flag and cdc_dsn (data sequence number).
 import concurrent.futures
 import math
 import threading
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pyspark.sql import SparkSession, functions as F, Window
 from pyspark import StorageLevel
 from .config import *
@@ -152,11 +152,12 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     hist_result = _gen_historical_trades(spark, cfg, dicts, dbutils, shared)
     counts.update(hist_result["counts"])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_INCREMENTAL_BATCHES) as executor:
-        futures = [executor.submit(_gen_incremental_trades, spark, cfg, dicts, batch_id, dbutils, shared)
-                   for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2)]
-        for f in futures:
-            counts.update(f.result())
+    if not cfg.augmented_incremental:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=NUM_INCREMENTAL_BATCHES) as executor:
+            futures = [executor.submit(_gen_incremental_trades, spark, cfg, dicts, batch_id, dbutils, shared)
+                       for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2)]
+            for f in futures:
+                counts.update(f.result())
 
     # Release trade_df now that incrementals (which read _ct/_hh_hist_batch{b} temp views that reference it) are done.
     safe_unpersist(hist_result["trade_df"], hist_result["cleanup_info"])
@@ -336,8 +337,17 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             F.col("t_id").cast("string"), "t_dts", "t_st_id", "t_tt_id", "t_is_cash",
             "t_s_symb", "t_qty", "t_bid_price", "t_ca_id", "t_exec_name",
             "t_trade_price", "t_chrg", "t_comm", "t_tax")
-        write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
+        if cfg.augmented_incremental:
+            from .utils import write_delta
+            out_p = out.withColumn(
+                "stg_target",
+                F.when(F.col("t_dts") < F.lit("2015-07-06"), F.lit("tables"))
+                 .otherwise(F.lit("files")))
+            write_delta(out_p, cfg=cfg, dataset="trade",
+                        partition_cols=["stg_target"])
+        else:
+            write_file(out, f"{cfg.batch_path(1)}/Trade.txt", "|", dbutils,
+                       scale_factor=cfg.sf)
         return {("Trade", 1): cfg.trade_total}
 
     def write_trade_history():
@@ -381,8 +391,17 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("th_st_id", F.lit("CMPT"))
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
-        write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
+        if cfg.augmented_incremental:
+            from .utils import write_delta
+            th_p = th_df.withColumn(
+                "stg_target",
+                F.when(F.col("th_dts") < F.lit("2015-07-06"), F.lit("tables"))
+                 .otherwise(F.lit("files")))
+            write_delta(th_p, cfg=cfg, dataset="tradehistory",
+                        partition_cols=["stg_target"])
+        else:
+            write_file(th_df, f"{cfg.batch_path(1)}/TradeHistory.txt", "|", dbutils,
+                       scale_factor=cfg.sf)
         # Analytical estimates for DimTradeHistory counts — always returned so the main-path log reports consistent values. Per DIGen's trade-type distribution: TLB/TLS = 30% each (limit orders), TMB/TMS = 20% each. TH rows per trade: limit orders average 2.9 (PNDG + SBMT/CNCL + CMPT if not canceled), market orders 2 (PNDG + CMPT). Canceled = 10% of limits.
         tt = cfg.trade_total
         est = {
@@ -436,8 +455,17 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
         # Batch1: settlement strictly before cutoff. Half-open [begin, cutoff) so a timestamp of exactly batch_cutoff_s (2017-07-08 00:00:00) falls into Batch 2, never Batch 1 — otherwise the same (accountid, to_date(ct_dts)) would appear in both batches and the FactCashBalances pipeline would emit two rows for one source pair.
         ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
-        write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
+        if cfg.augmented_incremental:
+            from .utils import write_delta
+            ct_p = ct_b1.withColumn(
+                "stg_target",
+                F.when(F.col("ct_dts") < F.lit("2015-07-06"), F.lit("tables"))
+                 .otherwise(F.lit("files")))
+            write_delta(ct_p, cfg=cfg, dataset="cashtransaction",
+                        partition_cols=["stg_target"])
+        else:
+            write_file(ct_b1, f"{cfg.batch_path(1)}/CashTransaction.txt", "|", dbutils,
+                       scale_factor=cfg.sf)
 
         # Analytical B1 estimate: CT = one per non-canceled trade that settled before cutoff. ~94% non-canceled × ~99.7% settled-before-cutoff.
         tt = cfg.trade_total
@@ -506,9 +534,22 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0"))))
 
         # Batch1: completed strictly before cutoff (half-open — matches CT logic).
-        hh_b1 = hh_base.filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
-        write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
+        # HoldingHistory: route by completion-timestamp into tables (< 2015-07-06) vs files (>=) when augmented.
+        if cfg.augmented_incremental:
+            cutoff_2015 = int(datetime(2015, 7, 6).timestamp())
+            hh_b1 = (hh_base
+                .filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long"))
+                .withColumn("stg_target",
+                    F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"),
+                           F.lit("tables")).otherwise(F.lit("files")))
+                .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty", "stg_target"))
+            from .utils import write_delta
+            write_delta(hh_b1, cfg=cfg, dataset="holdinghistory",
+                        partition_cols=["stg_target"])
+        else:
+            hh_b1 = hh_base.filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")).select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty")
+            write_file(hh_b1, f"{cfg.batch_path(1)}/HoldingHistory.txt", "|", dbutils,
+                       scale_factor=cfg.sf)
         # Analytical estimate: HH = one per non-canceled trade completed before cutoff (same as CT).
         hh_count = int(cfg.trade_total * 0.94 * 0.997) if static_audits_available(cfg) else hh_b1.count()
 

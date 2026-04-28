@@ -64,6 +64,11 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     log("[Prospect] Starting generation")
 
+    # Augmented-Incremental staging skips Prospect entirely — no Prospect consumer in either historical/*.sql or the per-day file drops.
+    if cfg.augmented_incremental:
+        log("[Prospect] augmented_incremental — skipping (no consumer)")
+        return {}
+
     # Row count: PHistScaling * SF * 0.9988 (matches DIGen's excludeDeletedIDs behavior) Verified: SF=10 -> 49940, SF=100 -> 499400, SF=1000 -> 4994000
     prospect_total = int(5 * cfg.internal_sf * 0.9988)
 

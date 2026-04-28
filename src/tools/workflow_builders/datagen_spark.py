@@ -115,7 +115,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           cloud_provider: str | None = None,
           default_worker_type: str | None = None,
           default_dbr_version: str | None = None,
+          datagen_choice: str = "spark",
           **_unused) -> dict:
+    """``datagen_choice`` flips the data_gen widget default — ``"spark"`` writes
+    raw files, ``"augmented_incremental"`` writes Delta tables to
+    ``tpcdi_raw_data.{dataset}{sf}`` and skips Batch2/Batch3."""
     tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     is_serverless = (serverless or "YES").upper() == "YES"
 
@@ -156,7 +160,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
         "parameters": [
-            {"name": "spark_or_native_datagen", "default": "spark"},
+            {"name": "spark_or_native_datagen", "default": datagen_choice},
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},

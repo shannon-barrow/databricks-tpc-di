@@ -179,32 +179,21 @@ if sku[0] not in ["CLUSTER","DBSQL"]:
 if sku[0] == "AUGMENTED":
   try: dbutils.widgets.remove("data_generator")
   except Exception: pass
-  data_generator = "spark"
-  try: dbutils.widgets.remove("scale_factor")
-  except Exception: pass
-  scale_factor = 20000
-  displayHTML(
-    '<div style="background:#fff3cd;border-left:4px solid #ffc107;'
-    'padding:12px;margin:8px 0;font-family:sans-serif;">'
-    '<strong>⚠ UNDER CONSTRUCTION — DATA NOT AVAILABLE OUTSIDE THIS DEV ENV</strong><br/>'
-    'AUGMENTED variants consume pre-staged per-day files at '
-    '<code>/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/augmented_incremental/_staging/sf={SF}/</code>. '
-    'Today only <strong>SF=20000</strong> is staged in this workspace; '
-    'until the file-splitting tools under '
-    '<code>src/tools/incremental_file_splitting/</code> are generalized to '
-    'produce daily files at any SF (Phase B), this benchmark cannot be '
-    'reproduced outside this dev environment. The Scale Factor widget is '
-    'hidden and locked to 20000 to prevent picking an SF with no daily '
-    'files to consume.'
-    '</div>'
-  )
+  data_generator = "augmented_incremental"
 
 # Build job_name(s) with suffixes after all widget logic settles incremental.
 # - Datagen job depends only on data_generator + SF (same output reused across all benchmark variants at that SF), so its name omits exec_type/batched.
 # - Benchmark job: batched + exec + gen suffixes. SDP has no batched concept, so omit that suffix there. The data_generator is also stamped on every created job as a `data_generator` tag so jobs are queryable by generator.
 # - `_datagen_label` (long form) is preserved for schema names — changing it would break already-materialized `..._spark_data_gen_*` schemas.
-_datagen_label   = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
-_gen_label       = "SparkGen" if data_generator == "spark" else "NativeGen"
+if data_generator == "augmented_incremental":
+  _datagen_label = "augmented_incremental_gen"
+  _gen_label     = "AugmentedGen"
+elif data_generator == "spark":
+  _datagen_label = "spark_data_gen"
+  _gen_label     = "SparkGen"
+else:
+  _datagen_label = "native_data_gen"
+  _gen_label     = "NativeGen"
 _batched_label   = "Incremental" if incremental else "SingleBatch"
 _exec_label      = "Cluster" if sku[0] == "CLUSTER" else wf_key
 _base_name       = dbutils.widgets.get('job_name')
@@ -221,33 +210,24 @@ else:
 # COMMAND ----------
 
 # DBTITLE 1,Create the Data Generation Workflow (serverless, single notebook task)
-# AUGMENTED variants consume pre-staged per-day files from the shared `tpcdi_incremental_staging_{sf}` schema (built once-per-SF by the Phase B file-splitting tools), so they don't need a datagen workflow.
-if sku[0] == "AUGMENTED":
-  displayHTML(
-    "<h2>Data Generation Workflow — skipped for AUGMENTED variants</h2>"
-    "<p>The augmented benchmark reads from the shared staging schema "
-    f"<code>{catalog}.tpcdi_incremental_staging_{scale_factor}</code>. "
-    "If that schema isn't populated for this SF, run the file-splitting "
-    "tools under <code>src/tools/incremental_file_splitting/</code> first.</p>"
-  )
-else:
-  datagen_job_id = generate_datagen_workflow(
-      job_name=datagen_job_name,
-      scale_factor=scale_factor,
-      catalog=catalog,
-      regenerate_data="NO",
-      log_level="INFO",
-      repo_src_path=tpcdi_config.repo_src_path,
-      workspace_src_path=tpcdi_config.workspace_src_path,
-      api_call=tpcdi_config.api_call,
-      data_generator=data_generator,
-      default_dbr_version=tpcdi_config.default_dbr_version,
-      default_worker_type=tpcdi_config.default_worker_type,
-      serverless=serverless,
-      node_types=tpcdi_config.node_types,
-      cloud_provider=tpcdi_config.cloud_provider,
-  )
-  displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
+# All variants run through generate_datagen_workflow. AUGMENTED dispatches data_generator="augmented_incremental" — Stage 0 (single-task) writes Delta tables to tpcdi_raw_data; Stage 1+2 (stage_files / stage_tables) and cleanup_stage0 land in workflow_builders/augmented_staging.py.
+datagen_job_id = generate_datagen_workflow(
+    job_name=datagen_job_name,
+    scale_factor=scale_factor,
+    catalog=catalog,
+    regenerate_data="NO",
+    log_level="INFO",
+    repo_src_path=tpcdi_config.repo_src_path,
+    workspace_src_path=tpcdi_config.workspace_src_path,
+    api_call=tpcdi_config.api_call,
+    data_generator=data_generator,
+    default_dbr_version=tpcdi_config.default_dbr_version,
+    default_worker_type=tpcdi_config.default_worker_type,
+    serverless=serverless,
+    node_types=tpcdi_config.node_types,
+    cloud_provider=tpcdi_config.cloud_provider,
+)
+displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 
 # COMMAND ----------
 

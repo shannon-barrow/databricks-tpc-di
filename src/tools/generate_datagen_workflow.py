@@ -24,9 +24,18 @@ from _workflow_utils import submit_dag
 from workflow_builders import datagen_digen, datagen_spark
 
 
+def _augmented_build(**kw):
+    """Stage 0 of augmented_incremental: same single-task spark builder, but
+    seed the data_gen widget to ``augmented_incremental`` so the runner skips
+    Batch2/Batch3 and writes Delta tables to ``tpcdi_raw_data``."""
+    kw["datagen_choice"] = "augmented_incremental"
+    return datagen_spark.build(**kw)
+
+
 _BUILDERS = {
     "spark": datagen_spark.build,
     "digen": datagen_digen.build,
+    "augmented_incremental": _augmented_build,
 }
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 
@@ -77,6 +86,7 @@ def generate_datagen_workflow(
             f"Unknown data_generator={data_generator!r}; "
             f"expected one of {sorted(_BUILDERS.keys())}"
         )
+    # augmented_incremental currently shares the single-task spark builder. The multi-task wrapper (stage_files / stage_tables / cleanup) lands in workflow_builders/augmented_staging.py.
     if data_generator == "digen" and not default_worker_type:
         raise ValueError(
             "data_generator='digen' requires default_worker_type — DIGen.jar "

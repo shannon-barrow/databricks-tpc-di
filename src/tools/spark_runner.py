@@ -46,9 +46,17 @@ def run(
     workspace_src_path: str,
     dbutils: Any,
     spark: Any,
+    augmented_incremental: bool = False,
     **_unused,  # accepts (and ignores) any extra kwargs for signature parity with digen_runner
 ) -> None:
-    """Generate TPC-DI data using the distributed Spark-native generator."""
+    """Generate TPC-DI data using the distributed Spark-native generator.
+
+    When ``augmented_incremental=True``: skip Batch2/Batch3 generation and
+    write each dataset as a Delta table at
+    ``{catalog}.tpcdi_raw_data.{dataset}{sf}`` instead of CSV/XML/TXT files.
+    These are temp staging tables consumed by the workflow's downstream
+    stage_files / stage_tables tasks and dropped by cleanup_stage0.
+    """
 
     def _tlog(msg):
         ts = datetime.now().strftime("%H:%M:%S")
@@ -151,7 +159,12 @@ def run(
 
     set_log_level(log_level)
 
-    cfg = ScaleConfig(int(scale_factor), catalog, tpcdi_directory=tpcdi_directory)
+    cfg = ScaleConfig(int(scale_factor), catalog, tpcdi_directory=tpcdi_directory,
+                      augmented_incremental=augmented_incremental)
+    if augmented_incremental:
+        _tlog("AUGMENTED-INCREMENTAL mode: writing Delta tables to "
+              f"{catalog}.tpcdi_raw_data.{{dataset}}{scale_factor}; "
+              f"Batch2/Batch3 generation will be skipped")
     gen_start_time = datetime.now(tz=timezone.utc)
     all_counts: dict = {}
 
@@ -167,8 +180,10 @@ def run(
         pass
     _utlog("[Init] output dir cleaned", "DEBUG")
 
-    _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
-    make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
+    # Augmented mode skips file output entirely — only Batch1 dir is needed for the audit emit step at the very end.
+    _num_batches = 1 if augmented_incremental else NUM_INCREMENTAL_BATCHES + 1
+    _utlog(f"[Init] creating {_num_batches} output directories", "DEBUG")
+    make_output_dirs(cfg.volume_path, _num_batches, dbutils)
     _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
     dicts = dictionaries.load_all()
     _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")
@@ -234,16 +249,20 @@ def run(
         all_counts.update(f_trade.result())
 
     from tpcdi_gen.utils import log as _log
-    _log("[Orchestrator] All data generation complete. Copying files to final locations...")
 
-    wait_for_background_copies()
-    bulk_copy_all(dbutils, max_workers=64, label="final")
-    _log("[Orchestrator] File copy complete. Cleaning up staging directories...")
-    cleanup_staging(cfg.volume_path, dbutils)
+    if augmented_incremental:
+        # Delta-only path — no files staged, no audit files needed (augmented benchmark doesn't run audit checks).
+        _log("[Orchestrator] augmented_incremental: skipping bulk file copy / audit emit")
+    else:
+        _log("[Orchestrator] All data generation complete. Copying files to final locations...")
+        wait_for_background_copies()
+        bulk_copy_all(dbutils, max_workers=64, label="final")
+        _log("[Orchestrator] File copy complete. Cleaning up staging directories...")
+        cleanup_staging(cfg.volume_path, dbutils)
 
-    _log("[Orchestrator] Generating audit files...")
-    from tpcdi_gen import audit
-    audit.generate(cfg, all_counts, gen_start_time, dbutils)
+        _log("[Orchestrator] Generating audit files...")
+        from tpcdi_gen import audit
+        audit.generate(cfg, all_counts, gen_start_time, dbutils)
 
     gen_end_time = datetime.now(tz=timezone.utc)
     elapsed = (gen_end_time - gen_start_time).total_seconds()

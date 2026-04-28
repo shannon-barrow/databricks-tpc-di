@@ -146,15 +146,24 @@ def _gen_daily_market(spark, cfg, dbutils):
         .select("dm_date", "dm_s_symb", "dm_close", "dm_high", "dm_low", "dm_vol")
     )
 
-    # Write batch 1 (historical): pipe-delimited flat file
-    write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
-               scale_factor=cfg.sf)
+    # Write batch 1 (historical): pipe-delimited flat file, OR Delta table when augmented_incremental staging mode is on.
+    if cfg.augmented_incremental:
+        from .utils import write_delta
+        # All DailyMarket rows are >= 2015-07-06 (DM_BEGIN_DATE), so every row goes to per-day files; no staging-tables consumer for this dataset → no partition needed.
+        write_delta(dm_df, cfg=cfg, dataset="dailymarket")
+    else:
+        write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
+                   scale_factor=cfg.sf)
     # Analytical estimate: sec_total × dm_days × 0.95 (0.95 accounts for symbols deactivated mid-window on average). Exact count only computed when we need it for dynamic audit regeneration at an unknown SF.
     dm_count_est = int(cfg.sec_total * cfg.dm_days * 0.95)
     counts = {("DailyMarket", 1): dm_count_est}
     log(f"[DailyMarket] ~{dm_count_est:,} historical ({cfg.dm_days} days × {cfg.sec_total} syms, minus deactivations)")
     if not static_audits_available(cfg):
         counts[("DailyMarket", 1)] = dm_df.count()
+
+    # Augmented mode skips B2/B3 — only B1 historical staging matters.
+    if cfg.augmented_incremental:
+        return counts
 
     # --- Incremental batches (batch 2, 3, ...) ---
     # Each incremental batch covers a single calendar day. Only securities whose creation_date <= inc_date < deactivation_date are included. Output is in CDC format: cdc_flag='I' (insert), cdc_dsn = sequential row number.

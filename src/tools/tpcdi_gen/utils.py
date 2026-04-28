@@ -669,6 +669,29 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     return targets
 
 
+def write_delta(df: DataFrame, *, cfg, dataset: str,
+                partition_cols: list = None) -> str:
+    """Write ``df`` as a Delta table at ``{catalog}.tpcdi_raw_data.{dataset}{sf}``.
+
+    Used by the augmented-incremental staging mode in place of file output.
+    The downstream ``stage_files`` / ``stage_tables`` tasks read from these
+    temp tables; ``cleanup_stage0`` drops them once per-day CSVs and the
+    ``tpcdi_incremental_staging_{sf}`` schema are populated.
+
+    Returns the fully-qualified table name written.
+    """
+    fq = f"{cfg.catalog}.tpcdi_raw_data.{dataset}{cfg.sf}"
+    writer = (df.write
+        .mode("overwrite")
+        .option("overwriteSchema", "true")
+        .format("delta"))
+    if partition_cols:
+        writer = writer.partitionBy(*partition_cols)
+    writer.saveAsTable(fq)
+    log(f"[Delta] wrote {fq}")
+    return fq
+
+
 def write_text(content: str, path: str, dbutils=None):
     """Write a plain text string directly to a file path.
 

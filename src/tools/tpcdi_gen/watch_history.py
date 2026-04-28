@@ -100,8 +100,9 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     log("[WatchHistory] Starting generation")
     counts = {}
     counts.update(_gen_historical(spark, cfg, dbutils))
-    for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
-        counts.update(_gen_incremental(spark, cfg, batch_id, dbutils))
+    if not cfg.augmented_incremental:
+        for batch_id in range(2, NUM_INCREMENTAL_BATCHES + 2):
+            counts.update(_gen_incremental(spark, cfg, batch_id, dbutils))
     log("[WatchHistory] Generation complete")
     return counts
 
@@ -425,8 +426,18 @@ def _gen_historical(spark, cfg, dbutils):
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
     staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
-    write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
-               scale_factor=cfg.sf)
+    if cfg.augmented_incremental:
+        from .utils import write_delta
+        # Route rows by event date: < 2015-07-06 -> staging tables, >= -> per-day files.
+        result_partitioned = result_df.withColumn(
+            "stg_target",
+            F.when(F.col("w_dts") < F.lit("2015-07-06"), F.lit("tables"))
+             .otherwise(F.lit("files")))
+        write_delta(result_partitioned, cfg=cfg, dataset="watchhistory",
+                    partition_cols=["stg_target"])
+    else:
+        write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
+                   scale_factor=cfg.sf)
 
     # Analytical estimate: n_actv = wh_actv_count; target_cncl = wh_total - wh_actv_count.
     actv_est = n_actv

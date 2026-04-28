@@ -138,7 +138,8 @@
 # COMMAND ----------
 
 dbutils.widgets.dropdown("spark_or_native_datagen", "spark",
-                         ["spark", "native"], "Spark or Native (DIGen) data generator")
+                         ["spark", "native", "augmented_incremental"],
+                         "Spark or Native (DIGen) data generator")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"],
                          "Scale Factor")
@@ -153,9 +154,10 @@ import sys
 
 # Normalize the generator choice — accept any case + leading/trailing whitespace.
 _choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
-if _choice not in ("spark", "native"):
+if _choice not in ("spark", "native", "augmented_incremental"):
     raise ValueError(
-        f"spark_or_native_datagen must be 'spark' or 'native' "
+        f"spark_or_native_datagen must be 'spark', 'native', or "
+        f"'augmented_incremental' "
         f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
     )
 
@@ -165,7 +167,12 @@ _regenerate = dbutils.widgets.get("regenerate_data") == "YES"
 _log_level = dbutils.widgets.get("log_level")
 
 _volume_base = f"/Volumes/{_catalog}/tpcdi_raw_data/tpcdi_volume/"
-_tpcdi_directory = f"{_volume_base}spark_datagen/" if _choice == "spark" else _volume_base
+# Augmented-Incremental writes only Delta tables (no files), but we still pass a tpcdi_directory so audit-file emit / volume bookkeeping have a path. Use the spark_datagen subdir to stay out of DIGen's space.
+_tpcdi_directory = (
+    f"{_volume_base}spark_datagen/"
+    if _choice in ("spark", "augmented_incremental")
+    else _volume_base
+)
 
 _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 _workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
@@ -181,7 +188,7 @@ print(f"  regenerate data:  {_regenerate}")
 print(f"  log level:        {_log_level}")
 print()  # blank line before the runner output begins
 
-# Both runner.run() functions take the same kwargs. log_level is consumed by spark_runner and silently ignored by digen_runner via **_unused.
+# Both runner.run() functions take the same kwargs. log_level is consumed by spark_runner and silently ignored by digen_runner via **_unused. augmented_incremental flips spark_runner into Delta-only mode and skips B2/B3.
 _run_kwargs = dict(
     scale_factor=_scale_factor,
     catalog=_catalog,
@@ -191,9 +198,10 @@ _run_kwargs = dict(
     workspace_src_path=_workspace_src_path,
     dbutils=dbutils,
     spark=spark,
+    augmented_incremental=(_choice == "augmented_incremental"),
 )
 
-if _choice == "spark":
+if _choice in ("spark", "augmented_incremental"):
     from spark_runner import run as runner
 else:  # native
     from digen_runner import run as runner
