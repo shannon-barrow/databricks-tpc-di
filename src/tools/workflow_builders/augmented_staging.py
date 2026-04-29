@@ -392,6 +392,19 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         run_if="ALL_DONE",
     ))
 
+    # ---------------- Cleanup: delete per-day dirs on file-gen failure ----
+    # Only fires when at least one stage_files task failed. Wipes the
+    # augmented_incremental/_staging/sf={sf}/ tree so a stale partial set
+    # of date dirs (e.g. 6 of 7 stage_files succeeded) doesn't trick the
+    # next run's early-exit check (730 dirs present) into skipping the
+    # rebuild.
+    tasks.append(_make_task(
+        task_key="cleanup_files_on_failure",
+        notebook_path=f"{repo_src_path}/tools/augmented_staging/cleanup_files_on_failure",
+        depends_on=stage_files_keys,
+        run_if="AT_LEAST_ONE_FAILED",
+    ))
+
     # ---------------- Top-level workflow ----------------
     workflow: dict[str, Any] = {
         "name": job_name,

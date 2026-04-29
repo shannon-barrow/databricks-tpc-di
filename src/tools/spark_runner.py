@@ -168,6 +168,13 @@ def run(
                       "stage 0; downstream tasks will skip via condition_task")
                 return
 
+        # Pre-create the 730 per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Single-threaded mkdirs here avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. mkdirs is idempotent (no-op if the dir already exists).
+        from datetime import date as _d, timedelta as _td
+        _tlog(f"augmented_incremental: pre-creating 730 per-day staging dirs under {_staging_dir}")
+        for _i in range(730):
+            _date = (_d(2015, 7, 6) + _td(days=_i)).isoformat()
+            dbutils.fs.mkdirs(f"{_staging_dir}/{_date}")
+
         _tlog(f"augmented_incremental: rebuilding temp Delta tables in "
               f"{catalog}.tpcdi_raw_data")
     else:
