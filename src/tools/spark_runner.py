@@ -264,20 +264,22 @@ def run(
     _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
     make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
 
+    _bg_mkdir_pool = None
+    _bg_mkdir_futures: list = []
     if augmented_incremental:
-        # Pre-create the per-day staging directories under volume_path AFTER the redundant cleanup + make_output_dirs (otherwise the cleanup wipes the dirs we just made). Avoids the ABFS "Parallel access to the create path detected" race when 7 stage_files notebooks each try to mkdir the same date subdir concurrently. Each thread targets a different path so no contention here; Spark Connect roundtrip per mkdir dominates wall-clock so 32-thread fan-out drops this from ~3 min to ~10s.
-        import concurrent.futures as _cf
+        # Fire 730-dir pre-creation as a background thread pool so it overlaps with data gen instead of blocking it. Each mkdir is a Spark Connect roundtrip that takes ~200ms; the heavy data-gen work (Spark jobs) takes minutes — there's plenty of overlap. We join the futures before spark_runner returns. Pool stays alive until then. No data gen depends on these dirs (only stage_files tasks downstream do).
         from datetime import date as _d2, timedelta as _td2
         from tpcdi_gen.config import (
             AUG_FILES_DATE_START as _aug_start2, AUG_FILES_DAYS as _aug_days2)
         _y2, _m2, _da2 = (int(x) for x in _aug_start2.split("-"))
         _all_dates = [(_d2(_y2, _m2, _da2) + _td2(days=_i)).isoformat()
                       for _i in range(_aug_days2)]
-        _utlog(f"[Init] pre-creating {_aug_days2} per-day staging dirs under {cfg.volume_path}", "DEBUG")
-        def _mk_date(_date):
-            dbutils.fs.mkdirs(f"{cfg.volume_path}/{_date}")
-        with _cf.ThreadPoolExecutor(max_workers=32) as _pool:
-            list(_pool.map(_mk_date, _all_dates))
+        _utlog(f"[Init] firing background mkdir for {_aug_days2} per-day staging dirs under {cfg.volume_path}", "DEBUG")
+        _bg_mkdir_pool = concurrent.futures.ThreadPoolExecutor(max_workers=32)
+        _bg_mkdir_futures = [
+            _bg_mkdir_pool.submit(dbutils.fs.mkdirs, f"{cfg.volume_path}/{_d}")
+            for _d in _all_dates
+        ]
     _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
     dicts = dictionaries.load_all()
     _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")
@@ -345,8 +347,14 @@ def run(
     from tpcdi_gen.utils import log as _log
 
     if augmented_incremental:
-        # Delta-only path — no files staged, no audit files needed (augmented benchmark doesn't run audit checks).
+        # Delta-only path — no files staged, no audit files needed (augmented benchmark doesn't run audit checks). Wait for the background mkdir pool to finish before returning so downstream stage_files tasks always find their date dirs.
         _log("[Orchestrator] augmented_incremental: skipping bulk file copy / audit emit")
+        if _bg_mkdir_pool is not None:
+            _log(f"[Orchestrator] joining background mkdir pool ({len(_bg_mkdir_futures)} dirs)")
+            _t0 = datetime.now()
+            concurrent.futures.wait(_bg_mkdir_futures)
+            _bg_mkdir_pool.shutdown(wait=True)
+            _log(f"[Orchestrator] mkdir pool done in {(datetime.now() - _t0).total_seconds():.1f}s")
     else:
         _log("[Orchestrator] All data generation complete. Copying files to final locations...")
         wait_for_background_copies()
