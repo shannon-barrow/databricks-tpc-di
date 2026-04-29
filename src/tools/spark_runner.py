@@ -171,20 +171,6 @@ def run(
                       "stage 0; downstream tasks will skip via condition_task")
                 return
 
-        # Pre-create the per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. Each thread targets a different path so there's no contention; the Spark Connect roundtrip per mkdir dominates wall-clock so threading drops this from ~3 min to ~10s. mkdirs is idempotent (no-op if the dir already exists).
-        import concurrent.futures as _cf
-        from datetime import date as _d2, timedelta as _td2
-        from tpcdi_gen.config import (
-            AUG_FILES_DATE_START as _aug_start2, AUG_FILES_DAYS as _aug_days2)
-        _y2, _m2, _da2 = (int(x) for x in _aug_start2.split("-"))
-        _all_dates = [(_d2(_y2, _m2, _da2) + _td2(days=_i)).isoformat()
-                      for _i in range(_aug_days2)]
-        _tlog(f"augmented_incremental: pre-creating {_aug_days2} per-day staging dirs under {_staging_dir}")
-        def _mk(_date):
-            dbutils.fs.mkdirs(f"{_staging_dir}/{_date}")
-        with _cf.ThreadPoolExecutor(max_workers=32) as _pool:
-            list(_pool.map(_mk, _all_dates))
-
         _tlog(f"augmented_incremental: rebuilding temp Delta tables in "
               f"{catalog}.tpcdi_raw_data")
     else:
@@ -277,6 +263,21 @@ def run(
 
     _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
     make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
+
+    if augmented_incremental:
+        # Pre-create the per-day staging directories under volume_path AFTER the redundant cleanup + make_output_dirs (otherwise the cleanup wipes the dirs we just made). Avoids the ABFS "Parallel access to the create path detected" race when 7 stage_files notebooks each try to mkdir the same date subdir concurrently. Each thread targets a different path so no contention here; Spark Connect roundtrip per mkdir dominates wall-clock so 32-thread fan-out drops this from ~3 min to ~10s.
+        import concurrent.futures as _cf
+        from datetime import date as _d2, timedelta as _td2
+        from tpcdi_gen.config import (
+            AUG_FILES_DATE_START as _aug_start2, AUG_FILES_DAYS as _aug_days2)
+        _y2, _m2, _da2 = (int(x) for x in _aug_start2.split("-"))
+        _all_dates = [(_d2(_y2, _m2, _da2) + _td2(days=_i)).isoformat()
+                      for _i in range(_aug_days2)]
+        _utlog(f"[Init] pre-creating {_aug_days2} per-day staging dirs under {cfg.volume_path}", "DEBUG")
+        def _mk_date(_date):
+            dbutils.fs.mkdirs(f"{cfg.volume_path}/{_date}")
+        with _cf.ThreadPoolExecutor(max_workers=32) as _pool:
+            list(_pool.map(_mk_date, _all_dates))
     _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
     dicts = dictionaries.load_all()
     _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")
