@@ -73,25 +73,25 @@ def run(
 
     blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
 
-    if catalog != "hive_metastore":
-        _tlog(f"checking catalog '{catalog}' existence")
-        catalog_exists = spark.sql(
-            f"SELECT count(*) FROM system.information_schema.tables "
-            f"WHERE table_catalog = '{catalog}'"
-        ).first()[0] > 0
-        _tlog(f"catalog check complete: exists={catalog_exists}")
-        if not catalog_exists:
-            _tlog("creating catalog + granting privileges")
-            spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
-            spark.sql(f"GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`")
-            _tlog("catalog created")
-        _tlog("CREATE DATABASE IF NOT EXISTS tpcdi_raw_data")
-        spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
-                  f"COMMENT 'Schema for TPC-DI Raw Files Volume'")
-        _tlog("CREATE VOLUME IF NOT EXISTS tpcdi_volume")
-        spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
-                  f"COMMENT 'TPC-DI Raw Files'")
-        _tlog("schema + volume ready")
+    # UC is a hard requirement (enforced in setup_context._init_cloud_defaults). No hive_metastore branch — every catalog op below assumes UC.
+    _tlog(f"checking catalog '{catalog}' existence")
+    catalog_exists = spark.sql(
+        f"SELECT count(*) FROM system.information_schema.tables "
+        f"WHERE table_catalog = '{catalog}'"
+    ).first()[0] > 0
+    _tlog(f"catalog check complete: exists={catalog_exists}")
+    if not catalog_exists:
+        _tlog("creating catalog + granting privileges")
+        spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
+        spark.sql(f"GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`")
+        _tlog("catalog created")
+    _tlog("CREATE DATABASE IF NOT EXISTS tpcdi_raw_data")
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
+              f"COMMENT 'Schema for TPC-DI Raw Files Volume'")
+    _tlog("CREATE VOLUME IF NOT EXISTS tpcdi_volume")
+    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
+              f"COMMENT 'TPC-DI Raw Files'")
+    _tlog("schema + volume ready")
 
     _tlog(f"dbutils.fs.ls check on {blob_out_path}")
     if _path_exists(dbutils, blob_out_path):
