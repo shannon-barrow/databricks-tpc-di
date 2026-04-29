@@ -344,11 +344,12 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
                 "t_s_symb", "quantity", "bidprice", "t_ca_id", "executedby",
                 "tradeprice", "fee", "commission", "tax")
             from .utils import write_delta
-            out_p = out_p.withColumn(
-                "stg_target",
-                F.when(F.col("t_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
-                 .when(F.col("t_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
-                 .otherwise(F.lit("discard")))
+            # Filter out post-window rows entirely so they never land in the temp Delta.
+            out_p = (out_p
+                .filter(F.col("t_dts") < F.lit(AUG_FILES_DATE_END_EXCL))
+                .withColumn("stg_target",
+                    F.when(F.col("t_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                     .otherwise(F.lit("files"))))
             write_delta(out_p, cfg=cfg, dataset="trade",
                         partition_cols=["stg_target"])
         else:
@@ -398,13 +399,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .select("th_t_id", "th_dts", "th_st_id"))
         th_df = th1.union(th2).union(th3)
         if cfg.augmented_incremental:
-            # Align Delta column names with the canonical TradeHistory.txt schema.
-            th_p = th_df.toDF("tradeid", "th_dts", "status")
-            th_p = th_p.withColumn(
-                "stg_target",
-                F.when(F.col("th_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
-                 .when(F.col("th_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
-                 .otherwise(F.lit("discard")))
+            # Align Delta column names with TradeHistory.txt schema; filter out post-window rows so they never land in the temp Delta.
+            th_p = (th_df
+                .toDF("tradeid", "th_dts", "status")
+                .filter(F.col("th_dts") < F.lit(AUG_FILES_DATE_END_EXCL))
+                .withColumn("stg_target",
+                    F.when(F.col("th_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                     .otherwise(F.lit("files"))))
             from .utils import write_delta
             write_delta(th_p, cfg=cfg, dataset="tradehistory",
                         partition_cols=["stg_target"])
@@ -465,13 +466,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # Batch1: settlement strictly before cutoff. Half-open [begin, cutoff) so a timestamp of exactly batch_cutoff_s (2017-07-08 00:00:00) falls into Batch 2, never Batch 1 — otherwise the same (accountid, to_date(ct_dts)) would appear in both batches and the FactCashBalances pipeline would emit two rows for one source pair.
         ct_b1 = ct_base.filter(F.col("_cash_ts") < F.lit(batch_cutoff_s).cast("long")).select("ct_ca_id", "ct_dts", "ct_amt", "ct_name")
         if cfg.augmented_incremental:
-            # Align Delta column names with the canonical CashTransaction.txt schema.
-            ct_p = ct_b1.toDF("accountid", "ct_dts", "ct_amt", "ct_name")
-            ct_p = ct_p.withColumn(
-                "stg_target",
-                F.when(F.col("ct_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
-                 .when(F.col("ct_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
-                 .otherwise(F.lit("discard")))
+            # Align Delta column names with CashTransaction.txt schema; filter out post-window rows.
+            ct_p = (ct_b1
+                .toDF("accountid", "ct_dts", "ct_amt", "ct_name")
+                .filter(F.col("ct_dts") < F.lit(AUG_FILES_DATE_END_EXCL))
+                .withColumn("stg_target",
+                    F.when(F.col("ct_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                     .otherwise(F.lit("files"))))
             from .utils import write_delta
             write_delta(ct_p, cfg=cfg, dataset="cashtransaction",
                         partition_cols=["stg_target"])
@@ -551,13 +552,13 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             cutoff_2015 = int(datetime(2015, 7, 6).timestamp())
             cutoff_2017 = int(datetime(2017, 7, 5).timestamp())
             hh_b1 = (hh_base
-                .filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long"))
+                .filter((F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")) &
+                        (F.col("_complete_ts") < F.lit(cutoff_2017).cast("long")))
                 .withColumn("event_dt",
                     F.to_date(F.col("_complete_ts").cast("timestamp")))
                 .withColumn("stg_target",
                     F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"), F.lit("tables"))
-                     .when(F.col("_complete_ts") < F.lit(cutoff_2017).cast("long"), F.lit("files"))
-                     .otherwise(F.lit("discard")))
+                     .otherwise(F.lit("files")))
                 .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty",
                         "event_dt", "stg_target"))
             from .utils import write_delta

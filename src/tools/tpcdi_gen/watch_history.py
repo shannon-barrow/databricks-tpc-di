@@ -428,12 +428,12 @@ def _gen_historical(spark, cfg, dbutils):
     staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
     if cfg.augmented_incremental:
         from .utils import write_delta
-        # 3-way: tables (< 2015-07-06) | files (730-day window) | discard (>= 2017-07-05).
-        result_partitioned = result_df.withColumn(
-            "stg_target",
-            F.when(F.col("w_dts") < F.lit("2015-07-06"), F.lit("tables"))
-             .when(F.col("w_dts") < F.lit("2017-07-05"), F.lit("files"))
-             .otherwise(F.lit("discard")))
+        # Filter out post-window rows; tables (< 2015-07-06) | files (730-day window).
+        result_partitioned = (result_df
+            .filter(F.col("w_dts") < F.lit("2017-07-05"))
+            .withColumn("stg_target",
+                F.when(F.col("w_dts") < F.lit("2015-07-06"), F.lit("tables"))
+                 .otherwise(F.lit("files"))))
         write_delta(result_partitioned, cfg=cfg, dataset="watchhistory",
                     partition_cols=["stg_target"])
     else:

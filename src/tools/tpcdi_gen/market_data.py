@@ -149,11 +149,10 @@ def _gen_daily_market(spark, cfg, dbutils):
     # Write batch 1 (historical): pipe-delimited flat file, OR Delta table when augmented_incremental staging mode is on.
     if cfg.augmented_incremental:
         from .utils import write_delta
-        # All DailyMarket rows are >= 2015-07-06 (DM_BEGIN_DATE), so 'tables' is unused. files=730-day window, discard=>=2017-07-05 (DM_END_DATE is 2017-07-06 so two extra days fall outside).
-        dm_p = dm_df.withColumn(
-            "stg_target",
-            F.when(F.col("dm_date") < F.lit("2017-07-05"), F.lit("files"))
-             .otherwise(F.lit("discard")))
+        # Filter out post-window rows entirely (DM_END_DATE = 2017-07-06 → 2 extra days). All surviving rows are >= 2015-07-06 (DM_BEGIN_DATE), so stg_target='files' for everything.
+        dm_p = (dm_df
+            .filter(F.col("dm_date") < F.lit("2017-07-05"))
+            .withColumn("stg_target", F.lit("files")))
         write_delta(dm_p, cfg=cfg, dataset="dailymarket",
                     partition_cols=["stg_target"])
     else:

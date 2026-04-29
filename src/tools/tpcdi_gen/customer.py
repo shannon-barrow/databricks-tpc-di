@@ -840,7 +840,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             """nullif(col, '') — empty string -> NULL."""
             return F.when(F.col(c) == "", F.lit(None)).otherwise(F.col(c))
 
-        cm_df = all_df.select(
+        # Filter out rows beyond the 730-day augmented window so they never land in the temp Delta — keeps the staging dir from ever picking up stray dates outside the benchmark range.
+        cm_df = all_df.filter(F.col("ActionTS") < F.lit(AUG_FILES_DATE_END_EXCL)).select(
             F.col("C_ID").cast("bigint").alias("customerid"),
             F.col("CA_ID").cast("bigint").alias("accountid"),
             F.col("CA_B_ID").cast("bigint").alias("brokerid"),
@@ -879,10 +880,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             _nz("C_NAT_TX_ID").alias("nat_tx_id"),
             F.to_timestamp(F.col("ActionTS")).alias("update_ts"),
             F.col("ActionType"),
-            # 3-way: tables (< 2015-07-06) | files (in 730-day window) | discard (>= 2017-07-05). discard rows stay in temp Delta but no consumer reads them.
+            # tables (< 2015-07-06) | files (in 730-day window). Dates >= 2017-07-05 are filtered out above before this select.
             F.when(F.col("ActionTS") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
-             .when(F.col("ActionTS") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
-             .otherwise(F.lit("discard")).alias("stg_target"),
+             .otherwise(F.lit("files")).alias("stg_target"),
         )
 
         write_delta(cm_df, cfg=cfg, dataset="customermgmt",
