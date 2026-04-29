@@ -21,7 +21,7 @@ scale_factor    = dbutils.widgets.get("scale_factor").strip()
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
 catalog         = dbutils.widgets.get("catalog").strip()
 
-target_dir = f"{tpcdi_directory.rstrip('/')}/augmented_incremental/_staging/sf={scale_factor}"
+target_dir = f"{tpcdi_directory.rstrip('/')}/sf={scale_factor}"  # tpcdi_directory base_param already ends with augmented_incremental/_staging/
 
 _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 _tools_dir = f"/Workspace{_nb_path.split('/src')[0]}/src/tools"

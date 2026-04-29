@@ -55,7 +55,8 @@ def stage_to_files(
         delimiter:    Field delimiter (default ``"|"``).
         max_retries:  Per-source open retry budget for FUSE EAGAIN.
     """
-    tmp_dir = f"{target_dir.rstrip('/')}_tmp"
+    # Per-dataset tmp dir so 7 stage_files notebooks running in parallel don't collide on the same path. Filename is the dataset's CSV name (e.g. "DailyMarket.txt") which is unique across the 7 producers, so it makes a safe namespace.
+    tmp_dir = f"{target_dir.rstrip('/')}/_tmp_{filename}"
     print(f"[stage_to_files] {source_view} → {target_dir}")
     print(f"  partitioned-CSV staging: {tmp_dir}")
 
