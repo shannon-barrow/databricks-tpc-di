@@ -62,14 +62,28 @@ def run(
         ts = datetime.now().strftime("%H:%M:%S")
         print(f"  {ts} [Init] {msg}")
 
+    def _safe_conf_set(key, value):
+        """Set a Spark conf, swallowing CONFIG_NOT_AVAILABLE on serverless.
+
+        Serverless allowlists only a small set of confs for spark.conf.set();
+        performance-tuning confs like autoBroadcastJoinThreshold raise
+        CONFIG_NOT_AVAILABLE. The runtime picks reasonable defaults for these
+        anyway, so silently dropping the set lets the same code work on
+        classic + serverless without branching.
+        """
+        try:
+            spark.conf.set(key, value)
+        except Exception as e:
+            _tlog(f"spark.conf.set({key}) skipped: {type(e).__name__}")
+
     _tlog(f"spark_runner.run() entered (scale_factor={scale_factor}, catalog={catalog})")
 
-    # Raise broadcast-join thresholds. The CustomerMgmt schedule DF alone is ~180MB at SF=5000 and scales with SF; default (10MB static / 30MB AQE) forces Spark into shuffle joins that materialize the 25M-row all_df across executors. Bumping to 250MB lets Spark broadcast the schedule without the shuffle storm. NB: on Spark Connect / serverless the very first spark.conf.set() is the first remote call of the session, so initial JVM + Unity-Catalog session init time is charged here.
+    # Raise broadcast-join thresholds. The CustomerMgmt schedule DF alone is ~180MB at SF=5000 and scales with SF; default (10MB static / 30MB AQE) forces Spark into shuffle joins that materialize the 25M-row all_df across executors. Bumping to 250MB lets Spark broadcast the schedule without the shuffle storm. On serverless these confs aren't on the user-settable allowlist and the set is silently dropped — the runtime's own defaults take over.
     _tlog("setting spark.sql.autoBroadcastJoinThreshold=250m (first spark-connect call — warmup)")
-    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", "250m")
+    _safe_conf_set("spark.sql.autoBroadcastJoinThreshold", "250m")
     _tlog("setting spark.databricks.adaptive.autoBroadcastJoinThreshold=250m")
-    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "250m")
-    _tlog("broadcast-join thresholds set")
+    _safe_conf_set("spark.databricks.adaptive.autoBroadcastJoinThreshold", "250m")
+    _tlog("broadcast-join thresholds set (or skipped on serverless)")
 
     blob_out_path = f"{tpcdi_directory}sf={scale_factor}"
 

@@ -669,6 +669,26 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     return targets
 
 
+def safe_conf_set(spark, key: str, value) -> bool:
+    """Set a Spark conf, swallowing CONFIG_NOT_AVAILABLE on serverless.
+
+    Serverless allowlists only a small set of confs for ``spark.conf.set()``
+    (see databricks.com/aws/en/spark/conf). Performance-tuning confs like
+    ``spark.sql.autoBroadcastJoinThreshold`` aren't on the list and raise
+    ``CONFIG_NOT_AVAILABLE`` when set. The serverless runtime picks sane
+    defaults for these anyway, so silently dropping the set lets the same
+    code run on classic + serverless without branching.
+
+    Returns True if the conf was applied, False if it was dropped.
+    """
+    try:
+        spark.conf.set(key, value)
+        return True
+    except Exception as e:
+        log(f"[Init] spark.conf.set({key}) skipped: {type(e).__name__}", "DEBUG")
+        return False
+
+
 def write_delta(df: DataFrame, *, cfg, dataset: str,
                 partition_cols: list = None) -> str:
     """Write ``df`` as a Delta table at ``{catalog}.tpcdi_raw_data.{dataset}{sf}``.

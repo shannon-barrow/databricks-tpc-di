@@ -403,7 +403,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     del sched_update, sched_action, sched_pos, sched_id
 
     log("[CustomerMgmt] Arrow-converting pandas → Spark DataFrame", "DEBUG")
-    spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
+    # Arrow is on by default on serverless; conf is on the user-settable allowlist for classic. safe_conf_set is a no-op if the runtime rejects it.
+    from .utils import safe_conf_set
+    safe_conf_set(spark, "spark.sql.execution.arrow.pyspark.enabled", "true")
     schedule_df = spark.createDataFrame(_sched_pdf)
     del _sched_pdf
 
