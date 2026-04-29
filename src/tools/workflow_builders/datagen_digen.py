@@ -106,7 +106,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
         "parameters": [
-            {"name": "spark_or_native_datagen", "default": "native"},
+            {"name": "data_gen_type", "default": "native"},
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},

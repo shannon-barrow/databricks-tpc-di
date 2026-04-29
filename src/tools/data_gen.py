@@ -3,7 +3,7 @@
 # MAGIC # TPC-DI Unified Data Generator (entry point)
 # MAGIC
 # MAGIC Single dispatch notebook for data generation. Reads the
-# MAGIC `spark_or_native_datagen` job parameter and runs **inline** in this
+# MAGIC `data_gen_type` job parameter and runs **inline** in this
 # MAGIC notebook's process — both runners are imported as Python modules so
 # MAGIC there is no `dbutils.notebook.run` indirection, no child notebook
 # MAGIC context, and no risk of a new cluster being spun up on serverless.
@@ -129,7 +129,7 @@
 # MAGIC
 # MAGIC ### Defaults
 # MAGIC
-# MAGIC - `spark_or_native_datagen=spark` (Spark generator preferred — faster,
+# MAGIC - `data_gen_type=spark` (Spark generator preferred — faster,
 # MAGIC   serverless-friendly, no DBR pinning).
 # MAGIC - `Serverless=YES` widget default.
 # MAGIC - `regenerate_data=NO` (re-running the job at the same SF is a no-op
@@ -137,7 +137,7 @@
 
 # COMMAND ----------
 
-dbutils.widgets.dropdown("spark_or_native_datagen", "spark",
+dbutils.widgets.dropdown("data_gen_type", "spark",
                          ["spark", "native", "augmented_incremental"],
                          "Spark or Native (DIGen) data generator")
 dbutils.widgets.dropdown("scale_factor", "10",
@@ -153,12 +153,12 @@ dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"],
 import sys
 
 # Normalize the generator choice — accept any case + leading/trailing whitespace.
-_choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
+_choice = dbutils.widgets.get("data_gen_type").strip().lower()
 if _choice not in ("spark", "native", "augmented_incremental"):
     raise ValueError(
-        f"spark_or_native_datagen must be 'spark', 'native', or "
+        f"data_gen_type must be 'spark', 'native', or "
         f"'augmented_incremental' "
-        f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
+        f"(got {dbutils.widgets.get('data_gen_type')!r})"
     )
 
 # Job-level parameters are free-form text on retrigger — strip whitespace and normalize case before comparing against literal sentinels so 'Yes', ' yes ', 'YES' all do the right thing.

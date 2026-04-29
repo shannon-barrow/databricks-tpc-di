@@ -62,7 +62,7 @@ don't take `tpcdi_directory`. Only the benchmark workflow does.
 ## Data generator architecture
 
 Entry point: `src/tools/data_gen.py` (the unified Driver-invoked notebook).
-It reads the `spark_or_native_datagen` job parameter and imports either
+It reads the `data_gen_type` job parameter and imports either
 `spark_runner.py` or `digen_runner.py`. The Spark path calls
 `spark_generate()` which orchestrates per-table generators living in
 `src/tools/tpcdi_gen/`:

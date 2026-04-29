@@ -34,7 +34,7 @@ cleanup_stage0 depends on every leaf in both branches. Runs ALL_DONE
 (not gated by delete_tables_when_finished — the temp Delta tables are
 unconditionally temporary).
 
-Data-gen widget (`spark_or_native_datagen`) defaults to
+Data-gen widget (`data_gen_type`) defaults to
 ``augmented_incremental`` so the spark_runner skips Batch2/Batch3 and
 writes Delta tables to ``tpcdi_raw_data.{dataset}{sf}``.
 """
@@ -141,6 +141,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # tpcdi_directory base_param common to every task that reads volume files via the ${tpcdi_directory} widget — passed per-task with the dynamic catalog reference so a run-time override of `catalog` automatically flows through.
     _td_param = {"tpcdi_directory": _tpcdi_dir_dynamic}
 
+    # wh_db base_param — hardcoded to the shared staging schema. Not a job-level param: data_gen_type=augmented_incremental fully determines where staging tables go, so there's no user knob.
+    _wh_param = {"wh_db": _STAGING_WH_DB}
+
+    _td_wh = {**_td_param, **_wh_param}
+
     tasks: list[dict] = []
 
     # ---------------- Stage 0: data_gen ----------------
@@ -178,7 +183,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "DimDate",
             "constraints": ", CONSTRAINT dimdate_pk PRIMARY KEY(sk_dateid)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -190,7 +195,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "DimTime",
             "constraints": ", CONSTRAINT dimtime_pk PRIMARY KEY(sk_timeid)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -202,7 +207,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "StatusType",
             "constraints": ", CONSTRAINT statustype_pk PRIMARY KEY(st_name)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -214,7 +219,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "TaxRate",
             "constraints": ", CONSTRAINT taxrate_pk PRIMARY KEY(tx_id)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -226,7 +231,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "TradeType",
             "constraints": ", CONSTRAINT tradetype_pk PRIMARY KEY(tt_id)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -238,7 +243,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "Industry",
             "constraints": ", CONSTRAINT industry_pk PRIMARY KEY(in_name)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     # BatchDate uses the Ingest_Incremental notebook (different file pattern).
@@ -252,7 +257,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tbl": "BatchDate",
             "constraints": ", CONSTRAINT batchdate_pk PRIMARY KEY(batchdate)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
 
@@ -261,7 +266,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="ingest_FinWire",
         notebook_path=f"{repo_src_path}/single_batch/SQL/ingest_finwire",
         depends_on=[_NEEDS_REGEN],
-        base_params={"tbl_props": _finwire_tprops(), **_td_param},
+        base_params={"tbl_props": _finwire_tprops(), **_td_wh},
     ))
 
     # ---------------- Stage 1a: Silver static dims ----------------
@@ -273,7 +278,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tgt_schema": f"sk_brokerid BIGINT {_NN} COMMENT 'Surrogate key for broker', brokerid BIGINT COMMENT 'Natural key for broker', managerid BIGINT COMMENT 'Natural key for manager\u2019s HR record', firstname STRING COMMENT 'First name', lastname STRING COMMENT 'Last Name', middleinitial STRING COMMENT 'Middle initial', branch STRING COMMENT 'Facility in which employee has office', office STRING COMMENT 'Office number or description', phone STRING COMMENT 'Employee phone number', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimbroker_pk PRIMARY KEY(sk_brokerid)",
             "tbl_props": _tprops(),
-            **_td_param,
+            **_td_wh,
         },
     ))
     tasks.append(_make_task(
@@ -284,6 +289,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tgt_schema": f"sk_companyid BIGINT {_NN} COMMENT 'Surrogate key for CompanyID', companyid BIGINT COMMENT 'Company identifier (CIK number)', status STRING COMMENT 'Company status', name STRING COMMENT 'Company name', industry STRING COMMENT 'Company\u2019s industry', sprating STRING COMMENT 'Standard & Poor company\u2019s rating', islowgrade BOOLEAN COMMENT 'True if this company is low grade', ceo STRING COMMENT 'CEO name', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', description STRING COMMENT 'Company description', foundingdate DATE COMMENT 'Date the company was founded', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimcompany_pk PRIMARY KEY(sk_companyid), CONSTRAINT dimcompany_status_fk FOREIGN KEY (status) REFERENCES StatusType(st_name), CONSTRAINT dimcompany_industry_fk FOREIGN KEY (industry) REFERENCES Industry(in_name)",
             "tbl_props": _tprops(),
+            **_wh_param,
         },
     ))
     tasks.append(_make_task(
@@ -294,6 +300,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tgt_schema": f"sk_securityid BIGINT {_NN} COMMENT 'Surrogate key for Symbol', symbol STRING COMMENT 'Identifies security on ticker', issue STRING COMMENT 'Issue type', status STRING COMMENT 'Status type', name STRING COMMENT 'Security name', exchangeid STRING COMMENT 'Exchange the security is traded on', sk_companyid BIGINT COMMENT 'Company issuing security', sharesoutstanding BIGINT COMMENT 'Shares outstanding', firsttrade DATE COMMENT 'Date of first trade', firsttradeonexchange DATE COMMENT 'Date of first trade on this exchange', dividend DOUBLE COMMENT 'Annual dividend per share', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimsecurity_pk PRIMARY KEY(sk_securityid), CONSTRAINT dimsecurity_status_fk FOREIGN KEY (status) REFERENCES StatusType(st_name), CONSTRAINT dimsecurity_company_fk FOREIGN KEY (sk_companyid) REFERENCES DimCompany(sk_companyid)",
             "tbl_props": _tprops(),
+            **_wh_param,
         },
     ))
     tasks.append(_make_task(
@@ -304,46 +311,55 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tgt_schema": f"sk_companyid BIGINT {_NN} COMMENT 'Company SK.', fi_year INT {_NN} COMMENT 'Year of the quarter end.', fi_qtr INT {_NN} COMMENT 'Quarter number that the financial information is for: valid values 1, 2, 3, 4.', fi_qtr_start_date DATE COMMENT 'Start date of quarter.', fi_revenue DOUBLE COMMENT 'Reported revenue for the quarter.', fi_net_earn DOUBLE COMMENT 'Net earnings reported for the quarter.', fi_basic_eps DOUBLE COMMENT 'Basic earnings per share for the quarter.', fi_dilut_eps DOUBLE COMMENT 'Diluted earnings per share for the quarter.', fi_margin DOUBLE COMMENT 'Profit divided by revenues for the quarter.', fi_inventory DOUBLE COMMENT 'Value of inventory on hand at the end of quarter.', fi_assets DOUBLE COMMENT 'Value of total assets at the end of the quarter.', fi_liability DOUBLE COMMENT 'Value of total liabilities at the end of the quarter.', fi_out_basic BIGINT COMMENT 'Average number of shares outstanding (basic).', fi_out_dilut BIGINT COMMENT 'Average number of shares outstanding (diluted).'",
             "constraints": ", CONSTRAINT financial_pk PRIMARY KEY(sk_companyid, fi_year, fi_qtr), CONSTRAINT financial_company_fk FOREIGN KEY (sk_companyid) REFERENCES DimCompany(sk_companyid)",
             "tbl_props": _tprops(),
+            **_wh_param,
         },
     ))
 
     # ---------------- Stage 1a: SCD2 historical dim/facts ----------------
     hist_path = f"{repo_src_path}/incremental_batches/augmented_incremental/historical"
 
+    # Each historical task writes to {wh_db}_{sf}.{table} — wh_db is hardcoded to the shared staging schema, no user knob.
     tasks.append(_make_task(
         task_key="DimCustomerHistorical",
         notebook_path=f"{hist_path}/DimCustomerHistorical",
         depends_on=[_NEEDS_REGEN, "ingest_TaxRate"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="DimAccountHistorical",
         notebook_path=f"{hist_path}/DimAccountHistorical",
         depends_on=["DimCustomerHistorical", "Silver_DimBroker"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="DimTradeHistorical",
         notebook_path=f"{hist_path}/DimTradeHistorical",
         depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimAccountHistorical"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactCashBalancesHistorical",
         notebook_path=f"{hist_path}/FactCashBalancesHistorical",
         depends_on=[_NEEDS_REGEN, "DimAccountHistorical"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactHoldingsHistorical",
         notebook_path=f"{hist_path}/FactHoldingsHistorical",
         depends_on=[_NEEDS_REGEN, "DimTradeHistorical"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactWatchesHistorical",
         notebook_path=f"{hist_path}/FactWatchesHistorical",
         depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimCustomerHistorical"],
+        base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="CompanyYearEPS",
         notebook_path=f"{hist_path}/CompanyYearEPS",
         depends_on=["Silver_Financial", "Silver_DimCompany"],
+        base_params=dict(_wh_param),
     ))
 
     # ---------------- Stage 1b: stage_files (per-day CSVs) ----------------
@@ -388,13 +404,12 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
             # data_gen task params
-            {"name": "spark_or_native_datagen", "default": "augmented_incremental"},
+            {"name": "data_gen_type", "default": "augmented_incremental"},
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},
             {"name": "log_level", "default": log_level},
-            # stage_tables target schema. Hardcoded — every user expects this schema name (the augmented benchmark CLONEs from it). Dropping predictive_optimization since it's not enabled on staging tables. Dropping the job-level tpcdi_directory — it's now passed per-task via {{job.parameters.catalog}} interpolation so a run-time catalog override automatically updates the path.
-            {"name": "wh_db", "default": _STAGING_WH_DB},
+            # tpcdi_directory and wh_db are NOT job-level params — they're hardcoded per-task via base_parameters since data_gen_type=augmented_incremental fully determines both. predictive_optimization is dropped (PO is not enabled on the shared staging schema).
         ],
         "queue": {"enabled": True},
         "tasks": tasks,

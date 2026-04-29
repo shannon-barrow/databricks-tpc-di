@@ -42,7 +42,7 @@ def _abort_digen(reason: str) -> None:
         f"DIGen pre-flight check FAILED: {reason}\n\n"
         f"DIGen.jar requires a NON-SERVERLESS cluster with DBR <= 15.4. "
         f"Re-create this job's cluster as a classic Photon DBR 15.4 cluster, "
-        f"or pick the Spark generator (spark_or_native_datagen='spark') if "
+        f"or pick the Spark generator (data_gen_type='spark') if "
         f"your cluster is serverless. No volume data has been modified."
     )
 

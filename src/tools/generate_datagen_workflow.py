@@ -14,7 +14,7 @@ Two implementations are supported, selected by the ``data_generator`` arg:
 Both jobs share a single notebook (`tools/data_gen`) that dispatches to
 the right runner via direct Python import — no `dbutils.notebook.run`
 indirection, no risk of a new cluster on serverless. The
-`spark_or_native_datagen` job parameter (default ``"spark"`` or ``"native"``
+`data_gen_type` job parameter (default ``"spark"`` or ``"native"``
 depending on which builder created the job) selects the implementation
 and is overridable per run.
 """
