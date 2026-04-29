@@ -91,11 +91,23 @@ def stage_to_files(
         target_path = f"{target_dir.rstrip('/')}/{date}/{filename}"
         target_local = _local(target_path)
         os.makedirs(os.path.dirname(target_local), exist_ok=True)
-        _concat_with_retry(
-            sources=[f"{part_dir_local}/{p}" for p in parts],
-            target=target_local,
-            max_retries=max_retries,
-        )
+        if len(parts) == 1:
+            # Fast path: no concat needed, just rename in place. UC Volume FUSE supports rename within the same volume — no byte copy, just a metadata-level move. Common at SF=10 where each date partition is small enough to fit in one Spark part file.
+            try:
+                os.rename(f"{part_dir_local}/{parts[0]}", target_local)
+            except OSError:
+                # Fall through to copy if rename fails (e.g. cross-FS edge case).
+                _concat_with_retry(
+                    sources=[f"{part_dir_local}/{parts[0]}"],
+                    target=target_local,
+                    max_retries=max_retries,
+                )
+        else:
+            _concat_with_retry(
+                sources=[f"{part_dir_local}/{p}" for p in parts],
+                target=target_local,
+                max_retries=max_retries,
+            )
         return 1
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
