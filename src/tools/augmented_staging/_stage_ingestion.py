@@ -88,26 +88,32 @@ def stage_to_files(
         parts = sorted(n for n in os.listdir(part_dir_local) if n.startswith("part-"))
         if not parts:
             return 0
-        target_path = f"{target_dir.rstrip('/')}/{date}/{filename}"
-        target_local = _local(target_path)
-        os.makedirs(os.path.dirname(target_local), exist_ok=True)
+        date_dir_local = _local(f"{target_dir.rstrip('/')}/{date}")
+        os.makedirs(date_dir_local, exist_ok=True)
         if len(parts) == 1:
-            # Fast path: no concat needed, just rename in place. UC Volume FUSE supports rename within the same volume — no byte copy, just a metadata-level move. Common at SF=10 where each date partition is small enough to fit in one Spark part file.
+            # Single Spark partition → keep the canonical filename (e.g. Customer.txt).
             try:
-                os.rename(f"{part_dir_local}/{parts[0]}", target_local)
+                os.rename(f"{part_dir_local}/{parts[0]}",
+                          f"{date_dir_local}/{filename}")
             except OSError:
-                # Fall through to copy if rename fails (e.g. cross-FS edge case).
                 _concat_with_retry(
                     sources=[f"{part_dir_local}/{parts[0]}"],
-                    target=target_local,
+                    target=f"{date_dir_local}/{filename}",
                     max_retries=max_retries,
                 )
         else:
-            _concat_with_retry(
-                sources=[f"{part_dir_local}/{p}" for p in parts],
-                target=target_local,
-                max_retries=max_retries,
-            )
+            # Multi-part → number the files (Customer_1.txt, Customer_2.txt, ...) instead of byte-copy concat. Bronze ingest's glob `{Customer.txt,Customer_[0-9]*.txt}` already matches this shape, and downstream simulate_filedrops just lists everything in the date dir.
+            base, ext = os.path.splitext(filename)
+            for i, p in enumerate(parts, start=1):
+                try:
+                    os.rename(f"{part_dir_local}/{p}",
+                              f"{date_dir_local}/{base}_{i}{ext}")
+                except OSError:
+                    _concat_with_retry(
+                        sources=[f"{part_dir_local}/{p}"],
+                        target=f"{date_dir_local}/{base}_{i}{ext}",
+                        max_retries=max_retries,
+                    )
         return 1
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:

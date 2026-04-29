@@ -20,13 +20,11 @@ batch_date      = dbutils.widgets.get("batch_date")
 wh_db           = dbutils.widgets.get("wh_db")
 batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
 staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
-filenames       = ['Account.txt', 'CashTransaction.txt', 'Customer.txt', 'DailyMarket.txt', 'HoldingHistory.txt', 'Trade.txt', 'WatchHistory.txt']
-threads         = len(filenames)
+day_src_dir     = f"{staging_dir}/{batch_date}"
 
 # COMMAND ----------
 
 def copy_file(source_file, target_file):
-  # shutil.copyfile(source_file, target_file)
   dbutils.fs.cp(source_file, target_file)
   return f"Successfully moved {source_file} to {target_file}"
 
@@ -46,10 +44,19 @@ dbutils.fs.mkdirs(batches_dir)
 
 # COMMAND ----------
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-  futures = []
-  for filename in filenames:
-    futures.append(executor.submit(copy_file, source_file=f"{staging_dir}/{batch_date}/{filename}", target_file=f"{batches_dir}/{batch_date}/{filename}"))
+# List whatever files exist under the day's staging dir and copy them all. stage_files now produces single-part dates as `Customer.txt` and multi-part dates as `Customer_1.txt`, `Customer_2.txt`, ... — the bronze ingest's glob (`{Customer.txt,Customer_[0-9]*.txt}`) handles both. Sparse datasets (Customer/Account at low SF) may not have a file for every date; we just copy whatever's there.
+try:
+  src_files = [e for e in dbutils.fs.ls(day_src_dir) if not e.isDir()]
+except Exception as e:
+  print(f"No staging files for {batch_date}: {type(e).__name__}: {e}")
+  src_files = []
+
+print(f"Copying {len(src_files)} files for {batch_date}")
+with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(src_files))) as executor:
+  futures = [executor.submit(copy_file,
+                             source_file=e.path,
+                             target_file=f"{batches_dir}/{batch_date}/{e.name}")
+             for e in src_files]
   for future in concurrent.futures.as_completed(futures):
     try: print(future.result())
     except requests.ConnectTimeout: print("ConnectTimeout.")
