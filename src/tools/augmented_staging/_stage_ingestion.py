@@ -60,9 +60,7 @@ def stage_to_files(
     print(f"[stage_to_files] {source_view} → {target_dir}")
     print(f"  partitioned-CSV staging: {tmp_dir}")
 
-    # Repartition by date_col before the write so each distinct date lands in a single Spark partition. partitionBy alone splits OUTPUT files by date but doesn't shuffle, so without this every Spark partition emits its share of each date as a separate part file. AQE auto-tunes the actual shuffle-partition count. Verified faster end-to-end at SF=10 (run 95882812237571: 7×~250s vs the no-repartition baseline that emitted thousands of tiny files per date).
     (spark.table(source_view)
-        .repartition(date_col)
         .write
         .mode("overwrite")
         .option("header", "false")
@@ -90,32 +88,15 @@ def stage_to_files(
         parts = sorted(n for n in os.listdir(part_dir_local) if n.startswith("part-"))
         if not parts:
             return 0
-        date_dir_local = _local(f"{target_dir.rstrip('/')}/{date}")
-        os.makedirs(date_dir_local, exist_ok=True)
-        if len(parts) == 1:
-            # Single Spark partition → keep the canonical filename (e.g. Customer.txt).
-            try:
-                os.rename(f"{part_dir_local}/{parts[0]}",
-                          f"{date_dir_local}/{filename}")
-            except OSError:
-                _concat_with_retry(
-                    sources=[f"{part_dir_local}/{parts[0]}"],
-                    target=f"{date_dir_local}/{filename}",
-                    max_retries=max_retries,
-                )
-        else:
-            # Multi-part → number the files (Customer_1.txt, Customer_2.txt, ...) instead of byte-copy concat. Bronze ingest's glob `{Customer.txt,Customer_[0-9]*.txt}` already matches this shape, and downstream simulate_filedrops just lists everything in the date dir.
-            base, ext = os.path.splitext(filename)
-            for i, p in enumerate(parts, start=1):
-                try:
-                    os.rename(f"{part_dir_local}/{p}",
-                              f"{date_dir_local}/{base}_{i}{ext}")
-                except OSError:
-                    _concat_with_retry(
-                        sources=[f"{part_dir_local}/{p}"],
-                        target=f"{date_dir_local}/{base}_{i}{ext}",
-                        max_retries=max_retries,
-                    )
+        target_path = f"{target_dir.rstrip('/')}/{date}/{filename}"
+        target_local = _local(target_path)
+        os.makedirs(os.path.dirname(target_local), exist_ok=True)
+        # Concat-with-retry was empirically faster than os.rename on UC Volume FUSE — rename appears to do a cp+rm under the hood rather than pure metadata, so a single read+write pass via copyfileobj wins. Multi-part is rare at SF=10 anyway (Spark only splits when partitions get big); when it does happen, we still concat into a single Customer.txt per day. Bronze ingest's glob handles both forms regardless.
+        _concat_with_retry(
+            sources=[f"{part_dir_local}/{p}" for p in parts],
+            target=target_local,
+            max_retries=max_retries,
+        )
         return 1
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
