@@ -118,18 +118,23 @@ def run(
                   f"COMMENT 'FinWire intermediate stage for augmented_incremental'")
         _tlog("staging schemas ready")
 
-    _tlog(f"dbutils.fs.ls check on {blob_out_path}")
-    if _path_exists(dbutils, blob_out_path):
-        if regenerate_data:
-            _tlog(f"regenerate_data=YES; recursive delete of prior output begins")
-            dbutils.fs.rm(blob_out_path, recurse=True)
-            _tlog("prior output deleted")
-        else:
-            print(f"Data generation skipped since {blob_out_path} already exists. "
-                  f"Set regenerate_data=YES to overwrite.")
-            return
+    if augmented_incremental:
+        # In augmented mode the volume "marker" dir is populated by Phase 2 stage_files, not by stage 0 — so the regenerate_data early-exit is misleading. cleanup_stage0 drops the temp Delta tables at the end of every workflow run, so downstream tasks always need stage 0 to rebuild them. Always run; ignore regenerate_data.
+        _tlog(f"augmented_incremental: always rebuilding temp Delta tables in "
+              f"{catalog}.tpcdi_raw_data (regenerate_data is ignored)")
     else:
-        _tlog("no prior output to delete")
+        _tlog(f"dbutils.fs.ls check on {blob_out_path}")
+        if _path_exists(dbutils, blob_out_path):
+            if regenerate_data:
+                _tlog(f"regenerate_data=YES; recursive delete of prior output begins")
+                dbutils.fs.rm(blob_out_path, recurse=True)
+                _tlog("prior output deleted")
+            else:
+                print(f"Data generation skipped since {blob_out_path} already exists. "
+                      f"Set regenerate_data=YES to overwrite.")
+                return
+        else:
+            _tlog("no prior output to delete")
 
     # Resolve module source. Try workspace path first (works on SINGLE_USER clusters); fall back to a Volume copy for USER_ISOLATION/SHARED clusters where /Workspace paths aren't accessible via Python file I/O.
     _tools_dir = f"{workspace_src_path}/tools"
