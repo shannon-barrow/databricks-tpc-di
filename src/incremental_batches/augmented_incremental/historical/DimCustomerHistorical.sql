@@ -51,7 +51,10 @@ with cust_updates as (
   SELECT
     customerid,
     taxid,
-    status,
+    CASE
+      WHEN ActionType IN ('NEW', 'ADDACCT', 'UPDACCT', 'UPDCUST') THEN 'Active'
+      WHEN ActionType IN ('CLOSEACCT', 'INACT') THEN 'Inactive'
+    END AS status,
     lastname, firstname, middleinitial,
     gender, tier, dob,
     addressline1, addressline2, postalcode, city, stateprov, country,

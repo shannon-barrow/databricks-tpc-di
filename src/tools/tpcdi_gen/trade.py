@@ -543,15 +543,18 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0"))))
 
         # Batch1: completed strictly before cutoff (half-open — matches CT logic).
-        # HoldingHistory: route by completion-timestamp into tables (< 2015-07-06) vs files (>=) when augmented.
+        # HoldingHistory: route by completion-timestamp into tables (< 2015-07-06) vs files (>=) when augmented. event_dt is included so the stage_files notebook can partition per-day without a join back to trade (the DIGen splitter does that join via max(event_dt) per tradeid; we already have _complete_ts here).
         if cfg.augmented_incremental:
             cutoff_2015 = int(datetime(2015, 7, 6).timestamp())
             hh_b1 = (hh_base
                 .filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long"))
+                .withColumn("event_dt",
+                    F.to_date(F.col("_complete_ts").cast("timestamp")))
                 .withColumn("stg_target",
                     F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"),
                            F.lit("tables")).otherwise(F.lit("files")))
-                .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty", "stg_target"))
+                .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty",
+                        "event_dt", "stg_target"))
             from .utils import write_delta
             write_delta(hh_b1, cfg=cfg, dataset="holdinghistory",
                         partition_cols=["stg_target"])

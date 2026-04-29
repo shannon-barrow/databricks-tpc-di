@@ -39,7 +39,10 @@ WITH acct_updates AS (
     accountdesc,
     taxstatus,
     brokerid,
-    status,
+    CASE
+      WHEN ActionType IN ('NEW', 'ADDACCT', 'UPDACCT', 'UPDCUST') THEN 'Active'
+      WHEN ActionType IN ('CLOSEACCT', 'INACT') THEN 'Inactive'
+    END AS status,
     date(update_ts) effectivedate,
     nvl(
       lead(date(update_ts)) OVER (PARTITION BY accountid ORDER BY update_ts),

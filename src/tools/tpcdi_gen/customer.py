@@ -847,9 +847,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             _nz("C_TAX_ID").alias("taxid"),
             _nz("CA_NAME").alias("accountdesc"),
             F.col("CA_TAX_ST").cast("tinyint").alias("taxstatus"),
-            F.when(F.col("ActionType").isin("NEW", "ADDACCT", "UPDACCT", "UPDCUST"), F.lit("Active"))
-             .when(F.col("ActionType").isin("CLOSEACCT", "INACT"), F.lit("Inactive"))
-             .alias("status"),
+            # ActionType is the source-of-truth for status — DimCustomerHistorical / DimAccountHistorical / stage_files Customer / stage_files Account each decode it differently (Active/Inactive vs ACTV/INAC), so we don't pre-decode here.
             _nz("C_L_NAME").alias("lastname"),
             _nz("C_F_NAME").alias("firstname"),
             _nz("C_M_NAME").alias("middleinitial"),
