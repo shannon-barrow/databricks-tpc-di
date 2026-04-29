@@ -80,7 +80,7 @@ def stage_to_files(
     tmp_local = _local(tmp_dir)
     date_partition_names = [n for n in os.listdir(tmp_local)
                             if n.startswith(f"{date_col}=")]
-    print(f"  {len(date_partition_names)} date partitions to concat")
+    print(f"  Copying {filename} into {len(date_partition_names)} per-date staging directories")
 
     def _do_one(part_dir_name):
         date = part_dir_name.split("=", 1)[1]
@@ -120,7 +120,7 @@ def stage_to_files(
         written = sum(pool.map(_do_one, date_partition_names))
 
     dbutils.fs.rm(tmp_dir, recurse=True)
-    print(f"[stage_to_files] done — {written}/{len(date_partition_names)} date files written")
+    print(f"[stage_to_files] done — {filename}: {written}/{len(date_partition_names)} per-date directories populated")
 
 
 def _local(path: str) -> str:
