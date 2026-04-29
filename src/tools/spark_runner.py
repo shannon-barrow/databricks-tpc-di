@@ -119,9 +119,57 @@ def run(
         _tlog("staging schemas ready")
 
     if augmented_incremental:
-        # In augmented mode the volume "marker" dir is populated by Phase 2 stage_files, not by stage 0 — so the regenerate_data early-exit is misleading. cleanup_stage0 drops the temp Delta tables at the end of every workflow run, so downstream tasks always need stage 0 to rebuild them. Always run; ignore regenerate_data.
-        _tlog(f"augmented_incremental: always rebuilding temp Delta tables in "
-              f"{catalog}.tpcdi_raw_data (regenerate_data is ignored)")
+        # Early-exit check: workflow's only deliverables are the staging tables in tpcdi_incremental_staging_{sf} and the per-day CSVs at augmented_incremental/_staging/sf={sf}/. If both are intact, there's nothing to do — we set staging_complete=true so the downstream condition_task (`staging_check` in augmented_staging.py) skips the rest of the workflow. regenerate_data=YES forces a rebuild regardless. Note: dbutils.jobs.taskValues string-encodes booleans as "true"/"false" — match that explicitly so the condition_task comparison is unambiguous.
+        _expected_tables = {
+            "taxrate", "dimdate", "dimtime", "industry", "tradetype",
+            "statustype", "dimbroker", "dimcompany", "dimsecurity",
+            "financial", "companyyeareps", "currentaccountbalances",
+            "dimcustomer", "dimaccount", "dimtrade", "factwatches",
+            "factholdings", "factcashbalances", "batchdate",
+        }
+        _staging_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+        _staging_dir = blob_out_path
+
+        if regenerate_data:
+            _tlog("augmented_incremental: regenerate_data=YES → forcing rebuild")
+            dbutils.jobs.taskValues.set(key="staging_complete", value="false")
+        else:
+            try:
+                _actual = {r.tableName.lower() for r in spark.sql(
+                    f"SHOW TABLES IN {_staging_schema}").collect()}
+            except Exception as e:
+                _tlog(f"augmented_incremental: staging schema scan failed ({type(e).__name__}); will rebuild")
+                _actual = set()
+            _missing = _expected_tables - _actual
+            _tables_ok = not _missing
+
+            from datetime import date as _d, timedelta as _td
+            _expected_dates = {(_d(2015, 7, 6) + _td(days=i)).isoformat()
+                               for i in range(730)}
+            try:
+                _date_dirs = {e.name.rstrip("/") for e in dbutils.fs.ls(_staging_dir)
+                              if e.isDir() and len(e.name.rstrip("/")) == 10}
+            except Exception:
+                _date_dirs = set()
+            _missing_dates = _expected_dates - _date_dirs
+            _files_ok = not _missing_dates
+
+            staging_complete = _tables_ok and _files_ok
+            _tlog(f"augmented_incremental: tables_ok={_tables_ok} "
+                  f"({len(_actual)}/{len(_expected_tables)} present, "
+                  f"missing={sorted(_missing)[:5] if _missing else '∅'}); "
+                  f"files_ok={_files_ok} "
+                  f"({len(_date_dirs & _expected_dates)}/730 expected dates present)")
+            dbutils.jobs.taskValues.set(
+                key="staging_complete",
+                value="true" if staging_complete else "false")
+            if staging_complete:
+                _tlog("augmented_incremental: staging is complete — skipping "
+                      "stage 0; downstream tasks will skip via condition_task")
+                return
+
+        _tlog(f"augmented_incremental: rebuilding temp Delta tables in "
+              f"{catalog}.tpcdi_raw_data")
     else:
         _tlog(f"dbutils.fs.ls check on {blob_out_path}")
         if _path_exists(dbutils, blob_out_path):
