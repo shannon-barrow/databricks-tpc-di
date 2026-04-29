@@ -346,8 +346,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             from .utils import write_delta
             out_p = out_p.withColumn(
                 "stg_target",
-                F.when(F.col("t_dts") < F.lit("2015-07-06"), F.lit("tables"))
-                 .otherwise(F.lit("files")))
+                F.when(F.col("t_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                 .when(F.col("t_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
+                 .otherwise(F.lit("discard")))
             write_delta(out_p, cfg=cfg, dataset="trade",
                         partition_cols=["stg_target"])
         else:
@@ -401,8 +402,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             th_p = th_df.toDF("tradeid", "th_dts", "status")
             th_p = th_p.withColumn(
                 "stg_target",
-                F.when(F.col("th_dts") < F.lit("2015-07-06"), F.lit("tables"))
-                 .otherwise(F.lit("files")))
+                F.when(F.col("th_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                 .when(F.col("th_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
+                 .otherwise(F.lit("discard")))
             from .utils import write_delta
             write_delta(th_p, cfg=cfg, dataset="tradehistory",
                         partition_cols=["stg_target"])
@@ -467,8 +469,9 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
             ct_p = ct_b1.toDF("accountid", "ct_dts", "ct_amt", "ct_name")
             ct_p = ct_p.withColumn(
                 "stg_target",
-                F.when(F.col("ct_dts") < F.lit("2015-07-06"), F.lit("tables"))
-                 .otherwise(F.lit("files")))
+                F.when(F.col("ct_dts") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                 .when(F.col("ct_dts") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
+                 .otherwise(F.lit("discard")))
             from .utils import write_delta
             write_delta(ct_p, cfg=cfg, dataset="cashtransaction",
                         partition_cols=["stg_target"])
@@ -546,13 +549,15 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
         # HoldingHistory: route by completion-timestamp into tables (< 2015-07-06) vs files (>=) when augmented. event_dt is included so the stage_files notebook can partition per-day without a join back to trade (the DIGen splitter does that join via max(event_dt) per tradeid; we already have _complete_ts here).
         if cfg.augmented_incremental:
             cutoff_2015 = int(datetime(2015, 7, 6).timestamp())
+            cutoff_2017 = int(datetime(2017, 7, 5).timestamp())
             hh_b1 = (hh_base
                 .filter(F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long"))
                 .withColumn("event_dt",
                     F.to_date(F.col("_complete_ts").cast("timestamp")))
                 .withColumn("stg_target",
-                    F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"),
-                           F.lit("tables")).otherwise(F.lit("files")))
+                    F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"), F.lit("tables"))
+                     .when(F.col("_complete_ts") < F.lit(cutoff_2017).cast("long"), F.lit("files"))
+                     .otherwise(F.lit("discard")))
                 .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty",
                         "event_dt", "stg_target"))
             from .utils import write_delta

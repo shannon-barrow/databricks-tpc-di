@@ -144,8 +144,11 @@ def run(
             _tables_ok = not _missing
 
             from datetime import date as _d, timedelta as _td
-            _expected_dates = {(_d(2015, 7, 6) + _td(days=i)).isoformat()
-                               for i in range(730)}
+            from tpcdi_gen.config import (
+                AUG_FILES_DATE_START as _aug_start, AUG_FILES_DAYS as _aug_days)
+            _y, _m, _da = (int(x) for x in _aug_start.split("-"))
+            _expected_dates = {(_d(_y, _m, _da) + _td(days=i)).isoformat()
+                               for i in range(_aug_days)}
             try:
                 _date_dirs = {e.name.rstrip("/") for e in dbutils.fs.ls(_staging_dir)
                               if e.isDir() and len(e.name.rstrip("/")) == 10}
@@ -168,11 +171,15 @@ def run(
                       "stage 0; downstream tasks will skip via condition_task")
                 return
 
-        # Pre-create the 730 per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. Each thread targets a different path so there's no contention; the Spark Connect roundtrip per mkdir dominates wall-clock so threading drops this from ~3 min to ~10s. mkdirs is idempotent (no-op if the dir already exists).
+        # Pre-create the per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. Each thread targets a different path so there's no contention; the Spark Connect roundtrip per mkdir dominates wall-clock so threading drops this from ~3 min to ~10s. mkdirs is idempotent (no-op if the dir already exists).
         import concurrent.futures as _cf
-        from datetime import date as _d, timedelta as _td
-        _tlog(f"augmented_incremental: pre-creating 730 per-day staging dirs under {_staging_dir}")
-        _all_dates = [(_d(2015, 7, 6) + _td(days=_i)).isoformat() for _i in range(730)]
+        from datetime import date as _d2, timedelta as _td2
+        from tpcdi_gen.config import (
+            AUG_FILES_DATE_START as _aug_start2, AUG_FILES_DAYS as _aug_days2)
+        _y2, _m2, _da2 = (int(x) for x in _aug_start2.split("-"))
+        _all_dates = [(_d2(_y2, _m2, _da2) + _td2(days=_i)).isoformat()
+                      for _i in range(_aug_days2)]
+        _tlog(f"augmented_incremental: pre-creating {_aug_days2} per-day staging dirs under {_staging_dir}")
         def _mk(_date):
             dbutils.fs.mkdirs(f"{_staging_dir}/{_date}")
         with _cf.ThreadPoolExecutor(max_workers=32) as _pool:

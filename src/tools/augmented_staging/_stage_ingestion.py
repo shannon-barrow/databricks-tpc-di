@@ -69,20 +69,24 @@ def stage_to_files(
         .csv(tmp_dir))
 
     # Spark wrote `{tmp_dir}/{date_col}=YYYY-MM-DD/part-NNNNN-….csv` per
-    # date partition. Loop those, concat part files into a single per-date
-    # file at `{target_dir}/{date}/{filename}`.
+    # date partition. Concat part files into a single per-date file at
+    # `{target_dir}/{date}/{filename}`. Per-date work is independent
+    # (different output paths) so we fan out across a thread pool;
+    # spark_runner pre-creates the per-date parent dirs in augmented mode
+    # so we don't need a per-thread mkdir call.
+    import concurrent.futures
     entries = dbutils.fs.ls(tmp_dir)
     date_dirs = [e for e in entries if e.name.rstrip("/").startswith(f"{date_col}=")]
     print(f"  {len(date_dirs)} date partitions to concat")
 
-    for d in date_dirs:
+    def _do_one(d):
         date = d.name.rstrip("/").split("=", 1)[1]
         parts = sorted(
             [e for e in dbutils.fs.ls(d.path) if e.name.startswith("part-")],
             key=lambda e: e.name,
         )
         if not parts:
-            continue
+            return 0
         target_path = f"{target_dir.rstrip('/')}/{date}/{filename}"
         target_local = _local(target_path)
         os.makedirs(os.path.dirname(target_local), exist_ok=True)
@@ -91,9 +95,13 @@ def stage_to_files(
             target=target_local,
             max_retries=max_retries,
         )
+        return 1
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+        written = sum(pool.map(_do_one, date_dirs))
 
     dbutils.fs.rm(tmp_dir, recurse=True)
-    print(f"[stage_to_files] done — {len(date_dirs)} date files written")
+    print(f"[stage_to_files] done — {written}/{len(date_dirs)} date files written")
 
 
 def _local(path: str) -> str:

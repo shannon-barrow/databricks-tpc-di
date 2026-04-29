@@ -46,6 +46,7 @@ SELECT
   dm_low,
   dm_vol
 FROM {catalog}.tpcdi_raw_data.dailymarket{scale_factor}
+WHERE stg_target = 'files'
 """)
 
 # COMMAND ----------

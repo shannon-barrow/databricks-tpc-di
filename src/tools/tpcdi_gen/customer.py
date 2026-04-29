@@ -879,8 +879,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             _nz("C_NAT_TX_ID").alias("nat_tx_id"),
             F.to_timestamp(F.col("ActionTS")).alias("update_ts"),
             F.col("ActionType"),
-            F.when(F.col("ActionTS") < F.lit("2015-07-06"), F.lit("tables"))
-             .otherwise(F.lit("files")).alias("stg_target"),
+            # 3-way: tables (< 2015-07-06) | files (in 730-day window) | discard (>= 2017-07-05). discard rows stay in temp Delta but no consumer reads them.
+            F.when(F.col("ActionTS") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+             .when(F.col("ActionTS") < F.lit(AUG_FILES_DATE_END_EXCL), F.lit("files"))
+             .otherwise(F.lit("discard")).alias("stg_target"),
         )
 
         write_delta(cm_df, cfg=cfg, dataset="customermgmt",
