@@ -45,7 +45,8 @@ SELECT
   taxstatus,
   CASE WHEN ActionType IN ('CLOSEACCT', 'INACT') THEN 'INAC' ELSE 'ACTV' END AS status,
   update_ts,
-  to_date(update_ts) AS update_dt
+  to_date(update_ts) AS update_dt,
+  to_date(update_ts) AS _pdate  -- duplicate partition col so update_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.customermgmt{scale_factor}
 WHERE stg_target = 'files'
   AND ActionType NOT IN ('UPDCUST', 'INACT')
@@ -56,7 +57,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_account",
-    date_col="update_dt",
+    date_col="_pdate",
     filename="Account.txt",
     target_dir=target_dir,
 )

@@ -40,7 +40,8 @@ SELECT
   ct_dts,
   ct_amt,
   ct_name,
-  to_date(ct_dts) AS event_dt
+  to_date(ct_dts) AS event_dt,
+  to_date(ct_dts) AS _pdate  -- duplicate partition col so event_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.cashtransaction{scale_factor}
 WHERE stg_target = 'files'
 """)
@@ -50,7 +51,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_cashtransaction",
-    date_col="event_dt",
+    date_col="_pdate",
     filename="CashTransaction.txt",
     target_dir=target_dir,
 )

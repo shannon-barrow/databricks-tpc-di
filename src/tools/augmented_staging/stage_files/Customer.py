@@ -89,7 +89,9 @@ SELECT
   lcl_tx_id,
   nat_tx_id,
   update_ts,
-  to_date(update_ts) AS update_dt
+  to_date(update_ts) AS update_dt,
+  -- _pdate is a duplicate of update_dt used ONLY as the partition column. Spark strips partition cols from the written data file, so without this duplicate the per-day file would lose update_dt entirely. The DIGen splitter's rawcustomer table has update_dt in the actual file content (because reading a Delta partition col includes it in SELECT *), and we need to match that shape.
+  to_date(update_ts) AS _pdate
 FROM {catalog}.tpcdi_raw_data.customermgmt{scale_factor}
 WHERE stg_target = 'files'
   AND ActionType IN ('NEW', 'INACT', 'UPDCUST')
@@ -100,7 +102,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_customer",
-    date_col="update_dt",
+    date_col="_pdate",
     filename="Customer.txt",
     target_dir=target_dir,
 )

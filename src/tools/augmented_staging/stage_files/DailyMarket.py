@@ -44,7 +44,8 @@ SELECT
   dm_close,
   dm_high,
   dm_low,
-  dm_vol
+  dm_vol,
+  dm_date AS _pdate  -- duplicate partition col so dm_date stays in the data file (the rawdailymarket schema has dm_date as a regular data column too)
 FROM {catalog}.tpcdi_raw_data.dailymarket{scale_factor}
 WHERE stg_target = 'files'
 """)
@@ -54,7 +55,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_dailymarket",
-    date_col="dm_date",
+    date_col="_pdate",
     filename="DailyMarket.txt",
     target_dir=target_dir,
 )

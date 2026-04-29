@@ -39,7 +39,8 @@ SELECT
   w_s_symb,
   w_dts,
   w_action,
-  to_date(w_dts) AS event_dt
+  to_date(w_dts) AS event_dt,
+  to_date(w_dts) AS _pdate  -- duplicate partition col so event_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.watchhistory{scale_factor}
 WHERE stg_target = 'files'
 """)
@@ -49,7 +50,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_watchhistory",
-    date_col="event_dt",
+    date_col="_pdate",
     filename="WatchHistory.txt",
     target_dir=target_dir,
 )

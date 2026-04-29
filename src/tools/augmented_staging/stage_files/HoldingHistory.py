@@ -41,7 +41,8 @@ SELECT
   hh_t_id,
   hh_before_qty,
   hh_after_qty,
-  event_dt
+  event_dt,
+  event_dt AS _pdate  -- duplicate partition col so event_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.holdinghistory{scale_factor}
 WHERE stg_target = 'files'
 """)
@@ -51,7 +52,7 @@ WHERE stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_holdinghistory",
-    date_col="event_dt",
+    date_col="_pdate",
     filename="HoldingHistory.txt",
     target_dir=target_dir,
 )

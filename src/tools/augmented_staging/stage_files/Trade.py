@@ -57,7 +57,8 @@ SELECT
   CASE WHEN th.status = 'CMPT' THEN t.fee END AS fee,
   CASE WHEN th.status = 'CMPT' THEN t.commission END AS commission,
   CASE WHEN th.status = 'CMPT' THEN t.tax END AS tax,
-  to_date(th.th_dts) AS event_dt
+  to_date(th.th_dts) AS event_dt,
+  to_date(th.th_dts) AS _pdate  -- duplicate partition col so event_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.tradehistory{scale_factor} th
 JOIN {catalog}.tpcdi_raw_data.trade{scale_factor} t
   ON t.t_id = th.tradeid
@@ -69,7 +70,7 @@ WHERE th.stg_target = 'files'
 stage_to_files(
     spark, dbutils,
     source_view="_stage_trade",
-    date_col="event_dt",
+    date_col="_pdate",
     filename="Trade.txt",
     target_dir=target_dir,
 )
