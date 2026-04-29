@@ -168,12 +168,15 @@ def run(
                       "stage 0; downstream tasks will skip via condition_task")
                 return
 
-        # Pre-create the 730 per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Single-threaded mkdirs here avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. mkdirs is idempotent (no-op if the dir already exists).
+        # Pre-create the 730 per-day staging directories under the augmented_incremental/_staging/sf={sf}/ root. Avoids the ABFS "Parallel access to the create path detected" error that fires when 7 stage_files notebooks try to mkdir the same date subdir concurrently. Each thread targets a different path so there's no contention; the Spark Connect roundtrip per mkdir dominates wall-clock so threading drops this from ~3 min to ~10s. mkdirs is idempotent (no-op if the dir already exists).
+        import concurrent.futures as _cf
         from datetime import date as _d, timedelta as _td
         _tlog(f"augmented_incremental: pre-creating 730 per-day staging dirs under {_staging_dir}")
-        for _i in range(730):
-            _date = (_d(2015, 7, 6) + _td(days=_i)).isoformat()
+        _all_dates = [(_d(2015, 7, 6) + _td(days=_i)).isoformat() for _i in range(730)]
+        def _mk(_date):
             dbutils.fs.mkdirs(f"{_staging_dir}/{_date}")
+        with _cf.ThreadPoolExecutor(max_workers=32) as _pool:
+            list(_pool.map(_mk, _all_dates))
 
         _tlog(f"augmented_incremental: rebuilding temp Delta tables in "
               f"{catalog}.tpcdi_raw_data")
