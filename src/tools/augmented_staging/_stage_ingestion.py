@@ -60,7 +60,9 @@ def stage_to_files(
     print(f"[stage_to_files] {source_view} → {target_dir}")
     print(f"  partitioned-CSV staging: {tmp_dir}")
 
+    # Repartition by date_col before the write so each distinct date lands in a single Spark partition. partitionBy alone splits OUTPUT files by date but doesn't shuffle, so without this every Spark partition emits its share of each date as a separate part file. AQE auto-tunes the actual shuffle-partition count. Verified faster end-to-end at SF=10 (run 95882812237571: 7×~250s vs the no-repartition baseline that emitted thousands of tiny files per date).
     (spark.table(source_view)
+        .repartition(date_col)
         .write
         .mode("overwrite")
         .option("header", "false")
