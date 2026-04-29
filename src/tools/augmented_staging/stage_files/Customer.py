@@ -42,7 +42,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_customer AS
 SELECT
   CASE WHEN ActionType = 'NEW' THEN 'I' ELSE 'U' END AS cdc_flag,
-  row_number() OVER (ORDER BY update_ts, customerid) - 1 AS cdc_dsn,
+  cdc_dsn,
   customerid,
   taxid,
   CASE WHEN ActionType IN ('CLOSEACCT', 'INACT') THEN 'INAC' ELSE 'ACTV' END AS status,

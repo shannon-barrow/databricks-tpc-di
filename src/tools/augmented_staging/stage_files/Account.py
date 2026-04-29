@@ -37,7 +37,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_account AS
 SELECT
   CASE WHEN ActionType IN ('NEW', 'ADDACCT') THEN 'I' ELSE 'U' END AS cdc_flag,
-  row_number() OVER (ORDER BY update_ts, accountid) - 1 AS cdc_dsn,
+  cdc_dsn,
   accountid,
   brokerid,
   customerid,

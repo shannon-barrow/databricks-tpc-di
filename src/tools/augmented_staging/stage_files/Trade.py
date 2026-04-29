@@ -42,7 +42,7 @@ SELECT
     WHEN row_number() OVER (PARTITION BY th.tradeid ORDER BY th.th_dts) = 1
     THEN 'I' ELSE 'U'
   END AS cdc_flag,
-  row_number() OVER (ORDER BY th.th_dts, th.tradeid) - 1 AS cdc_dsn,
+  th.cdc_dsn,
   th.tradeid,
   th.th_dts AS t_dts,
   th.status,

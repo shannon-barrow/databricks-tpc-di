@@ -36,7 +36,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_holdinghistory AS
 SELECT
   'I' AS cdc_flag,
-  row_number() OVER (ORDER BY event_dt, hh_t_id) - 1 AS cdc_dsn,
+  cdc_dsn,
   hh_h_t_id,
   hh_t_id,
   hh_before_qty,

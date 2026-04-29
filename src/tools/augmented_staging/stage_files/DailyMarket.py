@@ -38,7 +38,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_dailymarket AS
 SELECT
   'I' AS cdc_flag,
-  row_number() OVER (ORDER BY dm_date, dm_s_symb) - 1 AS cdc_dsn,
+  cdc_dsn,
   dm_date,
   dm_s_symb,
   dm_close,

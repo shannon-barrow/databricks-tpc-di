@@ -698,17 +698,34 @@ def write_delta(df: DataFrame, *, cfg, dataset: str,
     temp tables; ``cleanup_stage0`` drops them once per-day CSVs and the
     ``tpcdi_incremental_staging_{sf}`` schema are populated.
 
+    Every temp table gets a ``cdc_dsn BIGINT GENERATED ALWAYS AS IDENTITY``
+    column appended. stage_files notebooks SELECT it directly instead of
+    paying for a row_number() OVER (entire dataset) pass.
+
     Returns the fully-qualified table name written.
     """
     fq = f"{cfg.catalog}.tpcdi_raw_data.{dataset}{cfg.sf}"
-    writer = (df.write
-        .mode("overwrite")
-        .option("overwriteSchema", "true")
-        .format("delta"))
-    if partition_cols:
-        writer = writer.partitionBy(*partition_cols)
-    writer.saveAsTable(fq)
-    log(f"[Delta] wrote {fq}")
+
+    # DDL-first so Delta auto-assigns cdc_dsn during the INSERT. Drop+recreate so the IDENTITY sequence restarts at 0 on every run.
+    spark = df.sparkSession
+    spark.sql(f"DROP TABLE IF EXISTS {fq}")
+
+    cols_ddl_parts = [f"{f.name} {f.dataType.simpleString()}" for f in df.schema.fields]
+    cols_ddl_parts.append(
+        "cdc_dsn BIGINT GENERATED ALWAYS AS IDENTITY (START WITH 0 INCREMENT BY 1)"
+    )
+    cols_ddl = ", ".join(cols_ddl_parts)
+    partition_clause = (f"PARTITIONED BY ({', '.join(partition_cols)})"
+                        if partition_cols else "")
+    spark.sql(f"CREATE TABLE {fq} ({cols_ddl}) USING DELTA {partition_clause}")
+
+    src_view = f"_wd_src_{dataset}"
+    df.createOrReplaceTempView(src_view)
+    col_list = ", ".join(f.name for f in df.schema.fields)
+    spark.sql(f"INSERT INTO {fq} ({col_list}) SELECT {col_list} FROM {src_view}")
+    spark.catalog.dropTempView(src_view)
+
+    log(f"[Delta] wrote {fq} (with IDENTITY cdc_dsn)")
     return fq
 
 

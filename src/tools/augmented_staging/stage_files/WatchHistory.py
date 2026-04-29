@@ -34,7 +34,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_watchhistory AS
 SELECT
   'I' AS cdc_flag,
-  row_number() OVER (ORDER BY w_dts, w_c_id, w_s_symb) - 1 AS cdc_dsn,
+  cdc_dsn,
   w_c_id,
   w_s_symb,
   w_dts,

@@ -35,7 +35,7 @@ spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW _stage_cashtransaction AS
 SELECT
   'I' AS cdc_flag,
-  row_number() OVER (ORDER BY ct_dts, accountid) - 1 AS cdc_dsn,
+  cdc_dsn,
   accountid,
   ct_dts,
   ct_amt,
