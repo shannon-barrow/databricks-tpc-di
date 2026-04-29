@@ -58,29 +58,7 @@ SELECT
   city,
   stateprov,
   country,
-  -- Concatenated phone variants (consistent with DIGen Customer.sql output)
-  nvl2(c_local_1,
-    concat(
-      nvl2(c_ctry_1, '+' || c_ctry_1 || ' ', ''),
-      nvl2(c_area_1, '(' || c_area_1 || ') ', ''),
-      c_local_1,
-      nvl(c_ext_1, '')),
-    try_cast(null as string)) AS phone1,
-  nvl2(c_local_2,
-    concat(
-      nvl2(c_ctry_2, '+' || c_ctry_2 || ' ', ''),
-      nvl2(c_area_2, '(' || c_area_2 || ') ', ''),
-      c_local_2,
-      nvl(c_ext_2, '')),
-    try_cast(null as string)) AS phone2,
-  nvl2(c_local_3,
-    concat(
-      nvl2(c_ctry_3, '+' || c_ctry_3 || ' ', ''),
-      nvl2(c_area_3, '(' || c_area_3 || ') ', ''),
-      c_local_3,
-      nvl(c_ext_3, '')),
-    try_cast(null as string)) AS phone3,
-  -- Split phone components
+  -- Split phone components only (no concatenated phone1/2/3 — bronze schema doesn't include them).
   c_ctry_1, c_area_1, c_local_1, c_ext_1,
   c_ctry_2, c_area_2, c_local_2, c_ext_2,
   c_ctry_3, c_area_3, c_local_3, c_ext_3,
@@ -88,9 +66,8 @@ SELECT
   email2,
   lcl_tx_id,
   nat_tx_id,
-  update_ts,
   to_date(update_ts) AS update_dt,
-  -- _pdate is a duplicate of update_dt used ONLY as the partition column. Spark strips partition cols from the written data file, so without this duplicate the per-day file would lose update_dt entirely. The DIGen splitter's rawcustomer table has update_dt in the actual file content (because reading a Delta partition col includes it in SELECT *), and we need to match that shape.
+  -- _pdate is a duplicate of update_dt used ONLY as the partition column. Spark strips partition cols from the written data file, so without this duplicate the per-day file would lose update_dt entirely.
   to_date(update_ts) AS _pdate
 FROM {catalog}.tpcdi_raw_data.customermgmt{scale_factor}
 WHERE stg_target = 'files'

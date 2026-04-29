@@ -44,7 +44,6 @@ SELECT
   accountdesc,
   taxstatus,
   CASE WHEN ActionType IN ('CLOSEACCT', 'INACT') THEN 'INAC' ELSE 'ACTV' END AS status,
-  update_ts,
   to_date(update_ts) AS update_dt,
   to_date(update_ts) AS _pdate  -- duplicate partition col so update_dt stays in the data file
 FROM {catalog}.tpcdi_raw_data.customermgmt{scale_factor}
