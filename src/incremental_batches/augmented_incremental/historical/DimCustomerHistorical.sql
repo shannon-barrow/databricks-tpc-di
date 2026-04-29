@@ -45,7 +45,7 @@ TBLPROPERTIES (
 
 -- COMMAND ----------
 
--- Source: spark-gen temp Delta tpcdi_raw_data.customermgmt{sf} (CustomerMgmtRaw shape, partitioned by ActionType + stg_target). status is already decoded; phone1/2/3 are already concatenated; rows are dense (no sparse-XML nulls), so the windowed last_value IGNORE NULLS pass present in the DIGen splitter version is unnecessary here.
+-- Source: spark-gen temp Delta tpcdi_raw_data.customermgmt{sf} (CustomerMgmtRaw shape with split phone components for Customer.txt compat). status is already decoded; phone1/2/3 concatenated here in the CTE; rows are dense (no sparse-XML nulls), so the windowed last_value IGNORE NULLS pass present in the DIGen splitter version is unnecessary.
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimCustomer')
 with cust_updates as (
   SELECT
@@ -55,7 +55,27 @@ with cust_updates as (
     lastname, firstname, middleinitial,
     gender, tier, dob,
     addressline1, addressline2, postalcode, city, stateprov, country,
-    phone1, phone2, phone3,
+    nvl2(c_local_1,
+      concat(
+        nvl2(c_ctry_1, '+' || c_ctry_1 || ' ', ''),
+        nvl2(c_area_1, '(' || c_area_1 || ') ', ''),
+        c_local_1,
+        nvl(c_ext_1, '')),
+      try_cast(null as string)) phone1,
+    nvl2(c_local_2,
+      concat(
+        nvl2(c_ctry_2, '+' || c_ctry_2 || ' ', ''),
+        nvl2(c_area_2, '(' || c_area_2 || ') ', ''),
+        c_local_2,
+        nvl(c_ext_2, '')),
+      try_cast(null as string)) phone2,
+    nvl2(c_local_3,
+      concat(
+        nvl2(c_ctry_3, '+' || c_ctry_3 || ' ', ''),
+        nvl2(c_area_3, '(' || c_area_3 || ') ', ''),
+        c_local_3,
+        nvl(c_ext_3, '')),
+      try_cast(null as string)) phone3,
     email1, email2,
     lcl_tx_id, nat_tx_id,
     date(update_ts) effectivedate,

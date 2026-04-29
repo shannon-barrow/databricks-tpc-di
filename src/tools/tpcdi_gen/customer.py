@@ -831,23 +831,10 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     if views_ready_event is not None:
         views_ready_event.set()
 
-    # === Augmented-Incremental staging: write all_df as Delta in CustomerMgmtRaw shape ===
-    # Skip XML write entirely. Project the in-memory action-rows DataFrame into the exact column set produced by `single_batch/SQL/CustomerMgmtRaw.sql` (i.e. what that notebook produces by reading and unpacking CustomerMgmt.xml). Downstream silver SQL (DimCustomer / DimAccount + augmented historical/*.sql) consumes this table directly — no separate Customer.txt/Account.txt splitter step needed.
+    # === Augmented-Incremental staging: write all_df as Delta ===
+    # Skip XML write entirely. Project the in-memory action-rows DataFrame into a flat shape that's a superset of CustomerMgmtRaw — same cols PLUS the split phone-piece components (c_ctry_N / c_area_N / c_local_N / c_ext_N) that the per-day Customer.txt schema requires. Downstream consumers: - augmented historical/DimCustomerHistorical (concatenates phone1/2/3 in a CTE from these split pieces) - stage_files/Customer (writes Customer.txt with both split pieces, since Customer.txt's incremental file format includes them)
     if cfg.augmented_incremental:
         from .utils import write_delta
-
-        def _phone_concat(local, ctry, area, ext):
-            """Match CustomerMgmtRaw.sql's phone concat: '+CTRY (AREA) LOCALEXT' (skip
-            empty parts, NULL when local is NULL). Returns a Column expression."""
-            local_ok = F.col(local).isNotNull() & (F.col(local) != "")
-            ctry_part = F.when(F.col(ctry).isNotNull() & (F.col(ctry) != ""),
-                               F.concat(F.lit("+"), F.col(ctry), F.lit(" "))).otherwise(F.lit(""))
-            area_part = F.when(F.col(area).isNotNull() & (F.col(area) != ""),
-                               F.concat(F.lit("("), F.col(area), F.lit(") "))).otherwise(F.lit(""))
-            ext_part = F.coalesce(F.col(ext), F.lit(""))
-            return F.when(local_ok,
-                F.concat(ctry_part, area_part, F.col(local), ext_part)
-            ).otherwise(F.lit(None).cast("string"))
 
         def _nz(c):
             """nullif(col, '') — empty string -> NULL."""
@@ -875,9 +862,19 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             _nz("C_CITY").alias("city"),
             _nz("C_STATE_PROV").alias("stateprov"),
             _nz("C_CTRY").alias("country"),
-            _phone_concat("C_LOCAL_1", "C_CTRY_1", "C_AREA_1", "C_EXT_1").alias("phone1"),
-            _phone_concat("C_LOCAL_2", "C_CTRY_2", "C_AREA_2", "C_EXT_2").alias("phone2"),
-            _phone_concat("C_LOCAL_3", "C_CTRY_3", "C_AREA_3", "C_EXT_3").alias("phone3"),
+            # Split phone pieces — Customer.txt's incremental file format keeps these split, and DimCustomerHistorical concatenates phone1/2/3 in its CTE.
+            _nz("C_CTRY_1").alias("c_ctry_1"),
+            _nz("C_AREA_1").alias("c_area_1"),
+            _nz("C_LOCAL_1").alias("c_local_1"),
+            _nz("C_EXT_1").alias("c_ext_1"),
+            _nz("C_CTRY_2").alias("c_ctry_2"),
+            _nz("C_AREA_2").alias("c_area_2"),
+            _nz("C_LOCAL_2").alias("c_local_2"),
+            _nz("C_EXT_2").alias("c_ext_2"),
+            _nz("C_CTRY_3").alias("c_ctry_3"),
+            _nz("C_AREA_3").alias("c_area_3"),
+            _nz("C_LOCAL_3").alias("c_local_3"),
+            _nz("C_EXT_3").alias("c_ext_3"),
             _nz("C_PRIM_EMAIL").alias("email1"),
             _nz("C_ALT_EMAIL").alias("email2"),
             _nz("C_LCL_TX_ID").alias("lcl_tx_id"),
