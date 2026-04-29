@@ -21,21 +21,13 @@ and is overridable per run.
 from typing import Callable, Optional
 
 from _workflow_utils import submit_dag
-from workflow_builders import datagen_digen, datagen_spark
-
-
-def _augmented_build(**kw):
-    """Stage 0 of augmented_incremental: same single-task spark builder, but
-    seed the data_gen widget to ``augmented_incremental`` so the runner skips
-    Batch2/Batch3 and writes Delta tables to ``tpcdi_raw_data``."""
-    kw["datagen_choice"] = "augmented_incremental"
-    return datagen_spark.build(**kw)
+from workflow_builders import datagen_digen, datagen_spark, augmented_staging
 
 
 _BUILDERS = {
     "spark": datagen_spark.build,
     "digen": datagen_digen.build,
-    "augmented_incremental": _augmented_build,
+    "augmented_incremental": augmented_staging.build,
 }
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 
