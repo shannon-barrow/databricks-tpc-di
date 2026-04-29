@@ -1,6 +1,10 @@
 # Databricks notebook source
-spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
-spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+# Serverless rejects most spark.conf.set() calls with CONFIG_NOT_AVAILABLE — wrap in try/except so the runtime's own defaults take over there.
+try:
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
+    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+except Exception:
+    pass
 
 # COMMAND ----------
 

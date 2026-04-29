@@ -27,7 +27,10 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 
 # COMMAND ----------
 
-spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+try:
+    spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
+except Exception:
+    pass  # serverless: not on the user-settable allowlist
 
 def upsertToDelta(microBatchOutputDF, batch_id):
   microBatchOutputDF.createOrReplaceTempView("bronzedailymarket")
