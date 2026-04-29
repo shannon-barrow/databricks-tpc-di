@@ -107,6 +107,17 @@ def run(
               f"COMMENT 'TPC-DI Raw Files'")
     _tlog("schema + volume ready")
 
+    if augmented_incremental:
+        # Augmented mode also needs the staging schema (the one whose tables get cloned by per-user benchmark setup) — create it here so the workflow doesn't need a separate dw_init task. PO is intentionally NOT enabled on the staging schema (these tables are read-only deliverables).
+        _staging_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+        _tlog(f"CREATE DATABASE IF NOT EXISTS {_staging_schema}")
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {_staging_schema} "
+                  f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
+        _tlog(f"CREATE DATABASE IF NOT EXISTS {_staging_schema}_stage")
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {_staging_schema}_stage "
+                  f"COMMENT 'FinWire intermediate stage for augmented_incremental'")
+        _tlog("staging schemas ready")
+
     _tlog(f"dbutils.fs.ls check on {blob_out_path}")
     if _path_exists(dbutils, blob_out_path):
         if regenerate_data:

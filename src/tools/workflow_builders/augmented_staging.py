@@ -9,7 +9,10 @@ Stage 1 splits into two parallel branches that both depend only on
 data_gen completing:
 
   Branch A — staging tables (Phase 2a):
-    - dw_init creates `tpcdi_incremental_staging_{sf}` + `..._stage`
+    - The `tpcdi_incremental_staging_{sf}` + `..._stage` schemas are
+      created inline by spark_runner during stage 0, so this workflow
+      has no separate dw_init task. PO is intentionally NOT enabled on
+      the staging schema (these tables are read-only deliverables).
     - raw_ingestion ingests StatusType / TaxRate / DimDate / DimTime /
       Industry / TradeType / BatchDate from the .txt files spark gen
       writes under {volume}/Batch1/. Reuses single_batch/SQL files
@@ -118,28 +121,22 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           **_unused) -> dict:
     """Build the augmented_incremental data-gen workflow JSON."""
 
-    tpcdi_directory = (
-        f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
-        f"augmented_incremental/_staging/"
+    # tpcdi_directory uses {{job.parameters.catalog}} interpolation so the path tracks any run-time override of `catalog` (the previous build-time interpolation baked the original catalog into the path, which silently went stale if the user later overrode catalog). single_batch SQL notebooks (raw_ingestion / ingest_finwire / Ingest_Incremental) read this via base_parameters per-task; stage_files notebooks read it via the same job-level parameter, but they only need it for the volume path so the dynamic reference is sufficient.
+    _tpcdi_dir_dynamic = (
+        "/Volumes/{{job.parameters.catalog}}/tpcdi_raw_data/tpcdi_volume/"
+        "augmented_incremental/_staging/"
     )
-    common_base = {
-        "tbl_props": _tprops(),
-    }
+
+    # tpcdi_directory base_param common to every task that reads volume files via the ${tpcdi_directory} widget — passed per-task with the dynamic catalog reference so a run-time override of `catalog` automatically flows through.
+    _td_param = {"tpcdi_directory": _tpcdi_dir_dynamic}
 
     tasks: list[dict] = []
 
     # ---------------- Stage 0: data_gen ----------------
+    # Spark gen also creates the tpcdi_incremental_staging_{sf} + _stage schemas inline (replaces the old dw_init notebook task).
     tasks.append(_make_task(
         task_key="data_gen",
         notebook_path=f"{repo_src_path}/tools/data_gen",
-    ))
-
-    # ---------------- Stage 1a: dw_init ----------------
-    tasks.append(_make_task(
-        task_key="dw_init",
-        notebook_path=f"{repo_src_path}/single_batch/SQL/dw_init",
-        depends_on=["data_gen"],
-        base_params={"pred_opt": "{{job.parameters.predictive_optimization}}"},
     ))
 
     # ---------------- Stage 1a: raw_ingestion ----------------
@@ -147,81 +144,88 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
 
     tasks.append(_make_task(
         task_key="ingest_DimDate", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"sk_dateid BIGINT {_NN} COMMENT 'Surrogate key for the date', datevalue DATE COMMENT 'The date stored appropriately for doing comparisons in the Data Warehouse', datedesc STRING COMMENT 'The date in full written form e.g. July 7 2004', calendaryearid INT COMMENT 'Year number as a number', calendaryeardesc STRING COMMENT 'Year number as text', calendarqtrid INT COMMENT 'Quarter as a number e.g. 20042', calendarqtrdesc STRING COMMENT 'Quarter as text e.g. 2004 Q2', calendarmonthid INT COMMENT 'Month as a number e.g. 20047', calendarmonthdesc STRING COMMENT 'Month as text e.g. 2004 July', calendarweekid INT COMMENT 'Week as a number e.g. 200428', calendarweekdesc STRING COMMENT 'Week as text e.g. 2004-W28', dayofweeknum INT COMMENT 'Day of week as a number e.g. 3', dayofweekdesc STRING COMMENT 'Day of week as text e.g. Wednesday', fiscalyearid INT COMMENT 'Fiscal year as a number e.g. 2005', fiscalyeardesc STRING COMMENT 'Fiscal year as text e.g. 2005', fiscalqtrid INT COMMENT 'Fiscal quarter as a number e.g. 20051', fiscalqtrdesc STRING COMMENT 'Fiscal quarter as text e.g. 2005 Q1', holidayflag BOOLEAN COMMENT 'Indicates holidays'",
             "filename": "Date.txt",
             "tbl": "DimDate",
             "constraints": ", CONSTRAINT dimdate_pk PRIMARY KEY(sk_dateid)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
         task_key="ingest_DimTime", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"sk_timeid BIGINT {_NN} COMMENT 'Surrogate key for the time', timevalue STRING COMMENT 'The time stored appropriately for doing', hourid INT COMMENT 'Hour number as a number e.g. 01', hourdesc STRING COMMENT 'Hour number as text e.g. 01', minuteid INT COMMENT 'Minute as a number e.g. 23', minutedesc STRING COMMENT 'Minute as text e.g. 01:23', secondid INT COMMENT 'Second as a number e.g. 45', seconddesc STRING COMMENT 'Second as text e.g. 01:23:45', markethoursflag BOOLEAN COMMENT 'Indicates a time during market hours', officehoursflag BOOLEAN COMMENT 'Indicates a time during office hours'",
             "filename": "Time.txt",
             "tbl": "DimTime",
             "constraints": ", CONSTRAINT dimtime_pk PRIMARY KEY(sk_timeid)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
         task_key="ingest_StatusType", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"st_id STRING COMMENT 'Status code', st_name STRING {_NN} COMMENT 'Status description'",
             "filename": "StatusType.txt",
             "tbl": "StatusType",
             "constraints": ", CONSTRAINT statustype_pk PRIMARY KEY(st_name)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
         task_key="ingest_TaxRate", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"tx_id STRING {_NN} COMMENT 'Tax rate code', tx_name STRING COMMENT 'Tax rate description', tx_rate FLOAT COMMENT 'Tax rate'",
             "filename": "TaxRate.txt",
             "tbl": "TaxRate",
             "constraints": ", CONSTRAINT taxrate_pk PRIMARY KEY(tx_id)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
         task_key="ingest_TradeType", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"tt_id STRING {_NN} COMMENT 'Trade type code', tt_name STRING COMMENT 'Trade type description', tt_is_sell INT COMMENT 'Flag indicating a sale', tt_is_mrkt INT COMMENT 'Flag indicating a market order'",
             "filename": "TradeType.txt",
             "tbl": "TradeType",
             "constraints": ", CONSTRAINT tradetype_pk PRIMARY KEY(tt_id)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
         task_key="ingest_industry", notebook_path=raw_ingest_path,
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "raw_schema": f"in_id STRING COMMENT 'Industry code', in_name STRING {_NN} COMMENT 'Industry description', in_sc_id STRING COMMENT 'Sector identifier'",
             "filename": "Industry.txt",
             "tbl": "Industry",
             "constraints": ", CONSTRAINT industry_pk PRIMARY KEY(in_name)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     # BatchDate uses the Ingest_Incremental notebook (different file pattern).
     tasks.append(_make_task(
         task_key="ingest_BatchDate",
         notebook_path=f"{repo_src_path}/single_batch/SQL/Ingest_Incremental",
-        depends_on=["dw_init"],
+        depends_on=["data_gen"],
         base_params={
             "filename": "BatchDate.txt",
             "raw_schema": f"batchdate DATE {_NN} COMMENT 'Batch date'",
             "tbl": "BatchDate",
             "constraints": ", CONSTRAINT batchdate_pk PRIMARY KEY(batchdate)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
 
@@ -229,8 +233,8 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="ingest_FinWire",
         notebook_path=f"{repo_src_path}/single_batch/SQL/ingest_finwire",
-        depends_on=["dw_init"],
-        base_params={"tbl_props": _finwire_tprops()},
+        depends_on=["data_gen"],
+        base_params={"tbl_props": _finwire_tprops(), **_td_param},
     ))
 
     # ---------------- Stage 1a: Silver static dims ----------------
@@ -242,6 +246,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             "tgt_schema": f"sk_brokerid BIGINT {_NN} COMMENT 'Surrogate key for broker', brokerid BIGINT COMMENT 'Natural key for broker', managerid BIGINT COMMENT 'Natural key for manager\u2019s HR record', firstname STRING COMMENT 'First name', lastname STRING COMMENT 'Last Name', middleinitial STRING COMMENT 'Middle initial', branch STRING COMMENT 'Facility in which employee has office', office STRING COMMENT 'Office number or description', phone STRING COMMENT 'Employee phone number', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimbroker_pk PRIMARY KEY(sk_brokerid)",
             "tbl_props": _tprops(),
+            **_td_param,
         },
     ))
     tasks.append(_make_task(
@@ -324,6 +329,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             task_key=key,
             notebook_path=f"{stg_path}/{tbl}",
             depends_on=["data_gen"],
+            base_params=dict(_td_param),
         ))
         stage_files_keys.append(key)
 
@@ -360,10 +366,8 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},
             {"name": "log_level", "default": log_level},
-            # stage_tables / stage_files task params
-            {"name": "tpcdi_directory", "default": tpcdi_directory},
+            # stage_tables target schema. Hardcoded — every user expects this schema name (the augmented benchmark CLONEs from it). Dropping predictive_optimization since it's not enabled on staging tables. Dropping the job-level tpcdi_directory — it's now passed per-task via {{job.parameters.catalog}} interpolation so a run-time catalog override automatically updates the path.
             {"name": "wh_db", "default": _STAGING_WH_DB},
-            {"name": "predictive_optimization", "default": "ENABLE"},
         ],
         "queue": {"enabled": True},
         "tasks": tasks,
