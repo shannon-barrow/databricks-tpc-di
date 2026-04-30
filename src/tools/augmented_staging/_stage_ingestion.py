@@ -17,8 +17,6 @@ wasteful.
 """
 from __future__ import annotations
 
-import os
-
 
 def stage_to_files(
     spark,
@@ -26,16 +24,14 @@ def stage_to_files(
     *,
     source_view: str,
     date_col: str,
-    filename: str,
+    dataset: str,
     target_dir: str,
     delimiter: str = "|",
     file_ext: str = "csv",
 ) -> None:
     """Write ``source_view`` as a partitioned table for one dataset.
 
-    Output layout: ``{target_dir}/{dataset}/_pdate={date}/part-*.{file_ext}``
-    where ``dataset`` is ``filename`` without extension (e.g. ``"Trade"``
-    for ``"Trade.txt"``).
+    Output layout: ``{target_dir}/{dataset}/_pdate={date}/part-*.{file_ext}``.
 
     Args:
         spark:        active SparkSession
@@ -44,11 +40,10 @@ def stage_to_files(
                       ``date_col`` plus the payload columns in their final
                       output order.
         date_col:     Column to partition on (Spark strips it from output).
-        filename:     Final benchmark-side filename (e.g. ``"Trade.txt"``).
-                      The stem is the dataset name; simulate_filedrops
-                      reuses both the stem (subdir + renamed-stem) and the
-                      ``file_ext`` job parameter when it copies into the
-                      auto-loader watch dir.
+        dataset:      Dataset name (e.g. ``"Trade"``, ``"DailyMarket"``).
+                      Used as the staging subdir here AND as the renamed
+                      file stem in simulate_filedrops; the latter appends
+                      the job ``file_ext`` to produce e.g. ``Trade.txt``.
         target_dir:   Final target directory.
         delimiter:    CSV field delimiter (default ``"|"``). Ignored for
                       non-CSV writers.
@@ -58,7 +53,6 @@ def stage_to_files(
                       renamed extension at filedrop time, which may differ
                       (e.g. ``txt`` written via the ``csv`` writer).
     """
-    dataset, _ = os.path.splitext(filename)
     dataset_dir = f"{target_dir.rstrip('/')}/{dataset}"
     print(f"Writing {dataset} data out as {file_ext} table at staging directory: {dataset_dir}")
 
