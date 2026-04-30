@@ -425,7 +425,6 @@ def _gen_historical(spark, cfg, dbutils):
     final_cols = ["w_c_id", "w_s_symb", "w_dts", "w_action"]
     result_df = actv_df.select(*final_cols).union(cncl_df.select(*final_cols))
 
-    staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
     if cfg.augmented_incremental:
         from .utils import write_delta
         # Filter out post-window rows; tables (< 2015-07-06) | files (730-day window).
@@ -447,7 +446,10 @@ def _gen_historical(spark, cfg, dbutils):
     log(f"[WatchHistory] Batch1: {actv_est:,} ACTV + {cncl_est:,} CNCL = {total_est:,} total")
 
     if not static_audits_available(cfg):
-        # Dynamic audit regeneration: scan staged WatchHistory for exact counts.
+        # Dynamic audit regeneration: scan staged WatchHistory for exact
+        # counts. Unreachable in augmented mode (static_audits_available
+        # returns True there); only the non-augmented path reads the CSV.
+        staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
         written_df = spark.read.csv(
             staging_path, sep="|", header=False,
             schema="w_c_id STRING, w_s_symb STRING, w_dts STRING, w_action STRING")
