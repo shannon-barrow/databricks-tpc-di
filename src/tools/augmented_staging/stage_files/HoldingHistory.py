@@ -53,6 +53,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_holdinghistory",
     date_col="_pdate",
-    dataset="HoldingHistory",
+    filename="HoldingHistory.txt",
     target_dir=target_dir,
 )

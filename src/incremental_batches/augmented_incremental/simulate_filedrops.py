@@ -10,21 +10,29 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_vol
 dbutils.widgets.text("catalog", "tpcdi")
 dbutils.widgets.text("batch_date", "")
 dbutils.widgets.text("wh_db", "")
+dbutils.widgets.text("file_ext", "txt")
 
 catalog         = dbutils.widgets.get("catalog")
 scale_factor    = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 batch_date      = dbutils.widgets.get("batch_date")
 wh_db           = dbutils.widgets.get("wh_db")
-batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
-staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
+file_ext        = dbutils.widgets.get("file_ext").strip()
 
-# 7 stage_files notebooks each wrote {staging_dir}/{dataset}/_pdate={date}/part-*.csv.
+# stage_to_files writes via Spark's CSV writer (default), which produces
+# `*.csv` part files. The benchmark side wants `*.txt`. For any other
+# file_ext (e.g. parquet) the source extension matches the target.
+read_file_ext = "csv" if file_ext == "txt" else file_ext
+
+batches_dir = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
+staging_dir = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
+
+# 7 stage_files notebooks each wrote {staging_dir}/{Dataset}/_pdate={date}/part-*.{read_file_ext}.
 # stage_to_files repartitions by date_col before partitionBy, so each date
 # lands in a single shuffle bucket → single task → single part file per
 # date. We move (not copy) that one part file into the auto-loader watch
-# dir, renamed to {dataset}.txt. Sparse datasets (e.g. Customer) may have
-# no _pdate= dir for a given date — that's expected, just skip.
+# dir, renamed to {Dataset}.{file_ext}. Sparse datasets (e.g. Customer)
+# may have no _pdate= dir for a given date — that's expected, just skip.
 DATASETS = [
     "Customer", "Account", "Trade", "CashTransaction",
     "HoldingHistory", "DailyMarket", "WatchHistory",
@@ -52,14 +60,14 @@ def collect_one(dataset):
         entries = dbutils.fs.ls(src_dir)
     except Exception:
         return []
-    parts = [e for e in entries if e.name.startswith("part-")]
-    if len(parts) > 1:
-        raise RuntimeError(
-            f"{dataset} {batch_date}: expected 1 part file after repartition(_pdate), "
-            f"got {len(parts)}: {[e.name for e in parts]}")
+    parts = [e for e in entries if e.name.endswith(f".{read_file_ext}")]
     if not parts:
         return []
-    return [(parts[0].path, f"{batches_dir}/{batch_date}/{dataset}.txt")]
+    if len(parts) > 1:
+        raise RuntimeError(
+            f"{dataset} {batch_date}: expected 1 .{read_file_ext} file after "
+            f"repartition(_pdate), got {len(parts)}: {[e.name for e in parts]}")
+    return [(parts[0].path, f"{batches_dir}/{batch_date}/{dataset}.{file_ext}")]
 
 move_pairs = []
 for ds in DATASETS:

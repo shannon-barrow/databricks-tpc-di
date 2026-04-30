@@ -57,6 +57,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_account",
     date_col="_pdate",
-    dataset="Account",
+    filename="Account.txt",
     target_dir=target_dir,
 )

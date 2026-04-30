@@ -56,6 +56,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_dailymarket",
     date_col="_pdate",
-    dataset="DailyMarket",
+    filename="DailyMarket.txt",
     target_dir=target_dir,
 )
