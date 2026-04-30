@@ -1,9 +1,7 @@
 # Databricks notebook source
 import os
-import shutil
 import concurrent.futures
 import requests
-from datetime import date, timedelta
 
 # COMMAND ----------
 
@@ -20,13 +18,21 @@ batch_date      = dbutils.widgets.get("batch_date")
 wh_db           = dbutils.widgets.get("wh_db")
 batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
 staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
-day_src_dir     = f"{staging_dir}/{batch_date}"
 
-# COMMAND ----------
-
-def copy_file(source_file, target_file):
-  dbutils.fs.cp(source_file, target_file)
-  return f"Successfully moved {source_file} to {target_file}"
+# 7 stage_files notebooks each wrote {staging_dir}/{Dataset}/_pdate={date}/part-*.csv.
+# We move (not copy) the per-dataset part files for THIS day directly into
+# the auto-loader watch dir, with renamed targets matching the bronze
+# pathGlobfilter `{Dataset}_[0-9]*.txt`. Sparse datasets (e.g. Customer)
+# may have no _pdate= dir for a given date — that's expected, just skip.
+DATASETS = [
+    ("Customer",        "Customer.txt"),
+    ("Account",         "Account.txt"),
+    ("Trade",           "Trade.txt"),
+    ("CashTransaction", "CashTransaction.txt"),
+    ("HoldingHistory",  "HoldingHistory.txt"),
+    ("DailyMarket",     "DailyMarket.txt"),
+    ("WatchHistory",    "WatchHistory.txt"),
+]
 
 # COMMAND ----------
 
@@ -40,23 +46,36 @@ def copy_file(source_file, target_file):
 
 if os.path.exists(batches_dir):
   dbutils.fs.rm(batches_dir, recurse=True)
-dbutils.fs.mkdirs(batches_dir)
+dbutils.fs.mkdirs(f"{batches_dir}/{batch_date}")
 
 # COMMAND ----------
 
-# List whatever files exist under the day's staging dir and copy them all. stage_files writes every per-date output as `Base_1.txt`, `Base_2.txt`, ... (always numbered, even for single-part dates) so multi-part dates at high SF don't collide; bronze pathGlobfilter `Base_[0-9]*.txt` matches them. Sparse datasets (Customer/Account at low SF) may not have a file for every date; we just copy whatever's there.
-try:
-  src_files = [e for e in dbutils.fs.ls(day_src_dir) if not e.isDir()]
-except Exception as e:
-  print(f"No staging files for {batch_date}: {type(e).__name__}: {e}")
-  src_files = []
+def collect_one(dataset_name, target_filename):
+    src_dir = f"{staging_dir}/{dataset_name}/_pdate={batch_date}"
+    base, ext = os.path.splitext(target_filename)
+    try:
+        entries = dbutils.fs.ls(src_dir)
+    except Exception:
+        return []
+    parts = sorted((e for e in entries if e.name.startswith("part-")),
+                   key=lambda e: e.name)
+    return [(p.path, f"{batches_dir}/{batch_date}/{base}_{i}{ext}")
+            for i, p in enumerate(parts, start=1)]
 
-print(f"Copying {len(src_files)} files for {batch_date}")
-with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(src_files))) as executor:
-  futures = [executor.submit(copy_file,
-                             source_file=e.path,
-                             target_file=f"{batches_dir}/{batch_date}/{e.name}")
-             for e in src_files]
-  for future in concurrent.futures.as_completed(futures):
-    try: print(future.result())
-    except requests.ConnectTimeout: print("ConnectTimeout.")
+move_pairs = []
+for ds, fn in DATASETS:
+    move_pairs.extend(collect_one(ds, fn))
+
+print(f"Moving {len(move_pairs)} files for {batch_date}")
+
+def do_mv(pair):
+    src, target = pair
+    dbutils.fs.mv(src, target)
+    return f"{src} → {target}"
+
+with concurrent.futures.ThreadPoolExecutor(
+        max_workers=min(8, max(1, len(move_pairs)))) as executor:
+    futures = [executor.submit(do_mv, p) for p in move_pairs]
+    for future in concurrent.futures.as_completed(futures):
+        try: print(future.result())
+        except requests.ConnectTimeout: print("ConnectTimeout.")

@@ -143,26 +143,30 @@ def run(
             _missing = _expected_tables - _actual
             _tables_ok = not _missing
 
-            from datetime import date as _d, timedelta as _td
-            from tpcdi_gen.config import (
-                AUG_FILES_DATE_START as _aug_start, AUG_FILES_DAYS as _aug_days)
-            _y, _m, _da = (int(x) for x in _aug_start.split("-"))
-            _expected_dates = {(_d(_y, _m, _da) + _td(days=i)).isoformat()
-                               for i in range(_aug_days)}
-            try:
-                _date_dirs = {e.name.rstrip("/") for e in dbutils.fs.ls(_staging_dir)
-                              if e.isDir() and len(e.name.rstrip("/")) == 10}
-            except Exception:
-                _date_dirs = set()
-            _missing_dates = _expected_dates - _date_dirs
-            _files_ok = not _missing_dates
+            # New layout: stage_files writes {Dataset}/_pdate={date}/part-*.csv.
+            # Spark drops a top-level `_SUCCESS` marker per dataset dir on
+            # successful completion — use that as the "this dataset finished"
+            # signal (faster + more authoritative than counting _pdate= subdirs,
+            # which varies by dataset because Customer is sparse).
+            _expected_datasets = ("Account", "CashTransaction", "Customer",
+                                   "DailyMarket", "HoldingHistory", "Trade",
+                                   "WatchHistory")
+            def _ds_ok(ds):
+                try:
+                    return any(e.name == "_SUCCESS"
+                               for e in dbutils.fs.ls(f"{_staging_dir}/{ds}"))
+                except Exception:
+                    return False
+            _ds_status = {ds: _ds_ok(ds) for ds in _expected_datasets}
+            _files_ok = all(_ds_status.values())
 
             staging_complete = _tables_ok and _files_ok
+            _missing_ds = [ds for ds, ok in _ds_status.items() if not ok]
             _tlog(f"augmented_incremental: tables_ok={_tables_ok} "
                   f"({len(_actual)}/{len(_expected_tables)} present, "
                   f"missing={sorted(_missing)[:5] if _missing else '∅'}); "
                   f"files_ok={_files_ok} "
-                  f"({len(_date_dirs & _expected_dates)}/730 expected dates present)")
+                  f"(missing dataset dirs: {_missing_ds if _missing_ds else '∅'})")
             dbutils.jobs.taskValues.set(
                 key="staging_complete",
                 value="true" if staging_complete else "false")
@@ -264,22 +268,9 @@ def run(
     _utlog("[Init] creating Batch1/2/3 output directories", "DEBUG")
     make_output_dirs(cfg.volume_path, NUM_INCREMENTAL_BATCHES + 1, dbutils)
 
-    _bg_mkdir_pool = None
-    _bg_mkdir_futures: list = []
-    if augmented_incremental:
-        # Fire 730-dir pre-creation as a background thread pool so it overlaps with data gen instead of blocking it. Each mkdir is a Spark Connect roundtrip that takes ~200ms; the heavy data-gen work (Spark jobs) takes minutes — there's plenty of overlap. We join the futures before spark_runner returns. Pool stays alive until then. No data gen depends on these dirs (only stage_files tasks downstream do).
-        from datetime import date as _d2, timedelta as _td2
-        from tpcdi_gen.config import (
-            AUG_FILES_DATE_START as _aug_start2, AUG_FILES_DAYS as _aug_days2)
-        _y2, _m2, _da2 = (int(x) for x in _aug_start2.split("-"))
-        _all_dates = [(_d2(_y2, _m2, _da2) + _td2(days=_i)).isoformat()
-                      for _i in range(_aug_days2)]
-        _utlog(f"[Init] firing background mkdir for {_aug_days2} per-day staging dirs under {cfg.volume_path}", "DEBUG")
-        _bg_mkdir_pool = concurrent.futures.ThreadPoolExecutor(max_workers=32)
-        _bg_mkdir_futures = [
-            _bg_mkdir_pool.submit(dbutils.fs.mkdirs, f"{cfg.volume_path}/{_d}")
-            for _d in _all_dates
-        ]
+    # No per-day pre-creation needed — stage_files writes Spark
+    # partitioned-CSV under {Dataset}/_pdate={date}/, and Spark creates
+    # those subdirs itself during the write.
     _utlog("[Init] loading dictionary CSVs from disk", "DEBUG")
     dicts = dictionaries.load_all()
     _utlog(f"[Init] loaded {len(dicts)} dictionaries; registering as temp views", "DEBUG")
@@ -347,14 +338,9 @@ def run(
     from tpcdi_gen.utils import log as _log
 
     if augmented_incremental:
-        # Delta-only path — no files staged, no audit files needed (augmented benchmark doesn't run audit checks). Wait for the background mkdir pool to finish before returning so downstream stage_files tasks always find their date dirs.
+        # Delta-only path — no files staged, no audit files needed
+        # (augmented benchmark doesn't run audit checks).
         _log("[Orchestrator] augmented_incremental: skipping bulk file copy / audit emit")
-        if _bg_mkdir_pool is not None:
-            _log(f"[Orchestrator] joining background mkdir pool ({len(_bg_mkdir_futures)} dirs)")
-            _t0 = datetime.now()
-            concurrent.futures.wait(_bg_mkdir_futures)
-            _bg_mkdir_pool.shutdown(wait=True)
-            _log(f"[Orchestrator] mkdir pool done in {(datetime.now() - _t0).total_seconds():.1f}s")
     else:
         _log("[Orchestrator] All data generation complete. Copying files to final locations...")
         wait_for_background_copies()

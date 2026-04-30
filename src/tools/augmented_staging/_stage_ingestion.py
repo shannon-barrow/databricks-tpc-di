@@ -3,22 +3,20 @@
 Each per-dataset notebook under ``stage_files/`` builds a temp view that
 shapes the data into the format the augmented benchmark expects (cdc_flag,
 cdc_dsn, payload columns, plus a date column to partition on). It then
-calls ``stage_to_files`` here, which:
+calls ``stage_to_files`` here, which writes the view as a ``|``-delimited
+CSV partitioned by the date column under
+``{target_dir}/{Dataset}/_pdate={date}/part-*.csv``.
 
-1. Writes the view as a ``|``-delimited CSV table partitioned by the date
-   column to a temp staging directory. Spark fans out the writes so this
-   step is parallel.
-2. Loops the per-date partitions and ``dbutils.fs.mv``s each part file to
-   ``{date}/{base}_{i}{ext}`` under the final target dir. Server-side
-   rename on UC Volume — no driver streaming, no FUSE EAGAIN.
-
-The per-date target files are what ``simulate_filedrops`` later copies
-into the Autoloader watch directory at benchmark run-time.
+No post-write rename or concat. ``simulate_filedrops`` at benchmark run
+time scans each dataset's ``_pdate={batch_date}`` dir directly and moves
+part files to the auto-loader watch dir with renamed targets
+(``{Dataset}_{i}.txt``). The part files only need to land once, and they
+only feed exactly one batch — copying them at stage time AND copying them
+again at simulate-filedrop time was wasteful.
 """
 from __future__ import annotations
 
 import os
-import time
 
 
 def stage_to_files(
@@ -30,34 +28,41 @@ def stage_to_files(
     filename: str,
     target_dir: str,
     delimiter: str = "|",
-    move_threads: int = 8,
-    move_retries: int = 5,
 ) -> None:
-    """Write ``source_view`` as ``|``-delimited per-date numbered CSVs.
+    """Write ``source_view`` as ``|``-delimited per-date partitioned CSVs.
+
+    Output layout: ``{target_dir}/{base}/_pdate={date}/part-*.csv`` where
+    ``base`` is ``filename`` without extension (e.g. ``"Customer"`` for
+    ``"Customer.txt"``).
 
     Args:
         spark:        active SparkSession
-        dbutils:      Databricks dbutils
+        dbutils:      Databricks dbutils (unused here; kept for API compat)
         source_view:  Spark view/table name to read from. Must contain a
-                      column named ``date_col`` to partition on plus the
-                      payload columns in their final output order.
-        date_col:     Column to partition on. Each distinct value becomes
-                      a directory ``{target_dir}/{value}/`` containing one
-                      or more numbered files. The column is NOT included
-                      in the output (Spark CSV partition-by drops it from
-                      data files).
-        filename:     Base filename pattern (e.g. ``"DailyMarket.txt"``).
-                      Output files are numbered ``DailyMarket_1.txt``,
-                      ``DailyMarket_2.txt``, … per date — bronze read_files
-                      globs match both unnumbered and ``_[0-9]*`` forms.
+                      column named ``date_col`` plus the payload columns
+                      in their final output order.
+        date_col:     Column to partition on (Spark strips it from output).
+        filename:     Original-style filename for the dataset (e.g.
+                      ``"Customer.txt"``). The stem is used as the dataset
+                      subdir name; simulate_filedrops reuses the full
+                      filename pattern when renaming part files at move
+                      time so the bronze ``{Dataset}_[0-9]*.txt`` glob
+                      matches.
+        target_dir:   Final target directory. Per-dataset output lands at
+                      ``{target_dir}/{base}/_pdate={date}/part-*.csv``.
         delimiter:    Field delimiter (default ``"|"``).
     """
-    # Per-dataset tmp dir so 7 stage_files notebooks running in parallel don't collide on the same path. Filename is the dataset's CSV name (e.g. "DailyMarket.txt") which is unique across the 7 producers, so it makes a safe namespace.
-    tmp_dir = f"{target_dir.rstrip('/')}/_tmp_{filename}"
-    print(f"[stage_to_files] {source_view} → {target_dir}")
-    print(f"  partitioned-CSV staging: {tmp_dir}")
+    base, _ext = os.path.splitext(filename)
+    dataset_dir = f"{target_dir.rstrip('/')}/{base}"
+    print(f"[stage_to_files] {source_view} → {dataset_dir}")
 
-    # Repartition by date_col before the partitioned-CSV write. partitionBy alone splits the OUTPUT into per-date dirs but doesn't shuffle, so without this every Spark partition emits its share of each date as a separate part file (verified at SF=1000: ~64 part files per date per dataset = ~327K total tiny files, which then chokes the driver during concat). After this shuffle, AQE picks a sensible partition count and most dates land in a single Spark partition, yielding ~1 part file per date.
+    # Repartition by date_col before the partitioned-CSV write. partitionBy
+    # alone splits the OUTPUT into per-date dirs but doesn't shuffle, so
+    # without this every Spark partition emits its share of each date as a
+    # separate part file (verified at SF=1000: ~64 part files per date per
+    # dataset). After this shuffle, AQE picks a sensible partition count
+    # and most dates land in a single Spark partition, yielding ~1 part
+    # file per date.
     (spark.table(source_view)
         .repartition(date_col)
         .write
@@ -65,72 +70,6 @@ def stage_to_files(
         .option("header", "false")
         .option("delimiter", delimiter)
         .partitionBy(date_col)
-        .csv(tmp_dir))
+        .csv(dataset_dir))
 
-    # Spark wrote `{tmp_dir}/{date_col}=YYYY-MM-DD/part-NNNNN-….csv` per
-    # date. Server-side rename each part file to its final numbered name
-    # at `{target_dir}/{date}/{base}_{i}{ext}`. dbutils.fs.mv stays on the
-    # storage backend (no bytes streamed through the driver Python process),
-    # which at SF=20000 with ~1GB/day for DailyMarket is the difference
-    # between a 3-min and a 40-min stage_files step. Use os.listdir
-    # (FUSE-direct) to enumerate the partitions — dbutils.fs.ls is a
-    # Spark Connect roundtrip per call (~200ms × 730 calls). spark_runner
-    # pre-creates the per-date parent dirs so mv lands in an existing dir.
-    import concurrent.futures
-    tmp_local = _local(tmp_dir)
-    date_partition_names = [n for n in os.listdir(tmp_local)
-                            if n.startswith(f"{date_col}=")]
-    print(f"  Moving {filename} into {len(date_partition_names)} per-date staging directories")
-
-    base, ext = os.path.splitext(filename)
-
-    def _mv_with_retry(src, target):
-        # 7 stage_files tasks running concurrently × N threads each = several
-        # hundred dbutils.fs.mv RPCs in flight against the same Spark Connect
-        # endpoint. At SF=20000 the proxy queues them and individual calls
-        # exceed `spark.rpc.askTimeout` (120s, NOT settable on serverless —
-        # CANNOT_MODIFY_CONFIG). Retry with exponential backoff. If the src
-        # is already gone on retry, the underlying mv completed despite the
-        # timeout and we treat it as success.
-        for attempt in range(move_retries):
-            try:
-                dbutils.fs.mv(src, target)
-                return
-            except Exception as e:
-                msg = str(e)
-                if "RpcTimeoutException" in msg or "Future timed out" in msg:
-                    src_local = _local(src)
-                    if not os.path.exists(src_local):
-                        return
-                if attempt == move_retries - 1:
-                    raise
-                time.sleep(min(30, 2 ** attempt))
-
-    def _do_one(part_dir_name):
-        date = part_dir_name.split("=", 1)[1]
-        part_dir = f"{tmp_dir.rstrip('/')}/{part_dir_name}"
-        part_dir_local = f"{tmp_local}/{part_dir_name}"
-        parts = sorted(n for n in os.listdir(part_dir_local) if n.startswith("part-"))
-        if not parts:
-            return 0
-        target_subdir = f"{target_dir.rstrip('/')}/{date}"
-        # Always number, even single-part dates. Bronze read_files globs
-        # `{base}.txt,base_[0-9]*.txt`, so `_1.txt` is matched. Numbering
-        # uniformly lets multi-part dates (~1GB/file at SF=20000 when
-        # Spark splits a partition) slot in without renaming logic.
-        for i, part in enumerate(parts, start=1):
-            src = f"{part_dir}/{part}"
-            target = f"{target_subdir}/{base}_{i}{ext}"
-            _mv_with_retry(src, target)
-        return len(parts)
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=move_threads) as pool:
-        moved = sum(pool.map(_do_one, date_partition_names))
-
-    dbutils.fs.rm(tmp_dir, recurse=True)
-    print(f"[stage_to_files] done — {filename}: {moved} files moved across {len(date_partition_names)} per-date directories")
-
-
-def _local(path: str) -> str:
-    """Strip a ``dbfs:`` scheme so Python file ops see the FUSE mount."""
-    return path[5:] if path.startswith("dbfs:") else path
+    print(f"[stage_to_files] done — {dataset_dir}")
