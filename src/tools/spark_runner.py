@@ -119,7 +119,7 @@ def run(
         _tlog("staging schemas ready")
 
     if augmented_incremental:
-        # Early-exit check: workflow's only deliverables are the staging tables in tpcdi_incremental_staging_{sf} and the per-day CSVs at augmented_incremental/_staging/sf={sf}/. If both are intact, there's nothing to do — we set staging_complete=true so the downstream condition_task (`staging_check` in augmented_staging.py) skips the rest of the workflow. regenerate_data=YES forces a rebuild regardless. Note: dbutils.jobs.taskValues string-encodes booleans as "true"/"false" — match that explicitly so the condition_task comparison is unambiguous.
+        # Early-exit check: workflow's only deliverables are the staging tables in tpcdi_incremental_staging_{sf} and the per-dataset partitioned CSV trees at augmented_incremental/_staging/sf={sf}/{Dataset}/. If both are intact, there's nothing to do — we set staging_complete=true so the downstream condition_task (`staging_check` in augmented_staging.py) skips the rest of the workflow. regenerate_data=YES forces a rebuild regardless. Note: dbutils.jobs.taskValues string-encodes booleans as "true"/"false" — match that explicitly so the condition_task comparison is unambiguous.
         _expected_tables = {
             "taxrate", "dimdate", "dimtime", "industry", "tradetype",
             "statustype", "dimbroker", "dimcompany", "dimsecurity",
@@ -257,8 +257,11 @@ def run(
     print(f"Scale Factor: {scale_factor} ")
     print(f"Output: {cfg.volume_path}")
 
-    # Second recursive delete (redundant with the first one above, but harmless since the first already cleaned anything present).
-    _utlog(f"[Init] redundant cleanup of {cfg.volume_path}", "DEBUG")
+    # Second recursive delete in non-augmented mode (redundant with the
+    # first one above, but harmless). In augmented mode this is the only
+    # cleanup of cfg.volume_path — the augmented branch up top doesn't
+    # rm before falling through to here.
+    _utlog(f"[Init] cleanup of {cfg.volume_path}", "DEBUG")
     try:
         dbutils.fs.rm(cfg.volume_path, recurse=True)
     except Exception:

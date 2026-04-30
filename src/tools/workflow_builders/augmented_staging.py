@@ -1,9 +1,10 @@
 """Builder for the augmented_incremental data-gen workflow.
 
 Multi-task DAG: stage 0 (spark gen → temp Delta) → stage 1 (build the
-shared staging schema `tpcdi_incremental_staging_{sf}` + per-day staging
-files at `_staging/sf={sf}/{date}/`) → cleanup_stage0 (drop the temp
-Delta tables).
+shared staging schema `tpcdi_incremental_staging_{sf}` + per-dataset
+partitioned-CSV trees under `_staging/sf={sf}/{Dataset}/_pdate=…/`) →
+cleanup_stage0 (drop the temp Delta tables + remove spark-gen leftovers
+under that path: Batch1/2/3, inner _staging).
 
 Stage 1 splits into two parallel branches that both depend only on
 data_gen completing:
@@ -26,9 +27,11 @@ data_gen completing:
       DimCompany staging tables)
 
   Branch B — staging files (Phase 2b):
-    - 7 stage_files notebooks fan out per-day CSVs from the temp Delta
-      tables WHERE stg_target='files' to {volume}/augmented_incremental/
-      _staging/sf={sf}/{date}/{filename}
+    - 7 stage_files notebooks each filter their dataset's temp Delta
+      table to stg_target='files' and write Spark-native partitioned
+      CSV at {volume}/augmented_incremental/_staging/sf={sf}/{Dataset}/
+      _pdate={date}/part-*.csv. No post-write rename — simulate_filedrops
+      handles per-day rename + copy at benchmark run time.
 
 cleanup_stage0 depends on every leaf in both branches. Runs ALL_DONE
 (not gated by delete_tables_when_finished — the temp Delta tables are
@@ -63,10 +66,11 @@ def _description(scale_factor: int, catalog: str) -> str:
         f"`{catalog}.tpcdi_raw_data.*{scale_factor}`). Stage 1 fans out: "
         f"(a) stage_tables — populates `{catalog}.{_STAGING_WH_DB}_"
         f"{scale_factor}` (the shared staging schema the augmented "
-        f"benchmark clones from); (b) stage_files — writes per-day CSV "
-        f"files under `tpcdi_volume/augmented_incremental/_staging/"
-        f"sf={scale_factor}/{{date}}/`. cleanup_stage0 drops the 7 temp "
-        f"Delta tables once both branches complete."
+        f"benchmark clones from); (b) stage_files — writes Spark "
+        f"partitioned-CSV trees under `tpcdi_volume/augmented_incremental/"
+        f"_staging/sf={scale_factor}/{{Dataset}}/_pdate={{date}}/`. "
+        f"cleanup_stage0 drops the 7 temp Delta tables and removes the "
+        f"spark-gen Batch1/2/3 leftovers once both branches complete."
     )
 
 
@@ -362,7 +366,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         base_params=dict(_wh_param),
     ))
 
-    # ---------------- Stage 1b: stage_files (per-day CSVs) ----------------
+    # ---------------- Stage 1b: stage_files (per-dataset partitioned CSV) -
     stg_path = f"{repo_src_path}/tools/augmented_staging/stage_files"
     stage_files_keys: list[str] = []
     for tbl in ["Customer", "Account", "Trade", "CashTransaction",

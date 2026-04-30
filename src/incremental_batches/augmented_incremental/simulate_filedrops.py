@@ -71,11 +71,11 @@ def collect_one(dataset):
             f"repartition(_pdate), got {len(parts)}: {[e.name for e in parts]}")
     return [(parts[0].path, f"{batches_dir}/{batch_date}/{dataset}.{file_ext}")]
 
-move_pairs = []
+cp_pairs = []
 for ds in DATASETS:
-    move_pairs.extend(collect_one(ds))
+    cp_pairs.extend(collect_one(ds))
 
-print(f"Copying {len(move_pairs)} files for {batch_date}")
+print(f"Copying {len(cp_pairs)} files for {batch_date}")
 
 def do_cp(pair):
     src, target = pair
@@ -83,8 +83,8 @@ def do_cp(pair):
     return f"{src} → {target}"
 
 with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(8, max(1, len(move_pairs)))) as executor:
-    futures = [executor.submit(do_cp, p) for p in move_pairs]
+        max_workers=min(8, max(1, len(cp_pairs)))) as executor:
+    futures = [executor.submit(do_cp, p) for p in cp_pairs]
     for future in concurrent.futures.as_completed(futures):
         try: print(future.result())
         except requests.ConnectTimeout: print("ConnectTimeout.")

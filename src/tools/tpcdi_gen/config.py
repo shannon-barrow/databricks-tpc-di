@@ -45,8 +45,8 @@ DATE_END = datetime(2021, 1, 1)
 # Augmented-Incremental window. setup.py loops range(0, 730) starting at
 # AUG_FILES_DATE_START → 2015-07-06 .. 2017-07-04 inclusive (730 days).
 # AUG_FILES_DATE_END_EXCL = AUG_FILES_DATE_START + 730 days (the first
-# "out of window" date). Used by both spark gen (stg_target assignment)
-# and the early-exit check (validate 730 expected dirs exist).
+# "out of window" date). Used by spark gen for stg_target assignment
+# (rows < AUG_FILES_DATE_START → 'tables', else → 'files').
 # ---------------------------------------------------------------------------
 AUG_FILES_DATE_START = "2015-07-06"
 AUG_FILES_DATE_END_EXCL = "2017-07-05"
