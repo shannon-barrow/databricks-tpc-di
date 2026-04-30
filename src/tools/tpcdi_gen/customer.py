@@ -54,17 +54,23 @@ referential integrity:
     C_IDs and CA_IDs from *prior* updates only (update_id - 1 and earlier), enforcing
     the invariant that an entity must exist before it can be modified or closed.
 
-Temporal Ordering (NEWs first)
-==============================
-Within each update, actions are ordered by a deterministic sort key that enforces:
-  1. **NEW** actions come first (sub-sorted by C_ID) — ensures the customer and its
-     first account exist before any subsequent actions reference them.
-  2. **ADDACCT** actions come next (sub-sorted by CA_ID) — the new account's C_ID
-     was created in a prior update, so it already exists.
-  3. **UPDACCT**, **CLOSEACCT**, **UPDCUST**, **INACT** follow (sorted by position).
-This ordering is critical for Rule 1 (customer exists before account) and Rule 5
-(no action references a future entity). The sort key is:
-  ``update_id * 1_000_000 + action_order * 100_000 + entity_id_or_position``
+Temporal Ordering (action types interleaved by row index)
+=========================================================
+Within each update, timestamps are evenly spaced across the update window
+indexed by ``pos_in_update`` (the row's original 0..rows_per_update-1
+sequence). Action types were already randomized across row positions by
+``shuffled_pos`` (a per-update bijective permutation), so NEW / ADDACCT /
+UPDACCT / CLOSEACCT / UPDCUST / INACT actions land at *interleaved*
+timestamps rather than per-action slabs. This mirrors DIGen's
+CustomerMgmtScheduler: action TYPE is determined by a BijectivePermutation
+over rowsThisUpdate, but the row's TIMESTAMP comes from its sequential
+row index (``DateTimeGenerator.spread[currentRow]``).
+
+Rule 1 / Rule 5 referential integrity is preserved by the inter-update
+schedules (``inact_schedule``, ``close_schedule``) and the per-update
+bijection-with-disjoint-ranges, not by within-update sort order — every
+non-NEW action picks an entity that was created in update_id - 1 or
+earlier, so within-update timestamp ordering is purely cosmetic.
 
 Per-Day Deduplication
 =====================
@@ -78,7 +84,7 @@ The TPC-DI spec requires at most one update per entity per calendar day:
     only the first is kept. NEW and ADDACCT are exempt (they create the CA_ID and thus
     cannot conflict with a prior action on the same CA_ID on the same day).
 Both dedup passes use ``row_number()`` partitioned by the dedup key, ordered by
-``_sort_key``, keeping only rank == 1.
+``ActionTS``, keeping only rank == 1.
 
 Sparse UPDCUST Fields
 =====================
@@ -503,35 +509,25 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Rule 1/3 filters removed: the per-update schedules already pool from alive entities only, so no UPDCUST/UPDACCT/ADDACCT picks can land on an INACT'd customer or CLOSE'd account. Every scheduled action survives, matching DIGen's GrowingOffsetPermutation count fidelity.
 
     # === Assign timestamp ===
-    # Each update gets a time window of secs_per_update seconds. Within each update:
-    #   1. NEWs come first (ordered by C_ID) — ensures Rule 1 and Rule 5 2. ADDACCTs next (ordered by CA_ID) — ensures CA_ID created after customer 3. Then UPDACCT, CLOSEACCT, UPDCUST, INACT (any order)
-    # This ordering is enforced via a composite sort key that the timestamp is derived from. The sort key encodes: update_id (millions), action_order (hundred-thousands), and a sub-sort within each action type (entity ID or positional index).
-    action_order = (
-        F.when(F.col("ActionType") == "NEW", F.lit(0))
-         .when(F.col("ActionType") == "ADDACCT", F.lit(1))
-         .when(F.col("ActionType") == "UPDACCT", F.lit(2))
-         .when(F.col("ActionType") == "CLOSEACCT", F.lit(3))
-         .when(F.col("ActionType") == "UPDCUST", F.lit(4))
-         .otherwise(F.lit(5)))  # INACT
-
-    # Multipliers must exceed rows_per_update so action_order buckets never overlap. At SF=20000, rows_per_update = 230,000 — a 100K multiplier would let pos_in_update (up to 229,999) spill into the next action_order bucket, breaking the within-update ordering (e.g., UPDCUSTs landing AFTER INACTs). Use 10M for update_id and 1M for action_order (max update_id ~500, so 500 * 10M = 5*10^9 stays well within long range).
-    all_df = all_df.withColumn("_sort_key",
-        F.col("update_id").cast("long") * 10000000 + action_order * 1000000 +
-        F.when(F.col("ActionType") == "NEW", F.col("C_ID") % 1000000)
-         .when(F.col("ActionType") == "ADDACCT", F.col("CA_ID") % 1000000)
-         .otherwise(F.col("pos_in_update")))
-
-    # Compute sequential position within update based on the sort key. This ordered position is then used to derive evenly-spaced timestamps within the update's time window.
-    all_df = all_df.withColumn("_ordered_pos",
-        F.row_number().over(Window.partitionBy("update_id").orderBy("_sort_key")) - 1)
-
+    # Each update gets a time window of secs_per_update seconds. Timestamps
+    # are evenly spaced over that window, indexed by pos_in_update (the
+    # original 0..rows_per_update-1 row order, not by ActionType). Action
+    # types were already randomized across the row positions via
+    # shuffled_pos above, so this puts NEW/ADDACCT/…/INACT events at
+    # interleaved timestamps rather than packed into per-action slabs.
+    # Mirrors DIGen's CustomerMgmtScheduler behavior: action TYPE comes
+    # from BijectivePermutation(rowsThisUpdate), but the row's TIMESTAMP
+    # comes from its sequential row index (DateTimeGenerator.spread[i]).
+    # Without this, augmented Customer.txt only touched ~404/730 dates
+    # because NEW/UPDCUST/INACT got contiguous slabs covering only ~3.65
+    # of each 8.4-day update window.
     all_df = (all_df
         .withColumn("_update_base_ts", F.lit(cm_begin_s).cast("long") + F.col("update_id").cast("long") * F.lit(secs_per_update))
         .withColumn("_pos_offset",
             F.when(F.col("update_id") == 0,
-                F.col("_ordered_pos").cast("long") * F.lit(secs_per_update) / F.lit(max(1, hist_size)))
+                F.col("pos_in_update").cast("long") * F.lit(secs_per_update) / F.lit(max(1, hist_size)))
              .otherwise(
-                F.col("_ordered_pos").cast("long") * F.lit(secs_per_update) / F.lit(rows_per_update)))
+                F.col("pos_in_update").cast("long") * F.lit(secs_per_update) / F.lit(rows_per_update)))
         .withColumn("ActionTS", F.date_format(
             (F.col("_update_base_ts") + F.col("_pos_offset")).cast("timestamp"),
             "yyyy-MM-dd'T'HH:mm:ss"))
