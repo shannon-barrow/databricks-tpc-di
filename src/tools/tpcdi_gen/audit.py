@@ -39,7 +39,16 @@ def static_audits_available(cfg) -> bool:
     count() queries — when a static snapshot will be copied at the end of
     the run, the audit CSVs get exact pre-computed values regardless of
     what the generators return.
+
+    In augmented_incremental mode the benchmark doesn't read audits at
+    all (orchestrator skips audit emit), AND several dynamic-regen blocks
+    read from staging paths or B2/B3 temp views that don't exist when
+    augmented mode writes to Delta and skips B2/B3. Treat as "available"
+    so every generator takes the analytical-estimate path and never
+    hits those broken read sites.
     """
+    if getattr(cfg, "augmented_incremental", False):
+        return True
     user_sf = int(cfg.internal_sf // 1000)
     return os.path.isdir(os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
