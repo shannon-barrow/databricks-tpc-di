@@ -44,7 +44,7 @@ dbutils.fs.mkdirs(batches_dir)
 
 # COMMAND ----------
 
-# List whatever files exist under the day's staging dir and copy them all. stage_files now produces single-part dates as `Customer.txt` and multi-part dates as `Customer_1.txt`, `Customer_2.txt`, ... — the bronze ingest's glob (`{Customer.txt,Customer_[0-9]*.txt}`) handles both. Sparse datasets (Customer/Account at low SF) may not have a file for every date; we just copy whatever's there.
+# List whatever files exist under the day's staging dir and copy them all. stage_files writes every per-date output as `Base_1.txt`, `Base_2.txt`, ... (always numbered, even for single-part dates) so multi-part dates at high SF don't collide; bronze pathGlobfilter `Base_[0-9]*.txt` matches them. Sparse datasets (Customer/Account at low SF) may not have a file for every date; we just copy whatever's there.
 try:
   src_files = [e for e in dbutils.fs.ls(day_src_dir) if not e.isDir()]
 except Exception as e:

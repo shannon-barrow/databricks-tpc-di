@@ -28,14 +28,17 @@ schemas = {
   "watches": "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING, event_dt DATE"
 }
 
+# stage_files writes per-date files numbered `Base_1.txt`, `Base_2.txt`, …
+# so multi-part dates (~1GB/file at SF=20000 when Spark splits a partition)
+# don't collide. Glob matches the numbered form only.
 file_names = {
-  "account": "Account.txt",
-  "cashtransaction": "CashTransaction.txt",
-  "customer": "Customer.txt",
-  "dailymarket": "DailyMarket.txt",
-  "holdings": "HoldingHistory.txt",
-  "trade": "Trade.txt",
-  "watches": "WatchHistory.txt"
+  "account": "Account_[0-9]*.txt",
+  "cashtransaction": "CashTransaction_[0-9]*.txt",
+  "customer": "Customer_[0-9]*.txt",
+  "dailymarket": "DailyMarket_[0-9]*.txt",
+  "holdings": "HoldingHistory_[0-9]*.txt",
+  "trade": "Trade_[0-9]*.txt",
+  "watches": "WatchHistory_[0-9]*.txt"
 }
 
 schema = schemas.get(table)
