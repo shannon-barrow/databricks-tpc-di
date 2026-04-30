@@ -36,7 +36,7 @@ When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown appears: `C
 
 - **Single Batch** — all 3 TPC-DI batches in one pass (faster, **no audit checks**).
 - **Incremental** — batches sequentially with audit checks at each boundary (spec validation, CLUSTER + DBSQL only).
-- **Augmented Incremental** — 730-day daily streaming pipeline (CLUSTER + SDP only). Skips the datagen workflow; reads pre-staged per-day files from `tpcdi_incremental_staging_{sf}` (currently populated only at SF=20000). Run the tools under `src/tools/incremental_file_splitting/` to populate other SFs.
+- **Augmented Incremental** — 730-day daily streaming pipeline (CLUSTER + SDP only). Reads pre-staged per-day files from `_staging/sf={sf}/{Dataset}/_pdate={date}/`. Stage 0 (data prep) is a separate workflow built by `workflow_builders/augmented_staging.py` — run it once per SF to populate the staging tree. Validated at SF=10/100/1000/5000/10000/20000. See [`src/incremental_batches/augmented_incremental/README.md`](src/incremental_batches/augmented_incremental/README.md) for the architecture.
 
 ## How to run
 
@@ -134,10 +134,13 @@ src/
     cleanup_after_benchmark.sql               final cleanup task
     tpcdi_gen/                                Spark data-generator modules
       static_audits/sf={sf}/                  pre-computed audit snapshots
-    incremental_file_splitting/               (Phase B) tools to populate _staging
+    augmented_staging/                        Stage 0 for Augmented Incremental
+      _stage_ingestion.py                     stage_to_files() helper
+      stage_files/{Dataset}.py                7 partitioned-CSV writers
+      cleanup_stage0.py                       drops temp Delta + Batch1/2/3 leftovers
   incremental_batches/                        Cluster + DBSQL benchmark SQL
     bronze/ / silver/ / gold/ / audit_validation/
-    augmented_incremental/                    Augmented benchmark (Cluster + SDP)
+    augmented_incremental/                    Augmented benchmark (Cluster + SDP) — see its README
   single_batch/
     SQL/                                      single-batch Cluster + DBSQL
     spark_declarative_pipelines/              SDP variant
@@ -153,7 +156,7 @@ CLAUDE.md                                     architecture context for AI agents
 - Unity Catalog required for any non-`hive_metastore` catalog (and for lineage / PK-FK constraints).
 - Serverless is optional but assumed for most paths; non-serverless variants need an appropriately sized cluster.
 - The native DIGen.jar path requires DBR 15.4 + Photon and a `SINGLE_USER` cluster access mode for `/local_disk0` scratch.
-- Augmented Incremental currently has only SF=20000 staged; other SFs need the file-splitting tools to run first.
+- Augmented Incremental requires Stage 0 (the `augmented_staging` workflow) to run once per SF before the benchmark. Validated at SF=10/100/1000/5000/10000/20000.
 
 ## Notes on scoring
 

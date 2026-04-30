@@ -223,14 +223,23 @@ combination using Python builders under `src/tools/workflow_builders/`:
   benchmark workflows (one-shot vs auditable per-batch variants)
 - `sdp_pipeline.py` / `sdp_workflow.py` — SDP pipeline definition + the
   Jobs-API workflow that runs it
+- `augmented_staging.py` — Stage 0 for Augmented Incremental (one-time
+  data prep per SF: spark_runner in Delta-only mode + per-dataset
+  partitioned-CSV trees + cleanup of spark-gen leftovers)
+- `augmented_classic.py` / `augmented_sdp.py` — Augmented Incremental
+  benchmark workflows (730-day daily streaming loop). See
+  `src/incremental_batches/augmented_incremental/README.md` for the full
+  architecture.
 - `warehouse.py` — DBSQL warehouse spec
 - `_workflow_common.py` — shared helpers (`make_task`, `make_cleanup_tasks`,
   cluster specs, etc.)
 
 **Job naming convention** (Driver-built):
 - Datagen: `{base}-SF{N}-{SparkGen|NativeGen}`
+- Augmented Incremental Stage 0 (`augmented_staging`): `{base}-SF{N}-AugmentedGen`
 - Cluster/DBSQL benchmark: `{base}-SF{N}-{Incremental|SingleBatch}-{Cluster|DBSQL}-{SparkGen|NativeGen}`
 - SDP benchmark: `{base}-SF{N}-{SDP-CORE|SDP-PRO|SDP-ADVANCED}-{SparkGen|NativeGen}`
+- Augmented benchmark parent: `{base}-SF{N}-AugmentedIncremental-{Cluster|SDP}-Parent`
 
 Every created job carries a `data_generator: spark|native_jar` tag so the
 Jobs UI / API can filter without parsing the name.
@@ -282,6 +291,46 @@ final schemas. Setting the `delete_tables_when_finished` job parameter to
 
 These checks are mostly EXACT EQUALITY. Even 1 row off fails. Build
 generators with that in mind.
+
+### Augmented Incremental — what's different from Single-Batch / Incremental
+
+`src/incremental_batches/augmented_incremental/README.md` is the source of
+truth. Quick orientation for AI agents:
+
+- **Stage 0** is a separate workflow (`augmented_staging`) run once per
+  SF. `spark_runner` writes the 7 datasets to Delta tables at
+  `tpcdi_raw_data.{dataset}{sf}` with an `stg_target` column that splits
+  rows into 'tables' (pre-2015-07-06, source for the historical SCD2
+  builds) and 'files' (the 730-day window, source for the per-day file
+  drops). 7 `stage_files/*.py` notebooks then write Spark-native
+  partitioned-CSV at `_staging/sf={sf}/{Dataset}/_pdate={date}/part-*.csv`.
+  No post-write rename or concat at stage time.
+- **Early-exit** on Stage 0 uses Spark's `_SUCCESS` marker per dataset
+  dir, NOT a date-dir count. Authoritative — half-written datasets can't
+  false-positive.
+- **Stage 1** (the benchmark) is a parent job that loops 730 dates via
+  `for_each_task`. Per iteration: `simulate_filedrops.py` does
+  `dbutils.fs.cp` (NOT `mv`) of one day's part files into the auto-loader
+  watch dir, renamed to `{Dataset}.{file_ext}` (job param `file_ext`,
+  default `txt`). `read_file_ext = 'csv' if file_ext == 'txt' else
+  file_ext` bridges the writer/extension mismatch. Auto-loader → bronze
+  → silver/gold MERGEs follow.
+- **No audit step.** The orchestrator (`spark_runner.py`) skips
+  `audit.generate()` in augmented mode; `static_audits_available()` also
+  returns True unconditionally when `cfg.augmented_incremental` is set,
+  short-circuiting all per-generator dynamic-audit-regen blocks (those
+  blocks read legacy CSV staging paths or B2/B3 temp views that don't
+  exist in augmented mode).
+- **Customer event spread.** `customer.py` recently dropped
+  `_sort_key` / `_ordered_pos`; ActionTS now derives directly from
+  `pos_in_update`. Each ActionType (NEW / UPDCUST / INACT) spreads
+  uniformly across each 8.4-day update window — Customer touches all
+  730 dates instead of the prior 404. Mirrors DIGen's per-row-index
+  timestamping with action-type permutation.
+- **B2/B3 generation is skipped** in augmented mode (gated at the call
+  sites in `customer.py`, `trade.py`, `watch_history.py`, `prospect.py`).
+  The 730-day window's events come from the `'files'` partition of the
+  Stage 0 Delta tables.
 
 ## Common workflows
 
@@ -381,7 +430,14 @@ src/
       workflows_incremental.py    # Cluster+DBSQL per-batch auditable benchmark
       sdp_pipeline.py             # SDP pipeline definition (was dlt_pipeline)
       sdp_workflow.py             # SDP wrapping workflow (was dlt_workflow)
+      augmented_staging.py        # Augmented Incremental Stage 0 (data prep)
+      augmented_classic.py        # Augmented Incremental Cluster benchmark parent
+      augmented_sdp.py            # Augmented Incremental SDP benchmark parent
       warehouse.py                # DBSQL warehouse spec
+    augmented_staging/            # Stage 0 notebooks for Augmented Incremental
+      _stage_ingestion.py         # stage_to_files() helper — partitioned-CSV writer
+      stage_files/{Dataset}.py    # 7 per-dataset stage_files notebooks
+      cleanup_stage0.py           # drop temp Delta + remove spark-gen Batch1/2/3
     tpcdi_gen/
       audit.py                    # static-snapshot copy + dynamic regen
       config.py                   # ScaleConfig — all scaling constants
@@ -402,6 +458,11 @@ src/
     gold/                         # fact tables
     audit_validation/             # automated_audit.sql, batch_validation.sql, audit_alerts.sql
     dw_init.sql                   # schema + Audit table bootstrap
+    augmented_incremental/        # Augmented Incremental benchmark — see its README
+      README.md                   # source of truth for this variant
+      setup.py / teardown.py      # Stage 1 setup/cleanup
+      simulate_filedrops.py       # per-batch cp from _staging into auto-loader watch dir
+      bronze/ historical/ incremental/ DLT/  # SQL + notebooks
   single_batch/
     SQL/                          # all-batches-in-one variant (Cluster + DBSQL)
     spark_declarative_pipelines/  # SDP notebooks (was delta_live_tables/)
