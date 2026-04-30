@@ -30,9 +30,11 @@ staging_dir = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor
 # 7 stage_files notebooks each wrote {staging_dir}/{Dataset}/_pdate={date}/part-*.{read_file_ext}.
 # stage_to_files repartitions by date_col before partitionBy, so each date
 # lands in a single shuffle bucket → single task → single part file per
-# date. We move (not copy) that one part file into the auto-loader watch
-# dir, renamed to {Dataset}.{file_ext}. Sparse datasets (e.g. Customer)
-# may have no _pdate= dir for a given date — that's expected, just skip.
+# date. We copy that one part file into the auto-loader watch dir,
+# renamed to {Dataset}.{file_ext}. (Copy not move so the staging tree
+# stays intact for re-runs of any individual batch.) Sparse datasets
+# (e.g. Customer) may have no _pdate= dir for a given date — that's
+# expected, just skip.
 DATASETS = [
     "Customer", "Account", "Trade", "CashTransaction",
     "HoldingHistory", "DailyMarket", "WatchHistory",
@@ -73,16 +75,16 @@ move_pairs = []
 for ds in DATASETS:
     move_pairs.extend(collect_one(ds))
 
-print(f"Moving {len(move_pairs)} files for {batch_date}")
+print(f"Copying {len(move_pairs)} files for {batch_date}")
 
-def do_mv(pair):
+def do_cp(pair):
     src, target = pair
-    dbutils.fs.mv(src, target)
+    dbutils.fs.cp(src, target)
     return f"{src} → {target}"
 
 with concurrent.futures.ThreadPoolExecutor(
         max_workers=min(8, max(1, len(move_pairs)))) as executor:
-    futures = [executor.submit(do_mv, p) for p in move_pairs]
+    futures = [executor.submit(do_cp, p) for p in move_pairs]
     for future in concurrent.futures.as_completed(futures):
         try: print(future.result())
         except requests.ConnectTimeout: print("ConnectTimeout.")
