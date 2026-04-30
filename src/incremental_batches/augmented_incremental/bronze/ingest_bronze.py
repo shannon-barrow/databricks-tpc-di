@@ -28,17 +28,17 @@ schemas = {
   "watches": "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING, event_dt DATE"
 }
 
-# simulate_filedrops moves per-day part files into the watch dir with
-# renamed targets `{dataset}_{i}.txt` (lowercase dataset stem). Glob matches
-# that pattern only.
+# simulate_filedrops moves the single per-day part file into the watch
+# dir with renamed target `{Dataset}.txt`. After repartition(_pdate)
+# Spark guarantees one part file per date, so no glob is needed.
 file_names = {
-  "account": "Account_[0-9]*.txt",
-  "cashtransaction": "CashTransaction_[0-9]*.txt",
-  "customer": "Customer_[0-9]*.txt",
-  "dailymarket": "DailyMarket_[0-9]*.txt",
-  "holdings": "HoldingHistory_[0-9]*.txt",
-  "trade": "Trade_[0-9]*.txt",
-  "watches": "WatchHistory_[0-9]*.txt"
+  "account": "Account.txt",
+  "cashtransaction": "CashTransaction.txt",
+  "customer": "Customer.txt",
+  "dailymarket": "DailyMarket.txt",
+  "holdings": "HoldingHistory.txt",
+  "trade": "Trade.txt",
+  "watches": "WatchHistory.txt"
 }
 
 schema = schemas.get(table)

@@ -9,9 +9,9 @@ CSV partitioned by the date column under
 
 No post-write rename or concat. ``simulate_filedrops`` at benchmark run
 time scans each dataset's ``_pdate={batch_date}`` dir directly and moves
-part files to the auto-loader watch dir with renamed targets
-(``{Dataset}_{i}.txt``). The part files only need to land once, and they
-only feed exactly one batch — copying them at stage time AND copying them
+the single part file to the auto-loader watch dir, renamed to
+``{Dataset}.txt``. The part files only need to land once, and they only
+feed exactly one batch — copying them at stage time AND copying them
 again at simulate-filedrop time was wasteful.
 """
 from __future__ import annotations
@@ -34,8 +34,8 @@ def stage_to_files(
     Output layout: ``{target_dir}/{dataset}/_pdate={date}/part-*.csv``.
     ``dataset`` is the single source-of-truth string used both for the
     directory name here AND for the renamed filename in simulate_filedrops
-    (``{dataset}_{i}.txt``). Bronze ingest's ``pathGlobfilter`` matches
-    the same pattern.
+    (``{dataset}.txt``). Bronze ingest's ``pathGlobfilter`` matches the
+    same name.
 
     Args:
         spark:        active SparkSession

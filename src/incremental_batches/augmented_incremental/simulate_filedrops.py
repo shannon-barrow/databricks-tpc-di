@@ -20,12 +20,11 @@ batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}
 staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
 
 # 7 stage_files notebooks each wrote {staging_dir}/{dataset}/_pdate={date}/part-*.csv.
-# We move (not copy) the per-dataset part files for THIS day directly into
-# the auto-loader watch dir, with renamed targets matching the bronze
-# pathGlobfilter `{dataset}_[0-9]*.txt`. The dataset string is the single
-# source of truth — same value for the source subdir AND the renamed
-# filename stem. Sparse datasets (e.g. customer) may have no _pdate= dir
-# for a given date — that's expected, just skip.
+# stage_to_files repartitions by date_col before partitionBy, so each date
+# lands in a single shuffle bucket → single task → single part file per
+# date. We move (not copy) that one part file into the auto-loader watch
+# dir, renamed to {dataset}.txt. Sparse datasets (e.g. Customer) may have
+# no _pdate= dir for a given date — that's expected, just skip.
 DATASETS = [
     "Customer", "Account", "Trade", "CashTransaction",
     "HoldingHistory", "DailyMarket", "WatchHistory",
@@ -53,10 +52,14 @@ def collect_one(dataset):
         entries = dbutils.fs.ls(src_dir)
     except Exception:
         return []
-    parts = sorted((e for e in entries if e.name.startswith("part-")),
-                   key=lambda e: e.name)
-    return [(p.path, f"{batches_dir}/{batch_date}/{dataset}_{i}.txt")
-            for i, p in enumerate(parts, start=1)]
+    parts = [e for e in entries if e.name.startswith("part-")]
+    if len(parts) > 1:
+        raise RuntimeError(
+            f"{dataset} {batch_date}: expected 1 part file after repartition(_pdate), "
+            f"got {len(parts)}: {[e.name for e in parts]}")
+    if not parts:
+        return []
+    return [(parts[0].path, f"{batches_dir}/{batch_date}/{dataset}.txt")]
 
 move_pairs = []
 for ds in DATASETS:
