@@ -52,6 +52,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_cashtransaction",
     date_col="_pdate",
-    dataset="cashtransaction",
+    dataset="CashTransaction",
     target_dir=target_dir,
 )

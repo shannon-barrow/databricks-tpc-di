@@ -44,8 +44,8 @@ def stage_to_files(
                       column named ``date_col`` plus the payload columns
                       in their final output order.
         date_col:     Column to partition on (Spark strips it from output).
-        dataset:      Lowercase dataset name (e.g. ``"dailymarket"``,
-                      ``"holdinghistory"``). Used as the staging subdir
+        dataset:      Dataset name (e.g. ``"DailyMarket"``,
+                      ``"HoldingHistory"``). Used as the staging subdir
                       and as the renamed file stem at filedrop time.
         target_dir:   Final target directory.
         delimiter:    Field delimiter (default ``"|"``).

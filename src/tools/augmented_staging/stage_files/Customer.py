@@ -80,6 +80,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_customer",
     date_col="_pdate",
-    dataset="customer",
+    dataset="Customer",
     target_dir=target_dir,
 )

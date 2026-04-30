@@ -27,8 +27,8 @@ staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_fa
 # filename stem. Sparse datasets (e.g. customer) may have no _pdate= dir
 # for a given date — that's expected, just skip.
 DATASETS = [
-    "customer", "account", "trade", "cashtransaction",
-    "holdinghistory", "dailymarket", "watchhistory",
+    "Customer", "Account", "Trade", "CashTransaction",
+    "HoldingHistory", "DailyMarket", "WatchHistory",
 ]
 
 # COMMAND ----------

@@ -26,13 +26,13 @@ schemas = {
 # renamed targets `{dataset}_{i}.txt` (lowercase dataset stem). Glob matches
 # that pattern only.
 file_names = {
-  "account": "account_[0-9]*.txt",
-  "cashtransaction": "cashtransaction_[0-9]*.txt",
-  "customer": "customer_[0-9]*.txt",
-  "dailymarket": "dailymarket_[0-9]*.txt",
-  "holdings": "holdinghistory_[0-9]*.txt",
-  "trade": "trade_[0-9]*.txt",
-  "watches": "watchhistory_[0-9]*.txt"
+  "account": "Account_[0-9]*.txt",
+  "cashtransaction": "CashTransaction_[0-9]*.txt",
+  "customer": "Customer_[0-9]*.txt",
+  "dailymarket": "DailyMarket_[0-9]*.txt",
+  "holdings": "HoldingHistory_[0-9]*.txt",
+  "trade": "Trade_[0-9]*.txt",
+  "watches": "WatchHistory_[0-9]*.txt"
 }
 
 partitions = {

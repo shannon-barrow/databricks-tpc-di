@@ -51,6 +51,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_watchhistory",
     date_col="_pdate",
-    dataset="watchhistory",
+    dataset="WatchHistory",
     target_dir=target_dir,
 )
