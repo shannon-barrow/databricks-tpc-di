@@ -18,6 +18,7 @@ into the Autoloader watch directory at benchmark run-time.
 from __future__ import annotations
 
 import os
+import time
 
 
 def stage_to_files(
@@ -29,6 +30,8 @@ def stage_to_files(
     filename: str,
     target_dir: str,
     delimiter: str = "|",
+    move_threads: int = 8,
+    move_retries: int = 5,
 ) -> None:
     """Write ``source_view`` as ``|``-delimited per-date numbered CSVs.
 
@@ -81,6 +84,28 @@ def stage_to_files(
 
     base, ext = os.path.splitext(filename)
 
+    def _mv_with_retry(src, target):
+        # 7 stage_files tasks running concurrently × N threads each = several
+        # hundred dbutils.fs.mv RPCs in flight against the same Spark Connect
+        # endpoint. At SF=20000 the proxy queues them and individual calls
+        # exceed `spark.rpc.askTimeout` (120s, NOT settable on serverless —
+        # CANNOT_MODIFY_CONFIG). Retry with exponential backoff. If the src
+        # is already gone on retry, the underlying mv completed despite the
+        # timeout and we treat it as success.
+        for attempt in range(move_retries):
+            try:
+                dbutils.fs.mv(src, target)
+                return
+            except Exception as e:
+                msg = str(e)
+                if "RpcTimeoutException" in msg or "Future timed out" in msg:
+                    src_local = _local(src)
+                    if not os.path.exists(src_local):
+                        return
+                if attempt == move_retries - 1:
+                    raise
+                time.sleep(min(30, 2 ** attempt))
+
     def _do_one(part_dir_name):
         date = part_dir_name.split("=", 1)[1]
         part_dir = f"{tmp_dir.rstrip('/')}/{part_dir_name}"
@@ -96,10 +121,10 @@ def stage_to_files(
         for i, part in enumerate(parts, start=1):
             src = f"{part_dir}/{part}"
             target = f"{target_subdir}/{base}_{i}{ext}"
-            dbutils.fs.mv(src, target)
+            _mv_with_retry(src, target)
         return len(parts)
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=32) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=move_threads) as pool:
         moved = sum(pool.map(_do_one, date_partition_names))
 
     dbutils.fs.rm(tmp_dir, recurse=True)
