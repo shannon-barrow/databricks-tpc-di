@@ -31,8 +31,7 @@ import tempfile
 import time
 from typing import Any
 
-# Force flush on every print so logs in the Databricks notebook output stream
-# don't run together when stdout buffering interleaves with Spark logs.
+# Force flush on every print so logs in the Databricks notebook output stream don't run together when stdout buffering interleaves with Spark logs.
 print = functools.partial(print, flush=True)  # noqa: A001 — intentional shadow
 
 
@@ -43,18 +42,14 @@ def _abort_digen(reason: str) -> None:
         f"DIGen pre-flight check FAILED: {reason}\n\n"
         f"DIGen.jar requires a NON-SERVERLESS cluster with DBR <= 15.4. "
         f"Re-create this job's cluster as a classic Photon DBR 15.4 cluster, "
-        f"or pick the Spark generator (spark_or_native_datagen='spark') if "
+        f"or pick the Spark generator (data_gen_type='spark') if "
         f"your cluster is serverless. No volume data has been modified."
     )
 
 
 _SCRATCH_CANDIDATES = ("/local_disk0", "/tmp")
 
-# /tmp is typically the OS root partition (10-30 GB shared with logs and JARs)
-# and only big enough for small SFs. /local_disk0 is the VM's local SSD —
-# tens of GB on small VMs to multi-TB on large drivers. SF=100 ≈ 10 GB raw
-# already pushes /tmp; anything above that must use /local_disk0, which means
-# the cluster's data_security_mode has to be SINGLE_USER.
+# /tmp is typically the OS root partition (10-30 GB shared with logs and JARs) and only big enough for small SFs. /local_disk0 is the VM's local SSD — tens of GB on small VMs to multi-TB on large drivers. SF=100 ≈ 10 GB raw already pushes /tmp; anything above that must use /local_disk0, which means the cluster's data_security_mode has to be SINGLE_USER.
 _MAX_SCALE_FACTOR_FOR_TMP = 100
 
 
@@ -204,11 +199,7 @@ def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> N
     p.stdin.write("\n"); p.stdin.flush()
     p.stdin.write("YES\n"); p.stdin.flush()
 
-    # Skip everything from the "By using this software" line through the PDGF
-    # banner until DIGen actually starts loading config. Anything before that
-    # is the (long) BANKMARK end-user license and the PDGF version banner —
-    # noise that pushes useful output past the notebook output truncation
-    # limit at higher scale factors.
+    # Skip everything from the "By using this software" line through the PDGF banner until DIGen actually starts loading config. Anything before that is the (long) BANKMARK end-user license and the PDGF version banner — noise that pushes useful output past the notebook output truncation limit at higher scale factors.
     in_preamble = False
     while True:
         output = p.stdout.readline()
@@ -216,8 +207,7 @@ def _digen_subprocess(digen_path: str, scale_factor: int, output_path: str) -> N
             break
         if not output:
             continue
-        # DIGen sometimes emits progress with embedded \r (carriage return,
-        # no \n) — split so each chunk lands on its own line in the log.
+        # DIGen sometimes emits progress with embedded \r (carriage return, no \n) — split so each chunk lands on its own line in the log.
         for chunk in output.replace("\r\n", "\n").split("\r"):
             chunk = chunk.rstrip()
             if not chunk:
@@ -281,10 +271,7 @@ def run(
     else:
         print(f"Raw data directory {blob_out_path} does not exist yet.")
 
-    # Fresh unique session dir under the scratch root. /tmp/ persists across
-    # Databricks notebook sessions on long-lived clusters, and a prior session
-    # running under a different uid would leave behind un-deletable directories
-    # if we used a shared path.
+    # Fresh unique session dir under the scratch root. /tmp/ persists across Databricks notebook sessions on long-lived clusters, and a prior session running under a different uid would leave behind un-deletable directories if we used a shared path.
     session_root = tempfile.mkdtemp(prefix="tpcdi_", dir=DRIVER_ROOT)
     driver_tmp_path = f"{session_root}/datagen/"
     driver_out_path = f"{session_root}/sf={scale_factor}"
@@ -316,10 +303,7 @@ def run(
         for d in next(os.walk(driver_out_path))[1]:
             dbutils.fs.mkdirs(f"{blob_out_path}/{d}")
 
-        # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine.
-        # Progress is reported every 5% (and on completion) instead of per file —
-        # at high SFs there are millions of files and per-file logs hit the
-        # notebook output truncation limit.
+        # 64 file-move threads — IO-bound shutil.copyfile, so > cluster cores is fine. Progress is reported every 5% (and on completion) instead of per file — at high SFs there are millions of files and per-file logs hit the notebook output truncation limit.
         total_files = len(filenames)
         print(f"Copying {total_files:,} files to {blob_out_path} ...")
         move_start = time.time()
@@ -353,9 +337,7 @@ def run(
         if errors:
             print(f"  ({errors} file-move error(s) total; first 5 shown above)")
 
-        # End-of-run summary: confirm completion, show output location, and dump
-        # DIGen's own report so the user can see the per-batch row counts and
-        # timing without having to open the Volume browser.
+        # End-of-run summary: confirm completion, show output location, and dump DIGen's own report so the user can see the per-batch row counts and timing without having to open the Volume browser.
         print("\n" + "=" * 60)
         print(f"DIGen Data Generation Complete!")
         print(f"  Scale Factor: {scale_factor}")

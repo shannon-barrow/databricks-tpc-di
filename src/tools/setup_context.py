@@ -27,11 +27,13 @@ class SetupContext:
 
     # Static catalogs (don't need cluster info to populate)
     workflows_dict = {
-        "CLUSTER":     "Workspace Cluster Workflow",
-        "DBSQL":       "DBSQL Warehouse Workflow",
-        "SDP-CORE":    "CORE Spark Declarative Pipelines",
-        "SDP-PRO":     "PRO Spark Declarative Pipelines with SCD Type 1/2",
-        "SDP-ADVANCED":"ADVANCED Spark Declarative Pipelines with DQ",
+        "CLUSTER":          "Workspace Cluster Workflow",
+        "DBSQL":            "DBSQL Warehouse Workflow",
+        "SDP-CORE":         "CORE Spark Declarative Pipelines",
+        "SDP-PRO":          "PRO Spark Declarative Pipelines with SCD Type 1/2",
+        "SDP-ADVANCED":     "ADVANCED Spark Declarative Pipelines with DQ",
+        "AUGMENTED-CLUSTER":"Augmented Incremental Workflow (Cluster) — 730-day streaming pipeline",
+        "AUGMENTED-SDP":    "Augmented Incremental Workflow (SDP) — 730-day streaming pipeline",
     }
     min_dbr_version = 14.1
     invalid_dbr_list = [
@@ -134,8 +136,21 @@ class SetupContext:
     # ---------- Cloud detection + lookups ----------
 
     def _init_cloud_defaults(self):
-        self.uc_enabled = eval(
-            string.capwords(self.spark.conf.get("spark.databricks.unityCatalog.enabled")))
+        # Hard gate: TPC-DI requires Unity Catalog. UC Volumes hold raw data, autoloader landing dirs, and checkpoint dirs; cross-schema CLONEs also depend on UC. There is no hive_metastore fallback path.
+        try:
+            _uc_raw = self.spark.conf.get("spark.databricks.unityCatalog.enabled")
+            _uc_enabled = str(_uc_raw).strip().lower() == "true"
+        except Exception:
+            # Some serverless runtimes don't expose this conf to Spark Connect. Modern workspaces are UC-only — assume on; if it's actually off, downstream volume / catalog operations will surface a clearer error.
+            _uc_enabled = True
+        if not _uc_enabled:
+            raise RuntimeError(
+                "TPC-DI requires Unity Catalog. This workspace has UC disabled "
+                "(spark.databricks.unityCatalog.enabled = "
+                f"{_uc_raw!r}). Re-run on a UC-enabled workspace; the "
+                "benchmark relies on UC Volumes, catalogs, and cross-schema "
+                "CLONE operations that have no hive_metastore equivalent."
+            )
         self.cloud_provider = self.spark.conf.get("spark.databricks.cloudProvider")
         self.node_types = self.get_node_types()
         self.dbrs = self.get_dbr_versions()
@@ -158,4 +173,4 @@ class SetupContext:
             self.default_worker_type = "Standard_D8ads_v5"
             self.default_driver_type = "Standard_D4as_v5"
             self.cust_mgmt_type = "Standard_D64ads_v5"
-        self.default_catalog = "tpcdi" if self.uc_enabled else "hive_metastore"
+        self.default_catalog = "tpcdi"

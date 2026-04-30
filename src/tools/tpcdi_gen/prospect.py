@@ -64,18 +64,18 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
 
     log("[Prospect] Starting generation")
 
-    # Row count: PHistScaling * SF * 0.9988 (matches DIGen's excludeDeletedIDs behavior)
-    # Verified: SF=10 -> 49940, SF=100 -> 499400, SF=1000 -> 4994000
+    # Augmented-Incremental staging skips Prospect entirely — no Prospect consumer in either historical/*.sql or the per-day file drops.
+    if cfg.augmented_incremental:
+        log("[Prospect] augmented_incremental — skipping (no consumer)")
+        return {}
+
+    # Row count: PHistScaling * SF * 0.9988 (matches DIGen's excludeDeletedIDs behavior) Verified: SF=10 -> 49940, SF=100 -> 499400, SF=1000 -> 4994000
     prospect_total = int(5 * cfg.internal_sf * 0.9988)
 
     # --- Match count calculation ---
-    # P_MATCH_PCT of rows match a customer. The actual match rate in DIGen is ~30.6%,
-    # which is PMatchPct applied to the FULL prospect set including incremental overlap.
-    # For simplicity, we target matching ~30.6% of rows to match DIGen's audit output.
+    # P_MATCH_PCT of rows match a customer. The actual match rate in DIGen is ~30.6%, which is PMatchPct applied to the FULL prospect set including incremental overlap. For simplicity, we target matching ~30.6% of rows to match DIGen's audit output.
     # --- Derive historical customer count ---
-    # We need to know how many customers exist so matching prospect rows can
-    # reference valid C_IDs. This replicates the CustomerMgmt formula to
-    # compute the total number of historical customers (those created via NEW actions).
+    # We need to know how many customers exist so matching prospect rows can reference valid C_IDs. This replicates the CustomerMgmt formula to compute the total number of historical customers (those created via NEW actions).
     cust_per_update = int(0.005 * cfg.internal_sf)
     acct_per_update = int(0.01 * cfg.internal_sf)
     new_custs = int(cust_per_update * 0.7)
@@ -85,10 +85,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     hist_size = cfg.cm_final_row_count - update_last_id * rows_per_update
     n_hist_customers = hist_size + update_last_id * new_custs
 
-    # Cap matches at n_hist_customers so each customer maps to at most one prospect.
-    # Without this cap, n_match > n_hist_customers causes multiple prospects to share
-    # the same (lastname, firstname, address, postalcode), which duplicates DimCustomer
-    # SCD2 records when the pipeline joins DimCustomer to Prospect.
+    # Cap matches at n_hist_customers so each customer maps to at most one prospect. Without this cap, n_match > n_hist_customers causes multiple prospects to share the same (lastname, firstname, address, postalcode), which duplicates DimCustomer SCD2 records when the pipeline joins DimCustomer to Prospect.
     n_match = min(int(prospect_total * 0.306), n_hist_customers)
 
     log(f"[Prospect] {prospect_total} rows, {n_match} matches ({n_match*100//prospect_total}%), {n_hist_customers} historical customers")
@@ -96,35 +93,22 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     # =====================================================================
     # Build Prospect DataFrame
     # =====================================================================
-    # First n_match rows (p_id < n_match) will match a customer record.
-    # Remaining rows are independent (no customer match).
+    # First n_match rows (p_id < n_match) will match a customer record. Remaining rows are independent (no customer match).
     prospect_df = (spark.range(0, prospect_total).withColumnRenamed("id", "p_id")
         .withColumn("_is_match", F.col("p_id") < F.lit(n_match))
-        # For matching rows: map to a customer C_ID using sequential modular mapping.
-        # Each matching prospect maps to a unique customer (wraps around if n_match > n_hist_customers).
+        # For matching rows: map to a customer C_ID using sequential modular mapping. Each matching prospect maps to a unique customer (wraps around if n_match > n_hist_customers).
         .withColumn("_cust_ref",
             F.when(F.col("_is_match"), F.col("p_id") % F.lit(n_hist_customers))
             .otherwise(F.lit(-1)))
     )
 
-    # Repartition at SF>=1000 so all downstream dict_joins and withColumn
-    # passes fan out across many tasks instead of stacking on a handful of
-    # default partitions (which spills ~3GB at SF=5000 because each task
-    # holds all 25M rows' string materializations in memory before the
-    # final sort/write). Target ≈ sf/125 partitions so each maps to one
-    # ~128MB output file at write time (matches the ~40 files/batch observed
-    # at SF=5000). Below SF=1000 the whole Prospect fits comfortably on
-    # default partitioning and the write's maxRecordsPerFile already handles
-    # file-size capping, so we skip the extra shuffle.
+    # Repartition at SF>=1000 so all downstream dict_joins and withColumn passes fan out across many tasks instead of stacking on a handful of default partitions (which spills ~3GB at SF=5000 because each task holds all 25M rows' string materializations in memory before the final sort/write). Target ≈ sf/125 partitions so each maps to one ~128MB output file at write time (matches the ~40 files/batch observed at SF=5000). Below SF=1000 the whole Prospect fits comfortably on default partitioning and the write's maxRecordsPerFile already handles file-size capping, so we skip the extra shuffle.
     target_prospect_partitions = cfg.sf // 125 if cfg.sf >= 1000 else 0
     if target_prospect_partitions:
         prospect_df = prospect_df.repartition(target_prospect_partitions)
 
     # --- Name+address matching via shared hash seeds ---
-    # For matching rows, use the SAME seeds as CustomerMgmt so dictionary lookups
-    # produce identical values. This is the core of the matching logic: if Prospect
-    # and Customer share the same (hash_key(C_ID, seed) % dict_size), they get the
-    # same dictionary entry, producing identical name/address strings.
+    # For matching rows, use the SAME seeds as CustomerMgmt so dictionary lookups produce identical values. This is the core of the matching logic: if Prospect and Customer share the same (hash_key(C_ID, seed) % dict_size), they get the same dictionary entry, producing identical name/address strings.
     cm_ln_seed = seed_for("CM", "ln")
     cm_fn_seed = seed_for("CM", "fn")
     cm_a1_seed = seed_for("CM", "a1")
@@ -139,10 +123,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     n_zip = dict_count("zip_codes")
 
     # --- RandomAString helper for non-matching rows ---
-    # DIGen uses RandomAString (random A-Za-z of variable length) for non-matching
-    # prospect rows, NOT dictionary lookups. We approximate this by generating long
-    # strings from concatenated MD5 hashes, translating hex to mixed-case alpha,
-    # then taking a variable-length substring.
+    # DIGen uses RandomAString (random A-Za-z of variable length) for non-matching prospect rows, NOT dictionary lookups. We approximate this by generating long strings from concatenated MD5 hashes, translating hex to mixed-case alpha, then taking a variable-length substring.
     def _rand_astring(id_col, seed_name, min_len, max_len):
         """Generate a random A-Za-z string of length uniformly in [min_len, max_len]."""
         _len = (hash_key(id_col, seed_for("P", seed_name + "_len")) % (max_len - min_len + 1) + min_len).cast("int")
@@ -162,8 +143,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                  .when(_r == 2, F.upper(val))
                  .otherwise(F.lower(val)))
 
-    # For matching rows: compute dict index using same hash as CustomerMgmt (shared seeds).
-    # For non-matching rows: generate RandomAString (random gibberish) to match DIGen.
+    # For matching rows: compute dict index using same hash as CustomerMgmt (shared seeds). For non-matching rows: generate RandomAString (random gibberish) to match DIGen.
     prospect_df = (prospect_df
         .withColumn("_ln_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_ln_seed) % n_ln)
@@ -177,8 +157,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         .withColumn("_zip_key",
             F.when(F.col("_is_match"), hash_key(F.col("_cust_ref"), cm_zip_seed) % n_zip)
             .otherwise(F.lit(-1)))
-        # AddressLine2: matching rows use 90% empty + "Apt. NNN";
-        # non-matching use 5% null (empty), 95% RandomAString(5,80).
+        # AddressLine2: matching rows use 90% empty + "Apt. NNN"; non-matching use 5% null (empty), 95% RandomAString(5,80).
         .withColumn("_addr2_match",
             F.when(F.col("_is_match"),
                 F.when(hash_key(F.col("_cust_ref"), cm_a2n_seed) % 100 < 90, F.lit(""))
@@ -196,8 +175,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     prospect_df = dict_join(prospect_df, "zip_codes", F.col("_zip_key"), "_zip_raw")
 
     # --- Assign final field values ---
-    # Matching rows: use dictionary values (same as CustomerMgmt for matching).
-    # Non-matching rows: RandomAString with case transformation (DIGen pattern).
+    # Matching rows: use dictionary values (same as CustomerMgmt for matching). Non-matching rows: RandomAString with case transformation (DIGen pattern).
     prospect_df = (prospect_df
         .withColumn("lastname",
             F.when(F.col("_is_match"), F.col("_ln_raw"))
@@ -225,17 +203,14 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     prospect_df = prospect_df.withColumn("agencyid",
         F.concat(F.substring(F.col("lastname"), 1, 3), F.col("p_id").cast("string")))
 
-    # Middle initial: DIGen uses NullGenerator(0.05) wrapping RandomAString max=1.
-    # So 5% null, 95% have a single random A-Za-z char.
+    # Middle initial: DIGen uses NullGenerator(0.05) wrapping RandomAString max=1. So 5% null, 95% have a single random A-Za-z char.
     prospect_df = prospect_df.withColumn("middleinitial",
         F.when(hash_key(F.col("p_id"), seed_for("P", "mi")) % 100 < 5, F.lit(""))
         .otherwise(F.substring(F.lit("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"),
             (hash_key(F.col("p_id"), seed_for("P", "mi_v")) % 52 + 1).cast("int"), 1)))
 
     # --- Gender ---
-    # DIGen: NullGenerator(0.05) wrapping ProbabilityGenerator for M/F/m/f.
-    # So 5% null, 95% have a gender value. Of the 95%: equal mix of M/F/m/f.
-    # ~2% error injection: single random char from A-Za-z plus space
+    # DIGen: NullGenerator(0.05) wrapping ProbabilityGenerator for M/F/m/f. So 5% null, 95% have a gender value. Of the 95%: equal mix of M/F/m/f. ~2% error injection: single random char from A-Za-z plus space
     all_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz "
     prospect_df = prospect_df.withColumn("gender",
         F.when(hash_key(F.col("p_id"), seed_for("P", "gn")) % 100 < 5, F.lit(""))
@@ -287,10 +262,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
             .otherwise((hash_key(F.col("p_id"), seed_for("P", "nw")) % 3990000 + 10000).cast("string")))
     )
 
-    # Keep p_id on `final` so B2/B3 can slice the "oldest drop_count rows" with
-    # a simple filter on the dense 0..prospect_total-1 sequence. Dropping
-    # p_id here would force a row_number() Window.orderBy(...) pass, which
-    # shuffles the entire dataset onto a single task (~15 min at SF=20000).
+    # Keep p_id on `final` so B2/B3 can slice the "oldest drop_count rows" with a simple filter on the dense 0..prospect_total-1 sequence. Dropping p_id here would force a row_number() Window.orderBy(...) pass, which shuffles the entire dataset onto a single task (~15 min at SF=20000).
     final = prospect_df.select(
         "p_id",
         "agencyid", "lastname", "firstname", "middleinitial", "gender",
@@ -311,15 +283,9 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
     counts[("P_NEW", 1)] = prospect_total
 
     # --- Churn model for incremental batches ---
-    # Batch 2+: full extract with ~0.12% churn (same total rows, some replaced).
-    # Churn formula: ~CScaling * internal_sf * 1.2 prospects replaced per batch.
+    # Batch 2+: full extract with ~0.12% churn (same total rows, some replaced). Churn formula: ~CScaling * internal_sf * 1.2 prospects replaced per batch.
     #
-    # Key property: each batch keeps a *shifting window* of Batch 1's rows plus
-    # the accumulated churn from all prior batches, so Batch 2's new rows still
-    # appear in Batch 3's file. Without this, the silver-layer Prospect loader
-    # (filters by recordbatchid >= batch_id) would discard Batch 2's new rows
-    # at Batch 3 → no rows with batchid=2 in the final Prospect table → the
-    # 'Prospect batches' audit check fails (only 2 distinct batchids).
+    # Key property: each batch keeps a *shifting window* of Batch 1's rows plus the accumulated churn from all prior batches, so Batch 2's new rows still appear in Batch 3's file. Without this, the silver-layer Prospect loader (filters by recordbatchid >= batch_id) would discard Batch 2's new rows at Batch 3 → no rows with batchid=2 in the final Prospect table → the 'Prospect batches' audit check fails (only 2 distinct batchids).
     churn_per_batch = max(1, int(0.005 * cfg.internal_sf * 1.2))
     accumulated_new = None  # union of all prior batches' new rows
 
@@ -328,8 +294,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         # New prospect IDs start after the historical range to avoid collisions
         new_start = prospect_total + (batch_offset - 1) * churn_per_batch
 
-        # Drop the oldest batch_offset * churn_per_batch rows from Batch 1,
-        # then append all prior batches' new rows + this batch's new rows.
+        # Drop the oldest batch_offset * churn_per_batch rows from Batch 1, then append all prior batches' new rows + this batch's new rows.
         drop_count = batch_offset * churn_per_batch
         base_rows_to_keep = prospect_total - drop_count
         batch_base = (final
@@ -342,8 +307,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
         new_df = (spark.range(0, churn_per_batch).withColumnRenamed("id", "new_id")
             .withColumn("p_id", F.col("new_id") + F.lit(new_start)))
 
-        # Build new prospect fields using batch-specific seed prefix (e.g. "PB2", "PB3")
-        # to ensure each batch's churned rows are unique
+        # Build new prospect fields using batch-specific seed prefix (e.g. "PB2", "PB3") to ensure each batch's churned rows are unique
         new_df = dict_join(new_df, "hr_family_names", hash_key(F.col("p_id"), seed_for(f"PB{batch_id}", "ln")), "_ln")
         new_df = dict_join(new_df, "hr_given_names", hash_key(F.col("p_id"), seed_for(f"PB{batch_id}", "fn")), "_fn")
         new_df = dict_join(new_df, "address_lines", hash_key(F.col("p_id"), seed_for(f"PB{batch_id}", "a1")), "_a1")
@@ -395,9 +359,7 @@ def generate_prospect(spark: SparkSession, cfg, dicts: dict, dbutils) -> dict:
                            else accumulated_new.unionByName(new_prospects))
         write_file(batch_df, f"{cfg.batch_path(batch_id)}/Prospect.csv", ",", dbutils, scale_factor=cfg.sf)
         counts[("Prospect", batch_id)] = prospect_total
-        # Per-batch matching grows by the churn's matching count. At
-        # P_MATCH_PCT=0.25, ~25% of churn_per_batch new prospects match
-        # existing customers. Cumulative through B{batch_id}.
+        # Per-batch matching grows by the churn's matching count. At P_MATCH_PCT=0.25, ~25% of churn_per_batch new prospects match existing customers. Cumulative through B{batch_id}.
         churn_match_cumulative = int(0.25 * churn_per_batch * batch_offset)
         counts[("Prospect_Matching", batch_id)] = n_match + churn_match_cumulative
         counts[("P_NEW", batch_id)] = churn_per_batch

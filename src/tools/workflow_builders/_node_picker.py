@@ -42,8 +42,7 @@ def _is_arm(node_id: str, cloud: str) -> bool:
         m = re.search(r"standard_[a-z]+\d+([a-z]+)_v\d+", nid)
         return bool(m and "p" in m.group(1))
     if cloud == "AWS":
-        # Graviton families use 'g' as the first letter of the family-suffix:
-        # m8g, m8gd, c8g, r8g, x8g, etc.
+        # Graviton families use 'g' as the first letter of the family-suffix: m8g, m8gd, c8g, r8g, x8g, etc.
         m = re.match(r"^[a-z]+\d+([a-z]+)\.", nid)
         return bool(m and m.group(1).startswith("g"))
     if cloud == "GCP":
@@ -64,14 +63,11 @@ def _has_local_disk(node_id: str, info: dict, cloud: str) -> bool:
         m = re.search(r"standard_[a-z]+\d+([a-z]+)_v\d+", nid)
         return bool(m and "d" in m.group(1))
     if cloud == "AWS":
-        # 'd' in the family-suffix means local NVMe instance store
-        # (m7gd, m8gd, c6gd, r7gd, …). i-series storage-opt was caught above.
+        # 'd' in the family-suffix means local NVMe instance store (m7gd, m8gd, c6gd, r7gd, …). i-series storage-opt was caught above.
         m = re.match(r"^[a-z]+\d+([a-z]+)\.", nid)
         return bool(m and "d" in m.group(1))
     if cloud == "GCP":
-        # `-lssd` suffix indicates the bundled-local-SSD variant
-        # (e.g. c4a-standard-16-lssd). Without it we attach local SSDs
-        # via gcp_attributes.local_ssd_count from the caller.
+        # `-lssd` suffix indicates the bundled-local-SSD variant (e.g. c4a-standard-16-lssd). Without it we attach local SSDs via gcp_attributes.local_ssd_count from the caller.
         return nid.endswith("-lssd")
     return False
 

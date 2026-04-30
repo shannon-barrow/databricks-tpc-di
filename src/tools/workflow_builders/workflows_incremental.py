@@ -304,8 +304,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
         depends_on=["batch1_validation"],
     ))
 
-    # Batch 2 (depends on batch1_validation; its FactMarketHistory branches
-    # off batch1_validation directly per the original DAG).
+    # Batch 2 (depends on batch1_validation; its FactMarketHistory branches off batch1_validation directly per the original DAG).
     tasks.extend(_per_batch_tasks(
         batch_id=2, batch_dep="batch1_validation",
         repo_src_path=repo_src_path, job_name=job_name,
@@ -326,8 +325,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
         depends_on=["batch2_validation"],
     ))
 
-    # Batch 3 (depends on batch2_complete; FactMarketHistory branches off
-    # batch2_validation per the original DAG).
+    # Batch 3 (depends on batch2_complete; FactMarketHistory branches off batch2_validation per the original DAG).
     tasks.extend(_per_batch_tasks(
         batch_id=3, batch_dep="batch2_complete",
         repo_src_path=repo_src_path, job_name=job_name,
@@ -401,9 +399,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, scale_factor: int,
             cloud_provider=cloud_provider,
         )]
 
-    # Final cleanup pair — condition gate + SQL notebook. The gate watches
-    # automated_audit (last real task) with ALL_DONE so partial failures still
-    # reach cleanup; the SQL only fires when delete_tables_when_finished=TRUE.
+    # Final cleanup pair — condition gate + SQL notebook. The gate watches automated_audit (last real task) with ALL_DONE so partial failures still reach cleanup; the SQL only fires when delete_tables_when_finished=TRUE.
     tasks.extend(common.make_cleanup_tasks(
         repo_src_path=repo_src_path, job_name=job_name,
         exec_type=exec_type, serverless=serverless, wh_id=wh_id,

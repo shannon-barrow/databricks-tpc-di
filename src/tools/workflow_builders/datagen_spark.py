@@ -78,8 +78,7 @@ def _spark_cluster_spec(scale_factor: int, node_types: dict, cloud_provider: str
     new_cluster["enable_elastic_disk"] = True  # safety for nodes without local NVMe
     new_cluster["data_security_mode"] = "SINGLE_USER"
     new_cluster["runtime_engine"] = "PHOTON"
-    # On GCP, attach local SSDs to non-lssd nodes. We size by the WORKER
-    # cores (not driver), since workers do the heavy shuffle.
+    # On GCP, attach local SSDs to non-lssd nodes. We size by the WORKER cores (not driver), since workers do the heavy shuffle.
     _node_picker.apply_gcp_local_ssd_if_needed(
         new_cluster, worker, node_types.get(worker, {}), cloud_provider, worker_cores,
     )
@@ -102,8 +101,7 @@ def _cloud_attrs(cloud_provider: str) -> dict:
             "spot_bid_price_percent": 100,
         }}
     if cloud_provider == "GCP":
-        # local_ssd_count is added later by apply_gcp_local_ssd_if_needed if
-        # the picked node has no built-in local SSD.
+        # local_ssd_count is added later by apply_gcp_local_ssd_if_needed if the picked node has no built-in local SSD.
         return {"gcp_attributes": {
             "availability": "PREEMPTIBLE_WITH_FALLBACK_GCP",
         }}
@@ -117,7 +115,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           cloud_provider: str | None = None,
           default_worker_type: str | None = None,
           default_dbr_version: str | None = None,
+          datagen_choice: str = "spark",
           **_unused) -> dict:
+    """``datagen_choice`` flips the data_gen widget default — ``"spark"`` writes
+    raw files, ``"augmented_incremental"`` writes Delta tables to
+    ``tpcdi_raw_data.{dataset}{sf}`` and skips Batch2/Batch3."""
     tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     is_serverless = (serverless or "YES").upper() == "YES"
 
@@ -158,7 +160,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
         "parameters": [
-            {"name": "spark_or_native_datagen", "default": "spark"},
+            {"name": "data_gen_type", "default": datagen_choice},
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},

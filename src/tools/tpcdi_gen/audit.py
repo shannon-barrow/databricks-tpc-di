@@ -39,7 +39,16 @@ def static_audits_available(cfg) -> bool:
     count() queries — when a static snapshot will be copied at the end of
     the run, the audit CSVs get exact pre-computed values regardless of
     what the generators return.
+
+    In augmented_incremental mode the benchmark doesn't read audits at
+    all (orchestrator skips audit emit), AND several dynamic-regen blocks
+    read from staging paths or B2/B3 temp views that don't exist when
+    augmented mode writes to Delta and skips B2/B3. Treat as "available"
+    so every generator takes the analytical-estimate path and never
+    hits those broken read sites.
     """
+    if getattr(cfg, "augmented_incremental", False):
+        return True
     user_sf = int(cfg.internal_sf // 1000)
     return os.path.isdir(os.path.join(
         os.path.dirname(os.path.abspath(__file__)),
@@ -259,9 +268,7 @@ def _gen_table_audits(cfg, counts, dbutils):
                f"{bp}/HoldingHistory_audit.csv", dbutils)
 
     # --- TradeHistory / DimTradeHistory attributes ---
-    # DIGen emits TH_Records, TH_TLBTrades, TH_TLSTrades, TH_TMBTrades,
-    # TH_TMSTrades, TH_CanceledLTrades plus CT_Records and CT_Trades
-    # as a single TradeHistory_audit.csv per batch.
+    # DIGen emits TH_Records, TH_TLBTrades, TH_TLSTrades, TH_TMBTrades, TH_TMSTrades, TH_CanceledLTrades plus CT_Records and CT_Trades as a single TradeHistory_audit.csv per batch.
     th_lines = [
         _audit_row("DimTradeHistory", 1, "TH_Records",         counts.get(("TH_Records", 1), 0)),
         _audit_row("DimTradeHistory", 1, "TH_TLBTrades",       counts.get(("TH_TLBTrades", 1), 0)),
@@ -275,9 +282,7 @@ def _gen_table_audits(cfg, counts, dbutils):
     write_text(_AUDIT_HEADER + "".join(th_lines), f"{bp}/TradeHistory_audit.csv", dbutils)
 
     # --- FINWIRE: per-record-type counts + unimplemented DUP sentinels ---
-    # FW_FIN / FW_FIN_DUP go under DataSet='Financial' (not DimCompany) per
-    # DIGen's actual buf.append("Financial") — the XML comment says DimCompany
-    # but the code emits Financial, which is what automated_audit.sql expects.
+    # FW_FIN / FW_FIN_DUP go under DataSet='Financial' (not DimCompany) per DIGen's actual buf.append("Financial") — the XML comment says DimCompany but the code emits Financial, which is what automated_audit.sql expects.
     fw_lines = [
         _audit_row("DimSecurity", 1, "FW_SEC",     counts.get(("FW_SEC", 1), 0)),
         _audit_row("DimSecurity", 1, "FW_SEC_DUP", -1),
@@ -289,9 +294,7 @@ def _gen_table_audits(cfg, counts, dbutils):
     write_text(_AUDIT_HEADER + "".join(fw_lines), f"{bp}/FINWIRE_audit.csv", dbutils)
 
     # --- Prospect B1: P_RECORDS = total historical rows, P_NEW = same
-    # (all rows are new at B1), P_C_MATCHING = count of prospects matching
-    # existing customers. Batches 2/3 emit their own per-batch files
-    # (see _gen_incremental_table_audits below). ---
+    # (all rows are new at B1), P_C_MATCHING = count of prospects matching existing customers. Batches 2/3 emit their own per-batch files (see _gen_incremental_table_audits below). ---
     p_total = counts.get(("Prospect", 1), 0)
     p_match = counts.get(("Prospect_Matching", 1), 0)
     p_new = counts.get(("P_NEW", 1), p_total)
@@ -323,8 +326,7 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
     for b in range(2, NUM_INCREMENTAL_BATCHES + 2):
         bp = cfg.batch_path(b)
 
-        # Fact tables — per-batch incremental row counts the automated_audit
-        # cumulative-delta checks require at every BatchID in (1, 2, 3).
+        # Fact tables — per-batch incremental row counts the automated_audit cumulative-delta checks require at every BatchID in (1, 2, 3).
         wh_b = counts.get(("WatchHistory", b), 0)
         wh_actv_b = counts.get(("WH_ACTV", b), 0)
         wh_lines = [
@@ -341,18 +343,14 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
                                                counts.get(("HoldingHistory", b), 0)),
                    f"{bp}/HoldingHistory_audit.csv", dbutils)
 
-        # DimTradeHistory CT_Records/CT_Trades per incremental batch. No TH_*
-        # attributes in incrementals since DIGen doesn't generate incremental
-        # TradeHistory.txt (only Trade.txt CDC updates).
+        # DimTradeHistory CT_Records/CT_Trades per incremental batch. No TH_* attributes in incrementals since DIGen doesn't generate incremental TradeHistory.txt (only Trade.txt CDC updates).
         th_lines = [
             _audit_row("DimTradeHistory", b, "CT_Records", counts.get(("CT_Records", b), 0)),
             _audit_row("DimTradeHistory", b, "CT_Trades",  counts.get(("CT_Trades", b), 0)),
         ]
         write_text(_AUDIT_HEADER + "".join(th_lines), f"{bp}/TradeHistory_audit.csv", dbutils)
 
-        # Per-batch Prospect audit. P_RECORDS = total rows in this batch's
-        # Prospect.csv, P_NEW = rows churned (added) in this batch,
-        # P_C_MATCHING = cumulative matching prospects through this batch.
+        # Per-batch Prospect audit. P_RECORDS = total rows in this batch's Prospect.csv, P_NEW = rows churned (added) in this batch, P_C_MATCHING = cumulative matching prospects through this batch.
         p_total_b = counts.get(("Prospect", b), 0)
         p_match_b = counts.get(("Prospect_Matching", b), 0)
         p_new_b = counts.get(("P_NEW", b), 0)
@@ -384,12 +382,7 @@ def _gen_incremental_table_audits(cfg, counts, dbutils):
         ]
         write_text(_AUDIT_HEADER + "".join(acct_lines), f"{bp}/Account_audit.csv", dbutils)
 
-        # Trade_audit.csv (Trade.txt CDC-based).
-        # DimTrade's incremental ETL MERGEs on tradeid: cdc_flag='I' INSERTs new
-        # rows, cdc_flag='U' UPDATEs existing rows in place. T_NEW counts only
-        # the inserts — that's what drives DimTrade's cumulative row-count
-        # growth, which the 'DimTrade row count' check compares against running
-        # sum(T_NEW). T_Records is the raw incremental row count (I+U).
+        # Trade_audit.csv (Trade.txt CDC-based). DimTrade's incremental ETL MERGEs on tradeid: cdc_flag='I' INSERTs new rows, cdc_flag='U' UPDATEs existing rows in place. T_NEW counts only the inserts — that's what drives DimTrade's cumulative row-count growth, which the 'DimTrade row count' check compares against running sum(T_NEW). T_Records is the raw incremental row count (I+U).
         t_records = counts.get(("Trade", b), 0)
         trade_lines = [
             _audit_row("DimTrade", b, "T_Records",          t_records),

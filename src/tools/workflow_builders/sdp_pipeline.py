@@ -5,10 +5,7 @@ Submitted to the `/api/2.0/pipelines` endpoint (not the Jobs API).
 from __future__ import annotations
 
 
-# Bronze table descriptors used by the SDP bronze notebook. JSON-encoded as a
-# single string and read back inside the notebook via json.loads. Identical to
-# the value the Jinja template emitted; kept as one literal blob so future
-# schema edits happen here in one place.
+# Bronze table descriptors used by the SDP bronze notebook. JSON-encoded as a single string and read back inside the notebook via json.loads. Identical to the value the Jinja template emitted; kept as one literal blob so future schema edits happen here in one place.
 _BRONZE_TABLES_JSON = (
     '[{"table": "TaxRate", "filename": "TaxRate.txt", "raw_schema": "tx_id STRING NOT NULL COMMENT \'Tax rate code\', tx_name STRING NOT NULL COMMENT \'Tax rate description\', tx_rate FLOAT NOT NULL COMMENT \'Tax rate\'"}, '
     '{"table": "DimTime", "filename": "Time.txt", "raw_schema": "sk_timeid BIGINT NOT NULL COMMENT \'Surrogate key for the time\', timevalue STRING NOT NULL COMMENT \'The time stored appropriately for doing\', hourid INT NOT NULL COMMENT \'Hour number as a number e.g. 01\', hourdesc STRING NOT NULL COMMENT \'Hour number as text e.g. 01\', minuteid INT NOT NULL COMMENT \'Minute as a number e.g. 23\', minutedesc STRING NOT NULL COMMENT \'Minute as text e.g. 01:23\', secondid INT NOT NULL COMMENT \'Second as a number e.g. 45\', seconddesc STRING NOT NULL COMMENT \'Second as text e.g. 01:23:45\', markethoursflag BOOLEAN COMMENT \'Indicates a time during market hours\', officehoursflag BOOLEAN COMMENT \'Indicates a time during office hours\'"}, '
@@ -72,8 +69,7 @@ _FACT_WATCHES_SCHEMA = "sk_customerid BIGINT COMMENT 'Customer associated with w
 
 _DIM_ACCOUNT_STG_SCHEMA = "accountid BIGINT COMMENT 'Customer account identifier', customerid BIGINT COMMENT 'Customer identifier', accountdesc STRING COMMENT 'Name of customer account', taxstatus TINYINT COMMENT 'Tax status of this account', brokerid BIGINT COMMENT 'managing broker identifier', status STRING COMMENT 'Account status, active or closed', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE GENERATED ALWAYS AS (date(__START_AT)) COMMENT 'Beginning of date range when this record was the current record', enddate DATE GENERATED ALWAYS AS (nvl(date(__END_AT), date('9999-12-31'))) COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.', __START_AT TIMESTAMP COMMENT 'Beginning of date range when this record was the current record', __END_AT TIMESTAMP COMMENT 'Ending of date range when this record was the current record.'"
 
-# Two variants of DimCustomerStg.schema differ only in iscurrent/effectivedate/enddate
-# being either GENERATED columns (CORE) or plain columns (PRO/ADVANCED).
+# Two variants of DimCustomerStg.schema differ only in iscurrent/effectivedate/enddate being either GENERATED columns (CORE) or plain columns (PRO/ADVANCED).
 _DIM_CUSTOMER_STG_SCHEMA_CORE = "sk_customerid BIGINT COMMENT 'Surrogate key for CustomerID', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer\u2019s tax identifier', status STRING COMMENT 'Customer status type', lastname STRING COMMENT 'Customers last name.', firstname STRING COMMENT 'Customers first name.', middleinitial STRING COMMENT 'Customers middle name initial', gender STRING COMMENT 'Gender of the customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer\u2019s date of birth.', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or Postal Code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', phone1 STRING COMMENT 'Phone number 1', phone2 STRING COMMENT 'Phone number 2', phone3 STRING COMMENT 'Phone number 3', email1 STRING COMMENT 'Email address 1', email2 STRING COMMENT 'Email address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate', batchid INT COMMENT 'Batch ID when this record was inserted', iscurrent BOOLEAN COMMENT 'True if this is the current record', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'"
 _DIM_CUSTOMER_STG_SCHEMA_NONCORE = "sk_customerid BIGINT COMMENT 'Surrogate key for CustomerID', customerid BIGINT COMMENT 'Customer identifier', taxid STRING COMMENT 'Customer\u2019s tax identifier', status STRING COMMENT 'Customer status type', lastname STRING COMMENT 'Customers last name.', firstname STRING COMMENT 'Customers first name.', middleinitial STRING COMMENT 'Customers middle name initial', gender STRING COMMENT 'Gender of the customer', tier TINYINT COMMENT 'Customer tier', dob DATE COMMENT 'Customer\u2019s date of birth.', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or Postal Code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', phone1 STRING COMMENT 'Phone number 1', phone2 STRING COMMENT 'Phone number 2', phone3 STRING COMMENT 'Phone number 3', email1 STRING COMMENT 'Email address 1', email2 STRING COMMENT 'Email address 2', lcl_tx_id STRING COMMENT 'Customers local tax rate', nat_tx_id STRING COMMENT 'Customers national tax rate', batchid INT COMMENT 'Batch ID when this record was inserted', iscurrent BOOLEAN GENERATED ALWAYS AS (nvl2(__END_AT, false, true)) COMMENT 'True if this is the current record', effectivedate DATE GENERATED ALWAYS AS (date(__START_AT)) COMMENT 'Beginning of date range when this record was the current record', enddate DATE GENERATED ALWAYS AS (nvl(date(__END_AT), date('9999-12-31'))) COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.', __START_AT TIMESTAMP COMMENT 'Beginning of date range when this record was the current record', __END_AT TIMESTAMP COMMENT 'Ending of date range when this record was the current record.'"
 
@@ -87,11 +83,7 @@ _ADVANCED_CONSTRAINTS = {
 def _libraries(repo_src_path: str, edition: str, scale_factor: int,
                data_generator: str) -> list[dict]:
     libs: list[dict] = []
-    # CustomerMgmtRaw runs inside the pipeline (creating LIVE customermgmt)
-    # whenever the XML can be re-parsed cheaply: always for Spark datagen
-    # (split XML files), and below SF=1000 for DIGen (single big XML).
-    # Above SF=1000 with DIGen, the wrapping workflow runs the maven-lib
-    # ingest as an upstream task that writes to the staging schema instead.
+    # CustomerMgmtRaw runs inside the pipeline (creating LIVE customermgmt) whenever the XML can be re-parsed cheaply: always for Spark datagen (split XML files), and below SF=1000 for DIGen (single big XML). Above SF=1000 with DIGen, the wrapping workflow runs the maven-lib ingest as an upstream task that writes to the staging schema instead.
     in_pipeline_xml = data_generator == "spark" or scale_factor < 1000
     if in_pipeline_xml:
         libs.append({"notebook": {"path": f"{repo_src_path}/single_batch/spark_declarative_pipelines/CustomerMgmtRaw"}})
@@ -112,9 +104,7 @@ def build(*, job_name: str, catalog: str, wh_target: str, edition: str,
           sdp_driver_node_type: str | None = None,
           sdp_worker_node_count: int | None = None,
           **_unused) -> dict:
-    # cust_mgmt_schema mirrors _libraries(): when CustomerMgmtRaw is in the
-    # pipeline, the table is LIVE; otherwise it's read from the upstream-
-    # populated staging schema.
+    # cust_mgmt_schema mirrors _libraries(): when CustomerMgmtRaw is in the pipeline, the table is LIVE; otherwise it's read from the upstream- populated staging schema.
     in_pipeline_xml = data_generator == "spark" or scale_factor < 1000
     cust_mgmt_schema = (
         "LIVE" if in_pipeline_xml

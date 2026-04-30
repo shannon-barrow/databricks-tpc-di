@@ -3,7 +3,7 @@
 # MAGIC # TPC-DI Unified Data Generator (entry point)
 # MAGIC
 # MAGIC Single dispatch notebook for data generation. Reads the
-# MAGIC `spark_or_native_datagen` job parameter and runs **inline** in this
+# MAGIC `data_gen_type` job parameter and runs **inline** in this
 # MAGIC notebook's process — both runners are imported as Python modules so
 # MAGIC there is no `dbutils.notebook.run` indirection, no child notebook
 # MAGIC context, and no risk of a new cluster being spun up on serverless.
@@ -129,7 +129,7 @@
 # MAGIC
 # MAGIC ### Defaults
 # MAGIC
-# MAGIC - `spark_or_native_datagen=spark` (Spark generator preferred — faster,
+# MAGIC - `data_gen_type=spark` (Spark generator preferred — faster,
 # MAGIC   serverless-friendly, no DBR pinning).
 # MAGIC - `Serverless=YES` widget default.
 # MAGIC - `regenerate_data=NO` (re-running the job at the same SF is a no-op
@@ -137,8 +137,9 @@
 
 # COMMAND ----------
 
-dbutils.widgets.dropdown("spark_or_native_datagen", "spark",
-                         ["spark", "native"], "Spark or Native (DIGen) data generator")
+dbutils.widgets.dropdown("data_gen_type", "spark",
+                         ["spark", "native", "augmented_incremental"],
+                         "Spark or Native (DIGen) data generator")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"],
                          "Scale Factor")
@@ -152,20 +153,28 @@ dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN"],
 import sys
 
 # Normalize the generator choice — accept any case + leading/trailing whitespace.
-_choice = dbutils.widgets.get("spark_or_native_datagen").strip().lower()
-if _choice not in ("spark", "native"):
+_choice = dbutils.widgets.get("data_gen_type").strip().lower()
+if _choice not in ("spark", "native", "augmented_incremental"):
     raise ValueError(
-        f"spark_or_native_datagen must be 'spark' or 'native' "
-        f"(got {dbutils.widgets.get('spark_or_native_datagen')!r})"
+        f"data_gen_type must be 'spark', 'native', or "
+        f"'augmented_incremental' "
+        f"(got {dbutils.widgets.get('data_gen_type')!r})"
     )
 
-_catalog = dbutils.widgets.get("catalog")
-_scale_factor = int(dbutils.widgets.get("scale_factor"))
-_regenerate = dbutils.widgets.get("regenerate_data") == "YES"
-_log_level = dbutils.widgets.get("log_level")
+# Job-level parameters are free-form text on retrigger — strip whitespace and normalize case before comparing against literal sentinels so 'Yes', ' yes ', 'YES' all do the right thing.
+_catalog = dbutils.widgets.get("catalog").strip()
+_scale_factor = int(dbutils.widgets.get("scale_factor").strip())
+_regenerate = dbutils.widgets.get("regenerate_data").strip().upper() == "YES"
+_log_level = dbutils.widgets.get("log_level").strip().upper()
 
 _volume_base = f"/Volumes/{_catalog}/tpcdi_raw_data/tpcdi_volume/"
-_tpcdi_directory = f"{_volume_base}spark_datagen/" if _choice == "spark" else _volume_base
+# Per-mode target directory drives spark_runner's "skip if already exists" early-exit. - spark    → spark_datagen/sf={sf}/   (raw .txt/.xml/.csv files) - native   → sf={sf}/                (DIGen-native layout) - augmented → augmented_incremental/_staging/sf={sf}/   (Phase 2 per-day files; presence means the full augmented pipeline has already produced the persisted artifacts and stage 0 can short-circuit. Stage 0's temp Delta tables in tpcdi_raw_data are dropped by cleanup_stage0 anyway, so they aren't a useful marker)
+if _choice == "augmented_incremental":
+    _tpcdi_directory = f"{_volume_base}augmented_incremental/_staging/"
+elif _choice == "spark":
+    _tpcdi_directory = f"{_volume_base}spark_datagen/"
+else:
+    _tpcdi_directory = _volume_base
 
 _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 _workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
@@ -176,13 +185,17 @@ if _tools_dir not in sys.path:
 print(f"data_gen dispatch → {_choice!r}")
 print(f"  scale factor:     {_scale_factor}")
 print(f"  catalog:          {_catalog}")
-print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
+if _choice == "augmented_incremental":
+    print(f"  output target:    Delta tables at "
+          f"{_catalog}.tpcdi_raw_data.{{dataset}}{_scale_factor} "
+          f"(no volume files)")
+else:
+    print(f"  output directory: {_tpcdi_directory}sf={_scale_factor}/")
 print(f"  regenerate data:  {_regenerate}")
 print(f"  log level:        {_log_level}")
 print()  # blank line before the runner output begins
 
-# Both runner.run() functions take the same kwargs. log_level is consumed by
-# spark_runner and silently ignored by digen_runner via **_unused.
+# Both runner.run() functions take the same kwargs. log_level is consumed by spark_runner and silently ignored by digen_runner via **_unused. augmented_incremental flips spark_runner into Delta-only mode and skips B2/B3.
 _run_kwargs = dict(
     scale_factor=_scale_factor,
     catalog=_catalog,
@@ -192,9 +205,10 @@ _run_kwargs = dict(
     workspace_src_path=_workspace_src_path,
     dbutils=dbutils,
     spark=spark,
+    augmented_incremental=(_choice == "augmented_incremental"),
 )
 
-if _choice == "spark":
+if _choice in ("spark", "augmented_incremental"):
     from spark_runner import run as runner
 else:  # native
     from digen_runner import run as runner

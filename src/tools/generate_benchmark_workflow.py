@@ -1,9 +1,9 @@
 """Create a TPC-DI benchmark workflow (the ingest → dim/fact pipeline).
 
-Dispatches across workflow types — CLUSTER / DBSQL / SDP variants — by picking
-the appropriate Jinja template, building its ``dag_args``, optionally creating
-a warehouse or SDP pipeline first, then submitting the workflow to the Jobs
-API. Returns the created ``job_id``.
+Dispatches across workflow types — CLUSTER / DBSQL / SDP / AUGMENTED — by
+picking the right Python builder, optionally creating a warehouse or SDP
+pipeline first, then submitting the workflow(s) to the Jobs API. Returns
+the primary ``job_id`` (parent job for AUGMENTED variants).
 """
 import json
 from typing import Callable, Optional
@@ -14,6 +14,8 @@ from workflow_builders import sdp_workflow as _sdp_workflow_builder
 from workflow_builders import warehouse as _warehouse_builder
 from workflow_builders import workflows_single_batch as _single_batch_builder
 from workflow_builders import workflows_incremental as _incremental_builder
+from workflow_builders import augmented_classic as _augmented_classic_builder
+from workflow_builders import augmented_sdp as _augmented_sdp_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -26,6 +28,77 @@ _WH_SCALE_FACTOR_MAP = {
     "5000": "Large",
     "10000": "X-Large",
 }
+
+
+def _generate_augmented(*, variant: str, parent_job_name: str,
+                         catalog: str, wh_target: str, scale_factor: int,
+                         tpcdi_directory: str, repo_src_path: str,
+                         api_call: Callable) -> int:
+    """Submit the augmented-incremental benchmark resources and return the
+    parent job_id.
+
+    Creates (in order):
+      - CLUSTER variant: child job → parent job
+      - SDP variant: pipeline → child job → parent job
+
+    `wh_db` is built as ``{wh_target}_AugmentedIncremental_{Cluster|SDP}``
+    so two users running concurrently don't share Autoloader state under
+    ``_dailybatches/{wh_db}_{sf}/``.
+    """
+    label = "Cluster" if variant == "CLUSTER" else "SDP"
+    wh_db = f"{wh_target}_AugmentedIncremental_{label}"
+
+    # parent_job_name comes from the Driver as ``{base}-SF{sf}-AugmentedIncremental-{Cluster|SDP}-Parent`` — derive child + pipeline names by stripping/replacing the suffix.
+    child_job_name = parent_job_name[:-len("-Parent")] if parent_job_name.endswith("-Parent") else parent_job_name
+    pipeline_name  = f"{child_job_name}-Pipeline"
+
+    common = dict(
+        catalog=catalog, scale_factor=scale_factor,
+        tpcdi_directory=tpcdi_directory, wh_db=wh_db,
+        repo_src_path=repo_src_path,
+    )
+
+    print(f"\nAugmented Incremental ({label})")
+    print(f"  target schema:  {catalog}.{wh_db}_{scale_factor}")
+    print(f"  staging schema: {catalog}.tpcdi_incremental_staging_{scale_factor}")
+    print(f"  parent job:     {parent_job_name}")
+    print(f"  child job:      {child_job_name}")
+    if variant == "SDP":
+        print(f"  pipeline:       {pipeline_name}")
+    print()
+
+    if variant == "SDP":
+        print("Building SDP pipeline JSON via workflow_builders.augmented_sdp.build_pipeline")
+        pipeline_dag = _augmented_sdp_builder.build_pipeline(name=pipeline_name, **common)
+        print("Submitting SDP pipeline JSON to Databricks Pipelines API")
+        pipeline_id = submit_dag(
+            pipeline_dag, _PIPELINES_API_ENDPOINT, api_call, dag_type="pipeline")
+
+        print("Building child workflow JSON via workflow_builders.augmented_sdp.build_child")
+        child_dag = _augmented_sdp_builder.build_child(
+            job_name=child_job_name, pipeline_id=pipeline_id, **common)
+        print("Submitting child workflow JSON to Databricks Jobs API")
+        child_job_id = submit_dag(child_dag, _JOBS_API_ENDPOINT, api_call)
+
+        print("Building parent workflow JSON via workflow_builders.augmented_sdp.build_parent")
+        parent_dag = _augmented_sdp_builder.build_parent(
+            job_name=parent_job_name, child_job_id=child_job_id,
+            pipeline_id=pipeline_id, **common)
+        print("Submitting parent workflow JSON to Databricks Jobs API")
+        return submit_dag(parent_dag, _JOBS_API_ENDPOINT, api_call)
+
+    # CLUSTER variant
+    print("Building child workflow JSON via workflow_builders.augmented_classic.build_child")
+    child_dag = _augmented_classic_builder.build_child(
+        job_name=child_job_name, **common)
+    print("Submitting child workflow JSON to Databricks Jobs API")
+    child_job_id = submit_dag(child_dag, _JOBS_API_ENDPOINT, api_call)
+
+    print("Building parent workflow JSON via workflow_builders.augmented_classic.build_parent")
+    parent_dag = _augmented_classic_builder.build_parent(
+        job_name=parent_job_name, child_job_id=child_job_id, **common)
+    print("Submitting parent workflow JSON to Databricks Jobs API")
+    return submit_dag(parent_dag, _JOBS_API_ENDPOINT, api_call)
 
 
 def _get_or_create_warehouse(wh_name: str, dag_args: dict,
@@ -80,6 +153,19 @@ def generate_benchmark_workflow(
     """
     sku = wf_key.split("-")
 
+    # AUGMENTED variants take an early-exit path. They don't use the CLUSTER/DBSQL/SDP compute selection, always use Spark-staged data, and create multiple resources (parent + child + optional pipeline) rather than a single workflow.
+    if sku[0] == "AUGMENTED":
+        return _generate_augmented(
+            variant=sku[1],
+            parent_job_name=job_name,
+            catalog=catalog,
+            wh_target=wh_target,
+            scale_factor=scale_factor,
+            tpcdi_directory=tpcdi_directory,
+            repo_src_path=repo_src_path,
+            api_call=api_call,
+        )
+
     if sku[0] == "SDP":
         print("All 3 TPC-DI batches will be executed in a single SDP pipeline batch.")
     elif incremental:
@@ -99,12 +185,7 @@ def generate_benchmark_workflow(
         opt_write = "'delta.autoOptimize.optimizeWrite'=True"
         index_cols = ""
 
-    # The Driver builds tpcdi_directory up to (but not including) sf={scale_factor}/
-    # — including the generator-specific subdir (spark_datagen/ for Spark, none
-    # for DIGen) — so we pass it through unchanged. Downstream notebooks append
-    # sf=${scale_factor}/ themselves.
-    # Suffixes appended to wh_db (and embedded in templates' descriptions) so
-    # the Spark and DIGen runs at the same SF/exec_type don't share a schema.
+    # The Driver builds tpcdi_directory up to (but not including) sf={scale_factor}/ — including the generator-specific subdir (spark_datagen/ for Spark, none for DIGen) — so we pass it through unchanged. Downstream notebooks append sf=${scale_factor}/ themselves. Suffixes appended to wh_db (and embedded in templates' descriptions) so the Spark and DIGen runs at the same SF/exec_type don't share a schema.
     datagen_label = "spark_data_gen" if data_generator == "spark" else "native_data_gen"
     batched_label = "incremental" if incremental else "single_batch"
 

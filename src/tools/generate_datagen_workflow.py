@@ -14,19 +14,20 @@ Two implementations are supported, selected by the ``data_generator`` arg:
 Both jobs share a single notebook (`tools/data_gen`) that dispatches to
 the right runner via direct Python import — no `dbutils.notebook.run`
 indirection, no risk of a new cluster on serverless. The
-`spark_or_native_datagen` job parameter (default ``"spark"`` or ``"native"``
+`data_gen_type` job parameter (default ``"spark"`` or ``"native"``
 depending on which builder created the job) selects the implementation
 and is overridable per run.
 """
 from typing import Callable, Optional
 
 from _workflow_utils import submit_dag
-from workflow_builders import datagen_digen, datagen_spark
+from workflow_builders import datagen_digen, datagen_spark, augmented_staging
 
 
 _BUILDERS = {
     "spark": datagen_spark.build,
     "digen": datagen_digen.build,
+    "augmented_incremental": augmented_staging.build,
 }
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
 
@@ -77,6 +78,7 @@ def generate_datagen_workflow(
             f"Unknown data_generator={data_generator!r}; "
             f"expected one of {sorted(_BUILDERS.keys())}"
         )
+    # augmented_incremental currently shares the single-task spark builder. The multi-task wrapper (stage_files / stage_tables / cleanup) lands in workflow_builders/augmented_staging.py.
     if data_generator == "digen" and not default_worker_type:
         raise ValueError(
             "data_generator='digen' requires default_worker_type — DIGen.jar "

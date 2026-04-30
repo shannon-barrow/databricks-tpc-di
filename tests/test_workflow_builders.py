@@ -14,6 +14,7 @@ from workflow_builders import (
     datagen_spark, datagen_digen,
     workflows_single_batch, workflows_incremental,
     sdp_pipeline, sdp_workflow,
+    augmented_classic, augmented_sdp,
 )
 
 
@@ -242,6 +243,147 @@ def test_sdp_pipeline_digen_high_sf():
     _ok("cust_mgmt_schema → staging schema")
 
 
+# -------- AUGMENTED INCREMENTAL --------
+
+_AUG_COMMON = {
+    "catalog": "main",
+    "scale_factor": 20000,
+    "tpcdi_directory": "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
+    "wh_db": "Shannon_Barrow_TPCDI_AugmentedIncremental_Cluster",
+    "repo_src_path": COMMON["repo_src_path"],
+}
+
+
+def test_augmented_classic_child():
+    print("\naugmented_classic.build_child() — 17-task per-date job")
+    out = augmented_classic.build_child(
+        job_name="Smoke-TPCDI-SF20000-AugmentedIncremental-Cluster",
+        **_AUG_COMMON,
+    )
+    assert len(out["tasks"]) == 17, f"expected 17 tasks, got {len(out['tasks'])}"
+    _ok(f"task count = 17")
+    keys = [t["task_key"] for t in out["tasks"]]
+    for required in ("simulate_filedrops", "DimCustomer_Incremental",
+                      "DimAccount_Incremental", "DimTrade_Incremental",
+                      "FactCashBalances_Incremental",
+                      "FactMarketHistory_Incremental",
+                      "FactHoldings_Incremental", "FactWatches_Incremental",
+                      "currentaccountbalances_Incremental",
+                      "account_updates_from_customer"):
+        assert required in keys, f"missing task_key: {required}"
+    _ok("all dim/fact/staging task keys present")
+    assert sum(1 for k in keys if k.startswith("bronze")) == 7
+    _ok("7 bronze fan-out tasks")
+    assert out["tags"] == {"data_generator": "spark"}
+    _ok(f"tag = {out['tags']}")
+    assert out.get("performance_target") == "PERFORMANCE_OPTIMIZED"
+    _ok("performance_target = PERFORMANCE_OPTIMIZED")
+    # batch_date is in parameters so for_each can override
+    param_names = [p["name"] for p in out["parameters"]]
+    assert "batch_date" in param_names
+    _ok(f"batch_date in parameters: {param_names}")
+
+
+def test_augmented_classic_parent():
+    print("\naugmented_classic.build_parent() — for_each + cleanup gate")
+    out = augmented_classic.build_parent(
+        job_name="Smoke-TPCDI-SF20000-AugmentedIncremental-Cluster-Parent",
+        child_job_id=99999,
+        **_AUG_COMMON,
+    )
+    keys = [t["task_key"] for t in out["tasks"]]
+    assert keys == ["setup", "loop_incremental_tpcdi",
+                     "delete_when_finished_TRUE_FALSE", "cleanup"], keys
+    _ok(f"task order = {keys}")
+
+    loop = out["tasks"][1]
+    assert "for_each_task" in loop, "loop task missing for_each_task"
+    assert loop["for_each_task"]["inputs"] == "{{tasks.setup.values.batch_date_ls}}"
+    _ok("for_each consumes batch_date_ls from setup task value")
+    assert loop["for_each_task"]["task"]["run_job_task"]["job_id"] == 99999
+    _ok("for_each calls child job_id")
+
+    gate = out["tasks"][2]
+    assert gate["condition_task"]["right"] == "TRUE"
+    assert gate["run_if"] == "ALL_DONE"
+    _ok("gate: condition EQUAL_TO TRUE, run_if=ALL_DONE")
+
+    cleanup = out["tasks"][3]
+    assert cleanup["depends_on"][0] == {
+        "task_key": "delete_when_finished_TRUE_FALSE", "outcome": "true"}
+    _ok("cleanup depends on gate outcome=true")
+
+    # delete_tables_when_finished defaults FALSE for augmented (long runs)
+    finished_param = next(p for p in out["parameters"]
+                           if p["name"] == "delete_tables_when_finished")
+    assert finished_param["default"] == "FALSE"
+    _ok("delete_tables_when_finished default = FALSE (long-run safe)")
+
+
+def test_augmented_sdp_pipeline():
+    print("\naugmented_sdp.build_pipeline() — SDP pipeline def")
+    out = augmented_sdp.build_pipeline(
+        name="Smoke-Pipeline",
+        catalog="main", scale_factor=20000,
+        tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
+        wh_db="test_aug_sdp",
+        repo_src_path=COMMON["repo_src_path"],
+    )
+    assert out["target"] == "test_aug_sdp_20000"
+    _ok(f"target schema = {out['target']}")
+    libs = [lib["notebook"]["path"] for lib in out["libraries"]]
+    assert any("dlt_ingest_bronze" in p for p in libs)
+    assert any("dlt_incremental" in p for p in libs)
+    _ok("libraries: dlt_ingest_bronze + dlt_incremental")
+    assert out["serverless"] is True and out["photon"] is True
+    _ok("serverless + Photon")
+
+
+def test_augmented_sdp_child():
+    print("\naugmented_sdp.build_child() — 2-task per-date job")
+    out = augmented_sdp.build_child(
+        job_name="Smoke-Child-SDP",
+        pipeline_id="abc-123",
+        **_AUG_COMMON,
+    )
+    keys = [t["task_key"] for t in out["tasks"]]
+    assert keys == ["simulate_filedrops", "DLT_Pipeline_Incremental_TPCDI"]
+    _ok(f"task order = {keys}")
+    pipeline_task = out["tasks"][1]["pipeline_task"]
+    assert pipeline_task["pipeline_id"] == "abc-123"
+    assert pipeline_task["full_refresh"] is False
+    _ok("pipeline_task references pipeline_id, full_refresh=False")
+
+
+def test_augmented_sdp_parent():
+    print("\naugmented_sdp.build_parent() — historical-then-incremental orchestration")
+    out = augmented_sdp.build_parent(
+        job_name="Smoke-Parent-SDP",
+        child_job_id=88888,
+        pipeline_id="abc-123",
+        **_AUG_COMMON,
+    )
+    keys = [t["task_key"] for t in out["tasks"]]
+    assert keys == ["setup", "set_pipeline_historical",
+                     "run_historical_pipeline", "set_pipeline_incremental",
+                     "loop_incremental_tpcdi",
+                     "delete_when_finished_TRUE_FALSE", "cleanup"], keys
+    _ok(f"task order = {keys}")
+
+    set_hist = out["tasks"][1]
+    assert set_hist["notebook_task"]["base_parameters"] == {
+        "pipeline_id": "abc-123", "historical_flag": "true"}
+    _ok("set_pipeline_historical passes historical_flag=true")
+
+    run_hist = out["tasks"][2]
+    assert run_hist["pipeline_task"]["full_refresh"] is True
+    _ok("run_historical_pipeline uses full_refresh=True")
+
+    set_inc = out["tasks"][3]
+    assert set_inc["notebook_task"]["base_parameters"]["historical_flag"] == "false"
+    _ok("set_pipeline_incremental swaps back to historical_flag=false")
+
+
 def main():
     tests = [
         test_datagen_spark,
@@ -253,6 +395,11 @@ def main():
         test_sdp_pipeline,
         test_sdp_pipeline_spark_high_sf,
         test_sdp_pipeline_digen_high_sf,
+        test_augmented_classic_child,
+        test_augmented_classic_parent,
+        test_augmented_sdp_pipeline,
+        test_augmented_sdp_child,
+        test_augmented_sdp_parent,
     ]
     for t in tests:
         t()
