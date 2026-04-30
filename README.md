@@ -150,9 +150,8 @@ tests/
 CLAUDE.md                                     architecture context for AI agents
 ```
 
-## Limitations
+## Requirements of Note
 
-- Databricks E2 deployment + Repos required.
 - Unity Catalog required for any non-`hive_metastore` catalog (and for lineage / PK-FK constraints).
 - Serverless is optional but assumed for most paths; non-serverless variants need an appropriately sized cluster.
 - The native DIGen.jar path requires DBR 15.4 + Photon and a `SINGLE_USER` cluster access mode for `/local_disk0` scratch.
