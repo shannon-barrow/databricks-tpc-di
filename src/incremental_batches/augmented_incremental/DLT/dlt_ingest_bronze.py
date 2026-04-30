@@ -78,10 +78,14 @@ for table in tbl_ls:
 # Seed bronzecashtransaction with pre-2015-07-06 events so the running
 # `sum(ct_amt) over (partition by accountid order by ct_date)` in the
 # FactCashBalances incremental computes against the correct historical
-# baseline. Reads from `cashtransactionhistorical`, a staging table
-# CLONEd into the run schema by setup.py — populated by
+# baseline. SDP only — Cluster path uses `currentaccountbalances`
+# directly. Read straight from the shared staging schema (no CLONE
+# needed: SDP can't incrementally update CLONEd tables, and this is
+# always emitted as a once-MV so the staging-schema read is fine).
+# `cashtransactionhistorical` is created by
 # historical/FactCashBalancesHistorical.sql from the temp Delta
-# `tpcdi_raw_data.cashtransaction{sf}` (which cleanup_stage0 drops).
+# `tpcdi_raw_data.cashtransaction{sf}` (cleanup_stage0 drops the temp
+# Delta but the staging table persists).
 catalog = spark.conf.get("catalog")
 @dlt.append_flow(
   target = "bronzecashtransaction",
@@ -89,5 +93,5 @@ catalog = spark.conf.get("catalog")
   name = 'bronzecashtransaction_backfill')
 def backfill():
   return spark.sql(f"""
-    SELECT * FROM {catalog}.{wh_db}_{scale_factor}.cashtransactionhistorical
+    SELECT * FROM {catalog}.tpcdi_incremental_staging_{scale_factor}.cashtransactionhistorical
   """)

@@ -51,13 +51,7 @@ shallow_tbls = [
   'statustype',
   'dimcompany',
   'dimtime',
-  'currentaccountbalances',
-  # Historical cash transaction events (pre-2015-07-06). SDP's bronze
-  # backfill reads this to seed bronzecashtransaction so the running-sum
-  # daily balance starts from the correct baseline. Cluster path doesn't
-  # use it (it reads currentaccountbalances directly) — extra clone is
-  # harmless.
-  'cashtransactionhistorical',
+  'currentaccountbalances'
 ]
 deep_tbls = [
   'dimtrade',
