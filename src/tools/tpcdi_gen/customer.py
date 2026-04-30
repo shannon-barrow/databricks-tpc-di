@@ -415,8 +415,8 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     schedule_df = spark.createDataFrame(_sched_pdf)
     del _sched_pdf
 
-    # Collapse Arrow batch partitions into a small number of writers. With Arrow enabled, createDataFrame(pandas) produces one partition per arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at SF=20000. Without this, Photon's writer auto-rotates files at ~217K rows (per-file byte budget), producing 320+ tiny files written serially by one task — ~7 min wall-clock for a 584 MB output. coalesce (not repartition) because we only need to reduce fan-out; a shuffle would be wasted work.
-    _sched_target_parts = max(8, cfg.sf // 2500)
+    # Collapse Arrow batch partitions into a small number of writers. With Arrow enabled, createDataFrame(pandas) produces one partition per arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at SF=20000. Without this, Photon's writer auto-rotates files at ~217K rows (per-file byte budget), producing 320+ tiny files written serially by one task — ~7 min wall-clock for a 584 MB output. coalesce (not repartition) because we only need to reduce fan-out; a shuffle would be wasted work. Target ~30 MB per partition: total schedule rows scale ~17K/SF (across all action types × 32 B/row). At SF=20000 with the previous `cfg.sf // 2500` formula we got 8 partitions × ~280 MB each → blew past spark.rpc.message.maxSize (256 MB) when Spark Connect serialized the bound Arrow relation. cfg.sf // 250 keeps each task under ~30 MB at SF=20000 and still 8 at SF≤2000.
+    _sched_target_parts = max(8, cfg.sf // 250)
     schedule_df = schedule_df.coalesce(_sched_target_parts)
 
     # Map action_code → ActionType string so the join key matches all_df.
