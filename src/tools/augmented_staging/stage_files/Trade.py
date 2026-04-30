@@ -71,6 +71,6 @@ stage_to_files(
     spark, dbutils,
     source_view="_stage_trade",
     date_col="_pdate",
-    filename="Trade.txt",
+    dataset="trade",
     target_dir=target_dir,
 )

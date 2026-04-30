@@ -22,17 +22,17 @@ schemas = {
   "watches": "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING, event_dt DATE"
 }
 
-# stage_files writes per-date files numbered `Base_1.txt`, `Base_2.txt`, …
-# so multi-part dates (~1GB/file at SF=20000 when Spark splits a partition)
-# don't collide. Glob matches the numbered form only.
+# simulate_filedrops moves per-day part files into the watch dir with
+# renamed targets `{dataset}_{i}.txt` (lowercase dataset stem). Glob matches
+# that pattern only.
 file_names = {
-  "account": "Account_[0-9]*.txt",
-  "cashtransaction": "CashTransaction_[0-9]*.txt",
-  "customer": "Customer_[0-9]*.txt",
-  "dailymarket": "DailyMarket_[0-9]*.txt",
-  "holdings": "HoldingHistory_[0-9]*.txt",
-  "trade": "Trade_[0-9]*.txt",
-  "watches": "WatchHistory_[0-9]*.txt"
+  "account": "account_[0-9]*.txt",
+  "cashtransaction": "cashtransaction_[0-9]*.txt",
+  "customer": "customer_[0-9]*.txt",
+  "dailymarket": "dailymarket_[0-9]*.txt",
+  "holdings": "holdinghistory_[0-9]*.txt",
+  "trade": "trade_[0-9]*.txt",
+  "watches": "watchhistory_[0-9]*.txt"
 }
 
 partitions = {

@@ -25,15 +25,17 @@ def stage_to_files(
     *,
     source_view: str,
     date_col: str,
-    filename: str,
+    dataset: str,
     target_dir: str,
     delimiter: str = "|",
 ) -> None:
     """Write ``source_view`` as ``|``-delimited per-date partitioned CSVs.
 
-    Output layout: ``{target_dir}/{base}/_pdate={date}/part-*.csv`` where
-    ``base`` is ``filename`` without extension (e.g. ``"Customer"`` for
-    ``"Customer.txt"``).
+    Output layout: ``{target_dir}/{dataset}/_pdate={date}/part-*.csv``.
+    ``dataset`` is the single source-of-truth string used both for the
+    directory name here AND for the renamed filename in simulate_filedrops
+    (``{dataset}_{i}.txt``). Bronze ingest's ``pathGlobfilter`` matches
+    the same pattern.
 
     Args:
         spark:        active SparkSession
@@ -42,18 +44,13 @@ def stage_to_files(
                       column named ``date_col`` plus the payload columns
                       in their final output order.
         date_col:     Column to partition on (Spark strips it from output).
-        filename:     Original-style filename for the dataset (e.g.
-                      ``"Customer.txt"``). The stem is used as the dataset
-                      subdir name; simulate_filedrops reuses the full
-                      filename pattern when renaming part files at move
-                      time so the bronze ``{Dataset}_[0-9]*.txt`` glob
-                      matches.
-        target_dir:   Final target directory. Per-dataset output lands at
-                      ``{target_dir}/{base}/_pdate={date}/part-*.csv``.
+        dataset:      Lowercase dataset name (e.g. ``"dailymarket"``,
+                      ``"holdinghistory"``). Used as the staging subdir
+                      and as the renamed file stem at filedrop time.
+        target_dir:   Final target directory.
         delimiter:    Field delimiter (default ``"|"``).
     """
-    base, _ext = os.path.splitext(filename)
-    dataset_dir = f"{target_dir.rstrip('/')}/{base}"
+    dataset_dir = f"{target_dir.rstrip('/')}/{dataset}"
     print(f"[stage_to_files] {source_view} → {dataset_dir}")
 
     # Repartition by date_col before the partitioned-CSV write. partitionBy

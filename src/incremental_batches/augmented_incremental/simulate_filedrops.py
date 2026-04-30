@@ -19,19 +19,16 @@ wh_db           = dbutils.widgets.get("wh_db")
 batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
 staging_dir     = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
 
-# 7 stage_files notebooks each wrote {staging_dir}/{Dataset}/_pdate={date}/part-*.csv.
+# 7 stage_files notebooks each wrote {staging_dir}/{dataset}/_pdate={date}/part-*.csv.
 # We move (not copy) the per-dataset part files for THIS day directly into
 # the auto-loader watch dir, with renamed targets matching the bronze
-# pathGlobfilter `{Dataset}_[0-9]*.txt`. Sparse datasets (e.g. Customer)
-# may have no _pdate= dir for a given date — that's expected, just skip.
+# pathGlobfilter `{dataset}_[0-9]*.txt`. The dataset string is the single
+# source of truth — same value for the source subdir AND the renamed
+# filename stem. Sparse datasets (e.g. customer) may have no _pdate= dir
+# for a given date — that's expected, just skip.
 DATASETS = [
-    ("Customer",        "Customer.txt"),
-    ("Account",         "Account.txt"),
-    ("Trade",           "Trade.txt"),
-    ("CashTransaction", "CashTransaction.txt"),
-    ("HoldingHistory",  "HoldingHistory.txt"),
-    ("DailyMarket",     "DailyMarket.txt"),
-    ("WatchHistory",    "WatchHistory.txt"),
+    "customer", "account", "trade", "cashtransaction",
+    "holdinghistory", "dailymarket", "watchhistory",
 ]
 
 # COMMAND ----------
@@ -50,21 +47,20 @@ dbutils.fs.mkdirs(f"{batches_dir}/{batch_date}")
 
 # COMMAND ----------
 
-def collect_one(dataset_name, target_filename):
-    src_dir = f"{staging_dir}/{dataset_name}/_pdate={batch_date}"
-    base, ext = os.path.splitext(target_filename)
+def collect_one(dataset):
+    src_dir = f"{staging_dir}/{dataset}/_pdate={batch_date}"
     try:
         entries = dbutils.fs.ls(src_dir)
     except Exception:
         return []
     parts = sorted((e for e in entries if e.name.startswith("part-")),
                    key=lambda e: e.name)
-    return [(p.path, f"{batches_dir}/{batch_date}/{base}_{i}{ext}")
+    return [(p.path, f"{batches_dir}/{batch_date}/{dataset}_{i}.txt")
             for i, p in enumerate(parts, start=1)]
 
 move_pairs = []
-for ds, fn in DATASETS:
-    move_pairs.extend(collect_one(ds, fn))
+for ds in DATASETS:
+    move_pairs.extend(collect_one(ds))
 
 print(f"Moving {len(move_pairs)} files for {batch_date}")
 

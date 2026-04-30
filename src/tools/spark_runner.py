@@ -148,9 +148,9 @@ def run(
             # successful completion — use that as the "this dataset finished"
             # signal (faster + more authoritative than counting _pdate= subdirs,
             # which varies by dataset because Customer is sparse).
-            _expected_datasets = ("Account", "CashTransaction", "Customer",
-                                   "DailyMarket", "HoldingHistory", "Trade",
-                                   "WatchHistory")
+            _expected_datasets = ("account", "cashtransaction", "customer",
+                                   "dailymarket", "holdinghistory", "trade",
+                                   "watchhistory")
             def _ds_ok(ds):
                 try:
                     return any(e.name == "_SUCCESS"
