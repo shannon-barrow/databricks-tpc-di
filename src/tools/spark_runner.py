@@ -124,6 +124,7 @@ def run(
             "taxrate", "dimdate", "dimtime", "industry", "tradetype",
             "statustype", "dimbroker", "dimcompany", "dimsecurity",
             "financial", "companyyeareps", "currentaccountbalances",
+            "cashtransactionhistorical",
             "dimcustomer", "dimaccount", "dimtrade", "factwatches",
             "factholdings", "factcashbalances", "batchdate",
         }

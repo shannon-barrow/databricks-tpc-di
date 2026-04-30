@@ -121,6 +121,7 @@ def build_pipeline(
             "scale_factor":    str(scale_factor),
             "tpcdi_directory": tpcdi_directory,
             "wh_db":           wh_db,
+            "catalog":         catalog,
         },
     }
 

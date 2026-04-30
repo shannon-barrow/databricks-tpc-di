@@ -7,6 +7,32 @@
 -- COMMAND ----------
 
 USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
+-- Persist the pre-2015-07-06 cash transaction events as their own staging
+-- table. The SDP pipeline's bronzecashtransaction backfill reads from this
+-- so its `sum() over (partition by accountid order by ct_date)` running
+-- balance starts from the correct historical baseline post-2015-07-06.
+-- The temp Delta tpcdi_raw_data.cashtransaction{sf} gets dropped by
+-- cleanup_stage0, so this is the persistent copy that survives.
+CREATE OR REPLACE TABLE cashtransactionhistorical (
+  cdc_flag STRING,
+  cdc_dsn BIGINT,
+  accountid BIGINT,
+  ct_dts TIMESTAMP,
+  ct_amt DOUBLE,
+  ct_name STRING,
+  event_dt DATE
+)
+PARTITIONED BY (event_dt)
+TBLPROPERTIES (
+  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.optimizeWrite' = 'true'
+);
+INSERT OVERWRITE cashtransactionhistorical
+SELECT cdc_flag, cdc_dsn, accountid, ct_dts, ct_amt, ct_name,
+       to_date(ct_dts) AS event_dt
+FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+WHERE stg_target = 'tables';
+
 CREATE TABLE IF NOT EXISTS factcashbalances (
   sk_customerid BIGINT NOT NULL COMMENT 'Surrogate key for CustomerID',
   sk_accountid BIGINT NOT NULL COMMENT 'Surrogate key for AccountID',
