@@ -398,40 +398,49 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         f"(INACT={n_inact} CLOSE={n_close} UPDCUST={n_updcust} "
         f"UPDACCT={n_updacct} ADDACCT={n_addacct})", "DEBUG")
 
-    # Convert to Spark via Arrow-backed pandas path (vastly faster than createDataFrame on a list of Python tuples). Single unified DF means a single join against all_df instead of five chained joins.
-    log("[CustomerMgmt] building pandas DataFrame from numpy buffers", "DEBUG")
-    _sched_pdf = _pd.DataFrame({
+    # Persist the schedule numpy buffers directly to Parquet on the volume
+    # via pyarrow on the driver, then re-read as a Spark DataFrame.
+    #
+    # We deliberately avoid `spark.createDataFrame(pandas_df)` here because
+    # on Spark Connect serverless that path embeds the entire pandas
+    # payload in the LogicalPlan as a LocalRelation literal — the subsequent
+    # write task's serialized plan then carries the full data set. At
+    # SF=20000 the schedule is ~70M rows × 32 B ≈ 2.2 GB, blowing past
+    # spark.rpc.message.maxSize (256 MB, NOT settable on serverless) with
+    # `Serialized task ... was 494762139 bytes`. Coalesce / repartition
+    # can't fix it because the data is in the plan, not in input
+    # partitions. Writing the parquet directly via pyarrow → spark.read
+    # makes the data flow through the volume's FUSE mount instead of the
+    # Spark Connect control plane.
+    import pyarrow as _pa
+    import pyarrow.parquet as _pq
+    log("[CustomerMgmt] building Arrow Table from numpy buffers", "DEBUG")
+    _sched_action_str = _np.array(["INACT", "CLOSEACCT", "UPDCUST",
+                                    "UPDACCT", "ADDACCT"])[sched_action]
+    _sched_table = _pa.table({
         "_sched_update": sched_update,
-        "_sched_action_code": sched_action.astype(_np.int32),
+        "_sched_action": _sched_action_str,
         "_sched_pos": sched_pos,
         "_sched_id": sched_id,
     })
-    del sched_update, sched_action, sched_pos, sched_id
+    del sched_update, sched_action, sched_pos, sched_id, _sched_action_str
 
-    log("[CustomerMgmt] Arrow-converting pandas → Spark DataFrame", "DEBUG")
-    # Arrow is on by default on serverless; conf is on the user-settable allowlist for classic. safe_conf_set is a no-op if the runtime rejects it.
-    from .utils import safe_conf_set
-    safe_conf_set(spark, "spark.sql.execution.arrow.pyspark.enabled", "true")
-    schedule_df = spark.createDataFrame(_sched_pdf)
-    del _sched_pdf
-
-    # Collapse Arrow batch partitions into a small number of writers. With Arrow enabled, createDataFrame(pandas) produces one partition per arrow.maxRecordsPerBatch (default 10K rows) — ~6944 partitions at SF=20000. Without this, Photon's writer auto-rotates files at ~217K rows (per-file byte budget), producing 320+ tiny files written serially by one task — ~7 min wall-clock for a 584 MB output. coalesce (not repartition) because we only need to reduce fan-out; a shuffle would be wasted work.
-    _sched_target_parts = max(8, cfg.sf // 2500)
-    schedule_df = schedule_df.coalesce(_sched_target_parts)
-
-    # Map action_code → ActionType string so the join key matches all_df.
-    schedule_df = schedule_df.withColumn("_sched_action",
-        F.when(F.col("_sched_action_code") == ACT_INACT,   F.lit("INACT"))
-         .when(F.col("_sched_action_code") == ACT_CLOSE,   F.lit("CLOSEACCT"))
-         .when(F.col("_sched_action_code") == ACT_UPDCUST, F.lit("UPDCUST"))
-         .when(F.col("_sched_action_code") == ACT_UPDACCT, F.lit("UPDACCT"))
-         .otherwise(F.lit("ADDACCT"))
-    ).drop("_sched_action_code")
-
-    log("[CustomerMgmt] staging schedule DF to Parquet", "DEBUG")
-    schedule_df, _sched_cleanup = disk_cache(
-        schedule_df, spark, "CustomerMgmt schedules",
-        volume_path=cfg.volume_path, dbutils=dbutils)
+    _STAGING_COUNTER_LOCAL = 99  # outside the disk_cache counter range
+    _sched_path = (f"{cfg.volume_path}/_staging/"
+                   f"{_STAGING_COUNTER_LOCAL:03d}_customermgmt_schedules.parquet")
+    _sched_path_fuse = _sched_path[5:] if _sched_path.startswith("dbfs:") else _sched_path
+    log(f"[CustomerMgmt] writing schedule Parquet directly to {_sched_path_fuse}", "DEBUG")
+    import os as _os
+    _os.makedirs(_os.path.dirname(_sched_path_fuse), exist_ok=True)
+    # Cap each row group / output file size so the read-back fans out
+    # across reasonable partition count. ~5M rows per file at SF=20000
+    # gives ~14 files = 14 input splits.
+    _pq.write_table(_sched_table, _sched_path_fuse,
+                    row_group_size=5_000_000)
+    del _sched_table
+    schedule_df = spark.read.parquet(_sched_path)
+    _sched_cleanup = {"kind": "parquet", "path": _sched_path,
+                      "dbutils": dbutils, "label": "CustomerMgmt schedules"}
     log("[CustomerMgmt] schedule staged", "DEBUG")
 
     # === Assign C_ID ===

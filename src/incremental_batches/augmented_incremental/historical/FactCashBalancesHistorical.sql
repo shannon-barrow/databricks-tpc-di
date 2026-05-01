@@ -27,8 +27,11 @@ TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
 );
+-- Spark gen omits cdc_flag from the cashtransaction Delta (it's always
+-- 'I' for CashTransaction); stage_files/CashTransaction.py synthesizes
+-- it at file-write time. Mirror that here.
 INSERT OVERWRITE cashtransactionhistorical
-SELECT cdc_flag, cdc_dsn, accountid, ct_dts, ct_amt, ct_name,
+SELECT 'I' AS cdc_flag, cdc_dsn, accountid, ct_dts, ct_amt, ct_name,
        to_date(ct_dts) AS event_dt
 FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
 WHERE stg_target = 'tables';
