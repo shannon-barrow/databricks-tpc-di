@@ -381,9 +381,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         stage_files_keys.append(key)
 
     # ---------------- Cleanup: drop the 7 temp Delta tables ----------------
-    # Depends on every leaf in both branches. ALL_DONE so partial-failure
-    # runs still get the cleanup. Not gated by delete_tables_when_finished
-    # because the temp Delta tables are unconditionally temporary.
+    # Depends on every leaf in both branches. ALL_SUCCESS (not ALL_DONE) so
+    # any failed task can be repair-run from the same source data — the
+    # temp Delta tables stay around until everything has succeeded. Not
+    # gated by delete_tables_when_finished because the temp Delta tables
+    # are unconditionally temporary once we're past this point.
     cleanup_deps = stage_files_keys + [
         "DimAccountHistorical", "DimTradeHistorical",
         "FactCashBalancesHistorical", "FactHoldingsHistorical",
@@ -393,7 +395,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="cleanup_stage0",
         notebook_path=f"{repo_src_path}/tools/augmented_staging/cleanup_stage0",
         depends_on=cleanup_deps,
-        run_if="ALL_DONE",
+        run_if="ALL_SUCCESS",
     ))
 
     # No cleanup-on-failure task needed — the early-exit check uses
