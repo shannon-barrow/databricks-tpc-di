@@ -963,6 +963,11 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(wrap_xml, enumerate(part_files)))
 
+    try:
+        dbutils.fs.rm(tmp_path, recurse=True)
+    except Exception as e:
+        log(f"[CustomerMgmt] tmp staging cleanup skipped: {type(e).__name__}: {e}")
+
     total_new = hist_size + update_last_id * new_custs
     total_caids = hist_size + update_last_id * new_accts
     n_parts = len(part_files)
