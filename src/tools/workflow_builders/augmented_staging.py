@@ -1,10 +1,17 @@
 """Builder for the augmented_incremental data-gen workflow.
 
-Multi-task DAG: stage 0 (spark gen → temp Delta) → stage 1 (build the
-shared staging schema `tpcdi_incremental_staging_{sf}` + per-dataset
-partitioned-CSV trees under `_staging/sf={sf}/{Dataset}/_pdate=…/`) →
-cleanup_stage0 (drop the temp Delta tables + remove spark-gen leftovers
-under that path: Batch1/2/3, inner _staging).
+Multi-task DAG: stage 0 (per-dataset gen DAG → temp Delta in
+`tpcdi_raw_data`) → stage 1 (build the shared staging schema
+`tpcdi_incremental_staging_{sf}` + per-dataset partitioned-CSV trees
+under `_staging/sf={sf}/{Dataset}/_pdate=…/`) → cleanup_stage0 (drop the
+temp Delta tables + remove spark-gen leftovers under that path:
+Batch1/2/3, inner _staging).
+
+Stage 0 is itself a 9-task sub-DAG (init_intermediates → 7 parallel
+gen_* tasks → cleanup_intermediates) so a failed dataset can be
+repair-run without regenerating the rest. Cross-task intermediates
+(_gen_brokers, _gen_symbols, _gen_customer_dates) live in
+`tpcdi_incremental_staging_{sf}_stage` with no-stats TBLPROPERTIES.
 
 Stage 1 splits into two parallel branches that both depend only on
 data_gen completing:
@@ -152,23 +159,89 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
 
     tasks: list[dict] = []
 
-    # ---------------- Stage 0: data_gen ----------------
-    # Spark gen also creates the tpcdi_incremental_staging_{sf} + _stage schemas inline (replaces the old dw_init notebook task). Sets dbutils.jobs.taskValues `staging_complete` (string "true"/"false") which gates the condition_task below.
+    # ---------------- Stage 0: data_gen DAG ----------------
+    # Decomposed from the old single `data_gen` notebook task into 9 tasks:
+    # init → 7 gen_* in parallel waves → cleanup_intermediates. Each gen_*
+    # self-skips when its output Delta is intact (regenerate_data=NO),
+    # giving repair-run granularity (a failed dataset can be re-run without
+    # regenerating the rest).
+    #
+    # Cross-task intermediates (`_gen_brokers`, `_gen_symbols`,
+    # `_gen_customer_dates`) live as Delta tables in
+    # `{catalog}.tpcdi_incremental_staging_{sf}_stage` (same `_stage` schema
+    # convention dw_init.sql uses for benchmark interim tables) with no-stats
+    # / no-auto-optimize TBLPROPERTIES — they're transient.
+    #
+    # cleanup_intermediates runs ALL_SUCCESS so failed runs leave the temp
+    # tables for the next attempt's repair-run to consume.
+    _dgt_path = f"{repo_src_path}/tools/data_gen_tasks"
+    _dgt_params = {**_wh_param, "tpcdi_directory": _tpcdi_dir_dynamic,
+                   "augmented_incremental": "true"}
+
     tasks.append(_make_task(
-        task_key="data_gen",
-        notebook_path=f"{repo_src_path}/tools/data_gen",
+        task_key="init_intermediates",
+        notebook_path=f"{_dgt_path}/init_intermediates",
+        base_params=_wh_param,
+    ))
+    # Wave 1 — no upstream gen dependencies.
+    for _name in ("gen_reference", "gen_hr", "gen_finwire"):
+        tasks.append(_make_task(
+            task_key=_name,
+            notebook_path=f"{_dgt_path}/{_name}",
+            depends_on=["init_intermediates"],
+            base_params=_dgt_params,
+        ))
+    # Wave 2 — depends on a wave-1 producer.
+    tasks.append(_make_task(
+        task_key="gen_customer",
+        notebook_path=f"{_dgt_path}/gen_customer",
+        depends_on=["gen_hr"],
+        base_params=_dgt_params,
+    ))
+    tasks.append(_make_task(
+        task_key="gen_daily_market",
+        notebook_path=f"{_dgt_path}/gen_daily_market",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
+    ))
+    tasks.append(_make_task(
+        task_key="gen_trade",
+        notebook_path=f"{_dgt_path}/gen_trade",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
+    ))
+    # Wave 3 — depends on both finwire and customer.
+    tasks.append(_make_task(
+        task_key="gen_watch_history",
+        notebook_path=f"{_dgt_path}/gen_watch_history",
+        depends_on=["gen_finwire", "gen_customer"],
+        base_params=_dgt_params,
+    ))
+    _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_customer",
+                 "gen_daily_market", "gen_trade", "gen_watch_history"]
+    tasks.append(_make_task(
+        task_key="cleanup_intermediates",
+        notebook_path=f"{_dgt_path}/cleanup_intermediates",
+        depends_on=_gen_keys,
+        run_if="ALL_SUCCESS",
+        base_params=_wh_param,
     ))
 
     # ---------------- Early-exit gate ----------------
-    # condition_task evaluates the staging_complete task value spark_runner sets. When staging is intact (all 19 staging tables present + all 730 per-day file dirs present), staging_complete="true" and this condition is FALSE → outcome="false" → downstream stage_tables / stage_files tasks all skip cleanly. When something's missing, staging_complete="false" and condition is TRUE → outcome="true" → downstream runs normally. cleanup_stage0 still fires either way (run_if=ALL_DONE) but DROP IF EXISTS is a no-op when nothing was created.
+    # Inherits the staging_check condition_task pattern from the old
+    # single-task model. Now depends on cleanup_intermediates instead of
+    # data_gen. Always emits outcome="true" so downstream stage_tables /
+    # stage_files run after the gen DAG green-lights — per-task self-skip
+    # in each gen task already gives the granular short-circuit; this gate
+    # just transmits "all gens succeeded" to the rest of the workflow.
     tasks.append({
         "task_key": "staging_check",
-        "depends_on": [{"task_key": "data_gen"}],
+        "depends_on": [{"task_key": "cleanup_intermediates"}],
         "run_if": "ALL_SUCCESS",
         "condition_task": {
             "op": "EQUAL_TO",
-            "left": "{{tasks.data_gen.values.staging_complete}}",
-            "right": "false",
+            "left": "true",
+            "right": "true",
         },
         "timeout_seconds": 0,
         "email_notifications": {},
