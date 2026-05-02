@@ -155,11 +155,11 @@ def _gen_daily_market(spark, cfg, dbutils):
             .withColumn("stg_target", F.lit("files")))
         write_delta(dm_p, cfg=cfg, dataset="dailymarket",
                     partition_cols=["stg_target"])
-    else:
-        write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
     # Analytical estimate: sec_total × dm_days × 0.95 (0.95 accounts for symbols deactivated mid-window on average). Exact count only computed when we need it for dynamic audit regeneration at an unknown SF.
     dm_count_est = int(cfg.sec_total * cfg.dm_days * 0.95)
+    if not cfg.augmented_incremental:
+        write_file(dm_df, f"{cfg.batch_path(1)}/DailyMarket.txt", "|", dbutils,
+                   scale_factor=cfg.sf)
     counts = {("DailyMarket", 1): dm_count_est}
     log(f"[DailyMarket] ~{dm_count_est:,} historical ({cfg.dm_days} days × {cfg.sec_total} syms, minus deactivations)")
     if not static_audits_available(cfg):

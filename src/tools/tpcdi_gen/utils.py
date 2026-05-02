@@ -679,30 +679,70 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
 
 
 
+_TARGET_FILE_BYTES = 128 * 1024 * 1024  # ~128 MB per output file
+_BYTES_PER_ROW = {
+    "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
+    "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
+    "HR": 80, "Prospect": 196,
+}
+
+# Files-per-scale-factor for the Batch1 (historical) write of each dataset,
+# calibrated so each output part is ~128 MB at the given SF. Derived from
+# observed B1 byte sizes at SF=10 scaled linearly:
+#
+#   B1 size at SF=10 (MB) × (SF / 10) / 128 MB ≈ files
+#
+# B2/B3 (incremental window) are always 1 file — the per-day slice is
+# tiny relative to historical.
+_B1_FILES_PER_SF = {
+    "Trade":           0.111,  # 142 MB @ SF=10  → 2220 @ SF=20k
+    "TradeHistory":    0.082,  # 105 MB           → 1640
+    "CashTransaction": 0.085,  # 109 MB           → 1700
+    "HoldingHistory":  0.0195, #  25 MB           →  390
+    "DailyMarket":     0.245,  # 313 MB           → 4900
+    "WatchHistory":    0.107,  # 137 MB           → 2140
+    "HR":              0.0032, #   4 MB           →   64
+    "Prospect":        0.008,  #  10 MB / batch   →  165 / batch
+}
+
+
+def _target_file_count(dataset: str, scale_factor: int, path: str) -> int:
+    """How many evenly-sized output files this write should produce.
+
+    Returns 1 for incremental (B2/B3) batches — their per-day slice is
+    tiny enough that one file is correct. Returns the SF-scaled count for
+    Batch1 historical writes. Returns 1 as a safe fallback for unknown
+    datasets.
+    """
+    is_b1 = "/Batch1/" in path
+    if not is_b1:
+        return 1
+    ratio = _B1_FILES_PER_SF.get(dataset, 0)
+    if ratio <= 0 or scale_factor <= 0:
+        return 1
+    return max(1, int(round(ratio * scale_factor)))
+
+
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
                dbutils=None, scale_factor: int = 0):
     """Write a DataFrame to a staging directory and register final outputs.
 
-    Spark writes part files capped at ~128MB via ``maxRecordsPerFile``, then
-    ``register_copies_from_staging`` produces final numbered files using the
-    hybrid strategy:
+    Repartitions the DataFrame to a target file count derived from a per-
+    dataset ratio (``_B1_FILES_PER_SF``) and the scale factor. Each output
+    partition writes one part file at ~128 MB, eliminating the under-
+    partitioned tail (small parts → driver-side bin-pack in
+    ``register_copies_from_staging``). Every part then flows through the
+    parallel server-side ``dbutils.fs.cp`` code path.
 
-    - Parts ≥ 50MB are queued for deferred parallel ``dbutils.fs.cp`` (server-
-      side copy, no driver bandwidth).
-    - Parts < 50MB are bin-packed into ≤128MB groups and merged with
-      ``xargs cat`` on the driver FUSE mount.
-
-    Small datasets (most incrementals) trivially pack into a single bin, producing
-    one ``_1`` file. Large datasets (Batch1, DailyMarket) flow mostly through the
-    parallel-cp path with only tail partitions packed. CustomerMgmt XML and audit
-    files use their own writers and don't go through this path.
+    Incremental (Batch2/3) writes always coalesce to 1 file — the per-day
+    slice is small.
 
     Args:
         df: DataFrame to write.
-        path: Final output file path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
-        delimiter: Field delimiter for the CSV output. Defaults to ``|`` per TPC-DI spec.
+        path: Final output file path (e.g., ``/Volumes/.../Batch1/Trade.txt``).
+        delimiter: Field delimiter (default ``|`` per TPC-DI spec).
         dbutils: Databricks dbutils object for filesystem operations.
-        scale_factor: TPC-DI scale factor.
+        scale_factor: TPC-DI scale factor — drives the B1 file count.
 
     Returns:
         List of final target file paths.
@@ -710,15 +750,14 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
-    _BYTES_PER_ROW = {
-        "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
-        "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
-        "HR": 80, "Prospect": 196,
-    }
     filename = os.path.basename(path)
     dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
-    row_bytes = _BYTES_PER_ROW.get(dataset, 0)
-    max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
+
+    target_files = _target_file_count(dataset, scale_factor, path)
+    if target_files == 1:
+        df = df.coalesce(1)
+    else:
+        df = df.repartition(target_files)
 
     writer = (df
         .write
@@ -729,8 +768,6 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
         .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
-    if max_records > 0:
-        writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
     targets, _next = register_copies_from_staging(staging_dir, path, dbutils)
