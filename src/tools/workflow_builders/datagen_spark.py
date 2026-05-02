@@ -1,8 +1,30 @@
 """Builder for the Spark distributed data-generation workflow.
 
-By default runs as a single serverless notebook task. If the user picks
-non-serverless on the Driver, builds a classic Photon cluster sized by
-scale_factor:
+Multi-task DAG (mirrors the augmented_staging Stage-0 layout but writes
+files instead of Delta):
+
+  init_intermediates
+    ├── gen_reference / gen_hr / gen_finwire / gen_prospect   (wave 1)
+    │   ├── copy_hr / copy_finwire (parallel with downstream gens)
+    │   └── gen_customer (← gen_hr)
+    │       └── copy_customer
+    │   └── gen_daily_market / gen_trade (← gen_finwire)
+    │       └── copy_daily_market / copy_trade
+    │   └── copy_prospect (← gen_prospect)
+    └── gen_watch_history (← gen_finwire + gen_customer)
+        └── copy_watch_history
+  audit_emit (ALL_SUCCESS — aggregates record_counts task values from all gens)
+  cleanup_intermediates (ALL_SUCCESS — drops _gen_* + _dc_* in {wh_db}_{sf}_stage)
+
+Each gen_* task self-skips when its output is intact and
+``regenerate_data=NO``, so a re-trigger only redoes the missing
+datasets. copy_* tasks are decoupled from their gen so they run in
+parallel with downstream generation (avoiding the single-task daemon-
+thread race when large parts cross the 50 MB threshold).
+
+By default runs on serverless. If the user picks non-serverless on the
+Driver, builds a classic Photon cluster sized by scale_factor and pins
+every task to it (single shared cluster for the whole DAG):
 
   scale_factor   shape
   ------------   --------------------------------------------------
@@ -108,6 +130,36 @@ def _cloud_attrs(cloud_provider: str) -> dict:
     return {}
 
 
+_DEFAULT_NOTIF = {
+    "no_alert_for_skipped_runs": False,
+    "no_alert_for_canceled_runs": False,
+    "alert_on_last_attempt": False,
+}
+
+
+def _make_task(*, task_key: str, notebook_path: str,
+               depends_on: list | None = None,
+               base_params: dict | None = None,
+               run_if: str = "ALL_SUCCESS",
+               job_cluster_key: str | None = None) -> dict:
+    notebook_task = {"notebook_path": notebook_path, "source": "WORKSPACE"}
+    if base_params is not None:
+        notebook_task["base_parameters"] = base_params
+    task = {"task_key": task_key}
+    if depends_on:
+        task["depends_on"] = [
+            d if isinstance(d, dict) else {"task_key": d} for d in depends_on
+        ]
+    task["run_if"] = run_if
+    task["notebook_task"] = notebook_task
+    task["timeout_seconds"] = 0
+    task["email_notifications"] = {}
+    task["notification_settings"] = dict(_DEFAULT_NOTIF)
+    if job_cluster_key is not None:
+        task["job_cluster_key"] = job_cluster_key
+    return task
+
+
 def build(*, job_name: str, scale_factor: int, catalog: str,
           regenerate_data: str, log_level: str, repo_src_path: str,
           serverless: str = "YES",
@@ -117,14 +169,18 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           default_dbr_version: str | None = None,
           datagen_choice: str = "spark",
           **_unused) -> dict:
-    """``datagen_choice`` flips the data_gen widget default — ``"spark"`` writes
-    raw files, ``"augmented_incremental"`` writes Delta tables to
-    ``tpcdi_raw_data.{dataset}{sf}`` and skips Batch2/Batch3."""
+    """``datagen_choice`` flips the augmented_incremental widget on each
+    task — ``"spark"`` writes raw files (standard mode);
+    ``"augmented_incremental"`` writes Delta tables to
+    ``tpcdi_raw_data.{dataset}{sf}`` and skips Batch2/Batch3.
+    """
     tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
     is_serverless = (serverless or "YES").upper() == "YES"
+    is_augmented = datagen_choice == "augmented_incremental"
 
     if is_serverless:
         cluster_blurb = "serverless"
+        job_cluster_key = None
     else:
         cluster_spec = _spark_cluster_spec(
             scale_factor, node_types or {}, cloud_provider or "",
@@ -139,17 +195,103 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
                 f"non-serverless: {cluster_spec['driver_node_type_id']} driver + "
                 f"{cluster_spec['num_workers']} × {cluster_spec['node_type_id']} workers"
             )
+        job_cluster_key = f"{job_name}_compute"
 
     description = (
         f"TPC-DI **Spark** data-generation workflow (SF={scale_factor}, "
-        f"{cluster_blurb}). Distributed PySpark generator. Writes raw input "
-        f"files to `{tpcdi_directory}spark_datagen/sf={scale_factor}/`. "
-        f"Outputs are split files like `Customer_1.txt`, `Customer_2.txt`, "
-        f"... (matched by the benchmark via "
-        f"`{{Customer.txt,Customer_[0-9]*.txt}}`-style globs). Set "
-        f"`regenerate_data=YES` to wipe and rebuild; defaults to `NO` "
-        f"(no-op if output already exists)."
+        f"{cluster_blurb}). Distributed PySpark generator decomposed into "
+        f"per-dataset tasks: each gen_* writes its output, copy_* tasks run "
+        f"in parallel with downstream gens, and audit_emit aggregates "
+        f"record_counts task values into `*_audit.csv` files. "
+        f"`regenerate_data=YES` wipes and rebuilds; `NO` skips per-task "
+        f"when output is intact."
     )
+
+    # Common per-task base_params. tpcdi_directory + augmented_incremental
+    # are baked once; wh_db lands on the temp `_stage` schema by default
+    # (cleanup_intermediates drops `_gen_*` and `_dc_*` from there).
+    _base = {
+        "tpcdi_directory": tpcdi_directory,
+        "augmented_incremental": "true" if is_augmented else "false",
+        "wh_db": "tpcdi_incremental_staging",
+    }
+    _wh_only = {"wh_db": _base["wh_db"]}
+    _dgt = f"{repo_src_path}/tools/data_gen_tasks"
+
+    tasks: list[dict] = []
+    tasks.append(_make_task(
+        task_key="init_intermediates",
+        notebook_path=f"{_dgt}/init_intermediates",
+        base_params=_base,
+        job_cluster_key=job_cluster_key,
+    ))
+    # Wave 1 — no upstream gen.
+    for _name in ("gen_reference", "gen_hr", "gen_finwire", "gen_prospect"):
+        tasks.append(_make_task(
+            task_key=_name,
+            notebook_path=f"{_dgt}/{_name}",
+            depends_on=["init_intermediates"],
+            base_params=_base,
+            job_cluster_key=job_cluster_key,
+        ))
+    # Wave 2 — depend on a wave-1 producer.
+    tasks.append(_make_task(
+        task_key="gen_customer", notebook_path=f"{_dgt}/gen_customer",
+        depends_on=["gen_hr"], base_params=_base, job_cluster_key=job_cluster_key,
+    ))
+    tasks.append(_make_task(
+        task_key="gen_daily_market", notebook_path=f"{_dgt}/gen_daily_market",
+        depends_on=["gen_finwire"], base_params=_base, job_cluster_key=job_cluster_key,
+    ))
+    tasks.append(_make_task(
+        task_key="gen_trade", notebook_path=f"{_dgt}/gen_trade",
+        depends_on=["gen_finwire"], base_params=_base, job_cluster_key=job_cluster_key,
+    ))
+    # Wave 3.
+    tasks.append(_make_task(
+        task_key="gen_watch_history", notebook_path=f"{_dgt}/gen_watch_history",
+        depends_on=["gen_finwire", "gen_customer"], base_params=_base,
+        job_cluster_key=job_cluster_key,
+    ))
+
+    # Copy tasks — run in parallel with downstream gens.
+    _copy_specs = [
+        ("copy_hr",            ["gen_hr"]),
+        ("copy_finwire",       ["gen_finwire"]),
+        ("copy_customer",      ["gen_customer"]),
+        ("copy_daily_market",  ["gen_daily_market"]),
+        ("copy_trade",         ["gen_trade"]),
+        ("copy_watch_history", ["gen_watch_history"]),
+        ("copy_prospect",      ["gen_prospect"]),
+    ]
+    _copy_keys: list[str] = []
+    for _name, _deps in _copy_specs:
+        tasks.append(_make_task(
+            task_key=_name, notebook_path=f"{_dgt}/{_name}",
+            depends_on=_deps, base_params=_base, job_cluster_key=job_cluster_key,
+        ))
+        _copy_keys.append(_name)
+
+    _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_prospect",
+                 "gen_customer", "gen_daily_market", "gen_trade",
+                 "gen_watch_history"]
+
+    # audit_emit: aggregates record_counts task values from all gens.
+    tasks.append(_make_task(
+        task_key="audit_emit", notebook_path=f"{_dgt}/audit_emit",
+        depends_on=_gen_keys, run_if="ALL_SUCCESS",
+        base_params=_base, job_cluster_key=job_cluster_key,
+    ))
+
+    # cleanup_intermediates: depends on every gen + copy + audit_emit so
+    # disk_cache temps are still readable up to that point.
+    tasks.append(_make_task(
+        task_key="cleanup_intermediates",
+        notebook_path=f"{_dgt}/cleanup_intermediates",
+        depends_on=_gen_keys + _copy_keys + ["audit_emit"],
+        run_if="ALL_SUCCESS",
+        base_params=_wh_only, job_cluster_key=job_cluster_key,
+    ))
 
     payload = {
         "name": job_name,
@@ -166,31 +308,15 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             {"name": "regenerate_data", "default": regenerate_data},
             {"name": "log_level", "default": log_level},
         ],
-        "tasks": [{
-            "task_key": "generate_data",
-            "run_if": "ALL_SUCCESS",
-            "notebook_task": {
-                "notebook_path": f"{repo_src_path}/tools/data_gen",
-                "source": "WORKSPACE",
-            },
-            "timeout_seconds": 0,
-            "email_notifications": {},
-            "notification_settings": {
-                "no_alert_for_skipped_runs": False,
-                "no_alert_for_canceled_runs": False,
-                "alert_on_last_attempt": False,
-            },
-        }],
+        "tasks": tasks,
         "queue": {"enabled": True},
     }
 
     if is_serverless:
         payload["performance_target"] = "PERFORMANCE_OPTIMIZED"
     else:
-        # Pin the task to the classic cluster.
-        payload["tasks"][0]["job_cluster_key"] = f"{job_name}_compute"
         payload["job_clusters"] = [{
-            "job_cluster_key": f"{job_name}_compute",
+            "job_cluster_key": job_cluster_key,
             "new_cluster": cluster_spec,
         }]
 

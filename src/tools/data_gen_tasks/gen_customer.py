@@ -72,8 +72,16 @@ read_intermediate_view(spark, catalog=catalog, wh_db=wh_db,
 print(f"[gen_customer] re-registered _brokers from staging schema")
 
 from tpcdi_gen import customer
-result = customer.generate(spark, cfg, ctx["dicts"], dbutils,
-                           views_ready_event=threading.Event())
+import tpcdi_gen.utils as _u
+# Standard-mode write_file calls inside customer.generate get deferred
+# to copy_customer / copy_account. No-op in augmented mode (writes go
+# through write_delta, not write_file).
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = customer.generate(spark, cfg, ctx["dicts"], dbutils,
+                               views_ready_event=threading.Event())
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 # Persist `_customer_dates` for gen_watch_history. customer.py creates this
 # view at line 831 with columns (cust_id, cust_create_ts, cust_create_update,

@@ -62,7 +62,14 @@ read_intermediate_view(spark, catalog=catalog, wh_db=wh_db,
 print(f"[gen_daily_market] re-registered _symbols from staging schema")
 
 from tpcdi_gen import market_data
-result = market_data.generate(spark, cfg, dbutils)
+import tpcdi_gen.utils as _u
+# Defer file copies to copy_daily_market (standard mode). No-op in
+# augmented mode where outputs go to Delta.
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = market_data.generate(spark, cfg, dbutils)
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 import json as _json
 counts = result if isinstance(result, dict) else {}

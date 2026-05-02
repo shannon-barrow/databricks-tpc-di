@@ -78,7 +78,14 @@ except Exception:
     print(f"[gen_watch_history] _customer_dates not available — using analytical path")
 
 from tpcdi_gen import watch_history
-result = watch_history.generate(spark, cfg, ctx["dicts"], dbutils)
+import tpcdi_gen.utils as _u
+# Defer file copies to copy_watch_history (standard mode). No-op in
+# augmented mode where outputs go to Delta.
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = watch_history.generate(spark, cfg, ctx["dicts"], dbutils)
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 import json as _json
 counts = result if isinstance(result, dict) else {}

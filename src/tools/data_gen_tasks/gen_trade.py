@@ -84,7 +84,15 @@ except Exception:
     print(f"[gen_trade] _brokers not available — using analytical broker count")
 
 from tpcdi_gen import trade
-result = trade.generate(spark, cfg, ctx["dicts"], dbutils)
+import tpcdi_gen.utils as _u
+# Defer file copies to copy_trade (standard mode — Trade.txt /
+# TradeHistory.txt / CashTransaction.txt / HoldingHistory.txt). No-op
+# in augmented mode where outputs go to Delta.
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = trade.generate(spark, cfg, ctx["dicts"], dbutils)
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 import json as _json
 counts = result if isinstance(result, dict) else {}
