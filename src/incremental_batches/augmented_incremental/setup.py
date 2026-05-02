@@ -10,11 +10,13 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10", "100", "1000", "5000", "10
 dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("catalog", "tpcdi")
 dbutils.widgets.text("wh_db", "")
+dbutils.widgets.text("incremental_batches_to_run", "730")
 
 catalog         = dbutils.widgets.get("catalog")
 scale_factor    = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
 wh_db           = dbutils.widgets.get("wh_db")
+n_batches       = max(1, min(730, int(dbutils.widgets.get("incremental_batches_to_run").strip())))
 tgt_db          = f"{wh_db}_{scale_factor}"
 staging_db      = f"tpcdi_incremental_staging_{scale_factor}"
 batches_dir     = f"{tpcdi_directory}augmented_incremental/_dailybatches/{tgt_db}"
@@ -326,6 +328,7 @@ from datetime import date, timedelta, datetime
 
 batch_date_ls = []
 start_date    = datetime(2015, 7, 6)
-for dt_interval in range(0, 730):
+for dt_interval in range(0, n_batches):
   batch_date_ls.append((start_date + timedelta(days=dt_interval)).strftime("%Y-%m-%d"))
+print(f"Emitting {len(batch_date_ls)} batch dates ({batch_date_ls[0]} → {batch_date_ls[-1]})")
 dbutils.jobs.taskValues.set(key = "batch_date_ls", value = batch_date_ls)

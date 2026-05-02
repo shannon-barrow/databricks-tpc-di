@@ -245,7 +245,11 @@ def build_parent(
     setup_task = _make_task(
         task_key="setup",
         notebook_path=f"{aug}/DLT/pipelines_setup",
-        base_params=_COMMON_PARAMS,
+        base_params={
+            **_COMMON_PARAMS,
+            "incremental_batches_to_run":
+                "{{job.parameters.incremental_batches_to_run}}",
+        },
         existing_cluster_id=setup_cluster_id,
     )
 
@@ -354,6 +358,7 @@ def build_parent(
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
             {"name": "delete_tables_when_finished", "default": "FALSE"},
+            {"name": "incremental_batches_to_run", "default": "730"},
         ],
         "tasks": [setup_task, set_historical, run_historical, set_incremental,
                   loop_task, gate_task, cleanup_task],
