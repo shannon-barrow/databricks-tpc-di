@@ -2,21 +2,22 @@
 
 Two implementations are supported, selected by the ``data_generator`` arg:
 
-- ``"spark"`` (default): the distributed PySpark generator
-  (`tools/spark_runner`) invoked from the unified `tools/data_gen` notebook.
-  Runs on serverless. Outputs are split files like ``Customer_1.txt``,
+- ``"spark"`` (default): the distributed PySpark generator runs as a
+  multi-task DAG (`tools/data_gen_tasks/data_gen` entry → per-dataset
+  gen_* / copy_* tasks → audit_emit → cleanup_intermediates) on
+  serverless. Outputs are split files like ``Customer_1.txt``,
   ``Customer_2.txt``, etc.
 - ``"digen"``: the legacy single-threaded ``DIGen.jar`` utility wrapped by
-  `tools/digen_runner` (also invoked from `tools/data_gen`). Forced
-  non-serverless DBR 15.4 + Photon cluster, with worker count scaling by
-  scale_factor. Outputs are single files named ``Customer.txt``, etc.
+  `tools/digen_runner`, run inline from a single
+  `tools/data_gen_tasks/data_gen` task. Forced non-serverless DBR 15.4 +
+  Photon cluster, with worker count scaling by scale_factor. Outputs are
+  single files named ``Customer.txt``, etc.
 
-Both jobs share a single notebook (`tools/data_gen`) that dispatches to
-the right runner via direct Python import — no `dbutils.notebook.run`
-indirection, no risk of a new cluster on serverless. The
-`data_gen_type` job parameter (default ``"spark"`` or ``"native"``
-depending on which builder created the job) selects the implementation
-and is overridable per run.
+Both workflows share the same entry-point notebook
+(`tools/data_gen_tasks/data_gen`) which branches on ``data_gen_type``.
+For DIGen mode it imports `digen_runner` and runs the JAR inline; for
+spark/augmented_incremental mode it does first-task init work and lets
+the downstream per-dataset gen tasks generate the data.
 """
 from typing import Callable, Optional
 

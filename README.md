@@ -122,8 +122,9 @@ The SDP variant uses a library-swap trick (`update_pipeline_notebook`) to bulk-l
 src/
   TPC-DI Driver.py                            entry-point notebook
   tools/
-    data_gen.py                               unified datagen notebook (spark + digen)
-    spark_runner.py / digen_runner.py         per-generator runners
+    data_gen_tasks/data_gen.py                unified entry: digen inline; spark/augmented init+downstream gens
+    data_gen_tasks/{gen,copy}_*.py            per-dataset task notebooks
+    digen_runner.py                           DIGen.jar wrapper (inline-imported in native mode)
     setup_context.py                          tpcdi_config bootstrap
     workflow_builders/                        Python builders, no Jinja
       datagen_{spark,digen}.py

@@ -398,7 +398,7 @@ def test_augmented_staging_dag():
     )
     keys = {t["task_key"] for t in out["tasks"]}
     expected_gen_keys = {
-        "init_intermediates",
+        "data_gen",
         "gen_reference", "gen_hr", "gen_finwire", "gen_customer",
         "gen_daily_market", "gen_trade", "gen_watch_history",
         "cleanup_intermediates",
@@ -406,9 +406,11 @@ def test_augmented_staging_dag():
     missing = expected_gen_keys - keys
     assert not missing, f"missing tasks in augmented_staging DAG: {missing}"
     _ok(f"all 9 data_gen tasks present ({len(expected_gen_keys)})")
-    # Old single `data_gen` task should be gone.
-    assert "data_gen" not in keys, "old single `data_gen` task still present"
-    _ok("old single data_gen task removed")
+    # data_gen is the unified entry — verify it's wired as the root.
+    by_key0 = {t["task_key"]: t for t in out["tasks"]}
+    assert "depends_on" not in by_key0["data_gen"] or not by_key0["data_gen"].get("depends_on"), \
+        "data_gen should be the root task with no upstream deps"
+    _ok("data_gen is the root entry task")
     # cleanup_intermediates depends on every gen.
     by_key = {t["task_key"]: t for t in out["tasks"]}
     cleanup_deps = {d["task_key"] for d in by_key["cleanup_intermediates"]["depends_on"]}

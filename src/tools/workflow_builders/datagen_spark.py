@@ -3,7 +3,7 @@
 Multi-task DAG (mirrors the augmented_staging Stage-0 layout but writes
 files instead of Delta):
 
-  init_intermediates
+  data_gen (entry: schema+volume init, wipe on regenerate=YES)
     ├── gen_reference / gen_hr / gen_finwire / gen_prospect   (wave 1)
     │   ├── copy_hr / copy_finwire (parallel with downstream gens)
     │   └── gen_customer (← gen_hr)
@@ -220,8 +220,8 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
 
     tasks: list[dict] = []
     tasks.append(_make_task(
-        task_key="init_intermediates",
-        notebook_path=f"{_dgt}/init_intermediates",
+        task_key="data_gen",
+        notebook_path=f"{_dgt}/data_gen",
         base_params=_base,
         job_cluster_key=job_cluster_key,
     ))
@@ -230,7 +230,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         tasks.append(_make_task(
             task_key=_name,
             notebook_path=f"{_dgt}/{_name}",
-            depends_on=["init_intermediates"],
+            depends_on=["data_gen"],
             base_params=_base,
             job_cluster_key=job_cluster_key,
         ))

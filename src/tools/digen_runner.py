@@ -1,6 +1,6 @@
 """Pure-Python runner for the legacy DIGen.jar data generator.
 
-Importable from a Databricks notebook (e.g. `tools/data_gen.py`) to run the
+Importable from a Databricks notebook (e.g. `tools/data_gen_tasks/data_gen.py`) to run the
 full DIGen flow inline — no `dbutils.notebook.run` indirection, no child
 notebook context, no risk of a new cluster on serverless.
 
@@ -235,7 +235,7 @@ def run(
     workspace_src_path: str,
     dbutils: Any,
     spark: Any,
-    **_unused,  # accepts (and ignores) shared kwargs like log_level for signature parity with spark_runner
+    **_unused,  # accepts (and ignores) shared kwargs like log_level for signature parity with the spark/augmented data_gen task
 ) -> None:
     """Run the legacy DIGen.jar data-generation flow.
 

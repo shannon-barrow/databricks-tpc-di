@@ -105,13 +105,14 @@ def bootstrap(*, spark, dbutils, scale_factor, catalog: str, wh_db: str,
       serverless).
     - Builds ``cfg = ScaleConfig(...)``.
     - Loads dictionaries from disk if requested (most gen tasks need them;
-      ``init_intermediates`` and the cleanup task pass ``load_dicts=False``).
+      ``data_gen`` and the cleanup task pass ``load_dicts=False``).
     - Sets ``set_log_level(log_level)``.
 
     Returns a dict with keys: ``cfg``, ``dicts``, ``stage_schema``,
     ``gen_start_time``.
     """
-    # sys.path setup — same logic as spark_runner.py:194-234.
+    # sys.path setup — workspace tools dir takes priority; fall back to a
+    # volume copy if the workspace isn't FUSE-accessible from this task.
     _tools_dir = f"{workspace_src_path}/tools"
     _vol_module_dir = f"{tpcdi_directory}_module"
     _vol_tools_dir = f"{_vol_module_dir}/tools"

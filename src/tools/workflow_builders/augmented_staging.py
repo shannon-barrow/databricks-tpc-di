@@ -7,7 +7,7 @@ under `_staging/sf={sf}/{Dataset}/_pdate=…/`) → cleanup_stage0 (drop the
 temp Delta tables + remove spark-gen leftovers under that path:
 Batch1/2/3, inner _staging).
 
-Stage 0 is itself a 9-task sub-DAG (init_intermediates → 7 parallel
+Stage 0 is itself a 9-task sub-DAG (data_gen → 7 parallel
 gen_* tasks → cleanup_intermediates) so a failed dataset can be
 repair-run without regenerating the rest. Cross-task intermediates
 (_gen_brokers, _gen_symbols, _gen_customer_dates) live in
@@ -18,9 +18,10 @@ data_gen completing:
 
   Branch A — staging tables (Phase 2a):
     - The `tpcdi_incremental_staging_{sf}` + `..._stage` schemas are
-      created inline by spark_runner during stage 0, so this workflow
-      has no separate dw_init task. PO is intentionally NOT enabled on
-      the staging schema (these tables are read-only deliverables).
+      created inline by the data_gen task at the top of stage 0, so this
+      workflow has no separate dw_init task. PO is intentionally NOT
+      enabled on the staging schema (these tables are read-only
+      deliverables).
     - raw_ingestion ingests StatusType / TaxRate / DimDate / DimTime /
       Industry / TradeType / BatchDate from the .txt files spark gen
       writes under {volume}/Batch1/. Reuses single_batch/SQL files
@@ -45,8 +46,8 @@ cleanup_stage0 depends on every leaf in both branches. Runs ALL_DONE
 unconditionally temporary).
 
 Data-gen widget (`data_gen_type`) defaults to
-``augmented_incremental`` so the spark_runner skips Batch2/Batch3 and
-writes Delta tables to ``tpcdi_raw_data.{dataset}{sf}``.
+``augmented_incremental`` so the per-dataset gen tasks skip Batch2/Batch3
+and write Delta tables to ``tpcdi_raw_data.{dataset}{sf}``.
 """
 from __future__ import annotations
 
@@ -156,11 +157,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks: list[dict] = []
 
     # ---------------- Stage 0: data_gen DAG ----------------
-    # Decomposed from the old single `data_gen` notebook task into 9 tasks:
-    # init → 7 gen_* in parallel waves → cleanup_intermediates. Each gen_*
-    # self-skips when its output Delta is intact (regenerate_data=NO),
-    # giving repair-run granularity (a failed dataset can be re-run without
-    # regenerating the rest).
+    # Decomposed into 9 tasks: data_gen (entry: schema+volume init, wipe on
+    # regenerate=YES) → 7 gen_* in parallel waves → cleanup_intermediates.
+    # Each gen_* self-skips when its output Delta is intact
+    # (regenerate_data=NO), giving repair-run granularity (a failed dataset
+    # can be re-run without regenerating the rest).
     #
     # Cross-task intermediates (`_gen_brokers`, `_gen_symbols`,
     # `_gen_customer_dates`) live as Delta tables in
@@ -175,16 +176,16 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
                    "augmented_incremental": "true"}
 
     tasks.append(_make_task(
-        task_key="init_intermediates",
-        notebook_path=f"{_dgt_path}/init_intermediates",
-        base_params=_wh_param,
+        task_key="data_gen",
+        notebook_path=f"{_dgt_path}/data_gen",
+        base_params=_dgt_params,
     ))
     # Wave 1 — no upstream gen dependencies.
     for _name in ("gen_reference", "gen_hr", "gen_finwire"):
         tasks.append(_make_task(
             task_key=_name,
             notebook_path=f"{_dgt_path}/{_name}",
-            depends_on=["init_intermediates"],
+            depends_on=["data_gen"],
             base_params=_dgt_params,
         ))
     # Wave 2 — depends on a wave-1 producer.
@@ -502,8 +503,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # No cleanup-on-failure task needed — the early-exit check uses
     # Spark's `_SUCCESS` marker per dataset dir as the integrity signal.
     # A failed stage_files task leaves no _SUCCESS, so the next run's
-    # check returns staging_complete=false and rebuilds (spark_runner's
-    # init `dbutils.fs.rm(cfg.volume_path)` wipes any partial state).
+    # check returns staging_complete=false and rebuilds (the data_gen
+    # task's init `dbutils.fs.rm(cfg.volume_path)` on regenerate_data=YES
+    # wipes any partial state).
 
     # ---------------- Top-level workflow ----------------
     workflow: dict[str, Any] = {
