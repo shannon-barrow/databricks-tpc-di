@@ -80,12 +80,16 @@ if regenerate_data == "YES":
     except Exception as e:
         print(f"  rm {cfg.volume_path} skipped: {type(e).__name__}: {e}")
 
-    # Cross-task and disk_cache temps.
-    for _t in ("_gen_brokers", "_gen_symbols", "_gen_customer_dates",
-               "_gen_finwire_symbols", "_gen_customermgmt_schedules",
-               "_gen_customermgmt_actions", "_gen_trade_df"):
-        spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{_t}")
-    print(f"[init_intermediates] dropped any prior _gen_* temps in {stage_schema}")
+    # Cross-task `_gen_*` and per-call `_dc_*` temps from any prior run.
+    rows = spark.sql(f"SHOW TABLES IN {stage_schema}").collect()
+    dropped = []
+    for r in rows:
+        name = r["tableName"]
+        if name.startswith("_gen_") or name.startswith("_dc_"):
+            spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{name}")
+            dropped.append(name)
+    print(f"[init_intermediates] dropped {len(dropped)} prior data_gen temps "
+          f"in {stage_schema}: {dropped}")
 
     # Per-dataset Delta deliverables (augmented mode writes these).
     if augmented_incremental:

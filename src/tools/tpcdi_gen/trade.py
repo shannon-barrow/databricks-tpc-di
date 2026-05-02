@@ -314,7 +314,7 @@ def _gen_historical_trades(spark, cfg, dicts, dbutils, shared):
 
     # Materialize trade_df via disk_cache so the full DAG (which is expensive to re-run — joins against symbols, broker_names, valid_accts + many hash derivations) executes exactly once. All 4 downstream writes (Trade, TH, CT, HH) then read from this cached copy. On serverless this is a Parquet stage at {volume_path}/_staging/; on classic it's persist(DISK_ONLY).
     trade_df, _trade_df_cleanup = disk_cache(trade_df, spark, "trade_df",
-                                              volume_path=cfg.volume_path, dbutils=dbutils)
+                                              volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg)
 
     # === Write all 4 output tables ===
     def write_trade():

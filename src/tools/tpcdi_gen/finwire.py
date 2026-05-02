@@ -373,7 +373,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
 
     # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read it independently of the remaining FINWIRE compute (CMP/FIN union + the 10-25 min text write). This detaches downstream start time from the overall FINWIRE wallclock — previously they waited on f_fw.result(), now they wait on symbols_ready_event set right below.
     symbols, _sym_cleanup = disk_cache(symbols, spark, "FINWIRE symbols",
-                                        volume_path=cfg.volume_path, dbutils=dbutils)
+                                        volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg)
     symbols.createOrReplaceTempView("_symbols")
     # Estimate — symbols is a groupBy on SEC NEW records' Symbol; ~sec_total after dedup by Symbol (slight shrinkage from Symbol collisions across quarters).
     log(f"[FINWIRE] Active symbols: ~{cfg.sec_total:,} -> _symbols view (downstream unblocked)")

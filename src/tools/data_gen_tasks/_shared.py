@@ -157,7 +157,8 @@ def bootstrap(*, spark, dbutils, scale_factor, catalog: str, wh_db: str,
     set_log_level(log_level)
     cfg = ScaleConfig(int(scale_factor), catalog,
                       tpcdi_directory=tpcdi_directory,
-                      augmented_incremental=augmented_incremental)
+                      augmented_incremental=augmented_incremental,
+                      wh_db=wh_db)
 
     dicts = None
     if load_dicts:

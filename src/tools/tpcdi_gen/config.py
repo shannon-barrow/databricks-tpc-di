@@ -191,10 +191,13 @@ class ScaleConfig:
 
     def __init__(self, scale_factor: int, catalog: str,
                  tpcdi_directory: str | None = None,
-                 augmented_incremental: bool = False):
+                 augmented_incremental: bool = False,
+                 wh_db: str | None = None):
         self.sf = scale_factor
         # Augmented-Incremental staging mode: skip Batch2/Batch3 generation, write Delta tables to {catalog}.tpcdi_raw_data.{dataset}{sf} instead of CSV/XML/TXT files. Downstream stage_files / stage_tables tasks read from these temp Delta tables; cleanup_stage0 drops them once the per-day files + tpcdi_incremental_staging_{sf} schema are populated.
         self.augmented_incremental = augmented_incremental
+        # wh_db plumbs through to disk_cache so within-task materializations (CustomerMgmt schedules, trade_df, etc.) can target {catalog}.{wh_db}_{sf}_stage Delta tables (matching dw_init.sql's interim convention) instead of the legacy parquet path under {volume}/_staging/. None = legacy parquet fallback.
+        self.wh_db = wh_db
         # DIGen multiplies the user-facing SF by 1000 to get the internal scaling base. All row counts are expressed as a coefficient times internal_sf. See DIGen source: DataGenParameters.java, "sf = scaleFactor * 1000".
         self.internal_sf = scale_factor * 1000
         self.catalog = catalog

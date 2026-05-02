@@ -33,12 +33,20 @@ stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 
 # COMMAND ----------
 
-# All `_gen_*` tables the data_gen tasks may have produced. DROP IF EXISTS
-# is a no-op when a particular task didn't write its intermediate (e.g.
-# `_gen_customer_dates` is only used in the dynamic-audit path).
-for _t in ("_gen_brokers", "_gen_symbols", "_gen_customer_dates",
-           "_gen_finwire_symbols", "_gen_customermgmt_schedules",
-           "_gen_customermgmt_actions", "_gen_trade_df"):
-    spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{_t}")
+# Drop everything in {wh_db}_{sf}_stage that this data_gen run created:
+# - `_gen_*` cross-task intermediates (gen_hr → _gen_brokers, etc.)
+# - `_dc_*` per-call disk_cache temps (FINWIRE symbols, CustomerMgmt
+#   schedules / actions, trade_df, …) — the prefix is set in
+#   tpcdi_gen.utils.INTERMEDIATE_DC_PREFIX and is unique to data_gen.
+# Other tables in this schema (e.g. dw_init's CustomerMgmt /
+# WatchIncremental / etc.) belong to the benchmark phase — leave alone.
+rows = spark.sql(f"SHOW TABLES IN {stage_schema}").collect()
+dropped = []
+for r in rows:
+    name = r["tableName"]
+    if name.startswith("_gen_") or name.startswith("_dc_"):
+        spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{name}")
+        dropped.append(name)
 
-print(f"[cleanup_intermediates] dropped data_gen temp tables in {stage_schema}")
+print(f"[cleanup_intermediates] dropped {len(dropped)} data_gen temp tables in "
+      f"{stage_schema}: {dropped}")

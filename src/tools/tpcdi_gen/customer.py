@@ -796,7 +796,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     # Cache all_df — it's used to derive 4 views + the XML write + incrementals. Classic: persist; serverless: Parquet staging. Target ~100MB per XML file — the Databricks native XML reader cannot split XML files, so one file = one ingest task. 128MB files push task runtime too high (7+ min at SF=5000); 100MB keeps ingest parallelism reasonable. maxRecordsPerFile on both parquet staging (for read-back partitioning) and final XML write ensures bounded sizes without an explicit repartition. 580 bytes/row avg at SF=5000, with ~1.35x variance across partitions (largest file observed 157MB vs 116MB avg). To keep MAX file <=128MB we need max_records * worst-case-bytes <= 128MB → 128K records with ~1000 B/row worst case, producing avg ~74MB and max ~120MB. Favors file-count over file-size to stay safely under the XML reader's single-task constraint.
     _xml_records_per_file = 128 * 1024  # 131K rows → ~75MB avg / ~120MB max
     all_df, _all_df_cleanup = disk_cache(all_df, spark, "CustomerMgmt actions",
-                                          volume_path=cfg.volume_path, dbutils=dbutils,
+                                          volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg,
                                           max_records_per_file=_xml_records_per_file)
 
     # === _account_owners temp view ===

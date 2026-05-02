@@ -49,7 +49,15 @@ def safe_unpersist(df, cleanup_info=None):
     try:
         spark = df.sparkSession
         if _detect_serverless(spark):
-            if cleanup_info and cleanup_info.get("kind") == "parquet":
+            if cleanup_info and cleanup_info.get("kind") == "delta":
+                fq = cleanup_info.get("fq")
+                if fq:
+                    try:
+                        spark.sql(f"DROP TABLE IF EXISTS {fq}")
+                    except Exception:
+                        pass
+                log(f"[Staging] {cleanup_info.get('label','')}: dropped Delta {fq}")
+            elif cleanup_info and cleanup_info.get("kind") == "parquet":
                 path = cleanup_info.get("path")
                 dbutils = cleanup_info.get("dbutils")
                 if path and dbutils is not None:
@@ -106,6 +114,10 @@ def _detect_serverless(spark) -> bool:
 # Counter for disambiguating temp-table/temp-view names across calls.
 _STAGING_COUNTER = [0]
 
+# Prefix on the per-call disk_cache Delta names — cleanup_intermediates
+# uses it to find every disk_cache temp at end of data_gen.
+INTERMEDIATE_DC_PREFIX = "_dc_"
+
 
 def _sanitize_label(label: str) -> str:
     """Turn a label into a safe SQL identifier component (lowercase + underscores)."""
@@ -115,42 +127,80 @@ def _sanitize_label(label: str) -> str:
 
 def disk_cache(df, spark, label: str = "", materialize: bool = True,
                volume_path: str = None, dbutils=None,
-               max_records_per_file: int = 0):
+               max_records_per_file: int = 0,
+               cfg=None):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
     Classic: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local NVMe.
-    Serverless: persist is unsupported, so we write a Parquet staging file at
-    ``{volume_path}/_staging/{N}_{label}`` and return a DataFrame that reads it
-    back. ``cleanup_staging`` removes the ``_staging/`` directory at the end of
-    the run.
+    Serverless: persist is unsupported, so we materialize the DataFrame to
+    a Delta table in ``{cfg.catalog}.{cfg.wh_db}_{cfg.sf}_stage._dc_{slug}``
+    (matching the convention dw_init.sql uses for benchmark interim
+    tables) with no-stats / no-auto-optimize TBLPROPERTIES — these are
+    transient. Returns a DataFrame that reads back from the Delta table.
+    ``cleanup_intermediates`` (or per-task ``safe_unpersist``) drops the
+    table at end of data_gen.
 
-    ``max_records_per_file`` caps each parquet staging file, which controls
-    the partition count on read-back (each file becomes ~1 input split).
-    Use this to keep a high partition count for distribution; without it,
-    Spark may produce a few huge parquet files and the read-back partition
-    count drops far below the upstream ``repartition(N)``.
+    Falls back to the legacy parquet path under ``{volume_path}/_staging/``
+    when ``cfg`` is None (single-task entry-point compatibility) or when
+    ``cfg.wh_db`` isn't set.
+
+    ``max_records_per_file`` caps each output file (Spark writes one
+    partition per record-cap chunk). Use this to keep a high partition
+    count for distribution.
 
     Pass ``materialize=False`` for derived views whose parent is already
-    materialized — on serverless they stay as logical views (re-reading a
-    column-pruned subset of the parent is cheap); on classic they still
-    persist since persist is nearly free memory-wise.
+    materialized.
 
     Returns:
         (materialized_df, cleanup_info or None)
 
         ``cleanup_info`` is a dict consumed by ``safe_unpersist()``:
           - ``{"kind": "persist", "label": ...}`` on classic
+          - ``{"kind": "delta", "fq": "...", "label": ...}`` on serverless
+            with cfg (new path)
           - ``{"kind": "parquet", "path": ..., "dbutils": ..., "label": ...}``
-            on serverless when Parquet staging ran
+            on serverless without cfg (legacy fallback)
           - ``None`` if nothing was materialized (skip paths / failures)
     """
     if _detect_serverless(spark):
-        if not materialize or volume_path is None:
+        if not materialize:
+            return df, None
+
+        # New Delta path: write to {catalog}.{wh_db}_{sf}_stage._dc_{slug}
+        wh_db = getattr(cfg, "wh_db", None) if cfg is not None else None
+        if wh_db:
+            _STAGING_COUNTER[0] += 1
+            slug = _sanitize_label(label)
+            stage_schema = f"{cfg.catalog}.{wh_db}_{cfg.sf}_stage"
+            fq = f"{stage_schema}.{INTERMEDIATE_DC_PREFIX}{_STAGING_COUNTER[0]:03d}_{slug}"
+            log(f"[Staging] {label}: serverless cache → Delta {fq}")
+            try:
+                spark.sql(f"DROP TABLE IF EXISTS {fq}")
+                cols_ddl = ", ".join(f"{f.name} {f.dataType.simpleString()}"
+                                     for f in df.schema.fields)
+                spark.sql(
+                    f"CREATE TABLE {fq} ({cols_ddl}) USING DELTA "
+                    f"TBLPROPERTIES("
+                    f"'delta.dataSkippingNumIndexedCols'=0, "
+                    f"'delta.autoOptimize.autoCompact'=False, "
+                    f"'delta.autoOptimize.optimizeWrite'=False)"
+                )
+                writer = df.write.mode("append")
+                if max_records_per_file > 0:
+                    writer = writer.option("maxRecordsPerFile", max_records_per_file)
+                writer.saveAsTable(fq)
+                return spark.read.table(fq), {"kind": "delta", "fq": fq, "label": label}
+            except Exception as e:
+                log(f"[Staging] {label}: Delta path failed ({type(e).__name__}: {e})")
+                return df, None
+
+        # Legacy parquet fallback (no cfg.wh_db plumbed through).
+        if volume_path is None:
             return df, None
         _STAGING_COUNTER[0] += 1
         slug = _sanitize_label(label)
         staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
-        log(f"[Staging] {label}: cache is unavailable on serverless, staging to Parquet")
+        log(f"[Staging] {label}: serverless cache → Parquet (legacy path)")
         try:
             if dbutils is not None:
                 _cleanup(staging_path, dbutils)
