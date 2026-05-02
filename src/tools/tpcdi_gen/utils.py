@@ -490,35 +490,6 @@ def register_copy(source: str, target: str):
     _pending_copies.append((source, target))
 
 
-_LARGE_PART_MIN_BYTES = 50 * 1024 * 1024    # parts >= this bypass packing
-_PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
-
-
-def _pack_small_parts(small_parts, max_bytes: int):
-    """Greedy first-fit-decreasing bin-packing.
-
-    Given a list of part files (each an object with ``.path``, ``.name``, ``.size``),
-    group them into bins whose total size does not exceed ``max_bytes``.
-
-    Returns a list of bins, each a list of parts sorted by original part name
-    (so concat order is deterministic and matches Spark's partition order within
-    each bin).
-    """
-    sorted_parts = sorted(small_parts, key=lambda f: f.size, reverse=True)
-    bins = []  # list of {"files": [...], "size": int}
-    for f in sorted_parts:
-        placed = False
-        for b in bins:
-            if b["size"] + f.size <= max_bytes:
-                b["files"].append(f)
-                b["size"] += f.size
-                placed = True
-                break
-        if not placed:
-            bins.append({"files": [f], "size": f.size})
-    return [sorted(b["files"], key=lambda f: f.name) for b in bins]
-
-
 # When set True, register_copies_from_staging() returns immediately
 # without performing the staging→final copies. Per-task data_gen workflow
 # (data_gen_tasks/gen_*.py) sets this to True before calling generate(),
@@ -530,30 +501,20 @@ _DEFER_COPIES = {"enabled": False}
 
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
+    """Rename every Spark part file to the final ``base_N.ext`` numbering.
 
-    Spark writes output as a directory of ``part-NNNNN`` files sized up to
-    ``maxRecordsPerFile`` (~128MB). Tail partitions and under-partitioned
-    datasets often produce many smaller parts, which are wasteful to copy
-    individually (RPC overhead per file, extra files for downstream readers).
-
-    This function splits parts into two paths:
-
-    - **Large parts** (``>= 50MB``): registered for deferred parallel
-      ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
-      bandwidth, ~64-thread parallelism.
-
-    - **Small parts** (``< 50MB``): bin-packed into groups summing to
-      ``<= 128MB``, then concatenated into single files via driver-side
-      ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
-      produces fewer downstream files.
+    With ``write_file`` now repartitioning each DataFrame to a target file
+    count (driven by ``_B1_FILES_PER_SF`` × ``scale_factor``), every
+    ``part-NNNNN`` already has the right ~128 MB size — there's no
+    under-partitioned tail to bin-pack. We just kick a parallel
+    ``dbutils.fs.cp`` daemon to rename them all server-side.
 
     Output files are numbered sequentially starting from ``start_idx``:
     e.g. ``Customer_1.txt``, ``Customer_2.txt``, … matching the TPC-DI
     ``fileNamePattern`` regex. Multiple calls can share a sequence by
-    passing the returned `next_idx` as the next call's ``start_idx`` (used
-    by FINWIRE where CMP/SEC/FIN subsets each stage separately but land in
-    the same ``FINWIRE_N.txt`` namespace).
+    passing the returned ``next_idx`` as the next call's ``start_idx``
+    (used by FINWIRE where CMP/SEC/FIN subsets each stage separately but
+    land in the same ``FINWIRE_N.txt`` namespace).
 
     Args:
         staging_dir: Path to the Spark output directory containing part files.
@@ -574,54 +535,22 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
         return [], start_idx
 
     files = dbutils.fs.ls(staging_dir)
-    part_files = [f for f in files if f.name.startswith("part-")]
+    part_files = sorted([f for f in files if f.name.startswith("part-")],
+                        key=lambda f: f.name)
     if not part_files:
         return [], start_idx
 
-    large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
-                   key=lambda f: f.name)
-    small = [f for f in part_files if f.size < _LARGE_PART_MIN_BYTES]
-    bins = _pack_small_parts(small, _PACK_MAX_BYTES)
-
     base, ext = os.path.splitext(final_path)
+    copies = []
     targets = []
     idx = start_idx
-
-    # Large parts: kick off a per-dataset async copy immediately so this dataset can start copying as soon as write_file returns, without waiting for a global drain. The thread is tracked in `_background_threads` so orchestrator can wait_for_background_copies() before cleanup_staging.
-    large_copies = []
-    for pf in large:
+    for pf in part_files:
         target = f"{base}_{idx}{ext}"
-        large_copies.append((pf.path, target))
+        copies.append((pf.path, target))
         targets.append(target)
         idx += 1
-    if large_copies:
-        _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
 
-    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
-    if bins:
-        import shutil, time
-        for bin_files in bins:
-            target = f"{base}_{idx}{ext}"
-            dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
-            with open(dst_local, "wb") as out:
-                for pf in bin_files:
-                    src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
-                    last_err = None
-                    for attempt in range(10):
-                        try:
-                            with open(src_local, "rb") as src:
-                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
-                            break
-                        except OSError as e:
-                            last_err = e
-                            if attempt == 0:
-                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
-                            time.sleep(min(30, 0.5 * (2 ** attempt)))
-                    else:
-                        raise last_err
-            targets.append(target)
-            idx += 1
-
+    _start_dataset_copy(dbutils, copies, label=os.path.basename(base))
     return targets, idx
 
 
