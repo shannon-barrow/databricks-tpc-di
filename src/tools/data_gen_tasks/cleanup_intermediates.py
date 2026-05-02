@@ -16,7 +16,7 @@ import sys
 
 dbutils.widgets.dropdown("scale_factor", "10", ["10", "100", "1000", "5000", "10000", "20000"])
 dbutils.widgets.text("catalog", "main")
-dbutils.widgets.text("wh_db", "")
+dbutils.widgets.text("wh_db", "tpcdi_incremental_staging")
 
 scale_factor = dbutils.widgets.get("scale_factor").strip()
 catalog      = dbutils.widgets.get("catalog").strip()
