@@ -61,10 +61,17 @@ if regenerate_data != "YES" and is_already_generated(spark, symbols_fq):
 # COMMAND ----------
 
 from tpcdi_gen import finwire
-# Pass a dummy event since the in-task signal-and-continue overlap doesn't
-# apply in the per-task workflow model.
-result = finwire.generate(spark, cfg, ctx["dicts"], dbutils,
-                          symbols_ready_event=threading.Event())
+import tpcdi_gen.utils as _u
+# Skip the inline copy of FINWIRE_*.txt staging → final. copy_finwire
+# task does it in parallel with gen_daily_market / gen_trade /
+# gen_watch_history. Pass a dummy event since the in-task
+# signal-and-continue overlap doesn't apply in the per-task workflow model.
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = finwire.generate(spark, cfg, ctx["dicts"], dbutils,
+                              symbols_ready_event=threading.Event())
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 # Persist `_symbols` for downstream tasks. Schema:
 #   Symbol STRING, creation_quarter INT, deactivation_quarter INT, _idx LONG

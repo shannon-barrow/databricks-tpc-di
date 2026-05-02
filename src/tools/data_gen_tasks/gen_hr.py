@@ -60,7 +60,14 @@ if regenerate_data != "YES" and is_already_generated(spark, brokers_fq):
 # COMMAND ----------
 
 from tpcdi_gen import hr
-result = hr.generate(spark, cfg, ctx["dicts"], dbutils)
+import tpcdi_gen.utils as _u
+# Skip the inline copy of HR.csv staging → final. copy_hr task does it
+# in parallel with gen_customer (and any other downstream gen tasks).
+_u._DEFER_COPIES["enabled"] = True
+try:
+    result = hr.generate(spark, cfg, ctx["dicts"], dbutils)
+finally:
+    _u._DEFER_COPIES["enabled"] = False
 
 # Persist the in-memory `_brokers` temp view (created inside hr.generate at
 # tpcdi_gen/hr.py:128) so gen_customer can read it from Delta in its own

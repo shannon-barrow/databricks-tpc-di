@@ -217,12 +217,34 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         depends_on=["gen_finwire", "gen_customer"],
         base_params=_dgt_params,
     ))
+    # Copy tasks — synchronous staging→final copies for the datasets that
+    # still emit `__staging` part files (HR.csv, FINWIRE_*.txt). These run
+    # in parallel with downstream gens since the producers persisted the
+    # staging dirs to volume and the actual copy work is decoupled. The
+    # gen_* notebooks set utils._DEFER_COPIES["enabled"]=True so the
+    # in-line register_copies_from_staging call inside hr.generate /
+    # finwire.generate is a no-op; copy_* re-runs the same logic
+    # synchronously and waits on the daemon threads before exiting.
+    tasks.append(_make_task(
+        task_key="copy_hr",
+        notebook_path=f"{_dgt_path}/copy_hr",
+        depends_on=["gen_hr"],
+        base_params=_dgt_params,
+    ))
+    tasks.append(_make_task(
+        task_key="copy_finwire",
+        notebook_path=f"{_dgt_path}/copy_finwire",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
+    ))
+
     _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_customer",
                  "gen_daily_market", "gen_trade", "gen_watch_history"]
+    _copy_keys = ["copy_hr", "copy_finwire"]
     tasks.append(_make_task(
         task_key="cleanup_intermediates",
         notebook_path=f"{_dgt_path}/cleanup_intermediates",
-        depends_on=_gen_keys,
+        depends_on=_gen_keys + _copy_keys,
         run_if="ALL_SUCCESS",
         base_params=_wh_param,
     ))

@@ -469,6 +469,15 @@ def _pack_small_parts(small_parts, max_bytes: int):
     return [sorted(b["files"], key=lambda f: f.name) for b in bins]
 
 
+# When set True, register_copies_from_staging() returns immediately
+# without performing the staging→final copies. Per-task data_gen workflow
+# (data_gen_tasks/gen_*.py) sets this to True before calling generate(),
+# so generators write only the Spark `__staging` directories. A separate
+# `copy_*` task notebook then runs `register_copies_from_staging` (with
+# this flag back to False) in parallel with downstream gen tasks.
+_DEFER_COPIES = {"enabled": False}
+
+
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
     """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
@@ -505,6 +514,15 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
     Returns:
         (list of final target paths, next_idx to use for subsequent calls).
     """
+    if _DEFER_COPIES["enabled"]:
+        # Decomposed data_gen workflow: gen_* task writes the staging dir,
+        # a separate copy_* task does the actual copy (in parallel with
+        # downstream gens). FINWIRE shares a counter across CMP/SEC/FIN
+        # subsets — preserve start_idx flow even though we don't copy
+        # here. The copy_* task replays the same start_idx logic when it
+        # iterates the staging dirs.
+        return [], start_idx
+
     files = dbutils.fs.ls(staging_dir)
     part_files = [f for f in files if f.name.startswith("part-")]
     if not part_files:
