@@ -288,6 +288,38 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
                 return actual
             actual = new_actual
 
+    def _merge_sorted(big_sorted, small_unsorted):
+        """O(N + k log N) merge of a large sorted array with a small unsorted one.
+
+        Replaces ``_np.sort(_np.concatenate([big_sorted, small_unsorted]))`` —
+        which is O((N+k) log (N+k)) and ignores that ``big_sorted`` is already
+        sorted. At SF=20k late iterations N=4.3M, k=10K, so this is ~20x
+        faster per call vs the full re-sort.
+
+        ``small_unsorted`` is allowed to contain elements not in
+        ``big_sorted`` (the bijection scheduler guarantees this). Returns a
+        new sorted array.
+        """
+        if len(big_sorted) == 0:
+            return _np.sort(small_unsorted) if len(small_unsorted) > 0 else big_sorted
+        if len(small_unsorted) == 0:
+            return big_sorted
+        small_sorted = _np.sort(small_unsorted)
+        # Where each small element would land within big_sorted.
+        pos = _np.searchsorted(big_sorted, small_sorted)
+        n = len(big_sorted) + len(small_sorted)
+        out = _np.empty(n, dtype=big_sorted.dtype)
+        # Destination indices for the small elements in the merged array:
+        # element i goes at pos[i] + i (its insertion point shifted by all
+        # earlier insertions).
+        small_dest = pos + _np.arange(len(small_sorted), dtype=_np.int64)
+        # Mask everything else as the destination for big_sorted in order.
+        mask = _np.ones(n, dtype=bool)
+        mask[small_dest] = False
+        out[mask] = big_sorted
+        out[small_dest] = small_sorted
+        return out
+
     _inact_seed   = seed_for("CM", "inact_sched")
     _close_seed   = seed_for("CM", "close_sched")
     _updcust_seed = seed_for("CM", "updcust_sched")
@@ -353,7 +385,7 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
         # ADDACCT picks (pool: prior-alive customers MINUS this-update INACTs)
         if len(this_inacts) > 0:
-            combined_inacts = _np.sort(_np.concatenate([inact_sorted, this_inacts]))
+            combined_inacts = _merge_sorted(inact_sorted, this_inacts)
         else:
             combined_inacts = inact_sorted
         addacct_pool = pool_cust - len(combined_inacts)
@@ -381,11 +413,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             virtual = (b * ps + c) % alive_acct
             _append_picks(ACT_UPDACCT, g, _resolve_skip_vec(virtual, close_sorted))
 
-        # Commit this update's deletions.
-        if len(this_inacts) > 0:
-            inact_sorted = _np.sort(_np.concatenate([inact_sorted, this_inacts]))
+        # Commit this update's deletions. inact_sorted ↔ combined_inacts (we
+        # already paid for the merge above when computing combined_inacts —
+        # reuse it instead of recomputing the same sorted union).
+        inact_sorted = combined_inacts
         if len(this_closes) > 0:
-            close_sorted = _np.sort(_np.concatenate([close_sorted, this_closes]))
+            close_sorted = _merge_sorted(close_sorted, this_closes)
 
     # Trim to actual size and release the cumulative-deletions buffers.
     sched_update = sched_update[:_sched_idx]
