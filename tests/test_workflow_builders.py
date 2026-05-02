@@ -419,11 +419,20 @@ def test_augmented_staging_dag():
     _ok("cleanup_intermediates depends on all 7 gens")
     assert by_key["cleanup_intermediates"]["run_if"] == "ALL_SUCCESS"
     _ok("cleanup_intermediates runs ALL_SUCCESS")
-    # staging_check now depends on cleanup_intermediates.
-    sc_deps = {d["task_key"] for d in by_key["staging_check"]["depends_on"]}
-    assert "cleanup_intermediates" in sc_deps, \
-        f"staging_check should depend on cleanup_intermediates, got {sc_deps}"
-    _ok("staging_check depends on cleanup_intermediates")
+    # staging_check is gone — Stage 1 tasks wire directly to gen/copy.
+    assert "staging_check" not in keys, \
+        "staging_check should be removed; Stage 1 tasks wire to gen/copy directly"
+    _ok("staging_check removed")
+    # Spot-check Stage 1 wiring: stage_files_DailyMarket → gen_daily_market.
+    sf_dm_deps = {d["task_key"] for d in by_key["stage_files_DailyMarket"]["depends_on"]}
+    assert sf_dm_deps == {"gen_daily_market"}, \
+        f"stage_files_DailyMarket should depend on gen_daily_market only, got {sf_dm_deps}"
+    _ok("stage_files_DailyMarket → gen_daily_market only")
+    # ingest_FinWire → copy_finwire.
+    ifw_deps = {d["task_key"] for d in by_key["ingest_FinWire"]["depends_on"]}
+    assert ifw_deps == {"copy_finwire"}, \
+        f"ingest_FinWire should depend on copy_finwire only, got {ifw_deps}"
+    _ok("ingest_FinWire → copy_finwire only")
 
 
 def main():

@@ -111,10 +111,6 @@ def _make_task(*, task_key: str, notebook_path: str,
     return task
 
 
-# Convenience: dependency on staging_check's true branch (= "regenerate, staging is incomplete"). Used by every Stage 1a / 1b task in place of the old depends_on=["data_gen"].
-_NEEDS_REGEN = {"task_key": "staging_check", "outcome": "true"}
-
-
 # ---------- Schema strings (lifted from workflows_single_batch.py) ----------
 # These mirror the single_batch builder's per-task base_parameters so the
 # raw_ingestion / Silver_* notebooks build identical staging table shapes.
@@ -249,33 +245,18 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         base_params=_wh_param,
     ))
 
-    # ---------------- Early-exit gate ----------------
-    # Inherits the staging_check condition_task pattern from the old
-    # single-task model. Now depends on cleanup_intermediates instead of
-    # data_gen. Always emits outcome="true" so downstream stage_tables /
-    # stage_files run after the gen DAG green-lights — per-task self-skip
-    # in each gen task already gives the granular short-circuit; this gate
-    # just transmits "all gens succeeded" to the rest of the workflow.
-    tasks.append({
-        "task_key": "staging_check",
-        "depends_on": [{"task_key": "cleanup_intermediates"}],
-        "run_if": "ALL_SUCCESS",
-        "condition_task": {
-            "op": "EQUAL_TO",
-            "left": "true",
-            "right": "true",
-        },
-        "timeout_seconds": 0,
-        "email_notifications": {},
-        "notification_settings": dict(_DEFAULT_NOTIF),
-    })
+    # No staging_check gate — each Stage 1 task wires directly to the
+    # specific gen / copy task that produces its source data, so they
+    # start as soon as their actual inputs are ready (no synthetic
+    # all-gens-done barrier). Per-task self-skip in each gen handles the
+    # repair-friendly short-circuit.
 
     # ---------------- Stage 1a: raw_ingestion ----------------
     raw_ingest_path = f"{repo_src_path}/single_batch/SQL/raw_ingestion"
 
     tasks.append(_make_task(
         task_key="ingest_DimDate", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"sk_dateid BIGINT {_NN} COMMENT 'Surrogate key for the date', datevalue DATE COMMENT 'The date stored appropriately for doing comparisons in the Data Warehouse', datedesc STRING COMMENT 'The date in full written form e.g. July 7 2004', calendaryearid INT COMMENT 'Year number as a number', calendaryeardesc STRING COMMENT 'Year number as text', calendarqtrid INT COMMENT 'Quarter as a number e.g. 20042', calendarqtrdesc STRING COMMENT 'Quarter as text e.g. 2004 Q2', calendarmonthid INT COMMENT 'Month as a number e.g. 20047', calendarmonthdesc STRING COMMENT 'Month as text e.g. 2004 July', calendarweekid INT COMMENT 'Week as a number e.g. 200428', calendarweekdesc STRING COMMENT 'Week as text e.g. 2004-W28', dayofweeknum INT COMMENT 'Day of week as a number e.g. 3', dayofweekdesc STRING COMMENT 'Day of week as text e.g. Wednesday', fiscalyearid INT COMMENT 'Fiscal year as a number e.g. 2005', fiscalyeardesc STRING COMMENT 'Fiscal year as text e.g. 2005', fiscalqtrid INT COMMENT 'Fiscal quarter as a number e.g. 20051', fiscalqtrdesc STRING COMMENT 'Fiscal quarter as text e.g. 2005 Q1', holidayflag BOOLEAN COMMENT 'Indicates holidays'",
             "filename": "Date.txt",
@@ -287,7 +268,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_DimTime", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"sk_timeid BIGINT {_NN} COMMENT 'Surrogate key for the time', timevalue STRING COMMENT 'The time stored appropriately for doing', hourid INT COMMENT 'Hour number as a number e.g. 01', hourdesc STRING COMMENT 'Hour number as text e.g. 01', minuteid INT COMMENT 'Minute as a number e.g. 23', minutedesc STRING COMMENT 'Minute as text e.g. 01:23', secondid INT COMMENT 'Second as a number e.g. 45', seconddesc STRING COMMENT 'Second as text e.g. 01:23:45', markethoursflag BOOLEAN COMMENT 'Indicates a time during market hours', officehoursflag BOOLEAN COMMENT 'Indicates a time during office hours'",
             "filename": "Time.txt",
@@ -299,7 +280,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_StatusType", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"st_id STRING COMMENT 'Status code', st_name STRING {_NN} COMMENT 'Status description'",
             "filename": "StatusType.txt",
@@ -311,7 +292,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_TaxRate", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"tx_id STRING {_NN} COMMENT 'Tax rate code', tx_name STRING COMMENT 'Tax rate description', tx_rate FLOAT COMMENT 'Tax rate'",
             "filename": "TaxRate.txt",
@@ -323,7 +304,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_TradeType", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"tt_id STRING {_NN} COMMENT 'Trade type code', tt_name STRING COMMENT 'Trade type description', tt_is_sell INT COMMENT 'Flag indicating a sale', tt_is_mrkt INT COMMENT 'Flag indicating a market order'",
             "filename": "TradeType.txt",
@@ -335,7 +316,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_industry", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"in_id STRING COMMENT 'Industry code', in_name STRING {_NN} COMMENT 'Industry description', in_sc_id STRING COMMENT 'Sector identifier'",
             "filename": "Industry.txt",
@@ -349,7 +330,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="ingest_BatchDate",
         notebook_path=f"{repo_src_path}/single_batch/SQL/Ingest_Incremental",
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "filename": "BatchDate.txt",
             "raw_schema": f"batchdate DATE {_NN} COMMENT 'Batch date'",
@@ -361,10 +342,12 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
 
     # ---------------- Stage 1a: ingest_FinWire ----------------
+    # Reads FINWIRE_*.txt files at the volume's final path — needs the
+    # copy_finwire task to have moved them out of staging.
     tasks.append(_make_task(
         task_key="ingest_FinWire",
         notebook_path=f"{repo_src_path}/single_batch/SQL/ingest_finwire",
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["copy_finwire"],
         base_params={"tbl_props": _finwire_tprops(), **_td_wh},
     ))
 
@@ -372,7 +355,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="Silver_DimBroker",
         notebook_path=f"{repo_src_path}/single_batch/SQL/DimBroker",
-        depends_on=["ingest_DimDate"],
+        # Reads HR.csv at its final volume path — needs copy_hr to have
+        # moved it out of staging.
+        depends_on=["copy_hr"],
         base_params={
             "tgt_schema": f"sk_brokerid BIGINT {_NN} COMMENT 'Surrogate key for broker', brokerid BIGINT COMMENT 'Natural key for broker', managerid BIGINT COMMENT 'Natural key for manager\u2019s HR record', firstname STRING COMMENT 'First name', lastname STRING COMMENT 'Last Name', middleinitial STRING COMMENT 'Middle initial', branch STRING COMMENT 'Facility in which employee has office', office STRING COMMENT 'Office number or description', phone STRING COMMENT 'Employee phone number', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimbroker_pk PRIMARY KEY(sk_brokerid)",
@@ -421,7 +406,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="DimCustomerHistorical",
         notebook_path=f"{hist_path}/DimCustomerHistorical",
-        depends_on=[_NEEDS_REGEN, "ingest_TaxRate"],
+        # Reads tpcdi_raw_data.customermgmt{sf} (gen_customer's Delta) +
+        # the TaxRate ingest output.
+        depends_on=["gen_customer", "ingest_TaxRate"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
@@ -433,25 +420,33 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="DimTradeHistorical",
         notebook_path=f"{hist_path}/DimTradeHistorical",
-        depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.trade{sf} + tradehistory{sf} (gen_trade
+        # outputs) plus the dim joins.
+        depends_on=["gen_trade", "Silver_DimSecurity", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactCashBalancesHistorical",
         notebook_path=f"{hist_path}/FactCashBalancesHistorical",
-        depends_on=[_NEEDS_REGEN, "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.cashtransaction{sf} (gen_trade also writes
+        # cash transactions) plus the account dim join.
+        depends_on=["gen_trade", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactHoldingsHistorical",
         notebook_path=f"{hist_path}/FactHoldingsHistorical",
-        depends_on=[_NEEDS_REGEN, "DimTradeHistorical"],
+        # Reads tpcdi_raw_data.holdinghistory{sf} (gen_trade output) plus
+        # the trade dim join.
+        depends_on=["gen_trade", "DimTradeHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactWatchesHistorical",
         notebook_path=f"{hist_path}/FactWatchesHistorical",
-        depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimCustomerHistorical"],
+        # Reads tpcdi_raw_data.watchhistory{sf} (gen_watch_history output)
+        # plus the security + customer dim joins.
+        depends_on=["gen_watch_history", "Silver_DimSecurity", "DimCustomerHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
@@ -462,15 +457,26 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
 
     # ---------------- Stage 1b: stage_files (per-dataset partitioned CSV) -
+    # Each stage_files task reads from a specific gen_*'s Delta output and
+    # has no other upstream dependency, so it kicks off as soon as that
+    # gen task finishes (in parallel with other Stage 1 work).
     stg_path = f"{repo_src_path}/tools/augmented_staging/stage_files"
+    _stage_files_deps = {
+        "Customer":        ["gen_customer"],
+        "Account":         ["gen_customer"],
+        "Trade":           ["gen_trade"],
+        "CashTransaction": ["gen_trade"],
+        "HoldingHistory":  ["gen_trade"],
+        "DailyMarket":     ["gen_daily_market"],
+        "WatchHistory":    ["gen_watch_history"],
+    }
     stage_files_keys: list[str] = []
-    for tbl in ["Customer", "Account", "Trade", "CashTransaction",
-                "HoldingHistory", "DailyMarket", "WatchHistory"]:
+    for tbl, deps in _stage_files_deps.items():
         key = f"stage_files_{tbl}"
         tasks.append(_make_task(
             task_key=key,
             notebook_path=f"{stg_path}/{tbl}",
-            depends_on=[_NEEDS_REGEN],
+            depends_on=deps,
             base_params=dict(_td_param),
         ))
         stage_files_keys.append(key)
