@@ -1,22 +1,27 @@
-"""Builder for an isolated `gen_trade` → `copy_trade` perf-testing workflow.
+"""Builder for an isolated trade-family copy-strategy perf-testing workflow.
 
-This is a stripped-down 2-task DAG used to A/B test trade-family copy
-strategies in isolation, without the resource contention of the full
-datagen DAG. Assumes a prior full datagen run already populated:
+A 4-task DAG used to A/B test trade-family copy strategies in isolation,
+without the resource contention of the full datagen DAG:
 
-  - ``{wh_db}_{sf}_stage._gen_symbols`` Delta (produced by gen_finwire)
-  - ``{volume}/sf={sf}/Batch{1,2,3}/`` directories (produced by data_gen)
+    data_gen        (regenerate_data=NO baked in → idempotent: ensures
+      │              _stage schema, tpcdi_raw_data + volume, Batch1/2/3
+      │              dirs all exist. Skips the volume wipe entirely.)
+      ↓
+    prepare_symbols (gen_finwire, regenerate_data=NO → self-skips when
+      │              _gen_symbols Delta already exists; otherwise
+      │              generates it + the FINWIRE Batch1 staging files —
+      │              one-time cost, ~9 min at SF=20k.)
+      ↓
+    gen_trade       (regenerate_data=YES from job param → always rewrites
+      │              the Trade-family staging dirs.)
+      ↓
+    copy_trade      (the strategy being measured.)
 
-Neither is recreated here — that's the point. The user pre-populates
-those once, then iterates on copy strategies inside ``copy_trade``.
-
-Layout:
-
-    gen_trade   (regenerate_data=YES → rewrites the staging dirs)
-      └── copy_trade   (the strategy being measured)
-
-No ``data_gen``, no ``cleanup_intermediates`` — _gen_symbols stays
-intact across iterations.
+``regenerate_data=NO`` is hard-baked on the first two tasks so the
+job-level ``regenerate_data=YES`` only affects gen_trade — none of the
+other state (schema, volume tree, _gen_symbols, FINWIRE staging) gets
+wiped between runs. ``cleanup_intermediates`` is deliberately omitted
+so _gen_symbols persists across iterations.
 """
 from __future__ import annotations
 
@@ -81,12 +86,31 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "augmented_incremental": "false",
         "wh_db": wh_db,
     }
+    # data_gen + prepare_symbols pin regenerate_data=NO so the job-level
+    # `regenerate_data=YES` only affects gen_trade. data_gen still runs
+    # idempotent setup (schemas, volume, Batch dirs) without the wipe;
+    # prepare_symbols self-skips when _gen_symbols already exists.
+    _setup_base = {**_base, "regenerate_data": "NO"}
     _dgt = f"{repo_src_path}/tools/data_gen_tasks"
 
     tasks = [
         _make_task(
+            task_key="data_gen",
+            notebook_path=f"{_dgt}/data_gen",
+            base_params=_setup_base,
+            job_cluster_key=job_cluster_key,
+        ),
+        _make_task(
+            task_key="prepare_symbols",
+            notebook_path=f"{_dgt}/gen_finwire",
+            depends_on=["data_gen"],
+            base_params=_setup_base,
+            job_cluster_key=job_cluster_key,
+        ),
+        _make_task(
             task_key="gen_trade",
             notebook_path=f"{_dgt}/gen_trade",
+            depends_on=["prepare_symbols"],
             base_params=_base,
             job_cluster_key=job_cluster_key,
         ),
