@@ -1,12 +1,9 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: copy_trade (standard mode)
+# MAGIC # data_gen task: copy_cashtransaction (standard mode)
 # MAGIC
-# MAGIC Copies Trade.txt staging → final across Batch1/2/3. The other
-# MAGIC trade-family files (TradeHistory / CashTransaction / HoldingHistory)
-# MAGIC have their own copy_* tasks so each runs in parallel and can be
-# MAGIC repaired independently if it fails. Augmented mode self-skips
-# MAGIC (gen_trade writes Delta).
+# MAGIC Copies CashTransaction.txt staging → final across Batch1/2/3.
+# MAGIC Augmented mode self-skips (gen_trade writes Delta).
 
 # COMMAND ----------
 
@@ -39,5 +36,5 @@ ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 log_level=log_level, augmented_incremental=augmented_incremental,
                 workspace_src_path=workspace_src_path, load_dicts=False)
 
-n = copy_dataset(cfg=ctx["cfg"], dbutils=dbutils, filenames=["Trade.txt"])
-print(f"[copy_trade] {n} files copied")
+n = copy_dataset(cfg=ctx["cfg"], dbutils=dbutils, filenames=["CashTransaction.txt"])
+print(f"[copy_cashtransaction] {n} files copied")

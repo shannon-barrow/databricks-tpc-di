@@ -114,14 +114,18 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             base_params=_base,
             job_cluster_key=job_cluster_key,
         ),
-        _make_task(
-            task_key="copy_trade",
-            notebook_path=f"{_dgt}/copy_trade",
+    ]
+    # 4 sibling copy tasks, each touching one trade-family dataset.
+    # No copy-side cross-dependency — they run in parallel after gen_trade.
+    for _name in ("copy_trade", "copy_tradehistory",
+                  "copy_cashtransaction", "copy_holdinghistory"):
+        tasks.append(_make_task(
+            task_key=_name,
+            notebook_path=f"{_dgt}/{_name}",
             depends_on=["gen_trade"],
             base_params=_base,
             job_cluster_key=job_cluster_key,
-        ),
-    ]
+        ))
 
     payload = {
         "name": job_name,
