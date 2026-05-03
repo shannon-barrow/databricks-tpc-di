@@ -49,22 +49,17 @@ cfg = ctx["cfg"]
 
 # COMMAND ----------
 
-from tpcdi_gen.utils import (
-    register_copies_from_staging, wait_for_background_copies, _cleanup,
-)
+from tpcdi_gen.utils import register_copies_from_staging
 
 # Mirror the CMP/SEC/FIN counter-sharing flow from finwire.generate.
+# perf/v5: staging dirs use dataset-name (FINWIRE_cmp, etc., no __staging
+# suffix). register_copies_from_staging renames part-* in place. No
+# _cleanup — the renamed files live in the dirs.
 next_idx = 1
 final_path = f"{cfg.batch_path(1)}/FINWIRE.txt"
-staging_dirs = []
 for subset in ("cmp", "sec", "fin"):
-    staging = f"{cfg.batch_path(1)}/FINWIRE_{subset}.txt__staging"
-    staging_dirs.append(staging)
+    staging = f"{cfg.batch_path(1)}/FINWIRE_{subset}"
     print(f"[copy_finwire] {staging} → FINWIRE_{next_idx}+.txt")
     _, next_idx = register_copies_from_staging(
         staging, final_path, dbutils, start_idx=next_idx)
-
-wait_for_background_copies()
-for s in staging_dirs:
-    _cleanup(s, dbutils)
 print(f"[copy_finwire] done — wrote FINWIRE_1..{next_idx - 1}.txt")

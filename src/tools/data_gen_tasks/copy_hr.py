@@ -45,15 +45,7 @@ cfg = ctx["cfg"]
 
 # COMMAND ----------
 
-from tpcdi_gen.utils import (
-    register_copies_from_staging, wait_for_background_copies, _cleanup,
-)
+from data_gen_tasks._copy_helper import copy_dataset
 
-staging_dir = f"{cfg.batch_path(1)}/HR.csv__staging"
-final_path  = f"{cfg.batch_path(1)}/HR.csv"
-
-print(f"[copy_hr] {staging_dir} → {final_path}")
-register_copies_from_staging(staging_dir, final_path, dbutils)
-wait_for_background_copies()
-_cleanup(staging_dir, dbutils)
-print(f"[copy_hr] done")
+n = copy_dataset(cfg=ctx["cfg"], dbutils=dbutils, filenames=["HR.csv"], num_batches=1)
+print(f"[copy_hr] {n} files renamed")

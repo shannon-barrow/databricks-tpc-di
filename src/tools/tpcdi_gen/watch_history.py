@@ -449,7 +449,7 @@ def _gen_historical(spark, cfg, dbutils):
         # Dynamic audit regeneration: scan staged WatchHistory for exact
         # counts. Unreachable in augmented mode (static_audits_available
         # returns True there); only the non-augmented path reads the CSV.
-        staging_path = f"{cfg.batch_path(1)}/WatchHistory.txt__staging"
+        staging_path = f"{cfg.batch_path(1)}/WatchHistory"  # write_file dataset-name dir
         written_df = spark.read.csv(
             staging_path, sep="|", header=False,
             schema="w_c_id STRING, w_s_symb STRING, w_dts STRING, w_action STRING")
@@ -545,7 +545,7 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     cncl_part = inc_df.filter(F.col("w_action") == "CNCL").dropDuplicates(["w_c_id", "w_s_symb"])
     inc_df = actv_part.unionByName(cncl_part)
 
-    staging_inc = f"{cfg.batch_path(batch_id)}/WatchHistory.txt__staging"
+    staging_inc = f"{cfg.batch_path(batch_id)}/WatchHistory"  # write_file dataset-name dir
     write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # Analytical incremental estimates — 80/20 ACTV/CNCL split of rows_per_update.

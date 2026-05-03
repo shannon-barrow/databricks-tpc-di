@@ -501,8 +501,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
 
     # FIN repartition happens earlier, right on cmp_quarters before the crossJoin — see the block there. Doing it here (just before .write) would shuffle after the in-memory 475M-row compute had already been forced onto the narrow spark.range default partitioning, which is what causes the 15GB/task spill. CMP/SEC are small enough to use default partitioning and write directly.
+    # Staging dir is dataset-name (no __staging suffix) — matches write_file's
+    # convention. register_copies_from_staging will rename in place.
     def _write_subset(df, label):
-        staging = f"{cfg.batch_path(1)}/FINWIRE_{label}.txt__staging"
+        staging = f"{cfg.batch_path(1)}/FINWIRE_{label}"
         _cleanup(staging, dbutils)
         df.select("line").write.mode("overwrite") \
             .option("maxRecordsPerFile", max_records).text(staging)

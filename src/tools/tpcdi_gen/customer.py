@@ -1226,7 +1226,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
             "c_ctry_3","c_area_3","c_local_3","c_ext_3",
             "c_email_1","c_email_2","c_lcl_tx_id","c_nat_tx_id")
         # Write first, then count from staging (native Spark part files). The dropDuplicates above is non-deterministic in row selection across re-evaluations at scale (SF=5000+), so counting cust_df before write yields different numbers than what actually lands on disk. Reading staging once it's written gives the authoritative count that matches the ETL's view of the file. Same pattern as WatchHistory historical.
-        staging_cust = f"{bp}/Customer.txt__staging"
+        staging_cust = f"{bp}/Customer"  # write_file uses dataset-name dir (no __staging suffix)
         write_file(cust_df, f"{bp}/Customer.txt", "|", dbutils, scale_factor=cfg.sf)
 
         _cust_min_schema = "cdc_flag STRING, cdc_dsn BIGINT, c_id STRING, c_tax_id STRING, c_st_id STRING, c_l_name STRING, c_f_name STRING, c_m_name STRING, c_gndr STRING, c_tier STRING"
@@ -1328,7 +1328,7 @@ def generate_incremental(spark, cfg, dicts, dbutils):
         acct_final = acct_final.dropDuplicates(["ca_id"])
 
         # Write first, then count from staging. Same dropDuplicates non-determinism rationale as Customer.txt above.
-        staging_acct = f"{bp}/Account.txt__staging"
+        staging_acct = f"{bp}/Account"  # write_file uses dataset-name dir
         write_file(acct_final, f"{bp}/Account.txt", "|", dbutils, scale_factor=cfg.sf)
         _acct_min_schema = "cdc_flag STRING, cdc_dsn BIGINT, ca_id STRING, ca_b_id STRING, ca_c_id STRING, ca_name STRING, ca_tax_st STRING, ca_st_id STRING"
         _acct_agg = spark.read.csv(
