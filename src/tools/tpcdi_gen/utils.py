@@ -597,28 +597,36 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
     if large_copies:
         _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
 
-    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
+    # Small parts: cat-pack on driver via subprocess xargs cat (kernel-speed
+    # I/O on the FUSE mount). xargs avoids ARG_MAX issues for many parts.
+    # Whole-bin retry on subprocess CalledProcessError handles UC Volume
+    # FUSE EAGAIN under heavy parallel I/O.
     if bins:
-        import shutil, time
+        import subprocess, tempfile, time as _time
         for bin_files in bins:
             target = f"{base}_{idx}{ext}"
             dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
-            with open(dst_local, "wb") as out:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".txt") as lst:
                 for pf in bin_files:
                     src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
-                    last_err = None
-                    for attempt in range(10):
-                        try:
-                            with open(src_local, "rb") as src:
-                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
-                            break
-                        except OSError as e:
-                            last_err = e
-                            if attempt == 0:
-                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
-                            time.sleep(min(30, 0.5 * (2 ** attempt)))
-                    else:
-                        raise last_err
+                    lst.write(src_local + "\n")
+                list_path = lst.name
+            last_err = None
+            for attempt in range(10):
+                try:
+                    subprocess.run(
+                        ["bash", "-c", f"xargs -a {list_path} cat > {dst_local}"],
+                        check=True)
+                    break
+                except subprocess.CalledProcessError as e:
+                    last_err = e
+                    if attempt == 0:
+                        log(f"[Concat] {os.path.basename(target)}: xargs cat failed, retrying", "WARN")
+                    _time.sleep(min(30, 0.5 * (2 ** attempt)))
+            else:
+                os.unlink(list_path)
+                raise last_err
+            os.unlink(list_path)
             targets.append(target)
             idx += 1
 
