@@ -33,17 +33,23 @@ def copy_dataset(*, cfg, dbutils, filenames, num_batches: int = 3) -> int:
     if isinstance(filenames, str):
         filenames = [filenames]
 
+    import os
     n_total = 0
     for batch in range(1, num_batches + 1):
         bp = cfg.batch_path(batch)
         for fname in filenames:
-            staging = f"{bp}/{fname}__staging"
+            base, ext = os.path.splitext(fname)
+            # perf/v5: staging dir is the dataset name (e.g. Batch1/Trade)
+            # rather than Batch1/Trade.txt__staging. Spark writes part-* in
+            # there; register_copies_from_staging renames them in place to
+            # {base}_K{ext}.
+            staging = f"{bp}/{base}"
             final = f"{bp}/{fname}"
             try:
                 dbutils.fs.ls(staging)  # probe
             except Exception:
                 continue  # nothing staged for this batch (e.g. augmented mode)
-            print(f"  {staging}: in-place rename → {fname.rsplit('.',1)[0]}_K{fname[fname.rfind('.'):]}")
+            print(f"  {staging}: in-place rename → {base}_K{ext}")
             targets, _ = register_copies_from_staging(staging, final, dbutils)
             n_total += len(targets)
 

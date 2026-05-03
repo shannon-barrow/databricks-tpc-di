@@ -694,7 +694,11 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     Returns:
         List of final target file paths.
     """
-    staging_dir = path + "__staging"
+    # perf/v5: staging dir IS the final output dir — Spark writes part files
+    # here and register_copies_from_staging renames them in place to
+    # {base}_K{ext}. No cross-dir copy. Drop the ".txt__staging" suffix the
+    # legacy code used; just use the dataset name (e.g. "Batch1/Trade").
+    staging_dir = os.path.splitext(path)[0]
     _cleanup(staging_dir, dbutils)
 
     _BYTES_PER_ROW = {
