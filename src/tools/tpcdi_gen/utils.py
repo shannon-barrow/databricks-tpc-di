@@ -530,99 +530,86 @@ _DEFER_COPIES = {"enabled": False}
 
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
+    """perf/v5: in-place rename inside the Spark staging dir via shell.
 
-    Spark writes output as a directory of ``part-NNNNN`` files sized up to
-    ``maxRecordsPerFile`` (~128MB). Tail partitions and under-partitioned
-    datasets often produce many smaller parts, which are wasteful to copy
-    individually (RPC overhead per file, extra files for downstream readers).
+    Replaces the prior ``dbutils.fs.cp``-based cross-directory move
+    pipeline (which capped at ~49m at SF=20k due to UC Volumes Files API
+    throttling) with a one-shot bash loop that does same-directory
+    renames on the FUSE mount. Each ``mv`` should be a metadata-only op
+    on UC Volumes — no bytes moved, no Files API per-call overhead.
 
-    This function splits parts into two paths:
+    Files stay inside the ``__staging`` dir, renamed from
+    ``part-NNNNN-UUID[-cM].csv`` to ``{base}_K.{ext}`` where K is a 1-based
+    sequential index. Sequential numbering avoids the collision risk of
+    keeping Spark's NNNNN (which can repeat when ``maxRecordsPerFile``
+    splits a partition into multiple files with different ``-cM`` suffixes).
 
-    - **Large parts** (``>= 50MB``): registered for deferred parallel
-      ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
-      bandwidth, ~64-thread parallelism.
-
-    - **Small parts** (``< 50MB``): bin-packed into groups summing to
-      ``<= 128MB``, then concatenated into single files via driver-side
-      ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
-      produces fewer downstream files.
-
-    Output files are numbered sequentially starting from ``start_idx``:
-    e.g. ``Customer_1.txt``, ``Customer_2.txt``, … matching the TPC-DI
-    ``fileNamePattern`` regex. Multiple calls can share a sequence by
-    passing the returned `next_idx` as the next call's ``start_idx`` (used
-    by FINWIRE where CMP/SEC/FIN subsets each stage separately but land in
-    the same ``FINWIRE_N.txt`` namespace).
+    Bronze ingest must scan recursively to pick up files inside
+    ``__staging`` dirs. The ``{base}_K.{ext}`` naming still matches the
+    existing TPC-DI ``fileNamePattern`` regex (``Trade_[0-9]+\\.txt`` etc.).
 
     Args:
         staging_dir: Path to the Spark output directory containing part files.
-        final_path: Desired final output path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
-        dbutils: Databricks dbutils object for filesystem operations.
-        start_idx: First ``_N`` value to use (default 1).
+        final_path: Desired final output path — used to derive base+ext.
+            (e.g., ``/Volumes/.../Batch1/Trade.txt`` → ``base="Trade"``,
+            ``ext=".txt"``)
+        dbutils: Databricks dbutils object (kept for signature compat).
+        start_idx: First sequential number to use (default 1). Kept so
+            FINWIRE's CMP/SEC/FIN can share a counter across calls.
 
     Returns:
-        (list of final target paths, next_idx to use for subsequent calls).
+        (list of final renamed paths, next_idx for chained callers).
     """
     if _DEFER_COPIES["enabled"]:
-        # Decomposed data_gen workflow: gen_* task writes the staging dir,
-        # a separate copy_* task does the actual copy (in parallel with
-        # downstream gens). FINWIRE shares a counter across CMP/SEC/FIN
-        # subsets — preserve start_idx flow even though we don't copy
-        # here. The copy_* task replays the same start_idx logic when it
-        # iterates the staging dirs.
         return [], start_idx
 
-    files = dbutils.fs.ls(staging_dir)
-    part_files = [f for f in files if f.name.startswith("part-")]
-    if not part_files:
-        return [], start_idx
+    import subprocess
+    staging_local = staging_dir.replace("dbfs:", "") if staging_dir.startswith("dbfs:") else staging_dir
+    filename = os.path.basename(final_path)
+    base, ext = os.path.splitext(filename)
 
-    large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
-                   key=lambda f: f.name)
-    small = [f for f in part_files if f.size < _LARGE_PART_MIN_BYTES]
-    bins = _pack_small_parts(small, _PACK_MAX_BYTES)
+    # One-shot bash:
+    #   - cd into the staging dir
+    #   - serial loop over sorted `part-*` files, mv each to `{base}_K{ext}`
+    #     starting at start_idx (each mv = single syscall = metadata-only on FUSE)
+    #   - delete Spark marker files (_SUCCESS / _started_* / _committed_*)
+    #   - print the count + the highest index used so the parent process can
+    #     continue numbering past it (read via subprocess output).
+    cmd = (
+        f'set -eu; cd "{staging_local}"; '
+        f"i={start_idx}; "
+        f'for f in $(ls part-* 2>/dev/null | sort); do '
+        f'  mv "$f" "{base}_${{i}}{ext}"; '
+        f'  i=$((i + 1)); '
+        f'done; '
+        f"find . -maxdepth 1 -type f \\( -name '_SUCCESS' -o -name '_started_*' -o -name '_committed_*' \\) -delete; "
+        f'echo "RENAME_NEXT_IDX=$i"'
+    )
+    log(f"[Rename] {base}: in-place shell rename in {staging_local} (start={start_idx})", "DEBUG")
+    res = subprocess.run(["bash", "-c", cmd], check=True, capture_output=True, text=True)
 
-    base, ext = os.path.splitext(final_path)
-    targets = []
-    idx = start_idx
+    # Parse the next index emitted by the bash echo.
+    next_idx = start_idx
+    for line in res.stdout.splitlines():
+        if line.startswith("RENAME_NEXT_IDX="):
+            try:
+                next_idx = int(line.split("=", 1)[1])
+            except ValueError:
+                pass
 
-    # Large parts: kick off a per-dataset async copy immediately so this dataset can start copying as soon as write_file returns, without waiting for a global drain. The thread is tracked in `_background_threads` so orchestrator can wait_for_background_copies() before cleanup_staging.
-    large_copies = []
-    for pf in large:
-        target = f"{base}_{idx}{ext}"
-        large_copies.append((pf.path, target))
-        targets.append(target)
-        idx += 1
-    if large_copies:
-        _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
-
-    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
-    if bins:
-        import shutil, time
-        for bin_files in bins:
-            target = f"{base}_{idx}{ext}"
-            dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
-            with open(dst_local, "wb") as out:
-                for pf in bin_files:
-                    src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
-                    last_err = None
-                    for attempt in range(10):
-                        try:
-                            with open(src_local, "rb") as src:
-                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
-                            break
-                        except OSError as e:
-                            last_err = e
-                            if attempt == 0:
-                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
-                            time.sleep(min(30, 0.5 * (2 ** attempt)))
-                    else:
-                        raise last_err
-            targets.append(target)
-            idx += 1
-
-    return targets, idx
+    # List the renamed files for the return contract.
+    try:
+        renamed = sorted(
+            (f for f in os.listdir(staging_local)
+             if f.startswith(f"{base}_") and f.endswith(ext)),
+            key=lambda n: int(n[len(base) + 1: -len(ext)]) if n[len(base) + 1: -len(ext)].isdigit() else 0
+        )
+    except Exception as e:
+        log(f"[Rename] {base}: listdir failed {type(e).__name__}: {e}", "WARN")
+        renamed = []
+    targets = [f"{staging_local}/{name}" for name in renamed]
+    log(f"[Rename] {base}: {len(targets)} files renamed (next_idx={next_idx})", "DEBUG")
+    return targets, next_idx
 
 
 def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
@@ -707,7 +694,11 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     Returns:
         List of final target file paths.
     """
-    staging_dir = path + "__staging"
+    # perf/v5: staging dir IS the final output dir — Spark writes part files
+    # here and register_copies_from_staging renames them in place to
+    # {base}_K{ext}. No cross-dir copy. Drop the ".txt__staging" suffix the
+    # legacy code used; just use the dataset name (e.g. "Batch1/Trade").
+    staging_dir = os.path.splitext(path)[0]
     _cleanup(staging_dir, dbutils)
 
     _BYTES_PER_ROW = {

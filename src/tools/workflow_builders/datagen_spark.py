@@ -174,7 +174,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ``"augmented_incremental"`` writes Delta tables to
     ``tpcdi_raw_data.{dataset}{sf}`` and skips Batch2/Batch3.
     """
-    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    # Spark output goes under spark_datagen/ subdir to keep DIGen and Spark
+    # outputs separate (DIGen writes to the unprefixed sf=N/ path).
+    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
     is_serverless = (serverless or "YES").upper() == "YES"
     is_augmented = datagen_choice == "augmented_incremental"
 
@@ -254,15 +256,21 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         job_cluster_key=job_cluster_key,
     ))
 
-    # Copy tasks — run in parallel with downstream gens.
+    # Copy tasks — run in parallel with downstream gens. Trade family is
+    # split into 4 sibling tasks (one per dataset) so each gets repair-run
+    # granularity and the long-pole copies run concurrently across separate
+    # processes (independent UC Volumes Files API throttle slots).
     _copy_specs = [
-        ("copy_hr",            ["gen_hr"]),
-        ("copy_finwire",       ["gen_finwire"]),
-        ("copy_customer",      ["gen_customer"]),
-        ("copy_daily_market",  ["gen_daily_market"]),
-        ("copy_trade",         ["gen_trade"]),
-        ("copy_watch_history", ["gen_watch_history"]),
-        ("copy_prospect",      ["gen_prospect"]),
+        ("copy_hr",              ["gen_hr"]),
+        ("copy_finwire",         ["gen_finwire"]),
+        ("copy_customer",        ["gen_customer"]),
+        ("copy_daily_market",    ["gen_daily_market"]),
+        ("copy_trade",           ["gen_trade"]),
+        ("copy_tradehistory",    ["gen_trade"]),
+        ("copy_cashtransaction", ["gen_trade"]),
+        ("copy_holdinghistory",  ["gen_trade"]),
+        ("copy_watch_history",   ["gen_watch_history"]),
+        ("copy_prospect",        ["gen_prospect"]),
     ]
     _copy_keys: list[str] = []
     for _name, _deps in _copy_specs:
