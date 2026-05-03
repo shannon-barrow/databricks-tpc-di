@@ -490,6 +490,35 @@ def register_copy(source: str, target: str):
     _pending_copies.append((source, target))
 
 
+_LARGE_PART_MIN_BYTES = 50 * 1024 * 1024    # parts >= this bypass packing
+_PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
+
+
+def _pack_small_parts(small_parts, max_bytes: int):
+    """Greedy first-fit-decreasing bin-packing.
+
+    Given a list of part files (each an object with ``.path``, ``.name``, ``.size``),
+    group them into bins whose total size does not exceed ``max_bytes``.
+
+    Returns a list of bins, each a list of parts sorted by original part name
+    (so concat order is deterministic and matches Spark's partition order within
+    each bin).
+    """
+    sorted_parts = sorted(small_parts, key=lambda f: f.size, reverse=True)
+    bins = []  # list of {"files": [...], "size": int}
+    for f in sorted_parts:
+        placed = False
+        for b in bins:
+            if b["size"] + f.size <= max_bytes:
+                b["files"].append(f)
+                b["size"] += f.size
+                placed = True
+                break
+        if not placed:
+            bins.append({"files": [f], "size": f.size})
+    return [sorted(b["files"], key=lambda f: f.name) for b in bins]
+
+
 # When set True, register_copies_from_staging() returns immediately
 # without performing the staging→final copies. Per-task data_gen workflow
 # (data_gen_tasks/gen_*.py) sets this to True before calling generate(),
@@ -501,20 +530,30 @@ _DEFER_COPIES = {"enabled": False}
 
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """Rename every Spark part file to the final ``base_N.ext`` numbering.
+    """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
 
-    With ``write_file`` now repartitioning each DataFrame to a target file
-    count (driven by ``_B1_FILES_PER_SF`` × ``scale_factor``), every
-    ``part-NNNNN`` already has the right ~128 MB size — there's no
-    under-partitioned tail to bin-pack. We just kick a parallel
-    ``dbutils.fs.cp`` daemon to rename them all server-side.
+    Spark writes output as a directory of ``part-NNNNN`` files sized up to
+    ``maxRecordsPerFile`` (~128MB). Tail partitions and under-partitioned
+    datasets often produce many smaller parts, which are wasteful to copy
+    individually (RPC overhead per file, extra files for downstream readers).
+
+    This function splits parts into two paths:
+
+    - **Large parts** (``>= 50MB``): registered for deferred parallel
+      ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
+      bandwidth, ~64-thread parallelism.
+
+    - **Small parts** (``< 50MB``): bin-packed into groups summing to
+      ``<= 128MB``, then concatenated into single files via driver-side
+      ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
+      produces fewer downstream files.
 
     Output files are numbered sequentially starting from ``start_idx``:
     e.g. ``Customer_1.txt``, ``Customer_2.txt``, … matching the TPC-DI
     ``fileNamePattern`` regex. Multiple calls can share a sequence by
-    passing the returned ``next_idx`` as the next call's ``start_idx``
-    (used by FINWIRE where CMP/SEC/FIN subsets each stage separately but
-    land in the same ``FINWIRE_N.txt`` namespace).
+    passing the returned `next_idx` as the next call's ``start_idx`` (used
+    by FINWIRE where CMP/SEC/FIN subsets each stage separately but land in
+    the same ``FINWIRE_N.txt`` namespace).
 
     Args:
         staging_dir: Path to the Spark output directory containing part files.
@@ -535,22 +574,54 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
         return [], start_idx
 
     files = dbutils.fs.ls(staging_dir)
-    part_files = sorted([f for f in files if f.name.startswith("part-")],
-                        key=lambda f: f.name)
+    part_files = [f for f in files if f.name.startswith("part-")]
     if not part_files:
         return [], start_idx
 
+    large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
+                   key=lambda f: f.name)
+    small = [f for f in part_files if f.size < _LARGE_PART_MIN_BYTES]
+    bins = _pack_small_parts(small, _PACK_MAX_BYTES)
+
     base, ext = os.path.splitext(final_path)
-    copies = []
     targets = []
     idx = start_idx
-    for pf in part_files:
+
+    # Large parts: kick off a per-dataset async copy immediately so this dataset can start copying as soon as write_file returns, without waiting for a global drain. The thread is tracked in `_background_threads` so orchestrator can wait_for_background_copies() before cleanup_staging.
+    large_copies = []
+    for pf in large:
         target = f"{base}_{idx}{ext}"
-        copies.append((pf.path, target))
+        large_copies.append((pf.path, target))
         targets.append(target)
         idx += 1
+    if large_copies:
+        _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
 
-    _start_dataset_copy(dbutils, copies, label=os.path.basename(base))
+    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
+    if bins:
+        import shutil, time
+        for bin_files in bins:
+            target = f"{base}_{idx}{ext}"
+            dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
+            with open(dst_local, "wb") as out:
+                for pf in bin_files:
+                    src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
+                    last_err = None
+                    for attempt in range(10):
+                        try:
+                            with open(src_local, "rb") as src:
+                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
+                            break
+                        except OSError as e:
+                            last_err = e
+                            if attempt == 0:
+                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
+                            time.sleep(min(30, 0.5 * (2 ** attempt)))
+                    else:
+                        raise last_err
+            targets.append(target)
+            idx += 1
+
     return targets, idx
 
 
@@ -608,70 +679,30 @@ def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
 
 
 
-_TARGET_FILE_BYTES = 128 * 1024 * 1024  # ~128 MB per output file
-_BYTES_PER_ROW = {
-    "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
-    "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
-    "HR": 80, "Prospect": 196,
-}
-
-# Files-per-scale-factor for the Batch1 (historical) write of each dataset,
-# calibrated so each output part is ~128 MB at the given SF. Derived from
-# observed B1 byte sizes at SF=10 scaled linearly:
-#
-#   B1 size at SF=10 (MB) × (SF / 10) / 128 MB ≈ files
-#
-# B2/B3 (incremental window) are always 1 file — the per-day slice is
-# tiny relative to historical.
-_B1_FILES_PER_SF = {
-    "Trade":           0.111,  # 142 MB @ SF=10  → 2220 @ SF=20k
-    "TradeHistory":    0.082,  # 105 MB           → 1640
-    "CashTransaction": 0.085,  # 109 MB           → 1700
-    "HoldingHistory":  0.0195, #  25 MB           →  390
-    "DailyMarket":     0.245,  # 313 MB           → 4900
-    "WatchHistory":    0.107,  # 137 MB           → 2140
-    "HR":              0.0032, #   4 MB           →   64
-    "Prospect":        0.008,  #  10 MB / batch   →  165 / batch
-}
-
-
-def _target_file_count(dataset: str, scale_factor: int, path: str) -> int:
-    """How many evenly-sized output files this write should produce.
-
-    Returns 1 for incremental (B2/B3) batches — their per-day slice is
-    tiny enough that one file is correct. Returns the SF-scaled count for
-    Batch1 historical writes. Returns 1 as a safe fallback for unknown
-    datasets.
-    """
-    is_b1 = "/Batch1/" in path
-    if not is_b1:
-        return 1
-    ratio = _B1_FILES_PER_SF.get(dataset, 0)
-    if ratio <= 0 or scale_factor <= 0:
-        return 1
-    return max(1, int(round(ratio * scale_factor)))
-
-
 def write_file(df: DataFrame, path: str, delimiter: str = "|",
                dbutils=None, scale_factor: int = 0):
     """Write a DataFrame to a staging directory and register final outputs.
 
-    Repartitions the DataFrame to a target file count derived from a per-
-    dataset ratio (``_B1_FILES_PER_SF``) and the scale factor. Each output
-    partition writes one part file at ~128 MB, eliminating the under-
-    partitioned tail (small parts → driver-side bin-pack in
-    ``register_copies_from_staging``). Every part then flows through the
-    parallel server-side ``dbutils.fs.cp`` code path.
+    Spark writes part files capped at ~128MB via ``maxRecordsPerFile``, then
+    ``register_copies_from_staging`` produces final numbered files using the
+    hybrid strategy:
 
-    Incremental (Batch2/3) writes always coalesce to 1 file — the per-day
-    slice is small.
+    - Parts ≥ 50MB are queued for deferred parallel ``dbutils.fs.cp`` (server-
+      side copy, no driver bandwidth).
+    - Parts < 50MB are bin-packed into ≤128MB groups and merged with
+      ``xargs cat`` on the driver FUSE mount.
+
+    Small datasets (most incrementals) trivially pack into a single bin, producing
+    one ``_1`` file. Large datasets (Batch1, DailyMarket) flow mostly through the
+    parallel-cp path with only tail partitions packed. CustomerMgmt XML and audit
+    files use their own writers and don't go through this path.
 
     Args:
         df: DataFrame to write.
-        path: Final output file path (e.g., ``/Volumes/.../Batch1/Trade.txt``).
-        delimiter: Field delimiter (default ``|`` per TPC-DI spec).
+        path: Final output file path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
+        delimiter: Field delimiter for the CSV output. Defaults to ``|`` per TPC-DI spec.
         dbutils: Databricks dbutils object for filesystem operations.
-        scale_factor: TPC-DI scale factor — drives the B1 file count.
+        scale_factor: TPC-DI scale factor.
 
     Returns:
         List of final target file paths.
@@ -679,14 +710,15 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     staging_dir = path + "__staging"
     _cleanup(staging_dir, dbutils)
 
+    _BYTES_PER_ROW = {
+        "Trade": 188, "TradeHistory": 33, "CashTransaction": 87,
+        "HoldingHistory": 25, "WatchHistory": 45, "DailyMarket": 51,
+        "HR": 80, "Prospect": 196,
+    }
     filename = os.path.basename(path)
     dataset = filename.split(".")[0].split("_")[0] if "_" in filename else filename.rsplit(".", 1)[0]
-
-    target_files = _target_file_count(dataset, scale_factor, path)
-    if target_files == 1:
-        df = df.coalesce(1)
-    else:
-        df = df.repartition(target_files)
+    row_bytes = _BYTES_PER_ROW.get(dataset, 0)
+    max_records = int(128 * 1024 * 1024 / row_bytes) if row_bytes > 0 else 0
 
     writer = (df
         .write
@@ -697,6 +729,8 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
         .option("escape", "")      # No escape characters
         .option("nullValue", "")   # Nulls written as empty strings
         .option("emptyValue", ""))  # Empty strings stay empty (no quotes)
+    if max_records > 0:
+        writer = writer.option("maxRecordsPerFile", max_records)
     writer.csv(staging_dir)
 
     targets, _next = register_copies_from_staging(staging_dir, path, dbutils)

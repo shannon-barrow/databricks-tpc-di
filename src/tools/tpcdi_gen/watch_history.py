@@ -435,13 +435,14 @@ def _gen_historical(spark, cfg, dbutils):
                  .otherwise(F.lit("files"))))
         write_delta(result_partitioned, cfg=cfg, dataset="watchhistory",
                     partition_cols=["stg_target"])
+    else:
+        write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
+                   scale_factor=cfg.sf)
+
     # Analytical estimate: n_actv = wh_actv_count; target_cncl = wh_total - wh_actv_count.
     actv_est = n_actv
     cncl_est = target_cncl
     total_est = actv_est + cncl_est
-    if not cfg.augmented_incremental:
-        write_file(result_df, f"{cfg.batch_path(1)}/WatchHistory.txt", "|", dbutils,
-                   scale_factor=cfg.sf)
     log(f"[WatchHistory] Batch1: {actv_est:,} ACTV + {cncl_est:,} CNCL = {total_est:,} total")
 
     if not static_audits_available(cfg):
@@ -545,8 +546,7 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     inc_df = actv_part.unionByName(cncl_part)
 
     staging_inc = f"{cfg.batch_path(batch_id)}/WatchHistory.txt__staging"
-    write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils,
-               scale_factor=cfg.sf)
+    write_file(inc_df, f"{cfg.batch_path(batch_id)}/WatchHistory.txt", "|", dbutils, scale_factor=cfg.sf)
 
     # Analytical incremental estimates — 80/20 ACTV/CNCL split of rows_per_update.
     inc_rows_est = cp.get("wh_rows_per_update", 0)
