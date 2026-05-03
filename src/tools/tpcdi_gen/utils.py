@@ -447,7 +447,7 @@ _pending_copies = []  # legacy: rarely used; new register_copies_from_staging
 _background_threads = []  # Thread objects for per-dataset async copies
 
 
-def _start_dataset_copy(dbutils, copies, label: str = "", max_workers: int = 32):
+def _start_dataset_copy(dbutils, copies, label: str = "", max_workers: int = 64):
     """Kick off a background thread that copies just this dataset's part files.
 
     Each write_file call uses this to start copying its large parts as soon
