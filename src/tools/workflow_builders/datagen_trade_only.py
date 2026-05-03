@@ -47,7 +47,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           default_dbr_version: str | None = None,
           wh_db: str = "tpcdi_incremental_staging",
           **_unused) -> dict:
-    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+    # Spark output goes under spark_datagen/ subdir to avoid clobbering DIGen
+    # output (which uses the unprefixed sf=N/ path).
+    tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
     is_serverless = (serverless or "YES").upper() == "YES"
 
     if is_serverless:
