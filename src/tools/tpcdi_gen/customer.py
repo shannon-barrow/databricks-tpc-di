@@ -256,225 +256,31 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     all_df = all_df.withColumn("_atype_pos",
         F.row_number().over(_atype_win) - F.lit(1))
 
-    # === DIGen-style GrowingOffsetPermutation schedules ===
-    # DIGen picks IDs from a bijection over the "alive" pool at each update: pool size = total IDs created so far - IDs already deleted. This guarantees picks never land on deleted entities, so Rule 1/3 filters drop zero. We replicate it at the driver: process updates in order, maintain sorted lists of cumulative deletions, and resolve virtual indices to actual IDs via bisect-and-skip over the deletions.
-    #
-    # Per-action-type pool rules (mirrors DIGen's action-order semantics): INACT    pool = prior-alive customers (excludes INACTs in updates 1..g-1) CLOSE    pool = prior-alive accounts  (excludes CLOSEs in updates 1..g-1) UPDCUST  pool = prior-alive customers (same-update INACT comes AFTER UPDCUST) UPDACCT  pool = prior-alive accounts  (same-update CLOSE comes AFTER UPDACCT) ADDACCT  pool = prior-alive customers MINUS same-update INACTs (no new accounts for a customer being deactivated this same update)
-    import math as _math
-    import random as _rand
-    import numpy as _np
-    import pandas as _pd
+    # === V8-customer: Spark-native scheduler ===
+    # Replaces a ~22-26 min driver-only numpy loop at SF=20k with a
+    # Pandas-UDF port of DIGen's GrowingOffsetPermutation that runs on
+    # Spark executors. Output IDs do NOT byte-for-byte match the prior
+    # scheduler (different bijection params + DIGen's slot-offset
+    # semantics for ADDACCT/UPDCUST). Audit static snapshots are
+    # regenerated to match this scheduler's output.
+    from .customer_scheduler_v2 import build_schedule_df
+    log("[CustomerMgmt] V8: building schedule_df via Spark-native GrowingOffsetPermutation")
+    schedule_df = build_schedule_df(
+        spark,
+        hist_size=hist_size,
+        update_last_id=update_last_id,
+        new_custs=new_custs,
+        change_custs=change_custs,
+        del_custs=del_custs,
+        new_accts=new_accts,
+        change_accts=change_accts,
+        del_accts=del_accts,
+        addaccts_per_update=addaccts_per_update,
+        cust_perm_seed=seed_for("CM", "v2_cust_perm"),
+        acct_perm_seed=seed_for("CM", "v2_acct_perm"),
+    )
+    _sched_cleanup = None
 
-    def _bij_params(modulus: int, rng: _rand.Random) -> tuple:
-        if modulus < 3:
-            return 1, 0
-        b = rng.randrange(1, modulus)
-        while _math.gcd(b, modulus) != 1:
-            b = b + 1 if b + 1 < modulus else 1
-        return int(b), int(rng.randrange(0, modulus))
-
-    def _resolve_skip_vec(virtual, deletions):
-        """Vectorized map: virtual indices → actual IDs via fixed-point
-        iteration of f(a) = virtual + |{d in deletions : d <= a}|.
-
-        Each iteration either converges or advances at least one row by ≥1,
-        so the loop is bounded by the longest run of consecutive deleted IDs
-        adjacent to any target; in practice converges in <30 passes even at
-        SF=20000."""
-        actual = virtual.copy()
-        while True:
-            new_actual = virtual + _np.searchsorted(deletions, actual, side='right')
-            if _np.array_equal(new_actual, actual):
-                return actual
-            actual = new_actual
-
-    def _merge_sorted(big_sorted, small_unsorted):
-        """O(N + k log N) merge of a large sorted array with a small unsorted one.
-
-        Replaces ``_np.sort(_np.concatenate([big_sorted, small_unsorted]))`` —
-        which is O((N+k) log (N+k)) and ignores that ``big_sorted`` is already
-        sorted. At SF=20k late iterations N=4.3M, k=10K, so this is ~20x
-        faster per call vs the full re-sort.
-
-        ``small_unsorted`` is allowed to contain elements not in
-        ``big_sorted`` (the bijection scheduler guarantees this). Returns a
-        new sorted array.
-        """
-        if len(big_sorted) == 0:
-            return _np.sort(small_unsorted) if len(small_unsorted) > 0 else big_sorted
-        if len(small_unsorted) == 0:
-            return big_sorted
-        small_sorted = _np.sort(small_unsorted)
-        # Where each small element would land within big_sorted.
-        pos = _np.searchsorted(big_sorted, small_sorted)
-        n = len(big_sorted) + len(small_sorted)
-        out = _np.empty(n, dtype=big_sorted.dtype)
-        # Destination indices for the small elements in the merged array:
-        # element i goes at pos[i] + i (its insertion point shifted by all
-        # earlier insertions).
-        small_dest = pos + _np.arange(len(small_sorted), dtype=_np.int64)
-        # Mask everything else as the destination for big_sorted in order.
-        mask = _np.ones(n, dtype=bool)
-        mask[small_dest] = False
-        out[mask] = big_sorted
-        out[small_dest] = small_sorted
-        return out
-
-    _inact_seed   = seed_for("CM", "inact_sched")
-    _close_seed   = seed_for("CM", "close_sched")
-    _updcust_seed = seed_for("CM", "updcust_sched")
-    _updacct_seed = seed_for("CM", "updacct_sched")
-    _addacct_seed = seed_for("CM", "addacct_sched")
-
-    # Action-type codes for the unified schedule DataFrame — match ActionType strings in all_df so a single join resolves all non-NEW picks.
-    ACT_INACT, ACT_CLOSE, ACT_UPDCUST, ACT_UPDACCT, ACT_ADDACCT = 0, 1, 2, 3, 4
-
-    # Pre-allocate unified schedule buffers (exact sizes known up front).
-    n_inact   = del_custs * update_last_id
-    n_close   = del_accts * update_last_id
-    n_updcust = change_custs * update_last_id
-    n_updacct = change_accts * update_last_id
-    n_addacct = addaccts_per_update * update_last_id
-    total_rows = n_inact + n_close + n_updcust + n_updacct + n_addacct
-
-    sched_update = _np.zeros(total_rows, dtype=_np.int64)
-    sched_action = _np.zeros(total_rows, dtype=_np.int8)
-    sched_pos    = _np.zeros(total_rows, dtype=_np.int64)
-    sched_id     = _np.zeros(total_rows, dtype=_np.int64)
-    _sched_idx = 0
-
-    def _append_picks(action_code: int, g: int, ids):
-        nonlocal _sched_idx
-        n = len(ids)
-        if n == 0:
-            return
-        sched_update[_sched_idx:_sched_idx + n] = g
-        sched_action[_sched_idx:_sched_idx + n] = action_code
-        sched_pos[_sched_idx:_sched_idx + n]    = _np.arange(n, dtype=_np.int64)
-        sched_id[_sched_idx:_sched_idx + n]     = ids
-        _sched_idx += n
-
-    inact_sorted = _np.array([], dtype=_np.int64)
-    close_sorted = _np.array([], dtype=_np.int64)
-
-    for g in range(1, update_last_id + 1):
-        pool_cust = hist_size + (g - 1) * new_custs
-        pool_acct = hist_size + (g - 1) * new_accts
-        alive_cust = pool_cust - len(inact_sorted)
-        alive_acct = pool_acct - len(close_sorted)
-
-        # INACT picks (pool: prior-alive customers)
-        this_inacts = _np.array([], dtype=_np.int64)
-        if alive_cust >= max(3, del_custs):
-            rng = _rand.Random((_inact_seed << 16) ^ g)
-            b, c = _bij_params(alive_cust, rng)
-            ps = _np.arange(del_custs, dtype=_np.int64)
-            virtual = (b * ps + c) % alive_cust
-            this_inacts = _resolve_skip_vec(virtual, inact_sorted)
-            _append_picks(ACT_INACT, g, this_inacts)
-
-        # CLOSE picks (pool: prior-alive accounts)
-        this_closes = _np.array([], dtype=_np.int64)
-        if alive_acct >= max(3, del_accts):
-            rng = _rand.Random((_close_seed << 16) ^ g)
-            b, c = _bij_params(alive_acct, rng)
-            ps = _np.arange(del_accts, dtype=_np.int64)
-            virtual = (b * ps + c) % alive_acct
-            this_closes = _resolve_skip_vec(virtual, close_sorted)
-            _append_picks(ACT_CLOSE, g, this_closes)
-
-        # ADDACCT picks (pool: prior-alive customers MINUS this-update INACTs)
-        if len(this_inacts) > 0:
-            combined_inacts = _merge_sorted(inact_sorted, this_inacts)
-        else:
-            combined_inacts = inact_sorted
-        addacct_pool = pool_cust - len(combined_inacts)
-        if addacct_pool >= max(3, addaccts_per_update):
-            rng = _rand.Random((_addacct_seed << 16) ^ g)
-            b, c = _bij_params(addacct_pool, rng)
-            ps = _np.arange(addaccts_per_update, dtype=_np.int64)
-            virtual = (b * ps + c) % addacct_pool
-            _append_picks(ACT_ADDACCT, g, _resolve_skip_vec(virtual, combined_inacts))
-
-        # UPDCUST picks (pool: prior-alive customers MINUS this-update INACTs). Excluding this-update INACTs prevents UPDCUST and INACT from both picking the same customer in the same update — those would emit two CustomerMgmt actions for the same C_ID on the same day, which silver collapses via `WHERE effectivedate < enddate` and breaks the 'DimCustomer row count' check (audit count > silver row count). ADDACCT already does this above (line ~397) using combined_inacts.
-        upd_pool = pool_cust - len(combined_inacts)
-        if upd_pool >= max(3, change_custs):
-            rng = _rand.Random((_updcust_seed << 16) ^ g)
-            b, c = _bij_params(upd_pool, rng)
-            ps = _np.arange(change_custs, dtype=_np.int64)
-            virtual = (b * ps + c) % upd_pool
-            _append_picks(ACT_UPDCUST, g, _resolve_skip_vec(virtual, combined_inacts))
-
-        # UPDACCT picks (pool: prior-alive accounts)
-        if alive_acct >= max(3, change_accts):
-            rng = _rand.Random((_updacct_seed << 16) ^ g)
-            b, c = _bij_params(alive_acct, rng)
-            ps = _np.arange(change_accts, dtype=_np.int64)
-            virtual = (b * ps + c) % alive_acct
-            _append_picks(ACT_UPDACCT, g, _resolve_skip_vec(virtual, close_sorted))
-
-        # Commit this update's deletions. inact_sorted ↔ combined_inacts (we
-        # already paid for the merge above when computing combined_inacts —
-        # reuse it instead of recomputing the same sorted union).
-        inact_sorted = combined_inacts
-        if len(this_closes) > 0:
-            close_sorted = _merge_sorted(close_sorted, this_closes)
-
-    # Trim to actual size and release the cumulative-deletions buffers.
-    sched_update = sched_update[:_sched_idx]
-    sched_action = sched_action[:_sched_idx]
-    sched_pos    = sched_pos[:_sched_idx]
-    sched_id     = sched_id[:_sched_idx]
-    del inact_sorted, close_sorted
-
-    log(f"[CustomerMgmt] schedules: {_sched_idx} rows "
-        f"(INACT={n_inact} CLOSE={n_close} UPDCUST={n_updcust} "
-        f"UPDACCT={n_updacct} ADDACCT={n_addacct})", "DEBUG")
-
-    # Persist the schedule numpy buffers directly to Parquet on the volume
-    # via pyarrow on the driver, then re-read as a Spark DataFrame.
-    #
-    # We deliberately avoid `spark.createDataFrame(pandas_df)` here because
-    # on Spark Connect serverless that path embeds the entire pandas
-    # payload in the LogicalPlan as a LocalRelation literal — the subsequent
-    # write task's serialized plan then carries the full data set. At
-    # SF=20000 the schedule is ~70M rows × 32 B ≈ 2.2 GB, blowing past
-    # spark.rpc.message.maxSize (256 MB, NOT settable on serverless) with
-    # `Serialized task ... was 494762139 bytes`. Coalesce / repartition
-    # can't fix it because the data is in the plan, not in input
-    # partitions. Writing the parquet directly via pyarrow → spark.read
-    # makes the data flow through the volume's FUSE mount instead of the
-    # Spark Connect control plane.
-    import pyarrow as _pa
-    import pyarrow.parquet as _pq
-    log("[CustomerMgmt] building Arrow Table from numpy buffers", "DEBUG")
-    _sched_action_str = _np.array(["INACT", "CLOSEACCT", "UPDCUST",
-                                    "UPDACCT", "ADDACCT"])[sched_action]
-    _sched_table = _pa.table({
-        "_sched_update": sched_update,
-        "_sched_action": _sched_action_str,
-        "_sched_pos": sched_pos,
-        "_sched_id": sched_id,
-    })
-    del sched_update, sched_action, sched_pos, sched_id, _sched_action_str
-
-    _STAGING_COUNTER_LOCAL = 99  # outside the disk_cache counter range
-    _sched_path = (f"{cfg.volume_path}/_staging/"
-                   f"{_STAGING_COUNTER_LOCAL:03d}_customermgmt_schedules.parquet")
-    _sched_path_fuse = _sched_path[5:] if _sched_path.startswith("dbfs:") else _sched_path
-    log(f"[CustomerMgmt] writing schedule Parquet directly to {_sched_path_fuse}", "DEBUG")
-    import os as _os
-    _os.makedirs(_os.path.dirname(_sched_path_fuse), exist_ok=True)
-    # Cap each row group / output file size so the read-back fans out
-    # across reasonable partition count. ~5M rows per file at SF=20000
-    # gives ~14 files = 14 input splits.
-    _pq.write_table(_sched_table, _sched_path_fuse,
-                    row_group_size=5_000_000)
-    del _sched_table
-    schedule_df = spark.read.parquet(_sched_path)
-    _sched_cleanup = {"kind": "parquet", "path": _sched_path,
-                      "dbutils": dbutils, "label": "CustomerMgmt schedules"}
-    log("[CustomerMgmt] schedule staged", "DEBUG")
 
     # === Assign C_ID ===
     # NEW actions get sequentially allocated C_IDs. The allocation is cumulative:
