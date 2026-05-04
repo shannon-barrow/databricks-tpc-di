@@ -528,22 +528,16 @@ def _pack_small_parts(small_parts, max_bytes: int):
 _DEFER_COPIES = {"enabled": False}
 
 
-# V7 rename worker count per copy_* task. With 8 copy tasks running
-# concurrently in standard mode, total system-wide renames =
-# _RENAME_WORKERS × 8. ABFS rename has a soft per-account RPS limit
-# and UC Volumes FUSE has a per-pod concurrency limit; 16 × 8 = 128
-# total in-flight RPCs is well under both. Drop further if backend
-# throttling reappears.
-_RENAME_WORKERS = 16
+# V7.5 lessons-learned: within-pod parallelism doesn't help on
+# UC Volumes FUSE because the per-pod FUSE driver serializes rename
+# syscalls anyway, and the in-flight worker fan-out triggers ABFS
+# backend throttling cascades. Keep at 1 — effectively serial mv,
+# but each call still goes through the retry helper for transient
+# FUSE/backend errors. To genuinely parallelize across pods, we'd
+# need to distribute the rename pairs across Spark executors (V8 —
+# pending design).
+_RENAME_WORKERS = 1
 
-# Backoff schedule for transient mv failures. UC Volumes FUSE +
-# ABFS backend can fail with a variety of stderr signatures
-# (EAGAIN, "Resource temporarily unavailable", "I/O error",
-# "Operation timed out", or just "No such file or directory" when
-# FUSE inode cache is stale). Treat ALL CalledProcessErrors as
-# transient and retry — worst case a permanent error wastes ~25 s
-# before bubbling up. Schedule grows aggressively so we don't burn
-# a cache window on a doomed file.
 _RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
 
 
