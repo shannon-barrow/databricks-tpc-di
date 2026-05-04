@@ -69,15 +69,33 @@ defined in `workflow_builders/datagen_spark.py` /
 `workflow_builders/augmented_staging.py`:
 
 ```
-data_gen (entry: schema+volume init, wipe on regenerate=YES)
+data_gen (entry: schema+volume init, wipe when regenerate=YES)
   ├── gen_reference / gen_hr / gen_finwire / gen_prospect (wave 1)
   │   └── copy_hr / copy_finwire / copy_prospect (parallel with downstream)
   ├── gen_customer (← gen_hr)            └── copy_customer
-  ├── gen_daily_market / gen_trade (← gen_finwire)  └── copy_daily_market / copy_trade
+  ├── gen_daily_market (← gen_finwire)   └── copy_daily_market
+  ├── gen_trade_base (← gen_finwire)     V6 trade decomposition
+  │   ├── gen_trade            ──→ copy_trade
+  │   ├── gen_tradehistory     ──→ copy_tradehistory
+  │   ├── gen_cashtransaction  ──→ copy_cashtransaction
+  │   └── gen_holdinghistory   ──→ copy_holdinghistory
   └── gen_watch_history (← gen_finwire + gen_customer) └── copy_watch_history
-audit_emit (ALL_SUCCESS, ← all 8 gens — standard mode only)
+audit_emit (ALL_SUCCESS, ← all gens — standard mode only)
 cleanup_intermediates (ALL_SUCCESS, ← all gens + copies + audit_emit)
 ```
+
+**Trade decomposition (V6).** `gen_trade_base` materializes a
+``_gen_trade_df`` Delta table in `{wh_db}_{sf}_stage` containing the
+minimum cross-task column set: `t_id, t_qty, t_ca_id, t_s_symb,
+_is_canceled, _is_buy, _is_limit, _base_ts, _submit_ts, _complete_ts,
+_cash_ts`. The 4 leaves read this Delta in parallel and re-derive
+single-consumer columns from `t_id` (cheap hash ops). Notably *not*
+staged: `_ct_name_raw` (~300 GB at SF=20k — expensive to materialize,
+cheap to re-derive in the CT leaf), `_trade_val`, `_broker_idx`,
+`_qty_val`. Inter-leaf state (`_hh_hist_batch{N}`,
+`_ct_hist_batch{N}`, `_t_submit_hist_batch{N}` temp views from the
+legacy code) is *not* shared — each leaf computes the equivalent
+filter directly from `_gen_trade_df`. The leaves are independent.
 
 Each gen task is a thin notebook in `src/tools/data_gen_tasks/` that
 imports the per-table generator from `src/tools/tpcdi_gen/`. Each
@@ -113,13 +131,23 @@ Per-table generators live in `src/tools/tpcdi_gen/`:
   Emits `_symbols` temp view early via a `symbols_ready_event` so Trade /
   WatchHistory / DailyMarket can start before FINWIRE finishes.
 - `customer.py` — CustomerMgmt.xml + Customer.txt + Account.txt.
-  Implements a **bijection-based scheduler** (numpy on the driver) that
-  picks INACT/CLOSEACCT/UPDCUST/UPDACCT/ADDACCT victims via per-update
-  `f(x) = (b*x + c) % modulus` with `b` coprime to `modulus` (collision-free
-  within an update). The scheduler emits four numpy arrays
-  (`_sched_update`, `_sched_action`, `_sched_pos`, `_sched_id`) that get
-  Arrow-converted to a Spark DataFrame, then joined against the bijected
-  `all_df` to assign final ActionTypes.
+  Calls `customer_scheduler_v2.build_schedule_df()` (V8 — Spark-native
+  port of DIGen's `GrowingOffsetPermutation`) to emit the unified
+  schedule DataFrame directly on Spark executors via Pandas UDFs, then
+  joins it against the per-row bijected `all_df` to assign final
+  ActionTypes. Same DIGen algorithm as before but with the
+  `_resolve_skip_vec` driver-side numpy loop replaced by closed-form
+  recursion in vectorized numpy on each executor partition.
+- `customer_scheduler_v2.py` — implements the
+  `GrowingOffsetPermutation`. Driver-side computes per-generation
+  bijection params (b, c, perm_max, offsets, offset_sums) into broadcast-
+  friendly numpy arrays, then a Pandas UDF runs the recursion at scale.
+  Same-update non-collision between INACT/UPDCUST/ADDACCT (and
+  CLOSEACCT/UPDACCT) achieved via DIGen's slot-offset trick: each
+  action type gets a disjoint slot range on the same per-generation
+  bijection, so uniqueness within a slot range plus disjoint ranges
+  guarantees no two action types pick the same entity in the same
+  update.
 - `prospect.py` — Prospect.csv (B1/B2/B3). Slices B1 by `p_id` ordinal for
   B2/B3 incremental churn — does NOT use a `Window.orderBy()` (that forces
   single-partition shuffle).
@@ -128,11 +156,16 @@ Per-table generators live in `src/tools/tpcdi_gen/`:
   over the customer × security cross-product. Per-update LCG with `bij_b`
   capped at `2^62 / max_pos` to keep `pos × b` in bigint range
   (Photon ANSI raises ARITHMETIC_OVERFLOW otherwise at SF≥20000).
-- `trade.py` — Trade.txt + TradeHistory.txt + CashTransaction.txt +
-  HoldingHistory.txt. Trade `t_ca_id = _va_idx.cast(string)` directly —
-  the hash-derived index *is* the account ID (sequential 0..n_valid-1).
-  Account pool size is analytical (`cfg.n_available_accounts`); no
-  CustomerMgmt dependency.
+- `trade_split.py` — Trade.txt + TradeHistory.txt + CashTransaction.txt
+  + HoldingHistory.txt, decomposed into 5 functions (V6):
+  `materialize_base()` writes the `_gen_trade_df` Delta with the
+  minimum cross-task columns; `gen_trade()` /
+  `gen_tradehistory()` / `gen_cashtransaction()` /
+  `gen_holdinghistory()` are independent leaves that read the Delta
+  and write their dataset's outputs. Trade
+  `t_ca_id = _va_idx.cast(string)` directly — the hash-derived index
+  *is* the account ID (sequential 0..n_valid-1). Account pool size is
+  analytical (`cfg.n_available_accounts`); no CustomerMgmt dependency.
 - `audit.py` — emits `*_audit.csv` files. Two paths:
   1. **Static snapshot** at `static_audits/sf={SF}/` — pre-computed
      CSVs committed to the repo, copied into the volume after generation.
@@ -142,10 +175,11 @@ Per-table generators live in `src/tools/tpcdi_gen/`:
      generator populates during execution. No Spark scans needed; counts
      come from in-memory dict lookups + analytical formulas.
 
-`utils.py` holds shared helpers: `disk_cache` (parquet staging on serverless,
-persist+count on classic), `dict_join` / `dict_join_batch` for broadcast-style
-dictionary lookups, `register_copies_from_staging` for parallel UC Volume
-file copies with EAGAIN retry logic.
+`utils.py` holds shared helpers: `disk_cache` (Delta-table staging on
+serverless via `{wh_db}_{sf}_stage._dc_NNN_*`, `persist(DISK_ONLY)` on
+classic), `dict_join` / `dict_join_batch` for broadcast-style dictionary
+lookups, and `register_copies_from_staging` for the V8 Spark-distributed
+staging→final rename (see "Spark-distributed rename" below).
 
 ## Key design decisions
 
@@ -184,6 +218,36 @@ trades) per the historical pattern. Incrementals don't.
 These let Trade start as soon as FINWIRE `_symbols` is ready, with no
 dependency on CustomerMgmt or HR completion. Saves ~30 min on the critical
 path at SF=20000.
+
+### Spark-distributed rename (V8)
+`register_copies_from_staging` moves Spark part files from each
+generator's staging dir (`{batch_path}/{base}/part-*`) to the flat
+DIGen-compatible layout (`{batch_path}/{base}_K{ext}`). UC Volume FUSE
+serializes rename syscalls per-pod, so within-pod parallelism doesn't
+help — instead we repartition the (src, dst) pairs across `N=32`
+executor pods and run `subprocess.run(["mv", ...])` on each pod. Each
+pod has its own FUSE driver, so the system-wide concurrent rename
+count is `N`. Per-file mv has retry-with-backoff (~2 min total budget)
+to absorb transient ABFS rename throttling. Resume-safe: a re-run
+detects existing `{base}_K{ext}` files at the destination and starts
+the next K past the highest existing one.
+
+At SF=20k the long-pole copy task drops from ~80m (single-pod-serial
+under contention) to ~2m. Prior approaches that didn't survive:
+- V0: `dbutils.fs.cp` thread pool — Files API ~405 ms/file ceiling
+- V5: same-dir bash `mv` loop — 500 ms/file but FUSE bottleneck
+- V7: within-pod `ThreadPoolExecutor mv` — EAGAIN cascades, 2× slower
+
+### Spark-native CustomerMgmt scheduler (V8)
+`customer_scheduler_v2.build_schedule_df` ports DIGen's
+`GrowingOffsetPermutation` into a Pandas UDF that runs on Spark
+executors. Replaces the `~22-26 min driver-side numpy` loop with a
+~3-4 min distributed pass. Output IDs differ from the prior driver
+scheduler (different bijection params + DIGen's slot-offset semantics
+for ADDACCT/UPDCUST), so the static_audits/ snapshots were
+regenerated against this scheduler — every audit count remains within
+0.0005% of the validated DIGen baseline (the ADDACCT drift is the
+only non-zero one and is well below any audit tolerance).
 
 ### Account pool safety margin
 `n_available_accounts = max(hist_size, int(_n_created * _trade_fraction))`
@@ -393,6 +457,19 @@ databricks jobs run-now --profile tpc-di \
 - Has `max_concurrent_runs=1` — second trigger while one is running gets
   SKIPPED with `MAXIMUM_CONCURRENT_RUNS_REACHED`.
 
+### Run only N days of the augmented benchmark
+```
+databricks jobs run-now --profile tpc-di --json '{
+  "job_id": <augmented_parent_job_id>,
+  "job_parameters": {"scale_factor": "10", "incremental_batches_to_run": "30"}
+}'
+```
+- `incremental_batches_to_run` (default `730`) caps the daily-streaming
+  loop to the first N days. Useful for smoke runs without committing
+  ~a week of compute. Wired into both `augmented_classic` and
+  `augmented_sdp` parent jobs; `setup.py` and `DLT/pipelines_setup.py`
+  clamp the value to [1, 730].
+
 ### Regenerate audits without re-running datagen
 Open `src/tools/regenerate_audits` notebook in workspace, set widgets,
 run on serverless. Scans existing data files in the volume and rewrites
@@ -482,16 +559,17 @@ src/
     tpcdi_gen/
       audit.py                    # static-snapshot copy + dynamic regen
       config.py                   # ScaleConfig — all scaling constants
-      customer.py                 # CustomerMgmt + Customer.txt + Account.txt
+      customer.py                 # CustomerMgmt + Customer.txt + Account.txt orchestration
+      customer_scheduler_v2.py    # V8 Spark-native GrowingOffsetPermutation (Pandas UDF)
       finwire.py                  # FINWIRE quarterly files
       hr.py                       # HR.csv + _brokers temp view
       market_data.py              # DailyMarket.txt
       prospect.py                 # Prospect.csv (B1 + B2/B3 churn)
-      reference.py                # static reference tables
-      trade.py                    # Trade + TradeHistory + CashTransaction + HoldingHistory
-      utils.py                    # shared helpers
+      reference_tables.py         # static reference tables
+      trade_split.py              # V6 trade decomposition: base + 4 leaves
+      utils.py                    # shared helpers (V8 Spark-distributed rename)
       watch_history.py            # WatchHistory.txt with bijection
-      static_audits/sf={SF}/      # pre-computed audit snapshots (committed)
+      static_audits/sf={SF}/      # pre-computed audit snapshots (regenerated under V8)
     datagen/pdgf/                 # DIGen.jar + PDGF config (reference only)
   incremental_batches/
     bronze/                       # file → staging table SQL
@@ -514,15 +592,17 @@ tests/
 
 ## Active branch
 
-`augmented_incremental`. PR #20 (`augmented_incremental → main`) is open
-and ready to merge — once merged, `main` becomes the single source of
-truth and `augmented_incremental` retires.
+`data-gen-decomposition`. Carries the V6 trade-decomposition + V8
+customer scheduler + V8 Spark-distributed rename. Targets `main`.
 
 ## Status of validated scale factors
 
 As of the most recent validation pass, the Spark generator + benchmark
-audits pass at SF=10/100/1000/5000/10000. End-to-end smoke
-(SF=10 × {Cluster/Inc, DBSQL/Single, SDP-CORE} × Spark) all SUCCEED.
+audits pass at SF=10/100/1000/5000/10000/20000. SF=20k full pipeline
+finishes in ~19 m on serverless (down from ~105 m pre-V8). End-to-end
+smoke (SF=10 × {Cluster/Inc, DBSQL/Single, SDP-CORE} × Spark, plus
+Augmented at SF=10) all SUCCEED. Audit `*_audit.csv` snapshots were
+regenerated against V8 output and committed at every SF tier.
 
 ## DLT → SDP rename
 

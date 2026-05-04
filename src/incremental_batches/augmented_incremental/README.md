@@ -177,6 +177,7 @@ Auto Loader checkpoint sees only the day's intended files.
 | `tpcdi_directory`                   | (req.)  | Path to the volume containing `augmented_incremental/_staging/sf={sf}/`. |
 | `delete_when_finished_TRUE_FALSE`   | `FALSE` | A full 730-day run takes hours; default keeps the result tables for inspection. |
 | `file_ext`                          | `txt`   | Output file extension at filedrop time. `read_file_ext` becomes `csv` when this is `txt` (the CSV writer produces `.csv` part files we rename), or matches `file_ext` for any other value. |
+| `incremental_batches_to_run`        | `730`   | Cap on the daily-streaming loop length, clamped to [1, 730]. Use a small value (e.g. `30`) for smoke tests without committing to the full benchmark wall. Honored by both the Cluster and SDP variants. |
 
 ---
 
