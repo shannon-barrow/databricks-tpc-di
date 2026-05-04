@@ -245,10 +245,22 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="gen_daily_market", notebook_path=f"{_dgt}/gen_daily_market",
         depends_on=["gen_finwire"], base_params=_base, job_cluster_key=job_cluster_key,
     ))
+    # gen_trade is decomposed into base + 4 leaves (V6). The base task
+    # materializes _gen_trade_df Delta with the minimum cross-task col
+    # set; each leaf reads it in parallel and writes its dataset's
+    # outputs. Leaf-level repair-run granularity + the 4 long writes run
+    # truly concurrently instead of sharing one task's executors.
     tasks.append(_make_task(
-        task_key="gen_trade", notebook_path=f"{_dgt}/gen_trade",
+        task_key="gen_trade_base", notebook_path=f"{_dgt}/gen_trade_base",
         depends_on=["gen_finwire"], base_params=_base, job_cluster_key=job_cluster_key,
     ))
+    for _leaf in ("gen_trade", "gen_tradehistory",
+                  "gen_cashtransaction", "gen_holdinghistory"):
+        tasks.append(_make_task(
+            task_key=_leaf, notebook_path=f"{_dgt}/{_leaf}",
+            depends_on=["gen_trade_base"], base_params=_base,
+            job_cluster_key=job_cluster_key,
+        ))
     # Wave 3.
     tasks.append(_make_task(
         task_key="gen_watch_history", notebook_path=f"{_dgt}/gen_watch_history",
@@ -266,9 +278,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         ("copy_customer",        ["gen_customer"]),
         ("copy_daily_market",    ["gen_daily_market"]),
         ("copy_trade",           ["gen_trade"]),
-        ("copy_tradehistory",    ["gen_trade"]),
-        ("copy_cashtransaction", ["gen_trade"]),
-        ("copy_holdinghistory",  ["gen_trade"]),
+        ("copy_tradehistory",    ["gen_tradehistory"]),
+        ("copy_cashtransaction", ["gen_cashtransaction"]),
+        ("copy_holdinghistory",  ["gen_holdinghistory"]),
         ("copy_watch_history",   ["gen_watch_history"]),
         ("copy_prospect",        ["gen_prospect"]),
     ]
@@ -281,7 +293,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         _copy_keys.append(_name)
 
     _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_prospect",
-                 "gen_customer", "gen_daily_market", "gen_trade",
+                 "gen_customer", "gen_daily_market",
+                 "gen_trade_base", "gen_trade", "gen_tradehistory",
+                 "gen_cashtransaction", "gen_holdinghistory",
                  "gen_watch_history"]
 
     # audit_emit: aggregates record_counts task values from all gens.

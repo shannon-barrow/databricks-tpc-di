@@ -1,14 +1,19 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: gen_trade (V6 leaf)
+# MAGIC # data_gen task: gen_trade_base (V6)
 # MAGIC
-# MAGIC Reads ``_gen_trade_df`` Delta (produced by ``gen_trade_base``) and
-# MAGIC writes ``Trade.txt`` for B1 (+ B2/B3 incrementals in standard
-# MAGIC mode). Standalone leaf — does not produce TradeHistory, CT or HH
-# MAGIC anymore (those have their own gen_* leaves).
+# MAGIC Materializes ``_gen_trade_df`` Delta in
+# MAGIC ``{catalog}.{wh_db}_{sf}_stage`` with the *minimum* cross-task
+# MAGIC column set used by the 4 trade-family leaf tasks
+# MAGIC (gen_trade / gen_tradehistory / gen_cashtransaction /
+# MAGIC gen_holdinghistory). Each leaf re-derives single-consumer
+# MAGIC columns from t_id locally — saves ~300 GB at SF=20k vs staging
+# MAGIC ``_ct_name_raw`` and friends.
 # MAGIC
-# MAGIC Depends on ``gen_trade_base``. In standard mode also reads
-# MAGIC ``_gen_symbols`` for the B2/B3 incremental symbol-validity join.
+# MAGIC Depends on ``gen_finwire`` (``_gen_symbols``). Reads ``_brokers``
+# MAGIC only when ``static_audits_available`` returns False (dynamic-
+# MAGIC audit path); augmented mode unconditionally returns True so the
+# MAGIC Delta hand-off doesn't depend on gen_hr.
 
 # COMMAND ----------
 
@@ -38,46 +43,42 @@ if f"{workspace_src_path}/tools" not in sys.path:
     sys.path.insert(0, f"{workspace_src_path}/tools")
 
 from data_gen_tasks._shared import (
-    bootstrap, read_intermediate_view, is_already_generated,
+    bootstrap, intermediate_table_fq, is_already_generated,
+    read_intermediate_view,
 )
 
 ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 catalog=catalog, wh_db=wh_db, tpcdi_directory=tpcdi_directory,
                 log_level=log_level, augmented_incremental=augmented_incremental,
-                workspace_src_path=workspace_src_path, load_dicts=True)
+                workspace_src_path=workspace_src_path, load_dicts=False)
 cfg = ctx["cfg"]
 
 # COMMAND ----------
 
-# Self-skip — only the Trade output matters here.
-if augmented_incremental and regenerate_data != "YES":
-    fq = f"{catalog}.tpcdi_raw_data.trade{scale_factor}"
-    if is_already_generated(spark, fq):
-        print(f"[gen_trade] {fq} already populated — skipping")
-        dbutils.notebook.exit("skipped")
+# Self-skip when the staged Delta is intact and regenerate_data=NO.
+_trade_base_fq = intermediate_table_fq(catalog, wh_db, scale_factor, "_gen_trade_df")
+if regenerate_data != "YES" and is_already_generated(spark, _trade_base_fq):
+    print(f"[gen_trade_base] {_trade_base_fq} already populated — skipping")
+    dbutils.notebook.exit("skipped")
 
 # COMMAND ----------
 
 read_intermediate_view(spark, catalog=catalog, wh_db=wh_db,
                        scale_factor=scale_factor,
                        name="_gen_symbols", view_name="_symbols")
+print(f"[gen_trade_base] re-registered _symbols")
+
 try:
     read_intermediate_view(spark, catalog=catalog, wh_db=wh_db,
                            scale_factor=scale_factor,
                            name="_gen_brokers", view_name="_brokers")
+    print(f"[gen_trade_base] re-registered _brokers (dynamic-audit path)")
 except Exception:
-    print(f"[gen_trade] _brokers not available — using analytical count")
+    print(f"[gen_trade_base] _brokers not available — using analytical broker count")
+
+# COMMAND ----------
 
 from tpcdi_gen import trade_split
-import tpcdi_gen.utils as _u
-_u._DEFER_COPIES["enabled"] = True
-try:
-    base_df = trade_split.read_base(spark, cfg)
-    counts = trade_split.gen_trade(spark, cfg, dbutils, ctx["dicts"], base_df)
-finally:
-    _u._DEFER_COPIES["enabled"] = False
 
-import json as _json
-dbutils.jobs.taskValues.set(key="record_counts",
-                            value=_json.dumps({f"{k[0]}::{k[1]}": v for k, v in counts.items()}))
-print(f"[gen_trade] complete — {len(counts)} record_counts entries set")
+result = trade_split.materialize_base(spark, cfg, dbutils)
+print(f"[gen_trade_base] complete — {result['fq']} (n_brokers={result['n_brokers']:,})")

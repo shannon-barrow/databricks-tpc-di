@@ -48,8 +48,10 @@ cfg = ctx["cfg"]
 import json as _json
 all_counts = {}
 gen_tasks = ["gen_reference", "gen_hr", "gen_finwire", "gen_customer",
-             "gen_daily_market", "gen_trade", "gen_watch_history",
-             "gen_prospect"]
+             "gen_daily_market",
+             "gen_trade", "gen_tradehistory",
+             "gen_cashtransaction", "gen_holdinghistory",
+             "gen_watch_history", "gen_prospect"]
 for tk in gen_tasks:
     try:
         raw = dbutils.jobs.taskValues.get(taskKey=tk, key="record_counts",

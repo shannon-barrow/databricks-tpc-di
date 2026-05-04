@@ -400,12 +400,15 @@ def test_augmented_staging_dag():
     expected_gen_keys = {
         "data_gen",
         "gen_reference", "gen_hr", "gen_finwire", "gen_customer",
-        "gen_daily_market", "gen_trade", "gen_watch_history",
+        "gen_daily_market",
+        "gen_trade_base", "gen_trade", "gen_tradehistory",
+        "gen_cashtransaction", "gen_holdinghistory",
+        "gen_watch_history",
         "cleanup_intermediates",
     }
     missing = expected_gen_keys - keys
     assert not missing, f"missing tasks in augmented_staging DAG: {missing}"
-    _ok(f"all 9 data_gen tasks present ({len(expected_gen_keys)})")
+    _ok(f"all data_gen tasks present ({len(expected_gen_keys)})")
     # data_gen is the unified entry — verify it's wired as the root.
     by_key0 = {t["task_key"]: t for t in out["tasks"]}
     assert "depends_on" not in by_key0["data_gen"] or not by_key0["data_gen"].get("depends_on"), \
@@ -415,10 +418,13 @@ def test_augmented_staging_dag():
     by_key = {t["task_key"]: t for t in out["tasks"]}
     cleanup_deps = {d["task_key"] for d in by_key["cleanup_intermediates"]["depends_on"]}
     expected_gens = {"gen_reference", "gen_hr", "gen_finwire", "gen_customer",
-                     "gen_daily_market", "gen_trade", "gen_watch_history"}
+                     "gen_daily_market",
+                     "gen_trade_base", "gen_trade", "gen_tradehistory",
+                     "gen_cashtransaction", "gen_holdinghistory",
+                     "gen_watch_history"}
     assert expected_gens.issubset(cleanup_deps), \
         f"cleanup_intermediates missing deps: {expected_gens - cleanup_deps}"
-    _ok("cleanup_intermediates depends on all 7 gens")
+    _ok("cleanup_intermediates depends on all gens")
     assert by_key["cleanup_intermediates"]["run_if"] == "ALL_SUCCESS"
     _ok("cleanup_intermediates runs ALL_SUCCESS")
     # staging_check is gone — Stage 1 tasks wire directly to gen/copy.

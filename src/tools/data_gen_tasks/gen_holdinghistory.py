@@ -1,14 +1,12 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: gen_trade (V6 leaf)
+# MAGIC # data_gen task: gen_holdinghistory (V6 leaf)
 # MAGIC
 # MAGIC Reads ``_gen_trade_df`` Delta (produced by ``gen_trade_base``) and
-# MAGIC writes ``Trade.txt`` for B1 (+ B2/B3 incrementals in standard
-# MAGIC mode). Standalone leaf — does not produce TradeHistory, CT or HH
-# MAGIC anymore (those have their own gen_* leaves).
-# MAGIC
-# MAGIC Depends on ``gen_trade_base``. In standard mode also reads
-# MAGIC ``_gen_symbols`` for the B2/B3 incremental symbol-validity join.
+# MAGIC writes ``HoldingHistory.txt`` for B1 (+ B2/B3 incrementals in
+# MAGIC standard mode, which include the new-market-CMPT HH rows for the
+# MAGIC same-day-completing TMB/TMS new trades). In augmented mode writes
+# MAGIC a Delta table at ``tpcdi_raw_data.holdinghistory{sf}`` instead.
 
 # COMMAND ----------
 
@@ -49,15 +47,16 @@ cfg = ctx["cfg"]
 
 # COMMAND ----------
 
-# Self-skip — only the Trade output matters here.
 if augmented_incremental and regenerate_data != "YES":
-    fq = f"{catalog}.tpcdi_raw_data.trade{scale_factor}"
+    fq = f"{catalog}.tpcdi_raw_data.holdinghistory{scale_factor}"
     if is_already_generated(spark, fq):
-        print(f"[gen_trade] {fq} already populated — skipping")
+        print(f"[gen_holdinghistory] {fq} already populated — skipping")
         dbutils.notebook.exit("skipped")
 
 # COMMAND ----------
 
+# In standard mode the HH leaf reads `_symbols` for n_brokers resolution
+# (only used in dynamic-audit path).
 read_intermediate_view(spark, catalog=catalog, wh_db=wh_db,
                        scale_factor=scale_factor,
                        name="_gen_symbols", view_name="_symbols")
@@ -66,18 +65,18 @@ try:
                            scale_factor=scale_factor,
                            name="_gen_brokers", view_name="_brokers")
 except Exception:
-    print(f"[gen_trade] _brokers not available — using analytical count")
+    pass
 
 from tpcdi_gen import trade_split
 import tpcdi_gen.utils as _u
 _u._DEFER_COPIES["enabled"] = True
 try:
     base_df = trade_split.read_base(spark, cfg)
-    counts = trade_split.gen_trade(spark, cfg, dbutils, ctx["dicts"], base_df)
+    counts = trade_split.gen_holdinghistory(spark, cfg, dbutils, ctx["dicts"], base_df)
 finally:
     _u._DEFER_COPIES["enabled"] = False
 
 import json as _json
 dbutils.jobs.taskValues.set(key="record_counts",
                             value=_json.dumps({f"{k[0]}::{k[1]}": v for k, v in counts.items()}))
-print(f"[gen_trade] complete — {len(counts)} record_counts entries set")
+print(f"[gen_holdinghistory] complete — {len(counts)} record_counts entries set")

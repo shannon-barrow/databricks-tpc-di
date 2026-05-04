@@ -201,12 +201,21 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         depends_on=["gen_finwire"],
         base_params=_dgt_params,
     ))
+    # gen_trade decomposed into base + 4 leaves (V6).
     tasks.append(_make_task(
-        task_key="gen_trade",
-        notebook_path=f"{_dgt_path}/gen_trade",
+        task_key="gen_trade_base",
+        notebook_path=f"{_dgt_path}/gen_trade_base",
         depends_on=["gen_finwire"],
         base_params=_dgt_params,
     ))
+    for _leaf in ("gen_trade", "gen_tradehistory",
+                  "gen_cashtransaction", "gen_holdinghistory"):
+        tasks.append(_make_task(
+            task_key=_leaf,
+            notebook_path=f"{_dgt_path}/{_leaf}",
+            depends_on=["gen_trade_base"],
+            base_params=_dgt_params,
+        ))
     # Wave 3 — depends on both finwire and customer.
     tasks.append(_make_task(
         task_key="gen_watch_history",
@@ -236,7 +245,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
 
     _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_customer",
-                 "gen_daily_market", "gen_trade", "gen_watch_history"]
+                 "gen_daily_market",
+                 "gen_trade_base", "gen_trade", "gen_tradehistory",
+                 "gen_cashtransaction", "gen_holdinghistory",
+                 "gen_watch_history"]
     _copy_keys = ["copy_hr", "copy_finwire"]
     tasks.append(_make_task(
         task_key="cleanup_intermediates",
@@ -421,25 +433,26 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="DimTradeHistorical",
         notebook_path=f"{hist_path}/DimTradeHistorical",
-        # Reads tpcdi_raw_data.trade{sf} + tradehistory{sf} (gen_trade
-        # outputs) plus the dim joins.
-        depends_on=["gen_trade", "Silver_DimSecurity", "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.trade{sf} + tradehistory{sf}
+        # (gen_trade + gen_tradehistory leaves) plus the dim joins.
+        depends_on=["gen_trade", "gen_tradehistory",
+                    "Silver_DimSecurity", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactCashBalancesHistorical",
         notebook_path=f"{hist_path}/FactCashBalancesHistorical",
-        # Reads tpcdi_raw_data.cashtransaction{sf} (gen_trade also writes
-        # cash transactions) plus the account dim join.
-        depends_on=["gen_trade", "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.cashtransaction{sf} (gen_cashtransaction
+        # leaf) plus the account dim join.
+        depends_on=["gen_cashtransaction", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactHoldingsHistorical",
         notebook_path=f"{hist_path}/FactHoldingsHistorical",
-        # Reads tpcdi_raw_data.holdinghistory{sf} (gen_trade output) plus
-        # the trade dim join.
-        depends_on=["gen_trade", "DimTradeHistorical"],
+        # Reads tpcdi_raw_data.holdinghistory{sf} (gen_holdinghistory
+        # leaf) plus the trade dim join.
+        depends_on=["gen_holdinghistory", "DimTradeHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
@@ -466,8 +479,8 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "Customer":        ["gen_customer"],
         "Account":         ["gen_customer"],
         "Trade":           ["gen_trade"],
-        "CashTransaction": ["gen_trade"],
-        "HoldingHistory":  ["gen_trade"],
+        "CashTransaction": ["gen_cashtransaction"],
+        "HoldingHistory":  ["gen_holdinghistory"],
         "DailyMarket":     ["gen_daily_market"],
         "WatchHistory":    ["gen_watch_history"],
     }
