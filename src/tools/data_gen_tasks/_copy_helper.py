@@ -1,16 +1,15 @@
 """Shared helper for the per-dataset copy_* notebooks.
 
-perf/v5 — In-place shell rename approach: each ``copy_*`` task iterates
-Batch1/2/3 looking for ``{batch_path}/{filename}__staging`` directories
-and calls ``register_copies_from_staging`` which renames the Spark
-``part-NNNNN`` files in place to ``{base}_K.{ext}``. The staging dir
-remains as the output dir (bronze ingest must scan it recursively).
+perf/v7 — Parallel cross-directory ``mv`` to flat Batch* layout. Each
+``copy_*`` task iterates Batch1/2/3 looking for ``{batch_path}/{base}``
+staging directories (Spark's output) and calls
+``register_copies_from_staging`` which mv's part files concurrently
+(ThreadPoolExecutor, 32 workers, EAGAIN-retry) into
+``{batch_path}/{base}_K{ext}``. The (now empty) staging dir is
+removed at the end of a successful pass so retries cleanly skip.
 
-No post-rename ``_cleanup`` is performed — the renamed files now live
-INSIDE the ``__staging`` dir, so wiping that dir would destroy the
-output. Spark marker files (``_SUCCESS`` / ``_started_*`` /
-``_committed_*``) are deleted inside ``register_copies_from_staging``'s
-shell command.
+DIGen-compatible flat layout — bronze SQL ``fileNamePattern`` globs
+match the renamed files at the Batch* root (no recursive scan needed).
 
 Augmented mode skips Batch2/3 generation and writes Delta directly, so
 the copy_* tasks for Customer/Account/Trade/CashTransaction/
@@ -39,20 +38,21 @@ def copy_dataset(*, cfg, dbutils, filenames, num_batches: int = 3) -> int:
         bp = cfg.batch_path(batch)
         for fname in filenames:
             base, ext = os.path.splitext(fname)
-            # perf/v5: staging dir is the dataset name (e.g. Batch1/Trade)
-            # rather than Batch1/Trade.txt__staging. Spark writes part-* in
-            # there; register_copies_from_staging renames them in place to
-            # {base}_K{ext}.
+            # perf/v7: Spark writes to {batch_path}/{base} subdir.
+            # register_copies_from_staging mv's the part files in
+            # parallel into {batch_path}/{base}_K{ext} at the Batch*
+            # root and removes the (now empty) staging dir. A retry
+            # of this task with the staging dir gone is benign —
+            # treated as "already done" and skipped.
             staging = f"{bp}/{base}"
             final = f"{bp}/{fname}"
             try:
                 dbutils.fs.ls(staging)  # probe
             except Exception:
-                continue  # nothing staged for this batch (e.g. augmented mode)
-            print(f"  {staging}: in-place rename → {base}_K{ext}")
+                # Either nothing staged (augmented mode skipping
+                # Batch2/3) or a prior attempt fully drained the dir.
+                continue
+            print(f"  {staging}: parallel mv → {bp}/{base}_K{ext}")
             targets, _ = register_copies_from_staging(staging, final, dbutils)
             n_total += len(targets)
-
-    # NOTE: Do NOT _cleanup the staging dirs — renamed files now live there.
-    # Bronze ingest must scan {batch_path}/ recursively to pick them up.
     return n_total

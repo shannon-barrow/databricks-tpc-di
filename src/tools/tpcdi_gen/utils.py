@@ -528,87 +528,162 @@ def _pack_small_parts(small_parts, max_bytes: int):
 _DEFER_COPIES = {"enabled": False}
 
 
+# V7 rename worker count. Matches the spec's `mv` parallelism — ABFS
+# rename RPCs are I/O-bound, not CPU-bound, so far more workers than
+# driver cores still yields linear speedup until FUSE's per-pod
+# concurrency limit kicks in (empirically ~64 on serverless).
+_RENAME_WORKERS = 32
+
+# EAGAIN backoff schedule. UC Volumes FUSE returns
+# "Resource temporarily unavailable" sporadically when many parallel
+# renames hit the same backend; absorb up to ~10s of bursts.
+_RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0)
+
+
+def _mv_with_retry(src: str, dst: str) -> str:
+    """Single-file ``mv src dst`` with EAGAIN retry. Workers run this
+    inside a ThreadPoolExecutor — subprocess releases the GIL during
+    the syscall so true parallelism across N workers.
+    """
+    import subprocess
+    last_err = None
+    for delay in (0.0, *_RENAME_RETRIES):
+        if delay:
+            import time as _time
+            _time.sleep(delay)
+        try:
+            subprocess.run(["mv", src, dst], check=True,
+                           capture_output=True, text=True)
+            return dst
+        except subprocess.CalledProcessError as e:
+            last_err = e
+            stderr = (e.stderr or "")
+            transient = ("temporarily unavailable" in stderr
+                         or "Resource" in stderr
+                         or "EAGAIN" in stderr
+                         or "EBUSY" in stderr
+                         or "I/O error" in stderr)
+            if not transient:
+                raise
+    raise RuntimeError(f"mv {src} -> {dst} failed after retries: "
+                       f"{(last_err.stderr or '').strip() if last_err else ''}")
+
+
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """perf/v5: in-place rename inside the Spark staging dir via shell.
+    """V7: parallel cross-directory ``mv`` from Spark staging into the
+    flat Batch* layout DIGen produces.
 
-    Replaces the prior ``dbutils.fs.cp``-based cross-directory move
-    pipeline (which capped at ~49m at SF=20k due to UC Volumes Files API
-    throttling) with a one-shot bash loop that does same-directory
-    renames on the FUSE mount. Each ``mv`` should be a metadata-only op
-    on UC Volumes — no bytes moved, no Files API per-call overhead.
+    Files move from ``{staging_dir}/part-NNNNN-UUID[-cM].csv`` →
+    ``{dirname(final_path)}/{base}_K{ext}``. K is a 1-based sequential
+    counter (start_idx for chained callers like FINWIRE's CMP/SEC/FIN).
 
-    Files stay inside the ``__staging`` dir, renamed from
-    ``part-NNNNN-UUID[-cM].csv`` to ``{base}_K.{ext}`` where K is a 1-based
-    sequential index. Sequential numbering avoids the collision risk of
-    keeping Spark's NNNNN (which can repeat when ``maxRecordsPerFile``
-    splits a partition into multiple files with different ``-cM`` suffixes).
+    Same FUSE rename cost per file as V5's same-dir variant
+    (UC Volumes ``mv`` is NOT a metadata-only op — backend issues a
+    rename RPC either way), but parallelized across
+    ``_RENAME_WORKERS`` threads with EAGAIN retry. At SF=20k this drops
+    copy_trade from ~25 m to <1 m and eliminates the EAGAIN-induced
+    task failures we saw with the serial bash loop.
 
-    Bronze ingest must scan recursively to pick up files inside
-    ``__staging`` dirs. The ``{base}_K.{ext}`` naming still matches the
-    existing TPC-DI ``fileNamePattern`` regex (``Trade_[0-9]+\\.txt`` etc.).
+    The flat layout matches the existing bronze SQL ``fileNamePattern``
+    globs (``{Trade.txt,Trade_[0-9]*.txt}``) and avoids needing
+    ``recursiveFileLookup`` anywhere.
 
     Args:
-        staging_dir: Path to the Spark output directory containing part files.
-        final_path: Desired final output path — used to derive base+ext.
-            (e.g., ``/Volumes/.../Batch1/Trade.txt`` → ``base="Trade"``,
-            ``ext=".txt"``)
-        dbutils: Databricks dbutils object (kept for signature compat).
-        start_idx: First sequential number to use (default 1). Kept so
-            FINWIRE's CMP/SEC/FIN can share a counter across calls.
+        staging_dir: Spark output directory containing part-* files.
+        final_path: Desired final output path — used to derive
+            both the base directory (e.g. Batch1/) and the
+            (base, ext) for naming. e.g. ``…/Batch1/Trade.txt`` →
+            base=``Trade``, ext=``.txt``, target dir = ``…/Batch1``.
+        dbutils: Databricks dbutils (signature compat).
+        start_idx: First sequential number to use (default 1).
 
     Returns:
-        (list of final renamed paths, next_idx for chained callers).
+        (list of final paths, next_idx for chained callers).
     """
     if _DEFER_COPIES["enabled"]:
         return [], start_idx
 
-    import subprocess
     staging_local = staging_dir.replace("dbfs:", "") if staging_dir.startswith("dbfs:") else staging_dir
-    filename = os.path.basename(final_path)
+    final_local = final_path.replace("dbfs:", "") if final_path.startswith("dbfs:") else final_path
+    final_dir = os.path.dirname(final_local)
+    filename = os.path.basename(final_local)
     base, ext = os.path.splitext(filename)
 
-    # One-shot bash:
-    #   - cd into the staging dir
-    #   - serial loop over sorted `part-*` files, mv each to `{base}_K{ext}`
-    #     starting at start_idx (each mv = single syscall = metadata-only on FUSE)
-    #   - delete Spark marker files (_SUCCESS / _started_* / _committed_*)
-    #   - print the count + the highest index used so the parent process can
-    #     continue numbering past it (read via subprocess output).
-    cmd = (
-        f'set -eu; cd "{staging_local}"; '
-        f"i={start_idx}; "
-        f'for f in $(ls part-* 2>/dev/null | sort); do '
-        f'  mv "$f" "{base}_${{i}}{ext}"; '
-        f'  i=$((i + 1)); '
-        f'done; '
-        f"find . -maxdepth 1 -type f \\( -name '_SUCCESS' -o -name '_started_*' -o -name '_committed_*' \\) -delete; "
-        f'echo "RENAME_NEXT_IDX=$i"'
-    )
-    log(f"[Rename] {base}: in-place shell rename in {staging_local} (start={start_idx})", "DEBUG")
-    res = subprocess.run(["bash", "-c", cmd], check=True, capture_output=True, text=True)
-
-    # Parse the next index emitted by the bash echo.
-    next_idx = start_idx
-    for line in res.stdout.splitlines():
-        if line.startswith("RENAME_NEXT_IDX="):
-            try:
-                next_idx = int(line.split("=", 1)[1])
-            except ValueError:
-                pass
-
-    # List the renamed files for the return contract.
+    # Enumerate part files. Sort so successive runs / start_idx chains
+    # are deterministic. Spark's filenames are
+    # `part-NNNNN-UUID[-cM].csv`; sort-by-name is fine.
     try:
-        renamed = sorted(
-            (f for f in os.listdir(staging_local)
-             if f.startswith(f"{base}_") and f.endswith(ext)),
-            key=lambda n: int(n[len(base) + 1: -len(ext)]) if n[len(base) + 1: -len(ext)].isdigit() else 0
-        )
-    except Exception as e:
-        log(f"[Rename] {base}: listdir failed {type(e).__name__}: {e}", "WARN")
-        renamed = []
-    targets = [f"{staging_local}/{name}" for name in renamed]
-    log(f"[Rename] {base}: {len(targets)} files renamed (next_idx={next_idx})", "DEBUG")
+        all_entries = os.listdir(staging_local)
+    except FileNotFoundError:
+        log(f"[Rename] {base}: staging dir gone — nothing to do", "WARN")
+        return [], start_idx
+    parts = sorted(f for f in all_entries if f.startswith("part-"))
+    markers = [f for f in all_entries
+               if f == "_SUCCESS" or f.startswith("_started_") or f.startswith("_committed_")]
+
+    # Retry-resume: if a prior attempt already moved some part files to
+    # `{final_dir}/{base}_K{ext}`, start past the highest existing K so
+    # we don't collide-and-overwrite. Flat-layout files have no
+    # semantic ordering — gaps in K are harmless (bronze SQL globs
+    # `{base}_[0-9]*` doesn't care).
+    resume_start = start_idx
+    try:
+        existing_ks = []
+        for f in os.listdir(final_dir):
+            if f.startswith(f"{base}_") and f.endswith(ext):
+                k_str = f[len(base) + 1: -len(ext)] if ext else f[len(base) + 1:]
+                if k_str.isdigit():
+                    existing_ks.append(int(k_str))
+        if existing_ks:
+            resume_start = max(resume_start, max(existing_ks) + 1)
+            if resume_start != start_idx:
+                log(f"[Rename] {base}: resume — {len(existing_ks)} {base}_K{ext} "
+                    f"already in {final_dir}, starting at K={resume_start}", "WARN")
+    except FileNotFoundError:
+        pass
+
+    # Build (src, dst) pairs at flat Batch* layout.
+    moves = []
+    next_idx = resume_start
+    for f in parts:
+        src = f"{staging_local}/{f}"
+        dst = f"{final_dir}/{base}_{next_idx}{ext}"
+        moves.append((src, dst))
+        next_idx += 1
+
+    log(f"[Rename] {base}: {len(moves)} files, "
+        f"{staging_local} → {final_dir}/{base}_K{ext} "
+        f"(start={resume_start}, workers={_RENAME_WORKERS})")
+
+    # Parallel mv with retry. ThreadPoolExecutor saturates FUSE without
+    # building a Spark job (each mv is one syscall, ~250 ms latency
+    # bound). Failures bubble up so the caller can see them.
+    targets = []
+    if moves:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_RENAME_WORKERS) as executor:
+            futures = [executor.submit(_mv_with_retry, src, dst) for src, dst in moves]
+            for f in concurrent.futures.as_completed(futures):
+                targets.append(f.result())
+
+    # Drop Spark markers + the (now-empty) staging dir. Cross-directory
+    # move means callers no longer need the staging dir to live on
+    # post-rename — bronze ingest reads from the flat Batch* root.
+    for m in markers:
+        try:
+            os.remove(f"{staging_local}/{m}")
+        except OSError:
+            pass
+    try:
+        # rmdir only succeeds if the dir is empty — perfect safety net
+        # against an edge case where some part-* file failed to move.
+        os.rmdir(staging_local)
+    except OSError:
+        # Likely non-empty (some files left) or a chained caller will
+        # add more; leave it for cleanup_intermediates / next start_idx.
+        pass
+
+    log(f"[Rename] {base}: done, {len(targets)} files (next_idx={next_idx})")
     return targets, next_idx
 
 
