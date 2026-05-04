@@ -1,6 +1,0 @@
-DataSet, BatchID ,Date , Attribute , Value, DValue
-DimTrade,2,,T_Records,175774,
-DimTrade,2,,T_NEW,71039,
-DimTrade,2,,T_CanceledTrades,3929,
-DimTrade,2,,T_InvalidCommision,0,
-DimTrade,2,,T_InvalidCharge,0,
