@@ -2,34 +2,41 @@
 
 This module provides four key capabilities used across all TPC-DI generators:
 
-1. **Deterministic randomness** via `seed_for` and `hash_key` -- ensures reproducible
-   data generation across runs by deriving seeds from table/column names.
+1. **Deterministic randomness** via ``seed_for`` and ``hash_key`` — ensures
+   reproducible data generation across runs by deriving seeds from table/
+   column names.
 
-2. **Dictionary broadcast joins** via `register_dict_views` and `dict_join` -- small
-   lookup dictionaries (e.g., first names, cities) are registered as Spark temp views
-   and broadcast-joined into large DataFrames to map hash-based indices to string values.
+2. **Dictionary broadcast joins** via ``register_dict_views`` and
+   ``dict_join`` — small lookup dictionaries (e.g., first names, cities)
+   are registered as Spark temp views and broadcast-joined into large
+   DataFrames to map hash-based indices to string values.
 
-3. **Deferred file copy pattern** (staging -> bulk_copy) -- generators write DataFrames
-   to temporary staging directories, then register (source, target) pairs. At the end of
-   the generation run, `bulk_copy_all()` copies all files in parallel using a thread pool.
-   This avoids blocking on individual file I/O during generation and enables efficient
-   parallel transfers.
+3. **Spark-distributed staging→final rename** via
+   ``register_copies_from_staging`` — files move from each Spark output
+   directory (``{batch_path}/{base}/part-*``) to the flat Batch* layout
+   (``{batch_path}/{base}_K{ext}``) by repartitioning the rename pairs
+   across N executor pods and running ``subprocess.run(["mv", ...])`` on
+   each pod. Works around UC Volume FUSE per-pod serial-rename behavior
+   that capped V7.5's single-pod approach at ~1.5 s/file.
 
-4. **File writing with automatic splitting** via `write_file` -- writes a DataFrame as
-   CSV to a staging directory, preserving Spark's natural partitioning. Single-partition
-   outputs become one file; multi-partition outputs get numbered suffixes (e.g.,
-   `file_1.csv`, `file_2.csv`).
+4. **File writing with automatic splitting** via ``write_file`` — writes
+   a DataFrame as CSV to a staging directory, preserving Spark's natural
+   partitioning. Each part is then renamed in place by the per-task
+   ``copy_*`` workflow notebook calling ``register_copies_from_staging``.
+
+5. **Deferred copy gating** via ``_DEFER_COPIES`` — gen task notebooks
+   set this flag so ``write_file`` only writes the staging dir without
+   doing the rename. The dedicated ``copy_*`` task then runs the rename
+   in parallel with downstream gens, preserving repair-run granularity.
 """
 
 import hashlib
 import os
 import re
-import concurrent.futures
 from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession, functions as F
 from pyspark.sql.types import StringType, StructType, StructField, LongType
 from pyspark import StorageLevel
-from .config import MAX_FILE_BYTES
 
 
 def safe_unpersist(df, cleanup_info=None):
@@ -436,95 +443,15 @@ def hash_key(col_expr, seed: int) -> "F.Column":
 
 
 # ---------------------------------------------------------------------------
-# Deferred file copy registry
+# Deferred copy gating
 # ---------------------------------------------------------------------------
-# Generators write DataFrames to temporary staging directories (via Spark's DataFrameWriter) and then register (source, target) path pairs here. This "deferred copy" pattern exists because:
-#   1. Spark writes to a directory of part files, not a single named file. 2. Renaming/copying files one-at-a-time during generation would serialize I/O. 3. By deferring all copies to the end, we can execute them in parallel with a thread pool, significantly reducing total wall-clock time.
-# At the end of the generation run, bulk_copy_all() processes all pending copies.
-
-_pending_copies = []  # legacy: rarely used; new register_copies_from_staging
-                      # kicks off per-dataset copies directly.
-_background_threads = []  # Thread objects for per-dataset async copies
-
-
-def _start_dataset_copy(dbutils, copies, label: str = "", max_workers: int = 32):
-    """Kick off a background thread that copies just this dataset's part files.
-
-    Each write_file call uses this to start copying its large parts as soon
-    as the write returns, rather than queueing to a global list for a later
-    "drain everything" sweep. This avoids:
-      - Racing cleanup_staging vs. still-running bulk copies at scale.
-      - Head-of-line blocking: a slow dataset's copy no longer delays
-        fast datasets from finalizing.
-
-    Threads are tracked in `_background_threads` so the orchestrator can
-    wait_for_background_copies() before cleanup_staging.
-    """
-    import threading
-    def worker():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(dbutils.fs.cp, src, tgt) for src, tgt in copies]
-            for f in concurrent.futures.as_completed(futures):
-                f.result()
-        log(f"[Copy] {label}: {len(copies)} parts copied", "DEBUG")
-    t = threading.Thread(target=worker, daemon=True)
-    _background_threads.append(t)
-    t.start()
-
-
-def wait_for_background_copies(timeout_per_thread: float = 3600):
-    """Join all tracked background-copy threads. Call before cleanup_staging."""
-    threads = list(_background_threads)
-    _background_threads.clear()
-    for t in threads:
-        t.join(timeout=timeout_per_thread)
-
-
-def register_copy(source: str, target: str):
-    """Legacy: register a copy into the global bulk queue.
-
-    Preferred path: write_file -> register_copies_from_staging now starts
-    per-dataset async copies directly. This function is retained for
-    backward compat if any caller still queues manually.
-    """
-    _pending_copies.append((source, target))
-
-
-_LARGE_PART_MIN_BYTES = 50 * 1024 * 1024    # parts >= this bypass packing
-_PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
-
-
-def _pack_small_parts(small_parts, max_bytes: int):
-    """Greedy first-fit-decreasing bin-packing.
-
-    Given a list of part files (each an object with ``.path``, ``.name``, ``.size``),
-    group them into bins whose total size does not exceed ``max_bytes``.
-
-    Returns a list of bins, each a list of parts sorted by original part name
-    (so concat order is deterministic and matches Spark's partition order within
-    each bin).
-    """
-    sorted_parts = sorted(small_parts, key=lambda f: f.size, reverse=True)
-    bins = []  # list of {"files": [...], "size": int}
-    for f in sorted_parts:
-        placed = False
-        for b in bins:
-            if b["size"] + f.size <= max_bytes:
-                b["files"].append(f)
-                b["size"] += f.size
-                placed = True
-                break
-        if not placed:
-            bins.append({"files": [f], "size": f.size})
-    return [sorted(b["files"], key=lambda f: f.name) for b in bins]
-
-
 # When set True, register_copies_from_staging() returns immediately
-# without performing the staging→final copies. Per-task data_gen workflow
-# (data_gen_tasks/gen_*.py) sets this to True before calling generate(),
-# so generators write only the Spark `__staging` directories. A separate
-# `copy_*` task notebook then runs `register_copies_from_staging` (with
-# this flag back to False) in parallel with downstream gen tasks.
+# without performing the staging→final renames. Per-task data_gen
+# workflow (data_gen_tasks/gen_*.py) sets this to True before calling
+# the generator, so the generator writes only the Spark staging
+# directories. A separate `copy_*` task notebook then runs
+# register_copies_from_staging (with this flag back to False) in
+# parallel with downstream gen tasks.
 _DEFER_COPIES = {"enabled": False}
 
 
@@ -744,54 +671,6 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
 
     log(f"[Rename] {base}: done, {len(targets)} files (next_idx={next_idx})")
     return targets, next_idx
-
-
-def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
-    """Execute all registered file copies in parallel, then clear the registry.
-
-    Uses a thread pool to copy files concurrently. Called at dependency boundaries
-    to copy files from all generators that have completed since the last call.
-
-    Args:
-        dbutils: Databricks dbutils object for filesystem operations.
-        max_workers: Maximum number of concurrent copy threads. Defaults to 64,
-            which provides good throughput for cloud storage backends.
-        label: Optional context label for log messages (e.g., "after HR").
-    """
-    global _pending_copies
-    copies = list(_pending_copies)
-    _pending_copies = []
-
-    if not copies:
-        return
-
-    def copy_file(src_tgt):
-        src, tgt = src_tgt
-        dbutils.fs.cp(src, tgt)
-        return tgt
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(copy_file, pair) for pair in copies]
-        for future in concurrent.futures.as_completed(futures):
-            future.result()  # raises if failed
-
-    # Log per-dataset completion: group by (dataset, batch directory)
-    import re
-    from collections import defaultdict
-    by_dataset = defaultdict(lambda: {"count": 0, "dir": ""})
-    for _, tgt in copies:
-        fname = os.path.basename(tgt)
-        # Extract dataset name: strip numeric suffix (e.g., "Trade_1.txt" → "Trade") and strip year/quarter from FINWIRE (e.g., "FINWIRE1967Q1_1" → "FINWIRE")
-        base = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
-        dataset = re.sub(r'\d{4}Q\d$', '', base)  # FINWIRE1967Q1 → FINWIRE
-        batch_dir = os.path.dirname(tgt)
-        batch_name = os.path.basename(batch_dir)  # "Batch1", "Batch2", etc.
-        key = (dataset, batch_dir)
-        by_dataset[key]["count"] += 1
-        by_dataset[key]["dir"] = batch_name
-    label_suffix = f" ({label})" if label else ""
-    for (dataset, _), info in sorted(by_dataset.items()):
-        log(f"[Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}", "DEBUG")
 
 
 # ---------------------------------------------------------------------------

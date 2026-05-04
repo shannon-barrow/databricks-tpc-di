@@ -41,14 +41,12 @@ otherwise serialize the writes back together.
 
 Trade.py is intentionally left untouched — this is an additive module
 the new task notebooks call instead. Once V6 lands and is validated
-the orchestrator path in trade.py can be dropped.
+trade.py was deleted in the V8 cleanup pass once this module was the
+sole code path for Trade-family generation.
 """
-from __future__ import annotations
-
-import math
 from datetime import datetime, timedelta
 
-from pyspark.sql import SparkSession, functions as F, Window
+from pyspark.sql import functions as F, Window
 
 from .config import (
     TRADE_BEGIN_DATE, FIRST_BATCH_DATE, FIRST_BATCH_DATE_END,

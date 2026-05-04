@@ -2,13 +2,12 @@
 # MAGIC %md
 # MAGIC # data_gen task: copy_hr
 # MAGIC
-# MAGIC Copies HR.csv staging → final. Depends on `gen_hr` and runs in
-# MAGIC parallel with downstream gen tasks (gen_customer, gen_daily_market,
-# MAGIC gen_trade, gen_watch_history) since the staging files are persisted
-# MAGIC on the volume by gen_hr but the actual copy work is decoupled.
-# MAGIC
-# MAGIC Synchronous: waits for `wait_for_background_copies()` before exiting
-# MAGIC so any large-part daemon threads complete cleanly.
+# MAGIC Renames HR.csv staging files to flat Batch1/HR_K.csv layout via
+# MAGIC `register_copies_from_staging` (V8: Spark-distributed `mv` across
+# MAGIC ~32 executor pods). Depends on `gen_hr` and runs in parallel with
+# MAGIC downstream gen tasks (gen_customer, gen_daily_market, gen_trade,
+# MAGIC gen_watch_history) since the staging files are persisted on the
+# MAGIC volume by gen_hr but the actual rename work is decoupled.
 
 # COMMAND ----------
 

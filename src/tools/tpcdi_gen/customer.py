@@ -130,9 +130,8 @@ the temporal window when the customer was active (created and not yet inactivate
 """
 
 from pyspark.sql import SparkSession, functions as F, Window
-from pyspark import StorageLevel
 from .config import *
-from .utils import write_file, write_text, seed_for, dict_join, dict_join_batch, hash_key, register_copy, log, disk_cache, safe_unpersist
+from .utils import write_file, seed_for, dict_join, dict_join_batch, hash_key, log, disk_cache, safe_unpersist
 
 
 def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_ready_event=None) -> dict:

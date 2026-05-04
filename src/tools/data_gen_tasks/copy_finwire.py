@@ -2,17 +2,15 @@
 # MAGIC %md
 # MAGIC # data_gen task: copy_finwire
 # MAGIC
-# MAGIC Copies FINWIRE_*.txt staging → final. Depends on `gen_finwire` and
-# MAGIC runs in parallel with gen_daily_market / gen_trade / gen_watch_history.
+# MAGIC Renames FINWIRE_*.txt staging files to flat Batch1/FINWIRE_K.txt
+# MAGIC layout via `register_copies_from_staging` (V8: Spark-distributed
+# MAGIC `mv` across ~32 executor pods). Depends on `gen_finwire` and runs
+# MAGIC in parallel with gen_daily_market / gen_trade family / gen_watch_history.
 # MAGIC
 # MAGIC FINWIRE writes 3 separate Spark staging dirs (CMP/SEC/FIN subsets).
 # MAGIC Output files are numbered FINWIRE_1.txt, FINWIRE_2.txt, … with a
-# MAGIC counter shared across the 3 subsets — preserves the same numbering
-# MAGIC the original single-task `finwire.generate` produced (CMP files
-# MAGIC first, then SEC, then FIN).
-# MAGIC
-# MAGIC Synchronous: waits for `wait_for_background_copies()` before
-# MAGIC exiting so large-part daemon threads complete cleanly.
+# MAGIC counter shared across the 3 subsets so they form one contiguous
+# MAGIC numbering range.
 
 # COMMAND ----------
 

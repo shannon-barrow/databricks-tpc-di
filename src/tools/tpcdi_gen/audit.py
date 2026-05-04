@@ -27,7 +27,7 @@ All audit files use CSV format with header:
 """
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from .config import *
 from .utils import write_text, log
 

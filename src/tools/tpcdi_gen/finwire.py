@@ -62,7 +62,7 @@ deactivation_quarter = fw_quarters + 1 (effectively "never deactivated").
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log, disk_cache
+from .utils import write_file, seed_for, dict_join, hash_key, register_copies_from_staging, _cleanup, log, disk_cache
 from .audit import static_audits_available
 
 

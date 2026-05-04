@@ -85,7 +85,7 @@ cdc_dsn) for downstream incremental processing.
 
 import math
 from datetime import timedelta
-from pyspark.sql import SparkSession, functions as F, Window
+from pyspark.sql import SparkSession, functions as F
 from .config import *
 from .utils import write_file, seed_for, hash_key, log
 from .audit import static_audits_available
