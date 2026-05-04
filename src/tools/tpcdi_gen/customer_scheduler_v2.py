@@ -39,11 +39,8 @@ output (different bijection parameters, different action-type pool
 semantics for ADDACCT). Per the user policy, audit static snapshots
 will be regenerated against this scheduler.
 """
-from __future__ import annotations
-
 import math
 import random as _rand
-from typing import Iterator
 
 import numpy as _np
 
