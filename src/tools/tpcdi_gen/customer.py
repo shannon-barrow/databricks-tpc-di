@@ -734,12 +734,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
         new_total = hist_size + update_last_id * new_custs
         audit_counts = {
-            ("CM_ADDACCT", 1):   n_addacct,
-            ("CM_CLOSEACCT", 1): n_close,
-            ("CM_UPDACCT", 1):   n_updacct,
+            ("CM_ADDACCT", 1):   update_last_id * addaccts_per_update,
+            ("CM_CLOSEACCT", 1): update_last_id * del_accts,
+            ("CM_UPDACCT", 1):   update_last_id * change_accts,
             ("CM_NEW", 1):       new_total,
-            ("CM_UPDCUST", 1):   n_updcust,
-            ("CM_INACT", 1):     n_inact,
+            ("CM_UPDCUST", 1):   update_last_id * change_custs,
+            ("CM_INACT", 1):     update_last_id * del_custs,
             ("CM_DOB_TO", 1):    0,
             ("CM_DOB_TY", 1):    0,
             ("CM_TIER_INV", 1):  0,
@@ -812,15 +812,19 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     n_parts = len(part_files)
     log(f"[CustomerMgmt] CustomerMgmt.xml: {total} actions, {total_new} unique C_IDs, {total_caids} unique CA_IDs -> {n_parts} files")
 
-    # Per-ActionType counts for Batch1 CustomerMgmt_audit.csv. Known analytically from schedule allocation — no need to groupBy all_df's 5×internal_sf rows. NEW rows = historical batch (all NEW) + per-update NEW allocation × update count. Other action types are exact from the pre-computed schedules (INACT/CLOSEACCT) or the fixed per-update slot allocation that the bijection join resolves to (UPDCUST/UPDACCT/ADDACCT).
+    # Per-ActionType counts for Batch1 CustomerMgmt_audit.csv. Each
+    # action type emits exactly its target count per update — V8
+    # scheduler picks the correct number of rows per (update,
+    # action_type) by construction (bijection over alive pool +
+    # disjoint slot ranges), so totals are simply target × G.
     new_total = hist_size + update_last_id * new_custs
     audit_counts = {
-        ("CM_ADDACCT", 1):   n_addacct,
-        ("CM_CLOSEACCT", 1): n_close,
-        ("CM_UPDACCT", 1):   n_updacct,
+        ("CM_ADDACCT", 1):   update_last_id * addaccts_per_update,
+        ("CM_CLOSEACCT", 1): update_last_id * del_accts,
+        ("CM_UPDACCT", 1):   update_last_id * change_accts,
         ("CM_NEW", 1):       new_total,
-        ("CM_UPDCUST", 1):   n_updcust,
-        ("CM_INACT", 1):     n_inact,
+        ("CM_UPDCUST", 1):   update_last_id * change_custs,
+        ("CM_INACT", 1):     update_last_id * del_custs,
         # Our generator never deliberately injects invalid DOB / tier values, so these are zero. The ETL pipeline will see zero alerts, which matches zero in the audit → automated_audit checks pass.
         ("CM_DOB_TO", 1):    0,
         ("CM_DOB_TY", 1):    0,
