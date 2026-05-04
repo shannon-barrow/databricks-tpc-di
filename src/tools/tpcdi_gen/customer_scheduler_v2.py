@@ -266,24 +266,22 @@ def build_schedule_df(spark: SparkSession, *,
         "UPDACCT":   del_accts,
     }
 
-    # Broadcast the bijection params to executors. We marshal the four arrays
-    # via a single dict per perm — cheap to deserialize per partition.
-    sc = spark.sparkContext
-    bcast_cust = sc.broadcast(cust_params)
-    bcast_acct = sc.broadcast(acct_params)
-
-    # Pandas UDFs for vectorized recursion. Two flavors so the executor
-    # picks the right broadcast based on which entity table the action
-    # references.
+    # Pass the bijection params to executors via closure capture (the
+    # ``spark.sparkContext.broadcast()`` API is blocked on serverless,
+    # but cloudpickle-serializing a small dict of numpy arrays into the
+    # UDF closure is cheap — ~25 KB at SF=20k for both perms combined).
     from pyspark.sql.functions import pandas_udf
     import pandas as pd
+
+    _cust_params_local = cust_params
+    _acct_params_local = acct_params
 
     @pandas_udf(LongType())
     def _cust_perm_udf(slots: pd.Series, gens: pd.Series) -> pd.Series:
         ids = _get_permutation_vec(
             slots.to_numpy(dtype=_np.int64),
             gens.to_numpy(dtype=_np.int64),
-            bcast_cust.value)
+            _cust_params_local)
         return pd.Series(ids)
 
     @pandas_udf(LongType())
@@ -291,7 +289,7 @@ def build_schedule_df(spark: SparkSession, *,
         ids = _get_permutation_vec(
             slots.to_numpy(dtype=_np.int64),
             gens.to_numpy(dtype=_np.int64),
-            bcast_acct.value)
+            _acct_params_local)
         return pd.Series(ids)
 
     # Per-action picks. Each action emits exactly its target rows per update,
