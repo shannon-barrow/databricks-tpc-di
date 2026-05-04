@@ -528,25 +528,37 @@ def _pack_small_parts(small_parts, max_bytes: int):
 _DEFER_COPIES = {"enabled": False}
 
 
-# V7 rename worker count. Matches the spec's `mv` parallelism — ABFS
-# rename RPCs are I/O-bound, not CPU-bound, so far more workers than
-# driver cores still yields linear speedup until FUSE's per-pod
-# concurrency limit kicks in (empirically ~64 on serverless).
-_RENAME_WORKERS = 32
+# V7 rename worker count per copy_* task. With 8 copy tasks running
+# concurrently in standard mode, total system-wide renames =
+# _RENAME_WORKERS × 8. ABFS rename has a soft per-account RPS limit
+# and UC Volumes FUSE has a per-pod concurrency limit; 16 × 8 = 128
+# total in-flight RPCs is well under both. Drop further if backend
+# throttling reappears.
+_RENAME_WORKERS = 16
 
-# EAGAIN backoff schedule. UC Volumes FUSE returns
-# "Resource temporarily unavailable" sporadically when many parallel
-# renames hit the same backend; absorb up to ~10s of bursts.
-_RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0)
+# Backoff schedule for transient mv failures. UC Volumes FUSE +
+# ABFS backend can fail with a variety of stderr signatures
+# (EAGAIN, "Resource temporarily unavailable", "I/O error",
+# "Operation timed out", or just "No such file or directory" when
+# FUSE inode cache is stale). Treat ALL CalledProcessErrors as
+# transient and retry — worst case a permanent error wastes ~25 s
+# before bubbling up. Schedule grows aggressively so we don't burn
+# a cache window on a doomed file.
+_RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
 
 
 def _mv_with_retry(src: str, dst: str) -> str:
-    """Single-file ``mv src dst`` with EAGAIN retry. Workers run this
-    inside a ThreadPoolExecutor — subprocess releases the GIL during
-    the syscall so true parallelism across N workers.
+    """Single-file ``mv src dst`` with permissive retry. Workers run
+    this inside a ThreadPoolExecutor — subprocess releases the GIL
+    during the syscall so true parallelism across N workers.
+
+    Any ``CalledProcessError`` triggers retry with backoff. After
+    exhausting the schedule, raise with the last stderr captured so
+    the failed task surfaces a useful diagnostic.
     """
     import subprocess
     last_err = None
+    last_stderr = ""
     for delay in (0.0, *_RENAME_RETRIES):
         if delay:
             import time as _time
@@ -557,16 +569,16 @@ def _mv_with_retry(src: str, dst: str) -> str:
             return dst
         except subprocess.CalledProcessError as e:
             last_err = e
-            stderr = (e.stderr or "")
-            transient = ("temporarily unavailable" in stderr
-                         or "Resource" in stderr
-                         or "EAGAIN" in stderr
-                         or "EBUSY" in stderr
-                         or "I/O error" in stderr)
-            if not transient:
-                raise
-    raise RuntimeError(f"mv {src} -> {dst} failed after retries: "
-                       f"{(last_err.stderr or '').strip() if last_err else ''}")
+            last_stderr = (e.stderr or "").strip()
+        except FileNotFoundError as e:
+            # Source vanished mid-flight — could be a FUSE listdir
+            # vs mv race after a peer worker already moved it.
+            # Same retry schedule.
+            last_err = e
+            last_stderr = str(e)
+    raise RuntimeError(
+        f"mv {src} -> {dst} failed after {len(_RENAME_RETRIES)+1} attempts. "
+        f"Last stderr: {last_stderr}")
 
 
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
