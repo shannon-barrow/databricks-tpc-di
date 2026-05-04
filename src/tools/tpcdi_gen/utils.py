@@ -579,14 +579,20 @@ def _mv_with_retry(src: str, dst: str) -> str:
 
 def _mv_partition(rows):
     """Run on each Spark executor partition: serial ``mv`` over the
-    rows in this partition. Same retry schedule as the driver-side
-    fallback; subprocess + retry must be self-contained because this
-    closure is serialized to executor pods that can't import names
-    from this module's enclosing scope reliably.
+    rows in this partition. Subprocess + retry must be self-contained
+    because this closure is serialized to executor pods that can't
+    import names from this module's enclosing scope reliably.
+
+    Retry schedule extended to ~2 min total (vs the driver-fallback's
+    19s) because we observed sustained ABFS rename throttling at
+    SF=10k where 32 pods × concurrent renames against the same
+    storage account triggered cooldowns longer than 19s. Mid-flight
+    "source not found" (e.g. partial peer interference) is also
+    treated as transient.
     """
     import subprocess as _sp
     import time as _time
-    delays = (0.0, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
+    delays = (0.0, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0)
     for row in rows:
         src, dst = row["src"], row["dst"]
         last_stderr = ""
