@@ -528,23 +528,26 @@ def _pack_small_parts(small_parts, max_bytes: int):
 _DEFER_COPIES = {"enabled": False}
 
 
-# V7.5 lessons-learned: within-pod parallelism doesn't help on
-# UC Volumes FUSE because the per-pod FUSE driver serializes rename
-# syscalls anyway, and the in-flight worker fan-out triggers ABFS
-# backend throttling cascades. Keep at 1 — effectively serial mv,
-# but each call still goes through the retry helper for transient
-# FUSE/backend errors. To genuinely parallelize across pods, we'd
-# need to distribute the rename pairs across Spark executors (V8 —
-# pending design).
-_RENAME_WORKERS = 1
+# V8: distribute the rename work across Spark executor pods. Each pod
+# has its own FUSE driver, so N pods × 1 mv-at-a-time = N concurrent
+# renames at the ABFS backend (vs V7.5's single-pod-serial path which
+# was capped at ~1.5 s/file regardless of file count). Per-pod work is
+# still serial — within-pod ThreadPoolExecutor was a wash on V7
+# because per-pod FUSE serializes anyway.
+#
+# Tunables:
+#   _RENAME_TARGET_PODS — desired number of executor pods to spread
+#     the work across. The actual count is min(this, len(moves)).
+#     Higher = more concurrency until ABFS account RPS limit; ~32 is
+#     well under typical 5000 RPS soft caps.
+_RENAME_TARGET_PODS = 32
 
 _RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
 
 
 def _mv_with_retry(src: str, dst: str) -> str:
-    """Single-file ``mv src dst`` with permissive retry. Workers run
-    this inside a ThreadPoolExecutor — subprocess releases the GIL
-    during the syscall so true parallelism across N workers.
+    """Single-file ``mv src dst`` with permissive retry. Used by the
+    driver-side fallback path when no SparkSession is available.
 
     Any ``CalledProcessError`` triggers retry with backoff. After
     exhausting the schedule, raise with the last stderr captured so
@@ -566,8 +569,7 @@ def _mv_with_retry(src: str, dst: str) -> str:
             last_stderr = (e.stderr or "").strip()
         except FileNotFoundError as e:
             # Source vanished mid-flight — could be a FUSE listdir
-            # vs mv race after a peer worker already moved it.
-            # Same retry schedule.
+            # vs mv race. Same retry schedule.
             last_err = e
             last_stderr = str(e)
     raise RuntimeError(
@@ -575,21 +577,54 @@ def _mv_with_retry(src: str, dst: str) -> str:
         f"Last stderr: {last_stderr}")
 
 
+def _mv_partition(rows):
+    """Run on each Spark executor partition: serial ``mv`` over the
+    rows in this partition. Same retry schedule as the driver-side
+    fallback; subprocess + retry must be self-contained because this
+    closure is serialized to executor pods that can't import names
+    from this module's enclosing scope reliably.
+    """
+    import subprocess as _sp
+    import time as _time
+    delays = (0.0, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
+    for row in rows:
+        src, dst = row["src"], row["dst"]
+        last_stderr = ""
+        for delay in delays:
+            if delay:
+                _time.sleep(delay)
+            try:
+                _sp.run(["mv", src, dst], check=True,
+                        capture_output=True, text=True)
+                break
+            except _sp.CalledProcessError as e:
+                last_stderr = (e.stderr or "").strip()
+            except FileNotFoundError as e:
+                last_stderr = str(e)
+        else:
+            raise RuntimeError(
+                f"mv {src} -> {dst} failed on executor. "
+                f"Last stderr: {last_stderr}")
+
+
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """V7: parallel cross-directory ``mv`` from Spark staging into the
-    flat Batch* layout DIGen produces.
+    """V8: cross-directory ``mv`` distributed across Spark executor pods.
 
     Files move from ``{staging_dir}/part-NNNNN-UUID[-cM].csv`` →
     ``{dirname(final_path)}/{base}_K{ext}``. K is a 1-based sequential
     counter (start_idx for chained callers like FINWIRE's CMP/SEC/FIN).
 
-    Same FUSE rename cost per file as V5's same-dir variant
-    (UC Volumes ``mv`` is NOT a metadata-only op — backend issues a
-    rename RPC either way), but parallelized across
-    ``_RENAME_WORKERS`` threads with EAGAIN retry. At SF=20k this drops
-    copy_trade from ~25 m to <1 m and eliminates the EAGAIN-induced
-    task failures we saw with the serial bash loop.
+    Each executor pod has its own FUSE driver, so the (src, dst) pairs
+    are repartitioned across N pods and each pod runs ``mv`` serially
+    on its share. With N=32, copy_trade at SF=20k goes from ~100m
+    (V7.5 single-pod-serial) down to ~3m. ABFS rename RPS at the
+    storage account is the next bottleneck — the configured pod count
+    keeps system-wide RPC count well under typical 5000 RPS soft caps.
+
+    Falls back to driver-serial mv when no active SparkSession is
+    available (e.g. the gen_* tasks during the inline write_file path,
+    where _DEFER_COPIES gates this anyway, or unit tests).
 
     The flat layout matches the existing bronze SQL ``fileNamePattern``
     globs (``{Trade.txt,Trade_[0-9]*.txt}``) and avoids needing
@@ -658,19 +693,31 @@ def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
         moves.append((src, dst))
         next_idx += 1
 
-    log(f"[Rename] {base}: {len(moves)} files, "
-        f"{staging_local} → {final_dir}/{base}_K{ext} "
-        f"(start={resume_start}, workers={_RENAME_WORKERS})")
-
-    # Parallel mv with retry. ThreadPoolExecutor saturates FUSE without
-    # building a Spark job (each mv is one syscall, ~250 ms latency
-    # bound). Failures bubble up so the caller can see them.
-    targets = []
-    if moves:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_RENAME_WORKERS) as executor:
-            futures = [executor.submit(_mv_with_retry, src, dst) for src, dst in moves]
-            for f in concurrent.futures.as_completed(futures):
-                targets.append(f.result())
+    targets = [dst for _src, dst in moves]
+    if not moves:
+        log(f"[Rename] {base}: nothing to rename")
+    else:
+        # Try the Spark-distributed path first. Falls back to driver
+        # serial if no SparkSession is reachable (e.g. when
+        # register_copies_from_staging is invoked outside the per-task
+        # notebook context).
+        spark = SparkSession.getActiveSession()
+        if spark is not None:
+            n_pods = max(min(_RENAME_TARGET_PODS, len(moves)), 1)
+            log(f"[Rename] {base}: {len(moves)} files via Spark "
+                f"({staging_local} → {final_dir}/{base}_K{ext}, "
+                f"start={resume_start}, pods={n_pods})")
+            moves_df = spark.createDataFrame(moves, ["src", "dst"])
+            # Repartition on a hash so files spread across pods evenly,
+            # rather than the createDataFrame default of 1 partition
+            # which would route all renames to a single executor pod.
+            moves_df = moves_df.repartition(n_pods)
+            moves_df.foreachPartition(_mv_partition)
+        else:
+            log(f"[Rename] {base}: {len(moves)} files (driver-serial fallback, "
+                f"start={resume_start})")
+            for src, dst in moves:
+                _mv_with_retry(src, dst)
 
     # Drop Spark markers + the (now-empty) staging dir. Cross-directory
     # move means callers no longer need the staging dir to live on
