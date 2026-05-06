@@ -1,8 +1,8 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'delete+insert',
-    unique_key = 'sk_dateid',
+    incremental_strategy = 'insert_overwrite',
+    partition_by = 'sk_dateid',
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
@@ -20,8 +20,12 @@
       prior days' rows remain untouched. #}
 
 with new_dm as (
+  -- Only today's bronze rows. The factmarkethistory target is keyed by
+  -- sk_dateid (not dm_date), so since_last_load(dm_date) doesn't apply.
+  -- insert_overwrite with partition_by sk_dateid replaces only today's
+  -- partition; prior days remain.
   select * from {{ ref('bronzedailymarket') }}
-  {{ since_last_load('dm_date') }}
+  where dm_date = cast('{{ var("batch_date") }}' as date)
 ),
 
 sym_min_max as (

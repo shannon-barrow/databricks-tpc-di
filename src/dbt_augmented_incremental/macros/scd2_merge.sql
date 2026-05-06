@@ -34,17 +34,24 @@
   {%- set target_relation = arg_dict["target_relation"] -%}
   {%- set source_relation = arg_dict["temp_relation"] -%}
   {%- set unique_key = arg_dict["unique_key"] -%}
-  {%- set dest_columns = arg_dict["dest_columns"] -%}
+  {%- set dest_columns = arg_dict.get("dest_columns") -%}
 
   {%- if unique_key is none -%}
     {{ exceptions.raise_compiler_error("scd2 incremental strategy requires unique_key") }}
+  {%- endif -%}
+
+  {# dbt-databricks 1.10's incremental materialization does not always
+     populate dest_columns in arg_dict for custom strategies. Fall back
+     to introspecting the target relation directly. #}
+  {%- if dest_columns is none -%}
+    {%- set dest_columns = adapter.get_columns_in_relation(target_relation) -%}
   {%- endif -%}
 
   {%- set current_col = config.get('scd2_current_col', 'iscurrent') -%}
   {%- set effective_col = config.get('scd2_effective_col', 'effectivedate') -%}
   {%- set end_col = config.get('scd2_end_col', 'enddate') -%}
 
-  {%- set dest_cols_csv = get_quoted_csv(dest_columns | map(attribute='name')) -%}
+  {%- set dest_cols_csv = dest_columns | map(attribute='name') | join(', ') -%}
 
   merge into {{ target_relation }} t using (
     select s.{{ unique_key }} as __scd2_merge_key, s.*
