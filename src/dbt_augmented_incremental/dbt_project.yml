@@ -32,7 +32,12 @@ dispatch:
 
 models:
   dbt_augmented_incremental:
-    +schema: "{{ var('wh_db') }}_{{ var('scale_factor') }}"
+    # NOTE: target schema is the connection's default schema (set by the
+    # caller — for the augmented_dbt workflow that's `{wh_db}_{sf}`, set
+    # via the dbt_task config). We deliberately do NOT set `+schema` here:
+    # dbt's default `generate_schema_name` macro APPENDS `+schema` to the
+    # connection schema as `{default}_{custom}`, which would produce a
+    # doubled name like `wh_db_sf_wh_db_sf`.
     bronze:
       +materialized: incremental
       +incremental_strategy: append
