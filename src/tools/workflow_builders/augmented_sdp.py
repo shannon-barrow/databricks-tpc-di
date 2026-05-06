@@ -153,8 +153,8 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
         f"to bulk-load history; (4) `set_pipeline_incremental` swaps "
         f"back to `dlt_incremental`; (5) `loop_incremental_tpcdi` "
         f"for_each-loops the child job per simulated day. Cleanup gated "
-        f"by `delete_tables_when_finished` (default FALSE — long runs make "
-        f"keep-by-default the safer choice). Shared `_staging/sf={scale_factor}/` "
+        f"by `delete_tables_when_finished` (default TRUE — set to FALSE if "
+        f"you want to inspect tables after the run). Shared `_staging/sf={scale_factor}/` "
         f"is preserved across runs."
     )
 
@@ -357,7 +357,7 @@ def build_parent(
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
-            {"name": "delete_tables_when_finished", "default": "FALSE"},
+            {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run", "default": "730"},
         ],
         "tasks": [setup_task, set_historical, run_historical, set_incremental,
