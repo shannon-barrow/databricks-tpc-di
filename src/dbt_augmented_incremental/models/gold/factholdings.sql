@@ -18,7 +18,7 @@ with new_events as (
     hh_after_qty as currentholding,
     event_dt
   from {{ ref('bronzeholdings') }}
-  {{ since_last_load('event_dt') }}
+  where event_dt = cast('{{ var("batch_date") }}' as date)
 )
 
 select

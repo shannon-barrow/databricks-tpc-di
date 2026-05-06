@@ -25,12 +25,7 @@ with new_txns as (
     ct_amt,
     true as latest_batch
   from {{ ref('bronzecashtransaction') }}
-  {% if is_incremental() %}
-  where event_dt > coalesce(
-        (select max(ct_date) from {{ this }} where latest_batch),
-        cast('1900-01-01' as date)
-      )
-  {% endif %}
+  where event_dt = cast('{{ var("batch_date") }}' as date)
 ),
 
 prior as (

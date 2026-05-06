@@ -19,12 +19,7 @@
 
 with new_events as (
   select * from {{ ref('bronzeaccount') }}
-  {% if is_incremental() %}
-  where update_dt > coalesce(
-        (select max(effectivedate) from {{ this }}),
-        cast('1900-01-01' as date)
-      )
-  {% endif %}
+  where update_dt = cast('{{ var("batch_date") }}' as date)
 ),
 
 deduped as (

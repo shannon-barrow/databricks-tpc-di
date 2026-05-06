@@ -21,14 +21,7 @@
 
 with new_events as (
   select * from {{ ref('bronzewatches') }}
-  {% if is_incremental() %}
-  where event_dt > coalesce(
-        (select max(event_dt) from {{ ref('bronzewatches') }} b
-          where exists (select 1 from {{ this }} t
-            where t.customerid = b.w_c_id and t.symbol = b.w_s_symb)),
-        cast('1900-01-01' as date)
-      )
-  {% endif %}
+  where event_dt = cast('{{ var("batch_date") }}' as date)
 ),
 
 w as (

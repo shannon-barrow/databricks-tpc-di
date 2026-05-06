@@ -23,17 +23,7 @@
 
 with new_events as (
   select * from {{ ref('bronzetrade') }}
-  {% if is_incremental() %}
-  where event_dt > coalesce(
-        (select max(event_dt) from {{ ref('bronzetrade') }} b
-          where b.tradeid in (select tradeid from {{ this }})
-            and b.event_dt <= (select max(coalesce(
-                  to_date(cast(sk_closedateid as string), 'yyyyMMdd'),
-                  to_date(cast(sk_createdateid as string), 'yyyyMMdd')
-                )) from {{ this }})),
-        cast('1900-01-01' as date)
-      )
-  {% endif %}
+  where event_dt = cast('{{ var("batch_date") }}' as date)
 ),
 
 trades as (
