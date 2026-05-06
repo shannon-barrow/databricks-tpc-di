@@ -1,0 +1,40 @@
+version: 2
+
+# Read-only reference tables populated by Stage 0 + CLONEd into the run
+# schema before dbt enters. The daily-loop models JOIN to these but never
+# write to them. (Tables that the daily loop both reads AND writes —
+# dimcustomer, dimaccount, dimtrade, factwatches, factholdings,
+# factcashbalances, factmarkethistory — are dbt models in silver/ and
+# gold/ that target the same physical cloned tables and read existing
+# rows via {{ this }} / {{ ref(...) }} as needed.)
+sources:
+  - name: run_schema
+    description: Cloned per-run copy of the per-SF staging schema (Stage 0 output).
+    database: "{{ var('catalog') }}"
+    schema: "{{ var('wh_db') }}_{{ var('scale_factor') }}"
+    tables:
+      - name: taxrate
+      - name: dimdate
+      - name: industry
+      - name: tradetype
+      - name: dimbroker
+      - name: dimsecurity
+      - name: statustype
+      - name: dimcompany
+      - name: dimtime
+      - name: financial
+      - name: companyyeareps
+      - name: currentaccountbalances
+        description: |
+          Cumulative account-level cash balance built from CashTransaction
+          history. Read by gold/factcashbalances.
+      - name: dimaccount
+        description: |
+          Cloned at run-start with pre-{{ var('benchmark_start_date') }}
+          history. The silver/dimaccount model writes back into this
+          table via a custom SCD2 merge. Referenced as a *source* (not
+          ref()) by bronze/bronzeaccount when computing
+          account-updates-from-customer cascade rows — this gives us the
+          AS-OF-BATCH-START state of dimaccount, matching the Classic
+          streaming foreachBatch semantics. The DAG remains acyclic:
+          source -> bronzeaccount -> silver/dimaccount -> (next batch's source).
