@@ -62,7 +62,7 @@ deactivation_quarter = fw_quarters + 1 (effectively "never deactivated").
 
 from pyspark.sql import SparkSession, functions as F, Window
 from .config import *
-from .utils import write_file, seed_for, dict_join, hash_key, dict_count, register_copies_from_staging, _cleanup, log, disk_cache
+from .utils import write_file, seed_for, dict_join, hash_key, register_copies_from_staging, _cleanup, log, disk_cache
 from .audit import static_audits_available
 
 
@@ -373,7 +373,7 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
 
     # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read it independently of the remaining FINWIRE compute (CMP/FIN union + the 10-25 min text write). This detaches downstream start time from the overall FINWIRE wallclock — previously they waited on f_fw.result(), now they wait on symbols_ready_event set right below.
     symbols, _sym_cleanup = disk_cache(symbols, spark, "FINWIRE symbols",
-                                        volume_path=cfg.volume_path, dbutils=dbutils)
+                                        volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg)
     symbols.createOrReplaceTempView("_symbols")
     # Estimate — symbols is a groupBy on SEC NEW records' Symbol; ~sec_total after dedup by Symbol (slight shrinkage from Symbol collisions across quarters).
     log(f"[FINWIRE] Active symbols: ~{cfg.sec_total:,} -> _symbols view (downstream unblocked)")
@@ -501,8 +501,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
 
     # FIN repartition happens earlier, right on cmp_quarters before the crossJoin — see the block there. Doing it here (just before .write) would shuffle after the in-memory 475M-row compute had already been forced onto the narrow spark.range default partitioning, which is what causes the 15GB/task spill. CMP/SEC are small enough to use default partitioning and write directly.
+    # Staging dir is dataset-name (no __staging suffix) — matches write_file's
+    # convention. register_copies_from_staging will rename in place.
     def _write_subset(df, label):
-        staging = f"{cfg.batch_path(1)}/FINWIRE_{label}.txt__staging"
+        staging = f"{cfg.batch_path(1)}/FINWIRE_{label}"
         _cleanup(staging, dbutils)
         df.select("line").write.mode("overwrite") \
             .option("maxRecordsPerFile", max_records).text(staging)

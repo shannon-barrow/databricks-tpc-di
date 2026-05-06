@@ -1,19 +1,27 @@
 """Builder for the augmented_incremental data-gen workflow.
 
-Multi-task DAG: stage 0 (spark gen → temp Delta) → stage 1 (build the
-shared staging schema `tpcdi_incremental_staging_{sf}` + per-dataset
-partitioned-CSV trees under `_staging/sf={sf}/{Dataset}/_pdate=…/`) →
-cleanup_stage0 (drop the temp Delta tables + remove spark-gen leftovers
-under that path: Batch1/2/3, inner _staging).
+Multi-task DAG: stage 0 (per-dataset gen DAG → temp Delta in
+`tpcdi_raw_data`) → stage 1 (build the shared staging schema
+`tpcdi_incremental_staging_{sf}` + per-dataset partitioned-CSV trees
+under `_staging/sf={sf}/{Dataset}/_pdate=…/`) → cleanup_stage0 (drop the
+temp Delta tables + remove spark-gen leftovers under that path:
+Batch1/2/3, inner _staging).
+
+Stage 0 is itself a 9-task sub-DAG (data_gen → 7 parallel
+gen_* tasks → cleanup_intermediates) so a failed dataset can be
+repair-run without regenerating the rest. Cross-task intermediates
+(_gen_brokers, _gen_symbols, _gen_customer_dates) live in
+`tpcdi_incremental_staging_{sf}_stage` with no-stats TBLPROPERTIES.
 
 Stage 1 splits into two parallel branches that both depend only on
 data_gen completing:
 
   Branch A — staging tables (Phase 2a):
     - The `tpcdi_incremental_staging_{sf}` + `..._stage` schemas are
-      created inline by spark_runner during stage 0, so this workflow
-      has no separate dw_init task. PO is intentionally NOT enabled on
-      the staging schema (these tables are read-only deliverables).
+      created inline by the data_gen task at the top of stage 0, so this
+      workflow has no separate dw_init task. PO is intentionally NOT
+      enabled on the staging schema (these tables are read-only
+      deliverables).
     - raw_ingestion ingests StatusType / TaxRate / DimDate / DimTime /
       Industry / TradeType / BatchDate from the .txt files spark gen
       writes under {volume}/Batch1/. Reuses single_batch/SQL files
@@ -38,8 +46,8 @@ cleanup_stage0 depends on every leaf in both branches. Runs ALL_DONE
 unconditionally temporary).
 
 Data-gen widget (`data_gen_type`) defaults to
-``augmented_incremental`` so the spark_runner skips Batch2/Batch3 and
-writes Delta tables to ``tpcdi_raw_data.{dataset}{sf}``.
+``augmented_incremental`` so the per-dataset gen tasks skip Batch2/Batch3
+and write Delta tables to ``tpcdi_raw_data.{dataset}{sf}``.
 """
 from __future__ import annotations
 
@@ -104,10 +112,6 @@ def _make_task(*, task_key: str, notebook_path: str,
     return task
 
 
-# Convenience: dependency on staging_check's true branch (= "regenerate, staging is incomplete"). Used by every Stage 1a / 1b task in place of the old depends_on=["data_gen"].
-_NEEDS_REGEN = {"task_key": "staging_check", "outcome": "true"}
-
-
 # ---------- Schema strings (lifted from workflows_single_batch.py) ----------
 # These mirror the single_batch builder's per-task base_parameters so the
 # raw_ingestion / Silver_* notebooks build identical staging table shapes.
@@ -152,35 +156,120 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
 
     tasks: list[dict] = []
 
-    # ---------------- Stage 0: data_gen ----------------
-    # Spark gen also creates the tpcdi_incremental_staging_{sf} + _stage schemas inline (replaces the old dw_init notebook task). Sets dbutils.jobs.taskValues `staging_complete` (string "true"/"false") which gates the condition_task below.
+    # ---------------- Stage 0: data_gen DAG ----------------
+    # Decomposed into 9 tasks: data_gen (entry: schema+volume init, wipe on
+    # regenerate=YES) → 7 gen_* in parallel waves → cleanup_intermediates.
+    # Each gen_* self-skips when its output Delta is intact
+    # (regenerate_data=NO), giving repair-run granularity (a failed dataset
+    # can be re-run without regenerating the rest).
+    #
+    # Cross-task intermediates (`_gen_brokers`, `_gen_symbols`,
+    # `_gen_customer_dates`) live as Delta tables in
+    # `{catalog}.tpcdi_incremental_staging_{sf}_stage` (same `_stage` schema
+    # convention dw_init.sql uses for benchmark interim tables) with no-stats
+    # / no-auto-optimize TBLPROPERTIES — they're transient.
+    #
+    # cleanup_intermediates runs ALL_SUCCESS so failed runs leave the temp
+    # tables for the next attempt's repair-run to consume.
+    _dgt_path = f"{repo_src_path}/tools/data_gen_tasks"
+    _dgt_params = {**_wh_param, "tpcdi_directory": _tpcdi_dir_dynamic,
+                   "augmented_incremental": "true"}
+
     tasks.append(_make_task(
         task_key="data_gen",
-        notebook_path=f"{repo_src_path}/tools/data_gen",
+        notebook_path=f"{_dgt_path}/data_gen",
+        base_params=_dgt_params,
+    ))
+    # Wave 1 — no upstream gen dependencies.
+    for _name in ("gen_reference", "gen_hr", "gen_finwire"):
+        tasks.append(_make_task(
+            task_key=_name,
+            notebook_path=f"{_dgt_path}/{_name}",
+            depends_on=["data_gen"],
+            base_params=_dgt_params,
+        ))
+    # Wave 2 — depends on a wave-1 producer.
+    tasks.append(_make_task(
+        task_key="gen_customer",
+        notebook_path=f"{_dgt_path}/gen_customer",
+        depends_on=["gen_hr"],
+        base_params=_dgt_params,
+    ))
+    tasks.append(_make_task(
+        task_key="gen_daily_market",
+        notebook_path=f"{_dgt_path}/gen_daily_market",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
+    ))
+    # gen_trade decomposed into base + 4 leaves (V6).
+    tasks.append(_make_task(
+        task_key="gen_trade_base",
+        notebook_path=f"{_dgt_path}/gen_trade_base",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
+    ))
+    for _leaf in ("gen_trade", "gen_tradehistory",
+                  "gen_cashtransaction", "gen_holdinghistory"):
+        tasks.append(_make_task(
+            task_key=_leaf,
+            notebook_path=f"{_dgt_path}/{_leaf}",
+            depends_on=["gen_trade_base"],
+            base_params=_dgt_params,
+        ))
+    # Wave 3 — depends on both finwire and customer.
+    tasks.append(_make_task(
+        task_key="gen_watch_history",
+        notebook_path=f"{_dgt_path}/gen_watch_history",
+        depends_on=["gen_finwire", "gen_customer"],
+        base_params=_dgt_params,
+    ))
+    # Copy tasks — synchronous staging→final copies for the datasets that
+    # still emit `__staging` part files (HR.csv, FINWIRE_*.txt). These run
+    # in parallel with downstream gens since the producers persisted the
+    # staging dirs to volume and the actual copy work is decoupled. The
+    # gen_* notebooks set utils._DEFER_COPIES["enabled"]=True so the
+    # in-line register_copies_from_staging call inside hr.generate /
+    # finwire.generate is a no-op; copy_* re-runs the same logic
+    # synchronously and waits on the daemon threads before exiting.
+    tasks.append(_make_task(
+        task_key="copy_hr",
+        notebook_path=f"{_dgt_path}/copy_hr",
+        depends_on=["gen_hr"],
+        base_params=_dgt_params,
+    ))
+    tasks.append(_make_task(
+        task_key="copy_finwire",
+        notebook_path=f"{_dgt_path}/copy_finwire",
+        depends_on=["gen_finwire"],
+        base_params=_dgt_params,
     ))
 
-    # ---------------- Early-exit gate ----------------
-    # condition_task evaluates the staging_complete task value spark_runner sets. When staging is intact (all 19 staging tables present + all 730 per-day file dirs present), staging_complete="true" and this condition is FALSE → outcome="false" → downstream stage_tables / stage_files tasks all skip cleanly. When something's missing, staging_complete="false" and condition is TRUE → outcome="true" → downstream runs normally. cleanup_stage0 still fires either way (run_if=ALL_DONE) but DROP IF EXISTS is a no-op when nothing was created.
-    tasks.append({
-        "task_key": "staging_check",
-        "depends_on": [{"task_key": "data_gen"}],
-        "run_if": "ALL_SUCCESS",
-        "condition_task": {
-            "op": "EQUAL_TO",
-            "left": "{{tasks.data_gen.values.staging_complete}}",
-            "right": "false",
-        },
-        "timeout_seconds": 0,
-        "email_notifications": {},
-        "notification_settings": dict(_DEFAULT_NOTIF),
-    })
+    _gen_keys = ["gen_reference", "gen_hr", "gen_finwire", "gen_customer",
+                 "gen_daily_market",
+                 "gen_trade_base", "gen_trade", "gen_tradehistory",
+                 "gen_cashtransaction", "gen_holdinghistory",
+                 "gen_watch_history"]
+    _copy_keys = ["copy_hr", "copy_finwire"]
+    tasks.append(_make_task(
+        task_key="cleanup_intermediates",
+        notebook_path=f"{_dgt_path}/cleanup_intermediates",
+        depends_on=_gen_keys + _copy_keys,
+        run_if="ALL_SUCCESS",
+        base_params=_wh_param,
+    ))
+
+    # No staging_check gate — each Stage 1 task wires directly to the
+    # specific gen / copy task that produces its source data, so they
+    # start as soon as their actual inputs are ready (no synthetic
+    # all-gens-done barrier). Per-task self-skip in each gen handles the
+    # repair-friendly short-circuit.
 
     # ---------------- Stage 1a: raw_ingestion ----------------
     raw_ingest_path = f"{repo_src_path}/single_batch/SQL/raw_ingestion"
 
     tasks.append(_make_task(
         task_key="ingest_DimDate", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"sk_dateid BIGINT {_NN} COMMENT 'Surrogate key for the date', datevalue DATE COMMENT 'The date stored appropriately for doing comparisons in the Data Warehouse', datedesc STRING COMMENT 'The date in full written form e.g. July 7 2004', calendaryearid INT COMMENT 'Year number as a number', calendaryeardesc STRING COMMENT 'Year number as text', calendarqtrid INT COMMENT 'Quarter as a number e.g. 20042', calendarqtrdesc STRING COMMENT 'Quarter as text e.g. 2004 Q2', calendarmonthid INT COMMENT 'Month as a number e.g. 20047', calendarmonthdesc STRING COMMENT 'Month as text e.g. 2004 July', calendarweekid INT COMMENT 'Week as a number e.g. 200428', calendarweekdesc STRING COMMENT 'Week as text e.g. 2004-W28', dayofweeknum INT COMMENT 'Day of week as a number e.g. 3', dayofweekdesc STRING COMMENT 'Day of week as text e.g. Wednesday', fiscalyearid INT COMMENT 'Fiscal year as a number e.g. 2005', fiscalyeardesc STRING COMMENT 'Fiscal year as text e.g. 2005', fiscalqtrid INT COMMENT 'Fiscal quarter as a number e.g. 20051', fiscalqtrdesc STRING COMMENT 'Fiscal quarter as text e.g. 2005 Q1', holidayflag BOOLEAN COMMENT 'Indicates holidays'",
             "filename": "Date.txt",
@@ -192,7 +281,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_DimTime", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"sk_timeid BIGINT {_NN} COMMENT 'Surrogate key for the time', timevalue STRING COMMENT 'The time stored appropriately for doing', hourid INT COMMENT 'Hour number as a number e.g. 01', hourdesc STRING COMMENT 'Hour number as text e.g. 01', minuteid INT COMMENT 'Minute as a number e.g. 23', minutedesc STRING COMMENT 'Minute as text e.g. 01:23', secondid INT COMMENT 'Second as a number e.g. 45', seconddesc STRING COMMENT 'Second as text e.g. 01:23:45', markethoursflag BOOLEAN COMMENT 'Indicates a time during market hours', officehoursflag BOOLEAN COMMENT 'Indicates a time during office hours'",
             "filename": "Time.txt",
@@ -204,7 +293,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_StatusType", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"st_id STRING COMMENT 'Status code', st_name STRING {_NN} COMMENT 'Status description'",
             "filename": "StatusType.txt",
@@ -216,7 +305,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_TaxRate", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"tx_id STRING {_NN} COMMENT 'Tax rate code', tx_name STRING COMMENT 'Tax rate description', tx_rate FLOAT COMMENT 'Tax rate'",
             "filename": "TaxRate.txt",
@@ -228,7 +317,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_TradeType", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"tt_id STRING {_NN} COMMENT 'Trade type code', tt_name STRING COMMENT 'Trade type description', tt_is_sell INT COMMENT 'Flag indicating a sale', tt_is_mrkt INT COMMENT 'Flag indicating a market order'",
             "filename": "TradeType.txt",
@@ -240,7 +329,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
     tasks.append(_make_task(
         task_key="ingest_industry", notebook_path=raw_ingest_path,
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "raw_schema": f"in_id STRING COMMENT 'Industry code', in_name STRING {_NN} COMMENT 'Industry description', in_sc_id STRING COMMENT 'Sector identifier'",
             "filename": "Industry.txt",
@@ -254,7 +343,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="ingest_BatchDate",
         notebook_path=f"{repo_src_path}/single_batch/SQL/Ingest_Incremental",
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["gen_reference"],
         base_params={
             "filename": "BatchDate.txt",
             "raw_schema": f"batchdate DATE {_NN} COMMENT 'Batch date'",
@@ -266,10 +355,12 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
 
     # ---------------- Stage 1a: ingest_FinWire ----------------
+    # Reads FINWIRE_*.txt files at the volume's final path — needs the
+    # copy_finwire task to have moved them out of staging.
     tasks.append(_make_task(
         task_key="ingest_FinWire",
         notebook_path=f"{repo_src_path}/single_batch/SQL/ingest_finwire",
-        depends_on=[_NEEDS_REGEN],
+        depends_on=["copy_finwire"],
         base_params={"tbl_props": _finwire_tprops(), **_td_wh},
     ))
 
@@ -277,7 +368,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="Silver_DimBroker",
         notebook_path=f"{repo_src_path}/single_batch/SQL/DimBroker",
-        depends_on=["ingest_DimDate"],
+        # Reads HR.csv at its final volume path — needs copy_hr to have
+        # moved it out of staging.
+        depends_on=["copy_hr"],
         base_params={
             "tgt_schema": f"sk_brokerid BIGINT {_NN} COMMENT 'Surrogate key for broker', brokerid BIGINT COMMENT 'Natural key for broker', managerid BIGINT COMMENT 'Natural key for manager\u2019s HR record', firstname STRING COMMENT 'First name', lastname STRING COMMENT 'Last Name', middleinitial STRING COMMENT 'Middle initial', branch STRING COMMENT 'Facility in which employee has office', office STRING COMMENT 'Office number or description', phone STRING COMMENT 'Employee phone number', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimbroker_pk PRIMARY KEY(sk_brokerid)",
@@ -326,7 +419,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="DimCustomerHistorical",
         notebook_path=f"{hist_path}/DimCustomerHistorical",
-        depends_on=[_NEEDS_REGEN, "ingest_TaxRate"],
+        # Reads tpcdi_raw_data.customermgmt{sf} (gen_customer's Delta) +
+        # the TaxRate ingest output.
+        depends_on=["gen_customer", "ingest_TaxRate"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
@@ -338,25 +433,34 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="DimTradeHistorical",
         notebook_path=f"{hist_path}/DimTradeHistorical",
-        depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.trade{sf} + tradehistory{sf}
+        # (gen_trade + gen_tradehistory leaves) plus the dim joins.
+        depends_on=["gen_trade", "gen_tradehistory",
+                    "Silver_DimSecurity", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactCashBalancesHistorical",
         notebook_path=f"{hist_path}/FactCashBalancesHistorical",
-        depends_on=[_NEEDS_REGEN, "DimAccountHistorical"],
+        # Reads tpcdi_raw_data.cashtransaction{sf} (gen_cashtransaction
+        # leaf) plus the account dim join.
+        depends_on=["gen_cashtransaction", "DimAccountHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactHoldingsHistorical",
         notebook_path=f"{hist_path}/FactHoldingsHistorical",
-        depends_on=[_NEEDS_REGEN, "DimTradeHistorical"],
+        # Reads tpcdi_raw_data.holdinghistory{sf} (gen_holdinghistory
+        # leaf) plus the trade dim join.
+        depends_on=["gen_holdinghistory", "DimTradeHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
         task_key="FactWatchesHistorical",
         notebook_path=f"{hist_path}/FactWatchesHistorical",
-        depends_on=[_NEEDS_REGEN, "Silver_DimSecurity", "DimCustomerHistorical"],
+        # Reads tpcdi_raw_data.watchhistory{sf} (gen_watch_history output)
+        # plus the security + customer dim joins.
+        depends_on=["gen_watch_history", "Silver_DimSecurity", "DimCustomerHistorical"],
         base_params=dict(_wh_param),
     ))
     tasks.append(_make_task(
@@ -367,15 +471,26 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     ))
 
     # ---------------- Stage 1b: stage_files (per-dataset partitioned CSV) -
+    # Each stage_files task reads from a specific gen_*'s Delta output and
+    # has no other upstream dependency, so it kicks off as soon as that
+    # gen task finishes (in parallel with other Stage 1 work).
     stg_path = f"{repo_src_path}/tools/augmented_staging/stage_files"
+    _stage_files_deps = {
+        "Customer":        ["gen_customer"],
+        "Account":         ["gen_customer"],
+        "Trade":           ["gen_trade"],
+        "CashTransaction": ["gen_cashtransaction"],
+        "HoldingHistory":  ["gen_holdinghistory"],
+        "DailyMarket":     ["gen_daily_market"],
+        "WatchHistory":    ["gen_watch_history"],
+    }
     stage_files_keys: list[str] = []
-    for tbl in ["Customer", "Account", "Trade", "CashTransaction",
-                "HoldingHistory", "DailyMarket", "WatchHistory"]:
+    for tbl, deps in _stage_files_deps.items():
         key = f"stage_files_{tbl}"
         tasks.append(_make_task(
             task_key=key,
             notebook_path=f"{stg_path}/{tbl}",
-            depends_on=[_NEEDS_REGEN],
+            depends_on=deps,
             base_params=dict(_td_param),
         ))
         stage_files_keys.append(key)
@@ -401,8 +516,9 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # No cleanup-on-failure task needed — the early-exit check uses
     # Spark's `_SUCCESS` marker per dataset dir as the integrity signal.
     # A failed stage_files task leaves no _SUCCESS, so the next run's
-    # check returns staging_complete=false and rebuilds (spark_runner's
-    # init `dbutils.fs.rm(cfg.volume_path)` wipes any partial state).
+    # check returns staging_complete=false and rebuilds (the data_gen
+    # task's init `dbutils.fs.rm(cfg.volume_path)` on regenerate_data=YES
+    # wipes any partial state).
 
     # ---------------- Top-level workflow ----------------
     workflow: dict[str, Any] = {

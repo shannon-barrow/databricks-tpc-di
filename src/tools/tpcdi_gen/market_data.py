@@ -44,7 +44,7 @@ creation_date <= inc_date < deactivation_date produce a row for that day.
 from datetime import timedelta
 from pyspark.sql import SparkSession, functions as F
 from .config import *
-from .utils import write_file, seed_for, hash_key, log
+from .utils import write_file, seed_for, log
 from .audit import static_audits_available
 
 

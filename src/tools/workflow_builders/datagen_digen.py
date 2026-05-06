@@ -112,11 +112,14 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             {"name": "regenerate_data", "default": regenerate_data},
         ],
         "tasks": [{
-            "task_key": "generate_data",
+            "task_key": "data_gen",
             "run_if": "ALL_SUCCESS",
             "notebook_task": {
-                "notebook_path": f"{repo_src_path}/tools/data_gen",
+                "notebook_path": f"{repo_src_path}/tools/data_gen_tasks/data_gen",
                 "source": "WORKSPACE",
+                "base_parameters": {
+                    "tpcdi_directory": tpcdi_directory,
+                },
             },
             "job_cluster_key": "digen_cluster",
             "timeout_seconds": 0,

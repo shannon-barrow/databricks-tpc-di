@@ -26,7 +26,7 @@ source of truth.
 ```
 ┌─ Stage 0: Data prep (one-time per SF) ─────────────────────────────┐
 │  Driver → augmented_staging job:                                   │
-│    1. spark_runner (augmented mode) writes 7 datasets to Delta     │
+│    1. data_gen DAG (augmented mode) writes 7 datasets to Delta     │
 │       at {catalog}.tpcdi_raw_data.{dataset}{sf}, with stg_target   │
 │       column splitting rows into 'tables' (< 2015-07-06) and       │
 │       'files' (the 730-day window).                                │
@@ -113,11 +113,11 @@ run per SF. Outputs are reusable across many benchmark runs at that SF.
 |----------------------|--------------------------|-------|
 | `scale_factor`       | (required)               | 10 / 100 / 1000 / 5000 / 10000 / 20000 |
 | `catalog`            | `main`                   | Target catalog |
-| `data_gen_type`      | `augmented_incremental`  | Routes spark_runner into Delta-only mode (skips Batch2/3, writes to `tpcdi_raw_data.{dataset}{sf}`). |
+| `data_gen_type`      | `augmented_incremental`  | Routes the per-dataset gen tasks into Delta-only mode (skips Batch2/3, writes to `tpcdi_raw_data.{dataset}{sf}`). |
 | `regenerate_data`    | `NO`                     | `YES` forces a rebuild even if the early-exit check would otherwise skip. |
 | `log_level`          | `INFO`                   | DEBUG for verbose stage_runner traces. |
 
-**Early-exit check.** `spark_runner` skips stage 0 when both:
+**Early-exit check.** Each gen task self-skips when its output is intact and `regenerate_data=NO`. Stage 0 effectively short-circuits when both:
 
 1. The 19 expected staging tables exist in
    `tpcdi_incremental_staging_{sf}`, AND
@@ -177,6 +177,7 @@ Auto Loader checkpoint sees only the day's intended files.
 | `tpcdi_directory`                   | (req.)  | Path to the volume containing `augmented_incremental/_staging/sf={sf}/`. |
 | `delete_when_finished_TRUE_FALSE`   | `FALSE` | A full 730-day run takes hours; default keeps the result tables for inspection. |
 | `file_ext`                          | `txt`   | Output file extension at filedrop time. `read_file_ext` becomes `csv` when this is `txt` (the CSV writer produces `.csv` part files we rename), or matches `file_ext` for any other value. |
+| `incremental_batches_to_run`        | `730`   | Cap on the daily-streaming loop length, clamped to [1, 730]. Use a small value (e.g. `30`) for smoke tests without committing to the full benchmark wall. Honored by both the Cluster and SDP variants. |
 
 ---
 
@@ -236,8 +237,9 @@ specific source column.
 - **Top-level architecture / gotchas:** [`CLAUDE.md`](../../../CLAUDE.md) at repo root
 - **Workflow builders:** `src/tools/workflow_builders/augmented_staging.py`,
   `augmented_classic.py`, `augmented_sdp.py`
-- **Stage 0 entry:** `src/tools/spark_runner.py`
-  (`augmented_incremental=True` branch)
+- **Stage 0 entry task:** `src/tools/data_gen_tasks/data_gen.py`
+  (`augmented_incremental` branch); per-dataset gens in
+  `src/tools/data_gen_tasks/gen_*.py`
 - **Stage 0 file staging:** `src/tools/augmented_staging/_stage_ingestion.py`
   + 7 notebooks under `stage_files/`
 - **Driver:** `src/TPC-DI Driver.py` — set SKU = `Cluster` or `SDP` and

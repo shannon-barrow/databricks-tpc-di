@@ -2,34 +2,41 @@
 
 This module provides four key capabilities used across all TPC-DI generators:
 
-1. **Deterministic randomness** via `seed_for` and `hash_key` -- ensures reproducible
-   data generation across runs by deriving seeds from table/column names.
+1. **Deterministic randomness** via ``seed_for`` and ``hash_key`` — ensures
+   reproducible data generation across runs by deriving seeds from table/
+   column names.
 
-2. **Dictionary broadcast joins** via `register_dict_views` and `dict_join` -- small
-   lookup dictionaries (e.g., first names, cities) are registered as Spark temp views
-   and broadcast-joined into large DataFrames to map hash-based indices to string values.
+2. **Dictionary broadcast joins** via ``register_dict_views`` and
+   ``dict_join`` — small lookup dictionaries (e.g., first names, cities)
+   are registered as Spark temp views and broadcast-joined into large
+   DataFrames to map hash-based indices to string values.
 
-3. **Deferred file copy pattern** (staging -> bulk_copy) -- generators write DataFrames
-   to temporary staging directories, then register (source, target) pairs. At the end of
-   the generation run, `bulk_copy_all()` copies all files in parallel using a thread pool.
-   This avoids blocking on individual file I/O during generation and enables efficient
-   parallel transfers.
+3. **Spark-distributed staging→final rename** via
+   ``register_copies_from_staging`` — files move from each Spark output
+   directory (``{batch_path}/{base}/part-*``) to the flat Batch* layout
+   (``{batch_path}/{base}_K{ext}``) by repartitioning the rename pairs
+   across N executor pods and running ``subprocess.run(["mv", ...])`` on
+   each pod. Works around UC Volume FUSE per-pod serial-rename behavior
+   that capped V7.5's single-pod approach at ~1.5 s/file.
 
-4. **File writing with automatic splitting** via `write_file` -- writes a DataFrame as
-   CSV to a staging directory, preserving Spark's natural partitioning. Single-partition
-   outputs become one file; multi-partition outputs get numbered suffixes (e.g.,
-   `file_1.csv`, `file_2.csv`).
+4. **File writing with automatic splitting** via ``write_file`` — writes
+   a DataFrame as CSV to a staging directory, preserving Spark's natural
+   partitioning. Each part is then renamed in place by the per-task
+   ``copy_*`` workflow notebook calling ``register_copies_from_staging``.
+
+5. **Deferred copy gating** via ``_DEFER_COPIES`` — gen task notebooks
+   set this flag so ``write_file`` only writes the staging dir without
+   doing the rename. The dedicated ``copy_*`` task then runs the rename
+   in parallel with downstream gens, preserving repair-run granularity.
 """
 
 import hashlib
 import os
 import re
-import concurrent.futures
 from datetime import datetime
 from pyspark.sql import DataFrame, SparkSession, functions as F
 from pyspark.sql.types import StringType, StructType, StructField, LongType
 from pyspark import StorageLevel
-from .config import MAX_FILE_BYTES
 
 
 def safe_unpersist(df, cleanup_info=None):
@@ -49,7 +56,15 @@ def safe_unpersist(df, cleanup_info=None):
     try:
         spark = df.sparkSession
         if _detect_serverless(spark):
-            if cleanup_info and cleanup_info.get("kind") == "parquet":
+            if cleanup_info and cleanup_info.get("kind") == "delta":
+                fq = cleanup_info.get("fq")
+                if fq:
+                    try:
+                        spark.sql(f"DROP TABLE IF EXISTS {fq}")
+                    except Exception:
+                        pass
+                log(f"[Staging] {cleanup_info.get('label','')}: dropped Delta {fq}")
+            elif cleanup_info and cleanup_info.get("kind") == "parquet":
                 path = cleanup_info.get("path")
                 dbutils = cleanup_info.get("dbutils")
                 if path and dbutils is not None:
@@ -106,6 +121,10 @@ def _detect_serverless(spark) -> bool:
 # Counter for disambiguating temp-table/temp-view names across calls.
 _STAGING_COUNTER = [0]
 
+# Prefix on the per-call disk_cache Delta names — cleanup_intermediates
+# uses it to find every disk_cache temp at end of data_gen.
+INTERMEDIATE_DC_PREFIX = "_dc_"
+
 
 def _sanitize_label(label: str) -> str:
     """Turn a label into a safe SQL identifier component (lowercase + underscores)."""
@@ -115,42 +134,80 @@ def _sanitize_label(label: str) -> str:
 
 def disk_cache(df, spark, label: str = "", materialize: bool = True,
                volume_path: str = None, dbutils=None,
-               max_records_per_file: int = 0):
+               max_records_per_file: int = 0,
+               cfg=None):
     """Materialize a DataFrame so subsequent reads skip the upstream DAG.
 
     Classic: ``persist(DISK_ONLY)`` + ``count()`` — fast, uses local NVMe.
-    Serverless: persist is unsupported, so we write a Parquet staging file at
-    ``{volume_path}/_staging/{N}_{label}`` and return a DataFrame that reads it
-    back. ``cleanup_staging`` removes the ``_staging/`` directory at the end of
-    the run.
+    Serverless: persist is unsupported, so we materialize the DataFrame to
+    a Delta table in ``{cfg.catalog}.{cfg.wh_db}_{cfg.sf}_stage._dc_{slug}``
+    (matching the convention dw_init.sql uses for benchmark interim
+    tables) with no-stats / no-auto-optimize TBLPROPERTIES — these are
+    transient. Returns a DataFrame that reads back from the Delta table.
+    ``cleanup_intermediates`` (or per-task ``safe_unpersist``) drops the
+    table at end of data_gen.
 
-    ``max_records_per_file`` caps each parquet staging file, which controls
-    the partition count on read-back (each file becomes ~1 input split).
-    Use this to keep a high partition count for distribution; without it,
-    Spark may produce a few huge parquet files and the read-back partition
-    count drops far below the upstream ``repartition(N)``.
+    Falls back to the legacy parquet path under ``{volume_path}/_staging/``
+    when ``cfg`` is None (single-task entry-point compatibility) or when
+    ``cfg.wh_db`` isn't set.
+
+    ``max_records_per_file`` caps each output file (Spark writes one
+    partition per record-cap chunk). Use this to keep a high partition
+    count for distribution.
 
     Pass ``materialize=False`` for derived views whose parent is already
-    materialized — on serverless they stay as logical views (re-reading a
-    column-pruned subset of the parent is cheap); on classic they still
-    persist since persist is nearly free memory-wise.
+    materialized.
 
     Returns:
         (materialized_df, cleanup_info or None)
 
         ``cleanup_info`` is a dict consumed by ``safe_unpersist()``:
           - ``{"kind": "persist", "label": ...}`` on classic
+          - ``{"kind": "delta", "fq": "...", "label": ...}`` on serverless
+            with cfg (new path)
           - ``{"kind": "parquet", "path": ..., "dbutils": ..., "label": ...}``
-            on serverless when Parquet staging ran
+            on serverless without cfg (legacy fallback)
           - ``None`` if nothing was materialized (skip paths / failures)
     """
     if _detect_serverless(spark):
-        if not materialize or volume_path is None:
+        if not materialize:
+            return df, None
+
+        # New Delta path: write to {catalog}.{wh_db}_{sf}_stage._dc_{slug}
+        wh_db = getattr(cfg, "wh_db", None) if cfg is not None else None
+        if wh_db:
+            _STAGING_COUNTER[0] += 1
+            slug = _sanitize_label(label)
+            stage_schema = f"{cfg.catalog}.{wh_db}_{cfg.sf}_stage"
+            fq = f"{stage_schema}.{INTERMEDIATE_DC_PREFIX}{_STAGING_COUNTER[0]:03d}_{slug}"
+            log(f"[Staging] {label}: serverless cache → Delta {fq}")
+            try:
+                spark.sql(f"DROP TABLE IF EXISTS {fq}")
+                cols_ddl = ", ".join(f"{f.name} {f.dataType.simpleString()}"
+                                     for f in df.schema.fields)
+                spark.sql(
+                    f"CREATE TABLE {fq} ({cols_ddl}) USING DELTA "
+                    f"TBLPROPERTIES("
+                    f"'delta.dataSkippingNumIndexedCols'=0, "
+                    f"'delta.autoOptimize.autoCompact'=False, "
+                    f"'delta.autoOptimize.optimizeWrite'=False)"
+                )
+                writer = df.write.mode("append")
+                if max_records_per_file > 0:
+                    writer = writer.option("maxRecordsPerFile", max_records_per_file)
+                writer.saveAsTable(fq)
+                return spark.read.table(fq), {"kind": "delta", "fq": fq, "label": label}
+            except Exception as e:
+                log(f"[Staging] {label}: Delta path failed ({type(e).__name__}: {e})")
+                return df, None
+
+        # Legacy parquet fallback (no cfg.wh_db plumbed through).
+        if volume_path is None:
             return df, None
         _STAGING_COUNTER[0] += 1
         slug = _sanitize_label(label)
         staging_path = f"{volume_path}/_staging/{_STAGING_COUNTER[0]:03d}_{slug}"
-        log(f"[Staging] {label}: cache is unavailable on serverless, staging to Parquet")
+        log(f"[Staging] {label}: serverless cache → Parquet (legacy path)")
         try:
             if dbutils is not None:
                 _cleanup(staging_path, dbutils)
@@ -386,223 +443,234 @@ def hash_key(col_expr, seed: int) -> "F.Column":
 
 
 # ---------------------------------------------------------------------------
-# Deferred file copy registry
+# Deferred copy gating
 # ---------------------------------------------------------------------------
-# Generators write DataFrames to temporary staging directories (via Spark's DataFrameWriter) and then register (source, target) path pairs here. This "deferred copy" pattern exists because:
-#   1. Spark writes to a directory of part files, not a single named file. 2. Renaming/copying files one-at-a-time during generation would serialize I/O. 3. By deferring all copies to the end, we can execute them in parallel with a thread pool, significantly reducing total wall-clock time.
-# At the end of the generation run, bulk_copy_all() processes all pending copies.
+# When set True, register_copies_from_staging() returns immediately
+# without performing the staging→final renames. Per-task data_gen
+# workflow (data_gen_tasks/gen_*.py) sets this to True before calling
+# the generator, so the generator writes only the Spark staging
+# directories. A separate `copy_*` task notebook then runs
+# register_copies_from_staging (with this flag back to False) in
+# parallel with downstream gen tasks.
+_DEFER_COPIES = {"enabled": False}
 
-_pending_copies = []  # legacy: rarely used; new register_copies_from_staging
-                      # kicks off per-dataset copies directly.
-_background_threads = []  # Thread objects for per-dataset async copies
+
+# V8: distribute the rename work across Spark executor pods. Each pod
+# has its own FUSE driver, so N pods × 1 mv-at-a-time = N concurrent
+# renames at the ABFS backend (vs V7.5's single-pod-serial path which
+# was capped at ~1.5 s/file regardless of file count). Per-pod work is
+# still serial — within-pod ThreadPoolExecutor was a wash on V7
+# because per-pod FUSE serializes anyway.
+#
+# Tunables:
+#   _RENAME_TARGET_PODS — desired number of executor pods to spread
+#     the work across. The actual count is min(this, len(moves)).
+#     Higher = more concurrency until ABFS account RPS limit; ~32 is
+#     well under typical 5000 RPS soft caps.
+_RENAME_TARGET_PODS = 32
+
+_RENAME_RETRIES = (0.2, 0.5, 1.0, 2.0, 5.0, 10.0)
 
 
-def _start_dataset_copy(dbutils, copies, label: str = "", max_workers: int = 32):
-    """Kick off a background thread that copies just this dataset's part files.
+def _mv_with_retry(src: str, dst: str) -> str:
+    """Single-file ``mv src dst`` with permissive retry. Used by the
+    driver-side fallback path when no SparkSession is available.
 
-    Each write_file call uses this to start copying its large parts as soon
-    as the write returns, rather than queueing to a global list for a later
-    "drain everything" sweep. This avoids:
-      - Racing cleanup_staging vs. still-running bulk copies at scale.
-      - Head-of-line blocking: a slow dataset's copy no longer delays
-        fast datasets from finalizing.
-
-    Threads are tracked in `_background_threads` so the orchestrator can
-    wait_for_background_copies() before cleanup_staging.
+    Any ``CalledProcessError`` triggers retry with backoff. After
+    exhausting the schedule, raise with the last stderr captured so
+    the failed task surfaces a useful diagnostic.
     """
-    import threading
-    def worker():
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [executor.submit(dbutils.fs.cp, src, tgt) for src, tgt in copies]
-            for f in concurrent.futures.as_completed(futures):
-                f.result()
-        log(f"[Copy] {label}: {len(copies)} parts copied", "DEBUG")
-    t = threading.Thread(target=worker, daemon=True)
-    _background_threads.append(t)
-    t.start()
+    import subprocess
+    last_err = None
+    last_stderr = ""
+    for delay in (0.0, *_RENAME_RETRIES):
+        if delay:
+            import time as _time
+            _time.sleep(delay)
+        try:
+            subprocess.run(["mv", src, dst], check=True,
+                           capture_output=True, text=True)
+            return dst
+        except subprocess.CalledProcessError as e:
+            last_err = e
+            last_stderr = (e.stderr or "").strip()
+        except FileNotFoundError as e:
+            # Source vanished mid-flight — could be a FUSE listdir
+            # vs mv race. Same retry schedule.
+            last_err = e
+            last_stderr = str(e)
+    raise RuntimeError(
+        f"mv {src} -> {dst} failed after {len(_RENAME_RETRIES)+1} attempts. "
+        f"Last stderr: {last_stderr}")
 
 
-def wait_for_background_copies(timeout_per_thread: float = 3600):
-    """Join all tracked background-copy threads. Call before cleanup_staging."""
-    threads = list(_background_threads)
-    _background_threads.clear()
-    for t in threads:
-        t.join(timeout=timeout_per_thread)
+def _mv_partition(rows):
+    """Run on each Spark executor partition: serial ``mv`` over the
+    rows in this partition. Subprocess + retry must be self-contained
+    because this closure is serialized to executor pods that can't
+    import names from this module's enclosing scope reliably.
 
-
-def register_copy(source: str, target: str):
-    """Legacy: register a copy into the global bulk queue.
-
-    Preferred path: write_file -> register_copies_from_staging now starts
-    per-dataset async copies directly. This function is retained for
-    backward compat if any caller still queues manually.
+    Retry schedule extended to ~2 min total (vs the driver-fallback's
+    19s) because we observed sustained ABFS rename throttling at
+    SF=10k where 32 pods × concurrent renames against the same
+    storage account triggered cooldowns longer than 19s. Mid-flight
+    "source not found" (e.g. partial peer interference) is also
+    treated as transient.
     """
-    _pending_copies.append((source, target))
-
-
-_LARGE_PART_MIN_BYTES = 50 * 1024 * 1024    # parts >= this bypass packing
-_PACK_MAX_BYTES = 128 * 1024 * 1024         # packed file size cap
-
-
-def _pack_small_parts(small_parts, max_bytes: int):
-    """Greedy first-fit-decreasing bin-packing.
-
-    Given a list of part files (each an object with ``.path``, ``.name``, ``.size``),
-    group them into bins whose total size does not exceed ``max_bytes``.
-
-    Returns a list of bins, each a list of parts sorted by original part name
-    (so concat order is deterministic and matches Spark's partition order within
-    each bin).
-    """
-    sorted_parts = sorted(small_parts, key=lambda f: f.size, reverse=True)
-    bins = []  # list of {"files": [...], "size": int}
-    for f in sorted_parts:
-        placed = False
-        for b in bins:
-            if b["size"] + f.size <= max_bytes:
-                b["files"].append(f)
-                b["size"] += f.size
-                placed = True
+    import subprocess as _sp
+    import time as _time
+    delays = (0.0, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0)
+    for row in rows:
+        src, dst = row["src"], row["dst"]
+        last_stderr = ""
+        for delay in delays:
+            if delay:
+                _time.sleep(delay)
+            try:
+                _sp.run(["mv", src, dst], check=True,
+                        capture_output=True, text=True)
                 break
-        if not placed:
-            bins.append({"files": [f], "size": f.size})
-    return [sorted(b["files"], key=lambda f: f.name) for b in bins]
+            except _sp.CalledProcessError as e:
+                last_stderr = (e.stderr or "").strip()
+            except FileNotFoundError as e:
+                last_stderr = str(e)
+        else:
+            raise RuntimeError(
+                f"mv {src} -> {dst} failed on executor. "
+                f"Last stderr: {last_stderr}")
 
 
 def register_copies_from_staging(staging_dir: str, final_path: str, dbutils,
                                   start_idx: int = 1):
-    """Hybrid register: parallel cp for large parts, driver-side cat pack for small.
+    """V8: cross-directory ``mv`` distributed across Spark executor pods.
 
-    Spark writes output as a directory of ``part-NNNNN`` files sized up to
-    ``maxRecordsPerFile`` (~128MB). Tail partitions and under-partitioned
-    datasets often produce many smaller parts, which are wasteful to copy
-    individually (RPC overhead per file, extra files for downstream readers).
+    Files move from ``{staging_dir}/part-NNNNN-UUID[-cM].csv`` →
+    ``{dirname(final_path)}/{base}_K{ext}``. K is a 1-based sequential
+    counter (start_idx for chained callers like FINWIRE's CMP/SEC/FIN).
 
-    This function splits parts into two paths:
+    Each executor pod has its own FUSE driver, so the (src, dst) pairs
+    are repartitioned across N pods and each pod runs ``mv`` serially
+    on its share. With N=32, copy_trade at SF=20k goes from ~100m
+    (V7.5 single-pod-serial) down to ~3m. ABFS rename RPS at the
+    storage account is the next bottleneck — the configured pod count
+    keeps system-wide RPC count well under typical 5000 RPS soft caps.
 
-    - **Large parts** (``>= 50MB``): registered for deferred parallel
-      ``dbutils.fs.cp`` via ``bulk_copy_all`` — server-side copy, no driver
-      bandwidth, ~64-thread parallelism.
+    Falls back to driver-serial mv when no active SparkSession is
+    available (e.g. the gen_* tasks during the inline write_file path,
+    where _DEFER_COPIES gates this anyway, or unit tests).
 
-    - **Small parts** (``< 50MB``): bin-packed into groups summing to
-      ``<= 128MB``, then concatenated into single files via driver-side
-      ``xargs cat`` on the FUSE mount. Reduces per-file RPC overhead and
-      produces fewer downstream files.
-
-    Output files are numbered sequentially starting from ``start_idx``:
-    e.g. ``Customer_1.txt``, ``Customer_2.txt``, … matching the TPC-DI
-    ``fileNamePattern`` regex. Multiple calls can share a sequence by
-    passing the returned `next_idx` as the next call's ``start_idx`` (used
-    by FINWIRE where CMP/SEC/FIN subsets each stage separately but land in
-    the same ``FINWIRE_N.txt`` namespace).
+    The flat layout matches the existing bronze SQL ``fileNamePattern``
+    globs (``{Trade.txt,Trade_[0-9]*.txt}``) and avoids needing
+    ``recursiveFileLookup`` anywhere.
 
     Args:
-        staging_dir: Path to the Spark output directory containing part files.
-        final_path: Desired final output path (e.g., ``/Volumes/.../Batch1/Customer.txt``).
-        dbutils: Databricks dbutils object for filesystem operations.
-        start_idx: First ``_N`` value to use (default 1).
+        staging_dir: Spark output directory containing part-* files.
+        final_path: Desired final output path — used to derive
+            both the base directory (e.g. Batch1/) and the
+            (base, ext) for naming. e.g. ``…/Batch1/Trade.txt`` →
+            base=``Trade``, ext=``.txt``, target dir = ``…/Batch1``.
+        dbutils: Databricks dbutils (signature compat).
+        start_idx: First sequential number to use (default 1).
 
     Returns:
-        (list of final target paths, next_idx to use for subsequent calls).
+        (list of final paths, next_idx for chained callers).
     """
-    files = dbutils.fs.ls(staging_dir)
-    part_files = [f for f in files if f.name.startswith("part-")]
-    if not part_files:
+    if _DEFER_COPIES["enabled"]:
         return [], start_idx
 
-    large = sorted([f for f in part_files if f.size >= _LARGE_PART_MIN_BYTES],
-                   key=lambda f: f.name)
-    small = [f for f in part_files if f.size < _LARGE_PART_MIN_BYTES]
-    bins = _pack_small_parts(small, _PACK_MAX_BYTES)
+    staging_local = staging_dir.replace("dbfs:", "") if staging_dir.startswith("dbfs:") else staging_dir
+    final_local = final_path.replace("dbfs:", "") if final_path.startswith("dbfs:") else final_path
+    final_dir = os.path.dirname(final_local)
+    filename = os.path.basename(final_local)
+    base, ext = os.path.splitext(filename)
 
-    base, ext = os.path.splitext(final_path)
-    targets = []
-    idx = start_idx
+    # Enumerate part files. Sort so successive runs / start_idx chains
+    # are deterministic. Spark's filenames are
+    # `part-NNNNN-UUID[-cM].csv`; sort-by-name is fine.
+    try:
+        all_entries = os.listdir(staging_local)
+    except FileNotFoundError:
+        log(f"[Rename] {base}: staging dir gone — nothing to do", "WARN")
+        return [], start_idx
+    parts = sorted(f for f in all_entries if f.startswith("part-"))
+    markers = [f for f in all_entries
+               if f == "_SUCCESS" or f.startswith("_started_") or f.startswith("_committed_")]
 
-    # Large parts: kick off a per-dataset async copy immediately so this dataset can start copying as soon as write_file returns, without waiting for a global drain. The thread is tracked in `_background_threads` so orchestrator can wait_for_background_copies() before cleanup_staging.
-    large_copies = []
-    for pf in large:
-        target = f"{base}_{idx}{ext}"
-        large_copies.append((pf.path, target))
-        targets.append(target)
-        idx += 1
-    if large_copies:
-        _start_dataset_copy(dbutils, large_copies, label=os.path.basename(base))
+    # Retry-resume: if a prior attempt already moved some part files to
+    # `{final_dir}/{base}_K{ext}`, start past the highest existing K so
+    # we don't collide-and-overwrite. Flat-layout files have no
+    # semantic ordering — gaps in K are harmless (bronze SQL globs
+    # `{base}_[0-9]*` doesn't care).
+    resume_start = start_idx
+    try:
+        existing_ks = []
+        for f in os.listdir(final_dir):
+            if f.startswith(f"{base}_") and f.endswith(ext):
+                k_str = f[len(base) + 1: -len(ext)] if ext else f[len(base) + 1:]
+                if k_str.isdigit():
+                    existing_ks.append(int(k_str))
+        if existing_ks:
+            resume_start = max(resume_start, max(existing_ks) + 1)
+            if resume_start != start_idx:
+                log(f"[Rename] {base}: resume — {len(existing_ks)} {base}_K{ext} "
+                    f"already in {final_dir}, starting at K={resume_start}", "WARN")
+    except FileNotFoundError:
+        pass
 
-    # Small parts: cat-pack on driver into ~128MB chunks. FUSE mount on UC Volumes returns EAGAIN ("Resource temporarily unavailable") under heavy parallel I/O. At SF=10000+ we have hundreds of concat operations across TradeHistory/CashTransaction/HH/etc. running simultaneously through the dep-graph scheduler and xargs cat's 5-retry loop wasn't enough. Switched to pure-Python concat with per-source retry: open dst once, copy each src via shutil.copyfileobj; if a source read hits OSError (EAGAIN wraps up as such), back off and retry that source only.
-    if bins:
-        import shutil, time
-        for bin_files in bins:
-            target = f"{base}_{idx}{ext}"
-            dst_local = target.replace("dbfs:", "") if target.startswith("dbfs:") else target
-            with open(dst_local, "wb") as out:
-                for pf in bin_files:
-                    src_local = pf.path.replace("dbfs:", "") if pf.path.startswith("dbfs:") else pf.path
-                    last_err = None
-                    for attempt in range(10):
-                        try:
-                            with open(src_local, "rb") as src:
-                                shutil.copyfileobj(src, out, length=4 * 1024 * 1024)
-                            break
-                        except OSError as e:
-                            last_err = e
-                            if attempt == 0:
-                                log(f"[Concat] {os.path.basename(target)}: source EAGAIN on {os.path.basename(src_local)}, retrying", "WARN")
-                            time.sleep(min(30, 0.5 * (2 ** attempt)))
-                    else:
-                        raise last_err
-            targets.append(target)
-            idx += 1
+    # Build (src, dst) pairs at flat Batch* layout.
+    moves = []
+    next_idx = resume_start
+    for f in parts:
+        src = f"{staging_local}/{f}"
+        dst = f"{final_dir}/{base}_{next_idx}{ext}"
+        moves.append((src, dst))
+        next_idx += 1
 
-    return targets, idx
+    targets = [dst for _src, dst in moves]
+    if not moves:
+        log(f"[Rename] {base}: nothing to rename")
+    else:
+        # Try the Spark-distributed path first. Falls back to driver
+        # serial if no SparkSession is reachable (e.g. when
+        # register_copies_from_staging is invoked outside the per-task
+        # notebook context).
+        spark = SparkSession.getActiveSession()
+        if spark is not None:
+            n_pods = max(min(_RENAME_TARGET_PODS, len(moves)), 1)
+            log(f"[Rename] {base}: {len(moves)} files via Spark "
+                f"({staging_local} → {final_dir}/{base}_K{ext}, "
+                f"start={resume_start}, pods={n_pods})")
+            moves_df = spark.createDataFrame(moves, ["src", "dst"])
+            # Repartition on a hash so files spread across pods evenly,
+            # rather than the createDataFrame default of 1 partition
+            # which would route all renames to a single executor pod.
+            moves_df = moves_df.repartition(n_pods)
+            moves_df.foreachPartition(_mv_partition)
+        else:
+            log(f"[Rename] {base}: {len(moves)} files (driver-serial fallback, "
+                f"start={resume_start})")
+            for src, dst in moves:
+                _mv_with_retry(src, dst)
 
+    # Drop Spark markers + the (now-empty) staging dir. Cross-directory
+    # move means callers no longer need the staging dir to live on
+    # post-rename — bronze ingest reads from the flat Batch* root.
+    for m in markers:
+        try:
+            os.remove(f"{staging_local}/{m}")
+        except OSError:
+            pass
+    try:
+        # rmdir only succeeds if the dir is empty — perfect safety net
+        # against an edge case where some part-* file failed to move.
+        os.rmdir(staging_local)
+    except OSError:
+        # Likely non-empty (some files left) or a chained caller will
+        # add more; leave it for cleanup_intermediates / next start_idx.
+        pass
 
-def bulk_copy_all(dbutils, max_workers: int = 64, label: str = ""):
-    """Execute all registered file copies in parallel, then clear the registry.
-
-    Uses a thread pool to copy files concurrently. Called at dependency boundaries
-    to copy files from all generators that have completed since the last call.
-
-    Args:
-        dbutils: Databricks dbutils object for filesystem operations.
-        max_workers: Maximum number of concurrent copy threads. Defaults to 64,
-            which provides good throughput for cloud storage backends.
-        label: Optional context label for log messages (e.g., "after HR").
-    """
-    global _pending_copies
-    copies = list(_pending_copies)
-    _pending_copies = []
-
-    if not copies:
-        return
-
-    def copy_file(src_tgt):
-        src, tgt = src_tgt
-        dbutils.fs.cp(src, tgt)
-        return tgt
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(copy_file, pair) for pair in copies]
-        for future in concurrent.futures.as_completed(futures):
-            future.result()  # raises if failed
-
-    # Log per-dataset completion: group by (dataset, batch directory)
-    import re
-    from collections import defaultdict
-    by_dataset = defaultdict(lambda: {"count": 0, "dir": ""})
-    for _, tgt in copies:
-        fname = os.path.basename(tgt)
-        # Extract dataset name: strip numeric suffix (e.g., "Trade_1.txt" → "Trade") and strip year/quarter from FINWIRE (e.g., "FINWIRE1967Q1_1" → "FINWIRE")
-        base = fname.split("_")[0].split(".")[0] if "_" in fname else fname.rsplit(".", 1)[0]
-        dataset = re.sub(r'\d{4}Q\d$', '', base)  # FINWIRE1967Q1 → FINWIRE
-        batch_dir = os.path.dirname(tgt)
-        batch_name = os.path.basename(batch_dir)  # "Batch1", "Batch2", etc.
-        key = (dataset, batch_dir)
-        by_dataset[key]["count"] += 1
-        by_dataset[key]["dir"] = batch_name
-    label_suffix = f" ({label})" if label else ""
-    for (dataset, _), info in sorted(by_dataset.items()):
-        log(f"[Copy] {dataset}: {info['count']} file(s) -> {info['dir']}{label_suffix}", "DEBUG")
+    log(f"[Rename] {base}: done, {len(targets)} files (next_idx={next_idx})")
+    return targets, next_idx
 
 
 # ---------------------------------------------------------------------------
@@ -639,7 +707,11 @@ def write_file(df: DataFrame, path: str, delimiter: str = "|",
     Returns:
         List of final target file paths.
     """
-    staging_dir = path + "__staging"
+    # perf/v5: staging dir IS the final output dir — Spark writes part files
+    # here and register_copies_from_staging renames them in place to
+    # {base}_K{ext}. No cross-dir copy. Drop the ".txt__staging" suffix the
+    # legacy code used; just use the dataset name (e.g. "Batch1/Trade").
+    staging_dir = os.path.splitext(path)[0]
     _cleanup(staging_dir, dbutils)
 
     _BYTES_PER_ROW = {

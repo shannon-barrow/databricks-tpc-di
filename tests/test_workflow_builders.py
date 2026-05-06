@@ -15,6 +15,7 @@ from workflow_builders import (
     workflows_single_batch, workflows_incremental,
     sdp_pipeline, sdp_workflow,
     augmented_classic, augmented_sdp,
+    augmented_staging,
 )
 
 
@@ -384,6 +385,64 @@ def test_augmented_sdp_parent():
     _ok("set_pipeline_incremental swaps back to historical_flag=false")
 
 
+def test_augmented_staging_dag():
+    print("\naugmented_staging.build() — Stage 0 data_gen DAG present")
+    out = augmented_staging.build(
+        job_name="Smoke-TPCDI-SF10-AugmentedGen",
+        scale_factor=10,
+        catalog="main",
+        regenerate_data="NO",
+        log_level="INFO",
+        repo_src_path=COMMON["repo_src_path"],
+        serverless="YES",
+    )
+    keys = {t["task_key"] for t in out["tasks"]}
+    expected_gen_keys = {
+        "data_gen",
+        "gen_reference", "gen_hr", "gen_finwire", "gen_customer",
+        "gen_daily_market",
+        "gen_trade_base", "gen_trade", "gen_tradehistory",
+        "gen_cashtransaction", "gen_holdinghistory",
+        "gen_watch_history",
+        "cleanup_intermediates",
+    }
+    missing = expected_gen_keys - keys
+    assert not missing, f"missing tasks in augmented_staging DAG: {missing}"
+    _ok(f"all data_gen tasks present ({len(expected_gen_keys)})")
+    # data_gen is the unified entry — verify it's wired as the root.
+    by_key0 = {t["task_key"]: t for t in out["tasks"]}
+    assert "depends_on" not in by_key0["data_gen"] or not by_key0["data_gen"].get("depends_on"), \
+        "data_gen should be the root task with no upstream deps"
+    _ok("data_gen is the root entry task")
+    # cleanup_intermediates depends on every gen.
+    by_key = {t["task_key"]: t for t in out["tasks"]}
+    cleanup_deps = {d["task_key"] for d in by_key["cleanup_intermediates"]["depends_on"]}
+    expected_gens = {"gen_reference", "gen_hr", "gen_finwire", "gen_customer",
+                     "gen_daily_market",
+                     "gen_trade_base", "gen_trade", "gen_tradehistory",
+                     "gen_cashtransaction", "gen_holdinghistory",
+                     "gen_watch_history"}
+    assert expected_gens.issubset(cleanup_deps), \
+        f"cleanup_intermediates missing deps: {expected_gens - cleanup_deps}"
+    _ok("cleanup_intermediates depends on all gens")
+    assert by_key["cleanup_intermediates"]["run_if"] == "ALL_SUCCESS"
+    _ok("cleanup_intermediates runs ALL_SUCCESS")
+    # staging_check is gone — Stage 1 tasks wire directly to gen/copy.
+    assert "staging_check" not in keys, \
+        "staging_check should be removed; Stage 1 tasks wire to gen/copy directly"
+    _ok("staging_check removed")
+    # Spot-check Stage 1 wiring: stage_files_DailyMarket → gen_daily_market.
+    sf_dm_deps = {d["task_key"] for d in by_key["stage_files_DailyMarket"]["depends_on"]}
+    assert sf_dm_deps == {"gen_daily_market"}, \
+        f"stage_files_DailyMarket should depend on gen_daily_market only, got {sf_dm_deps}"
+    _ok("stage_files_DailyMarket → gen_daily_market only")
+    # ingest_FinWire → copy_finwire.
+    ifw_deps = {d["task_key"] for d in by_key["ingest_FinWire"]["depends_on"]}
+    assert ifw_deps == {"copy_finwire"}, \
+        f"ingest_FinWire should depend on copy_finwire only, got {ifw_deps}"
+    _ok("ingest_FinWire → copy_finwire only")
+
+
 def main():
     tests = [
         test_datagen_spark,
@@ -400,6 +459,7 @@ def main():
         test_augmented_sdp_pipeline,
         test_augmented_sdp_child,
         test_augmented_sdp_parent,
+        test_augmented_staging_dag,
     ]
     for t in tests:
         t()
