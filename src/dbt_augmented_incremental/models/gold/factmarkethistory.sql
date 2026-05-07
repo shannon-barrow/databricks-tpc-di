@@ -1,13 +1,22 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'merge',
+    incremental_strategy = 'replace_using',
     unique_key = ['sk_securityid', 'sk_dateid'],
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
+
+{# Strategy: replace_using (custom — see macros/replace_using.sql).
+   Generates `INSERT INTO factmarkethistory REPLACE USING (sk_securityid,
+   sk_dateid) SELECT * FROM <model body>`. Delta atomically replaces
+   rows matching on (sk_securityid, sk_dateid); non-matching target
+   rows untouched. Same end-state as Classic's INSERT OVERWRITE
+   dynamic-partition behavior, expressed as a key-based atomic upsert
+   that doesn't depend on the table's partition layout. Works on SQL
+   Warehouses without compute-config tweaks. #}
 
 {# Daily market history with rolling 365-day high/low. Each batch:
    1. Compute per-symbol min_by/max_by(low, high) over the 365 days

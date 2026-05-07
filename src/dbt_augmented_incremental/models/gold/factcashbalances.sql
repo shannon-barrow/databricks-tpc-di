@@ -1,13 +1,20 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'merge',
+    incremental_strategy = 'replace_using',
     unique_key = ['sk_accountid', 'sk_dateid'],
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
+
+{# Strategy: replace_using (custom — see macros/replace_using.sql).
+   Generates `INSERT INTO factcashbalances REPLACE USING (sk_accountid,
+   sk_dateid) SELECT * FROM <model body>`. Delta atomically replaces
+   rows matching (sk_accountid, sk_dateid); non-matching target rows
+   untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
+   behavior on a SQL Warehouse without compute-config tweaks. #}
 
 {# For each account touched this batch, write its (sk_customerid,
    sk_accountid, sk_dateid, cash) row at the latest sk_dateid. Old
