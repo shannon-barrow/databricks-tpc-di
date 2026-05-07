@@ -13,6 +13,12 @@ vars:
   tpcdi_directory: '/Volumes/main/tpcdi_raw_data/tpcdi_volume/'
   batch_date: ''               # ISO date for the current incremental run (per-batch)
   benchmark_start_date: '2015-07-06'
+  # Disable dbt-databricks's auto-OPTIMIZE behaviors (1.11+ runs
+  # `OPTIMIZE table` after snapshot / table v2 materializations and
+  # liquid-clustered incrementals). Equivalent to the
+  # DATABRICKS_SKIP_OPTIMIZE=true env var. We don't want dbt-launched
+  # OPTIMIZE during the benchmark — it would skew per-batch timings.
+  databricks_skip_optimize: true
 
 model-paths: ["models/"]
 macro-paths: ["macros/"]
