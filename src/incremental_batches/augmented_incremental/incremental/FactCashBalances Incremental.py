@@ -28,7 +28,7 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 # spark.session config tweak. Aligns with the dbt port's replace_using.
 spark.sql(f"""
   INSERT INTO {tgt_table}
-  REPLACE USING (sk_accountid, sk_dateid)
+  REPLACE USING (sk_dateid)
   SELECT
     a.sk_customerid,
     a.sk_accountid,

@@ -2,7 +2,7 @@
   config(
     materialized = 'incremental',
     incremental_strategy = 'replace_using',
-    unique_key = ['sk_securityid', 'sk_dateid'],
+    unique_key = ['sk_dateid'],
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
