@@ -31,7 +31,7 @@ def upsertToDelta(microBatchOutputDF, batch_id):
   microBatchOutputDF.createOrReplaceTempView("bronzedailymarket")
   microBatchOutputDF.sparkSession.sql(f"""
     INSERT INTO {tgt_table}
-    REPLACE WHERE sk_dateid = bigint(date_format('{batch_date}','yyyyMMdd'))
+    REPLACE USING (sk_securityid, sk_dateid)
     with sym_min_max as (
       SELECT 
         dm_s_symb, 

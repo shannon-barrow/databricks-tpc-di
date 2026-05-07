@@ -209,7 +209,7 @@ def build_child(
         notebook_path=f"{incr}/FactCashBalances Incremental",
         depends_on=["currentaccountbalances_Incremental",
                     "DimAccount_Incremental"],
-        base_params=_BATCHED_PARAMS,  # batch_date drives the REPLACE WHERE
+        base_params=_COMMON_PARAMS,
     ))
     tasks.append(_make_task(
         task_key="FactMarketHistory_Incremental",
