@@ -4,67 +4,76 @@ A dbt port of the [Augmented Incremental TPC-DI](../incremental_batches/augmente
 benchmark. Same 730-day daily streaming workload, same source data, same
 business logic — expressed as a dbt project so we can compare:
 
-- **dbt vs SDP** on Databricks (R7 vs R1 in the product benchmark plan)
-- **dbt incremental vs SDP MV/ST** materializations on Databricks (R8 vs R1)
-- **Cross-CDW** dbt performance (R1 / R2 / R3 / R4 — Databricks vs Snowflake / BigQuery / Redshift)
+- **dbt vs SDP** on Databricks
+- **dbt incremental vs SDP MV/ST** materializations on Databricks
+- **Cross-CDW** dbt performance (Databricks DBSQL vs Snowflake / BigQuery / Redshift)
+
+dbt's scope is **per-batch incremental only**. Stage 0 (data generation)
+and Stage 1 setup (CLONE staging schema, reset `_dailybatches/`,
+populate the historical SCD2 dims/facts) stay in the existing
+Databricks notebooks — `setup_dbt.py` next to this directory. dbt
+enters when the daily loop starts.
 
 ## Layout
 
 ```
 dbt_augmented_incremental/
-├── dbt_project.yml
-├── packages.yml
-├── profiles.yml.template
+├── dbt_project.yml             # vars + per-folder materialization defaults
+├── profiles.yml.template       # databricks + snowflake outputs (template)
 ├── macros/
-│   ├── _helpers.sql              # tgt_db(), fq(), since_last_load(), etc.
-│   ├── clone_staging.sql         # one-shot clone of the per-SF staging schema
-│   └── read_files_dispatch.sql   # adapter dispatch: Databricks read_files vs Snowflake stage
-├── models/
-│   ├── 10_static/                # 7 static dims (table)
-│   ├── 20_finwire/               # 4 FinWire-derived (table)
-│   ├── 30_historical/            # 6 historical SCD2 builds (table)
-│   ├── 40_bronze/                # 7 daily ingestion (incremental, append)
-│   ├── 50_silver/                # 4 SCD2/SCD1 dims (incremental, merge)
-│   └── 60_gold/                  # 4 fact tables (mix of strategies)
-└── driver/
-    └── dbt_runner.py             # per-batch loop wrapper (Databricks notebook)
+│   ├── _helpers.sql            # tgt_db(), since_last_load(), staging_fq()
+│   ├── read_files_dispatch.sql # adapter dispatch: read_files vs Snowflake stage
+│   ├── scd2_merge.sql          # custom incremental_strategy='scd2'
+│   └── replace_using.sql       # custom incremental_strategy='replace_using'
+└── models/
+    ├── sources.yml             # 12 read-only reference tables (cloned from staging)
+    ├── bronze/                 # 7 incremental-append models (daily file ingest)
+    ├── silver/                 # 4 dim/fact models (3 SCD2 + 1 SCD1)
+    └── gold/                   # 4 fact models (append, replace_using, insert_overwrite)
 ```
 
 ## End-to-end flow
 
-Stage 0 (data prep) is unchanged — uses the same `augmented_staging` job to
-build the per-SF shared staging schema and the partitioned-CSV staging tree
-under `_staging/sf={sf}/{Dataset}/_pdate={date}/`.
-
-Stage 1 (per-batch dbt loop) replaces the SDP / Classic notebooks:
-
 ```
-setup.py            (reuses augmented_incremental/setup.py — clones staging, resets dirs)
+augmented_incremental/setup_dbt.py    # CLONE staging → run schema, reset
+                                      # _dailybatches, emit batch_date list
    │
-   ├─ run-once: dbt run-operation clone_staging  (or: keep setup.py's clone)
-   ├─ run-once: dbt run --select 10_static 20_finwire 30_historical
-   │
-   └─ for batch_date in dates_730:
-        simulate_filedrops.py --batch_date {batch_date}
-        dbt run --select 40_bronze 50_silver 60_gold --vars '{batch_date: {batch_date}}'
+   └─ for batch_date in batch_date_ls:
+        simulate_filedrops.py --batch_date <date>
+        dbt run --vars '{batch_date: <date>, scale_factor, wh_db, ...}'
 ```
 
-Per-batch concurrency stays at the dbt thread level (`threads: 8` default)
-plus dbt's parallel model-graph execution.
+The orchestrator is `tools/workflow_builders/augmented_dbt.py` —
+parent + child Databricks Jobs that wire setup_dbt + simulate_filedrops
++ a Databricks-native dbt task into a `for_each_task` loop, mirroring
+the Classic / SDP variants.
+
+## Materialization summary (15 dbt-managed models)
+
+| Layer | Strategy | Models |
+|---|---|---|
+| **bronze** (7) | `incremental` `append` | 7× daily ingestion: bronzecustomer/account/cashtransaction/dailymarket/holdings/trade/watches |
+| **silver** (4) | `incremental` `scd2` (custom) | dimcustomer, dimaccount |
+| | `incremental` `merge` + `incremental_predicates` | dimtrade (open-trades partition prune), factwatches (`!removed` prune) |
+| **gold** (4) | `incremental` `append` | factholdings |
+| | `incremental` `insert_overwrite` partition_by latest_batch | currentaccountbalances |
+| | `incremental` `replace_using` (custom) | factmarkethistory (sk_securityid, sk_dateid), factcashbalances (sk_accountid, sk_dateid) |
+
+The 11 read-only static + FinWire reference tables are populated by Stage
+0 + CLONEd into the run schema by `setup_dbt.py`; the dbt project
+`source()`s them but doesn't write to them.
 
 ## Adapter targets
 
-The same project graph runs against both adapters. Per-model dispatch
-hooks (`read_files_dispatch`, etc.) handle the differences:
+Per-model dispatch hooks handle the differences:
 
 | Concern | Databricks | Snowflake |
 |---|---|---|
-| Daily file ingest | `read_files('<path>', schema => ...)` | `select $1::T from @stage/.../<file>` |
+| Daily file ingest | `read_files('<path>', schema => …)` | `select $1::T from @stage/…/<file>` |
 | Materialization | Delta tables w/ partitions | Snowflake transient/permanent tables |
 | `merge` strategy | native MERGE | native MERGE |
-| `delete+insert` strategy | native | native |
-| `insert_overwrite` strategy | dynamic partition overwrite | (no native) |
-| `microbatch` strategy | partition by date | partition by date |
+| `replace_using` strategy | Delta `INSERT REPLACE USING` | n/a (custom macro raises error) |
+| `insert_overwrite` strategy | dynamic partition overwrite (cluster) / TABLE materialization (warehouse) | (no native) |
 
 ## Re-run safety
 
@@ -74,28 +83,26 @@ Every bronze model uses the `since_last_load(date_col)` macro:
 {{ since_last_load('update_dt') }}
 ```
 
-This expands to a `WHERE date_col > coalesce(MAX(date_col), '1900-01-01')`
-guard inside `is_incremental()` blocks — same idempotency semantics as
-the Auto Loader checkpoint in the Classic build, just expressed in SQL.
+Inside `is_incremental()` it expands to `WHERE date_col > coalesce(MAX(date_col), '1900-01-01')` — same idempotency semantics as the Auto Loader checkpoint in the Classic build, expressed in SQL.
+
+Silver/gold models filter the source bronze with `WHERE date_col = '{{ var('batch_date') }}'`. Each batch processes exactly that day's data, and the literal `batch_date` gives the optimizer a constant for downstream join-prune (notably the `quarter()`/`year()` filter on companyyeareps that gives the dbt build a meaningful perf edge over Classic's streaming version, where the batch date is implicit in the streaming checkpoint and not a SQL-visible literal).
 
 ## How to run
 
 ```bash
-# Install dbt-databricks (or dbt-snowflake) and packages
-pip install dbt-databricks dbt-snowflake
+pip install dbt-databricks
 cd src/dbt_augmented_incremental
-cp profiles.yml.template ~/.dbt/profiles.yml  # fill in credentials
+cp profiles.yml.template ~/.dbt/profiles.yml   # fill in credentials
 
-dbt deps
-
-# Stage 0 + clone (one-time)
-dbt run-operation clone_staging --vars '{wh_db: shannon_barrow, scale_factor: "10"}'
-dbt run --select 10_static 20_finwire 30_historical \
-  --vars '{wh_db: shannon_barrow, scale_factor: "10"}'
-
-# Per batch (orchestrated by driver/dbt_runner.py)
-dbt run --select 40_bronze 50_silver 60_gold \
-  --vars '{wh_db: shannon_barrow, scale_factor: "10", batch_date: "2015-07-06"}'
+# Per batch (orchestrated by tools/workflow_builders/augmented_dbt.py
+# in production; for local dev:)
+dbt run --vars '{
+  batch_date: "2015-07-06",
+  scale_factor: "10",
+  wh_db: "shannon_barrow_AugmentedIncremental_DBT",
+  catalog: "main",
+  tpcdi_directory: "/Volumes/main/tpcdi_raw_data/tpcdi_volume/"
+}'
 ```
 
 ## What's NOT here

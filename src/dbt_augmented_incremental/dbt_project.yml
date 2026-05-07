@@ -33,8 +33,6 @@ clean-targets:
 dispatch:
   - macro_namespace: dbt
     search_order: ['dbt_augmented_incremental', 'dbt']
-  - macro_namespace: dbt_utils
-    search_order: ['dbt_augmented_incremental', 'dbt_utils']
 
 models:
   dbt_augmented_incremental:
