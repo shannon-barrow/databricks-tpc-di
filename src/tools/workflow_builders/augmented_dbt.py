@@ -131,12 +131,15 @@ def build_child(
         "run_if": "ALL_SUCCESS",
         "dbt_task": {
             "project_directory": dbt_project_dir,
-            "commands": [_dbt_run_command()],
+            "commands": ["dbt deps", _dbt_run_command()],
             "schema": f"{wh_db}_{scale_factor}",
             "warehouse_id": wh_id,
             "catalog": catalog,
             "source": "WORKSPACE",
         },
+        # Serverless dbt tasks need an environment_key pointing at a
+        # job-level environments[] entry that declares the Python deps.
+        "environment_key": "dbt",
         "timeout_seconds": 0,
         "email_notifications": {},
         "notification_settings": dict(_DEFAULT_NOTIF),
@@ -172,6 +175,17 @@ def build_child(
             {"name": "batch_date", "default": ""},
         ],
         "tasks": [simulate_task, dbt_task],
+        "environments": [{
+            "environment_key": "dbt",
+            "spec": {
+                "client": "2",
+                # Latest stable dbt-databricks at the time of writing.
+                # Bump as new releases land; the dbt task installs into a
+                # fresh serverless env each run so version pinning matters
+                # only for the build, not lock-file reproducibility.
+                "dependencies": ["dbt-databricks==1.11.7"],
+            },
+        }],
         "queue": {"enabled": True},
     }
 
