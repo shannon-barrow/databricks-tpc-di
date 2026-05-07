@@ -1,8 +1,8 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'insert_overwrite',
-    partition_by = 'sk_dateid',
+    incremental_strategy = 'merge',
+    unique_key = ['sk_securityid', 'sk_dateid'],
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
