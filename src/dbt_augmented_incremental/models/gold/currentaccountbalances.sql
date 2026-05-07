@@ -1,22 +1,30 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'merge',
-    unique_key = 'accountid',
+    incremental_strategy = 'insert_overwrite',
+    partition_by = 'latest_batch',
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
 
-{# Per-account cumulative cash balance. The model body unions new bronze
-   transactions with the existing target rows, then aggregates per
-   accountid. dbt's delete+insert (keyed on accountid) replaces every
-   account row that appears in the source — i.e. every account that
-   either had a new transaction or is already in the target. The
-   `latest_batch` flag distinguishes accounts touched in this batch from
-   those carried over unchanged; downstream factcashbalances filters
-   `where latest_batch`. #}
+{# Per-account cumulative cash balance. Mirrors the Classic build's
+   INSERT OVERWRITE pattern (incremental/currentaccountbalances Incremental.py):
+   union new bronze transactions with the existing target rows, aggregate
+   per accountid taking max(ct_date) + sum(ct_amt) + max(latest_batch),
+   then INSERT OVERWRITE the entire table.
+
+   Partitioned by `latest_batch` so the downstream factcashbalances model
+   (which filters `where latest_batch`) prunes to the single TRUE
+   partition — fast point-read for the few thousand accounts touched in
+   the current batch, instead of scanning the full multi-million-row
+   account-balance set.
+
+   On a SQL Warehouse, dbt-databricks's insert_overwrite degrades to
+   `CREATE OR REPLACE TABLE AS SELECT` (full table replace). The model
+   body reads {{ this }} BEFORE the replace happens, so prior balances
+   carry through the union — same outcome as Classic's INSERT OVERWRITE. #}
 
 with new_txns as (
   select
