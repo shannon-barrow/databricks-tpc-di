@@ -27,15 +27,11 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 
 # COMMAND ----------
 
-try:
-    spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-except Exception:
-    pass  # serverless: not on the user-settable allowlist
-
 def upsertToDelta(microBatchOutputDF, batch_id):
   microBatchOutputDF.createOrReplaceTempView("bronzedailymarket")
   microBatchOutputDF.sparkSession.sql(f"""
-    INSERT OVERWRITE {tgt_table}
+    INSERT INTO {tgt_table}
+    REPLACE WHERE sk_dateid = bigint(date_format('{batch_date}','yyyyMMdd'))
     with sym_min_max as (
       SELECT 
         dm_s_symb, 
