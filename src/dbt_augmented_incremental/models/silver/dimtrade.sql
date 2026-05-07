@@ -3,6 +3,7 @@
     materialized = 'incremental',
     incremental_strategy = 'merge',
     unique_key = 'tradeid',
+    incremental_predicates = ['DBT_INTERNAL_DEST.sk_closedateid IS NULL'],
     merge_update_columns = [
       'sk_closedateid', 'sk_closetimeid', 'status', 'type', 'cashflag',
       'quantity', 'bidprice', 'executedby', 'tradeprice', 'fee',
@@ -13,6 +14,13 @@
     full_refresh = false,
   )
 }}
+
+{# incremental_predicates adds `AND DBT_INTERNAL_DEST.sk_closedateid IS NULL`
+   to the MERGE ON clause, mirroring the Classic build's MERGE condition.
+   Combined with the cloned dimtrade's PARTITIONED BY (sk_closedateid),
+   this prunes the merge to just the open-trades partition (sk_closedateid
+   IS NULL) — same partition-prune optimization Classic gets, and avoids
+   scanning the full multi-million-row historical dimtrade. #}
 
 {# Trade lifecycle: SBMT -> ACTV -> (CMPT | CNCL). One bronze event per
    transition. Aggregate per tradeid keeping create_ts (the 'I' event's
