@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (iscurrent);
 
 -- COMMAND ----------
 
@@ -122,7 +122,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (iscurrent);
 
 -- COMMAND ----------
 
@@ -225,7 +225,7 @@ CREATE OR REFRESH STREAMING TABLE dimtrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade'
 )
-PARTITIONED BY (sk_closedateid);
+CLUSTER BY (sk_closedateid);
 
 -- COMMAND ----------
 
@@ -296,7 +296,7 @@ CREATE OR REFRESH STREAMING TABLE factholdings (
   currentprice DOUBLE COMMENT 'Unit price of this security for the current trade',
   currentholding INT COMMENT 'Quantity of a security held after the current trade.'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
@@ -330,7 +330,7 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
   removed BOOLEAN COMMENT 'True if this watch has been removed'
 )
-PARTITIONED BY (removed);
+CLUSTER BY (removed);
 
 -- COMMAND ----------
 
@@ -396,7 +396,7 @@ CREATE OR REFRESH STREAMING TABLE factmarkethistory (
   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
   volume INT COMMENT 'Trading volume of the security on this day'
 )
-PARTITIONED BY (sk_dateid) AS 
+CLUSTER BY (sk_dateid) AS
 with dm as (
   select 
     dm.dm_date,
@@ -447,7 +447,7 @@ CREATE OR REFRESH MATERIALIZED VIEW dailytransactionstotals (
   totalcashtransactions DECIMAL(15,2) COMMENT 'Cash transactions totals for the day',
   ct_date DATE COMMENT 'Date of the transactions'
 )
-PARTITIONED BY (ct_date) AS
+CLUSTER BY (ct_date) AS
 SELECT
   accountid,
   cast(sum(ct_amt) as DECIMAL(15,2)) totalcashtransactions,
@@ -463,7 +463,7 @@ CREATE OR REFRESH MATERIALIZED VIEW factcashbalances (
   sk_dateid BIGINT NOT NULL COMMENT 'Surrogate key for the date',
   cash DECIMAL(25,2) COMMENT 'Cash balance for the account after applying'
 )
-PARTITIONED BY (sk_dateid) AS 
+CLUSTER BY (sk_dateid) AS
 SELECT 
   a.sk_customerid, 
   a.sk_accountid, 

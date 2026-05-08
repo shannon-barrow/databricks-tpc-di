@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (iscurrent);
 
 -- COMMAND ----------
 
@@ -88,7 +88,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (iscurrent);
 
 -- COMMAND ----------
 
@@ -135,7 +135,7 @@ CREATE OR REFRESH STREAMING TABLE dimtrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade'
 )
-PARTITIONED BY (sk_closedateid);
+CLUSTER BY (sk_closedateid);
 
 -- COMMAND ----------
 
@@ -179,7 +179,7 @@ CREATE OR REFRESH STREAMING TABLE factholdings (
   currentprice DOUBLE COMMENT 'Unit price of this security for the current trade',
   currentholding INT COMMENT 'Quantity of a security held after the current trade.'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
@@ -210,7 +210,7 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
   removed BOOLEAN COMMENT 'True if this watch has been removed'
 )
-PARTITIONED BY (removed);
+CLUSTER BY (removed);
 
 -- COMMAND ----------
 
