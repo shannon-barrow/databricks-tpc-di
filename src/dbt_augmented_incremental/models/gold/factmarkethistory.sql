@@ -1,22 +1,22 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'replace_using',
-    unique_key = ['sk_dateid'],
+    incremental_strategy = 'insert_overwrite',
+    partition_by = 'sk_dateid',
+    use_replace_on_for_insert_overwrite = True,
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
 
-{# Strategy: replace_using (custom — see macros/replace_using.sql).
-   Generates `INSERT INTO factmarkethistory REPLACE USING (sk_securityid,
-   sk_dateid) SELECT * FROM <model body>`. Delta atomically replaces
-   rows matching on (sk_securityid, sk_dateid); non-matching target
-   rows untouched. Same end-state as Classic's INSERT OVERWRITE
-   dynamic-partition behavior, expressed as a key-based atomic upsert
-   that doesn't depend on the table's partition layout. Works on SQL
-   Warehouses without compute-config tweaks. #}
+{# Stock dbt-databricks insert_overwrite. The
+   use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit
+   Delta's REPLACE-on-partition primitive that works on SQL Warehouses
+   — without it the strategy degraded to full-table TABLE materialization
+   on warehouses. Effect: today's sk_dateid partition is replaced; prior
+   days untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
+   behaviour. #}
 
 {# Daily market history with rolling 365-day high/low. Each batch:
    1. Compute per-symbol min_by/max_by(low, high) over the 365 days

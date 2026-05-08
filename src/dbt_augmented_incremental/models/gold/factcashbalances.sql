@@ -1,20 +1,21 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'replace_using',
-    unique_key = ['sk_dateid'],
+    incremental_strategy = 'insert_overwrite',
+    partition_by = 'sk_dateid',
+    use_replace_on_for_insert_overwrite = True,
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
 
-{# Strategy: replace_using (custom — see macros/replace_using.sql).
-   Generates `INSERT INTO factcashbalances REPLACE USING (sk_accountid,
-   sk_dateid) SELECT * FROM <model body>`. Delta atomically replaces
-   rows matching (sk_accountid, sk_dateid); non-matching target rows
-   untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
-   behavior on a SQL Warehouse without compute-config tweaks. #}
+{# Stock dbt-databricks insert_overwrite. The
+   use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit
+   Delta's REPLACE-on-partition primitive that works on SQL Warehouses
+   without the spark.session config tweak. Effect: today's sk_dateid
+   partition is replaced; prior days untouched. Mirrors Classic's
+   INSERT OVERWRITE dynamic-partition behaviour. #}
 
 {# For each account touched this batch, write its (sk_customerid,
    sk_accountid, sk_dateid, cash) row at the latest sk_dateid. Old
