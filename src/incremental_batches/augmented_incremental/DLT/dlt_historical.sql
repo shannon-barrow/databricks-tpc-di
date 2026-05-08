@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-CLUSTER BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -88,7 +88,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-CLUSTER BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -207,10 +207,9 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   customerid BIGINT COMMENT 'Customer associated with watch list',
   symbol STRING COMMENT 'Security listed on watch list',
   sk_dateid_dateplaced BIGINT COMMENT 'Date the watch list item was added',
-  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
-  removed BOOLEAN COMMENT 'True if this watch has been removed'
+  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed'
 )
-CLUSTER BY (removed);
+CLUSTER BY (sk_dateid_dateremoved);
 
 -- COMMAND ----------
 
@@ -223,6 +222,5 @@ SELECT
   customerid, 
   symbol, 
   sk_dateid_dateplaced, 
-  sk_dateid_dateremoved, 
-  removed
+  sk_dateid_dateremoved
 FROM tpcdi_incremental_staging_${scale_factor}.factwatches;
