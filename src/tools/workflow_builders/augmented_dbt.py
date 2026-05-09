@@ -303,7 +303,7 @@ def build_parent(
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
-            {"name": "incremental_batches_to_run", "default": "730"},
+            {"name": "incremental_batches_to_run", "default": "365"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         "queue": {"enabled": True},

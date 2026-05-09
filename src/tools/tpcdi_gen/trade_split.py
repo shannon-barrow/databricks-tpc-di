@@ -672,15 +672,19 @@ def gen_holdinghistory(spark, cfg, dbutils, dicts, base_df):
         .withColumn("hh_after_qty", F.when(F.col("_is_buy"), F.col("t_qty")).otherwise(F.lit("0"))))
 
     if cfg.augmented_incremental:
-        cutoff_2015 = int(datetime(2015, 7, 6).timestamp())
-        cutoff_2017 = int(datetime(2017, 7, 5).timestamp())
+        # cutoffs are kept as epoch ints for fast filter on the long _complete_ts
+        # column. AUG_FILES_DATE_START shifted from 2015-07-06 → 2016-07-06 (365-
+        # day window), so the 'tables' boundary moves with it.
+        from datetime import datetime as _dt
+        cutoff_aug_start = int(_dt.fromisoformat(AUG_FILES_DATE_START).timestamp())
+        cutoff_aug_end   = int(_dt.fromisoformat(AUG_FILES_DATE_END_EXCL).timestamp())
         hh_b1 = (hh_base
             .filter((F.col("_complete_ts") < F.lit(batch_cutoff_s).cast("long")) &
-                    (F.col("_complete_ts") < F.lit(cutoff_2017).cast("long")))
+                    (F.col("_complete_ts") < F.lit(cutoff_aug_end).cast("long")))
             .withColumn("event_dt",
                 F.to_date(F.col("_complete_ts").cast("timestamp")))
             .withColumn("stg_target",
-                F.when(F.col("_complete_ts") < F.lit(cutoff_2015).cast("long"), F.lit("tables"))
+                F.when(F.col("_complete_ts") < F.lit(cutoff_aug_start).cast("long"), F.lit("tables"))
                  .otherwise(F.lit("files")))
             .select("hh_h_t_id", "hh_t_id", "hh_before_qty", "hh_after_qty",
                     "event_dt", "stg_target"))
