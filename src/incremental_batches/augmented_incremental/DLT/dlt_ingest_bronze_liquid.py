@@ -63,7 +63,8 @@ def generate_tables(tbl):
   tbl_name = (f"bronze{tbl}")
   @dlt.table(
     name=tbl_name,
-    partition_cols=partitions.get(tbl)
+    cluster_by=partitions.get(tbl),
+    table_properties={"delta.dataSkippingNumIndexedCols": "34"}
   )
   def create_table(): 
     return build_autoloader_stream(tbl)

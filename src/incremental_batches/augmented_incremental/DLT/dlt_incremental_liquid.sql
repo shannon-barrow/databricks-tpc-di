@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -122,7 +122,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -225,7 +225,7 @@ CREATE OR REFRESH STREAMING TABLE dimtrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade'
 )
-PARTITIONED BY (sk_closedateid);
+CLUSTER BY (sk_closedateid);
 
 -- COMMAND ----------
 
@@ -296,7 +296,7 @@ CREATE OR REFRESH STREAMING TABLE factholdings (
   currentprice DOUBLE COMMENT 'Unit price of this security for the current trade',
   currentholding INT COMMENT 'Quantity of a security held after the current trade.'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
@@ -327,10 +327,9 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   customerid BIGINT COMMENT 'Customer associated with watch list',
   symbol STRING COMMENT 'Security listed on watch list',
   sk_dateid_dateplaced BIGINT COMMENT 'Date the watch list item was added',
-  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
-  removed BOOLEAN COMMENT 'True if this watch has been removed'
+  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed'
 )
-PARTITIONED BY (removed);
+CLUSTER BY (sk_dateid_dateremoved);
 
 -- COMMAND ----------
 
@@ -343,7 +342,6 @@ FROM (
     w.w_s_symb symbol,
     case when w_action != 'CNCL' then BIGINT(date_format(w_dts, 'yyyyMMdd')) end sk_dateid_dateplaced,
     case when w_action = 'CNCL' then BIGINT(date_format(w_dts, 'yyyyMMdd')) end sk_dateid_dateremoved,
-    if(w_action = 'CNCL', True, False) removed,
     w.w_dts
   from STREAM(bronzewatches) w
   JOIN tpcdi_incremental_staging_${scale_factor}.dimsecurity s 
@@ -396,7 +394,7 @@ CREATE OR REFRESH STREAMING TABLE factmarkethistory (
   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
   volume INT COMMENT 'Trading volume of the security on this day'
 )
-PARTITIONED BY (sk_dateid) AS
+CLUSTER BY (sk_dateid) AS
 with dm as (
   select
     dm.dm_date,
@@ -413,8 +411,12 @@ with dm as (
   join factmarkethistorystg fmh
     on
       dm.dm_s_symb = fmh.dm_s_symb
-  -- Skip pre-window rows pre-seeded by dlt_ingest_bronze backfill +
-  -- dlt_historical INSERT INTO ONCE flow.
+  -- Skip pre-window rows: bronzedailymarket is pre-seeded with the prior
+  -- year (2015-07-06 → 2016-07-05) via dlt_ingest_bronze's
+  -- bronzedailymarket_backfill append_flow, and factmarkethistory is
+  -- already pre-populated with those rows by dlt_historical.sql's INSERT
+  -- INTO ONCE flow. Without this filter, the first incremental update
+  -- would recompute FMH for the backfill rows and double-insert.
   where dm.dm_date >= DATE'2016-07-06'  -- AUG_FILES_DATE_START
 )
 SELECT 
@@ -450,7 +452,7 @@ CREATE OR REFRESH MATERIALIZED VIEW dailytransactionstotals (
   totalcashtransactions DECIMAL(15,2) COMMENT 'Cash transactions totals for the day',
   ct_date DATE COMMENT 'Date of the transactions'
 )
-PARTITIONED BY (ct_date) AS
+CLUSTER BY (ct_date) AS
 SELECT
   accountid,
   cast(sum(ct_amt) as DECIMAL(15,2)) totalcashtransactions,
@@ -466,7 +468,7 @@ CREATE OR REFRESH MATERIALIZED VIEW factcashbalances (
   sk_dateid BIGINT NOT NULL COMMENT 'Surrogate key for the date',
   cash DECIMAL(25,2) COMMENT 'Cash balance for the account after applying'
 )
-PARTITIONED BY (sk_dateid) AS 
+CLUSTER BY (sk_dateid) AS
 SELECT 
   a.sk_customerid, 
   a.sk_accountid, 
