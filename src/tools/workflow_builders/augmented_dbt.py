@@ -132,6 +132,11 @@ def build_child(
         "dbt_task": {
             "project_directory": dbt_project_dir,
             "commands": ["dbt deps", _dbt_run_command()],
+            # `schema` is required by the Databricks Jobs API but it does
+            # NOT support {{job.parameters.X}} substitution. The dbt project
+            # overrides `generate_schema_name` (see macros/_helpers.sql) to
+            # route models through `tgt_db()` (derived from --vars wh_db +
+            # scale_factor) instead, so this field is effectively a placeholder.
             "schema": f"{wh_db}_{scale_factor}",
             "warehouse_id": wh_id,
             "catalog": catalog,

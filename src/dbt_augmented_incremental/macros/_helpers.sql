@@ -10,6 +10,19 @@
 {{ var('wh_db') }}_{{ var('scale_factor') }}
 {%- endmacro -%}
 
+{# Override dbt's default `generate_schema_name` so every model routes
+   through `tgt_db()` (derived from --vars wh_db + scale_factor) instead
+   of the connection's hardcoded schema. The Databricks Jobs API field
+   `dbt_task.schema` does NOT accept `{{job.parameters.X}}` substitution,
+   so cloning a dbt job and changing the wh_db parameter alone leaves
+   `dbt_task.schema` pinned to the original — every model would then be
+   written into the donor's schema. This override decouples model
+   placement from `dbt_task.schema` entirely; that field can be left at
+   any non-empty value (the connection profile still requires one). #}
+{% macro generate_schema_name(custom_schema_name, node) -%}
+    {{ tgt_db() }}
+{%- endmacro %}
+
 {%- macro fq(table_name) -%}
 {{ var('catalog') }}.{{ tgt_db() }}.{{ table_name }}
 {%- endmacro -%}
