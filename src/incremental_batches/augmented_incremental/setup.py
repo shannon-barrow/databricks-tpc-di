@@ -62,6 +62,15 @@ deep_tbls = [
   'dimcustomer',
   'dimaccount',
   'factcashbalances',
+  # 365-day window: pre-window data is staged so factmarkethistory's
+  # rolling-year lookback into bronzedailymarket is fully populated from
+  # batch 1 (2016-07-06). DailyMarketHistorical.sql writes
+  # `bronzedailymarket` to the staging schema; FactMarketHistoryHistorical.sql
+  # writes `factmarkethistory`. Auto Loader appends daily drops on top of
+  # the cloned bronzedailymarket; the FMH incremental MERGEs into the
+  # cloned factmarkethistory.
+  'bronzedailymarket',
+  'factmarkethistory',
 ]
 threads = len(shallow_tbls) + len(deep_tbls)
 with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
@@ -76,32 +85,11 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
-# MAGIC CREATE OR REPLACE TABLE factmarkethistory (
-# MAGIC   sk_securityid BIGINT NOT NULL COMMENT 'Surrogate key for SecurityID',
-# MAGIC   sk_companyid BIGINT COMMENT 'Surrogate key for CompanyID',
-# MAGIC   sk_dateid BIGINT NOT NULL COMMENT 'Surrogate key for the date',
-# MAGIC   peratio DOUBLE COMMENT 'Price to earnings per share ratio',
-# MAGIC   yield DOUBLE COMMENT 'Dividend to price ratio, as a percentage',
-# MAGIC   fiftytwoweekhigh DOUBLE COMMENT 'Security highest price in last 52 weeks from this day',
-# MAGIC   sk_fiftytwoweekhighdate BIGINT COMMENT 'Earliest date on which the 52 week high price was set',
-# MAGIC   fiftytwoweeklow DOUBLE COMMENT 'Security lowest price in last 52 weeks from this day',
-# MAGIC   sk_fiftytwoweeklowdate BIGINT COMMENT 'Earliest date on which the 52 week low price was set',
-# MAGIC   closeprice DOUBLE COMMENT 'Security closing price on this day',
-# MAGIC   dayhigh DOUBLE COMMENT 'Highest price for the security on this day',
-# MAGIC   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
-# MAGIC   volume INT COMMENT 'Trading volume of the security on this day',
-# MAGIC   CONSTRAINT fmh_pk PRIMARY KEY(sk_securityid, sk_dateid),
-# MAGIC   CONSTRAINT fmh_security_fk FOREIGN KEY (sk_securityid) REFERENCES DimSecurity(sk_securityid),
-# MAGIC   CONSTRAINT fmh_company_fk FOREIGN KEY (sk_companyid) REFERENCES DimCompany(sk_companyid),
-# MAGIC   CONSTRAINT fmh_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid)
-# MAGIC )
-# MAGIC PARTITIONED BY (sk_dateid)
-# MAGIC TBLPROPERTIES (
-# MAGIC   'delta.autoOptimize.autoCompact' = 'true',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
-# MAGIC );
+# factmarkethistory is now DEEP CLONEd from the staging schema (populated
+# by FactMarketHistoryHistorical.sql with the prior year of FMH rows for
+# 2015-07-06 → 2016-07-05 — see the deep_tbls list above). The incremental
+# MERGE/REPLACE pattern adds new sk_dateid partitions on top of the
+# cloned starting state.
 
 # COMMAND ----------
 
@@ -235,22 +223,10 @@ for tbl in incr_tbls:
 
 # COMMAND ----------
 
-# MAGIC %sql
-# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzedailymarket') (
-# MAGIC   cdc_flag STRING, 
-# MAGIC   cdc_dsn BIGINT, 
-# MAGIC   dm_date DATE, 
-# MAGIC   dm_s_symb STRING, 
-# MAGIC   dm_close DOUBLE, 
-# MAGIC   dm_high DOUBLE, 
-# MAGIC   dm_low DOUBLE, 
-# MAGIC   dm_vol INT
-# MAGIC )
-# MAGIC PARTITIONED BY (dm_date)
-# MAGIC TBLPROPERTIES (
-# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
-# MAGIC )
+# bronzedailymarket is now DEEP CLONEd from the staging schema (populated
+# by DailyMarketHistorical.sql with the prior year of DM rows for
+# 2015-07-06 → 2016-07-05 — see the deep_tbls list above). Auto Loader
+# appends new daily drops post-clone.
 
 # COMMAND ----------
 

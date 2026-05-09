@@ -469,6 +469,30 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         depends_on=["Silver_Financial", "Silver_DimCompany"],
         base_params=dict(_wh_param),
     ))
+    # Pre-window DailyMarket. Reads tpcdi_raw_data.dailymarket{sf} (the
+    # gen_daily_market leaf's Delta) filtered to stg_target='tables'
+    # (= dm_date < AUG_FILES_DATE_START = 2016-07-06 under the 365-day
+    # window). Persists as bronzedailymarketstaging so it survives
+    # cleanup_stage0 dropping the temp Delta. Consumed by Classic/dbt
+    # setup (clones into bronzedailymarket) and SDP (append_flow_once
+    # backfills bronzedailymarket from this).
+    tasks.append(_make_task(
+        task_key="DailyMarketHistorical",
+        notebook_path=f"{hist_path}/DailyMarketHistorical",
+        depends_on=["gen_daily_market"],
+        base_params=dict(_wh_param),
+    ))
+    # Pre-window FactMarketHistory ([2015-07-06, 2016-07-05]). Computed
+    # so benchmark batch 1 (2016-07-06) starts with a fully populated
+    # factmarkethistory and a 365-day rolling window into bronzedailymarket.
+    # Depends on the new bronzedailymarketstaging table + the security/
+    # company dim historicals (joined on effective-date temporal range).
+    tasks.append(_make_task(
+        task_key="FactMarketHistoryHistorical",
+        notebook_path=f"{hist_path}/FactMarketHistoryHistorical",
+        depends_on=["DailyMarketHistorical", "Silver_DimSecurity", "CompanyYearEPS"],
+        base_params=dict(_wh_param),
+    ))
 
     # ---------------- Stage 1b: stage_files (per-dataset partitioned CSV) -
     # Each stage_files task reads from a specific gen_*'s Delta output and

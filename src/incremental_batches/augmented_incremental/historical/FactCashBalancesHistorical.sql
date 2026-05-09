@@ -7,10 +7,11 @@
 -- COMMAND ----------
 
 USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
--- Persist the pre-2015-07-06 cash transaction events as their own staging
--- table. The SDP pipeline's bronzecashtransaction backfill reads from this
--- so its `sum() over (partition by accountid order by ct_date)` running
--- balance starts from the correct historical baseline post-2015-07-06.
+-- Persist the pre-AUG_FILES_DATE_START cash transaction events as their
+-- own staging table. The SDP pipeline's bronzecashtransaction backfill
+-- reads from this so its `sum() over (partition by accountid order by
+-- ct_date)` running balance starts from the correct historical baseline
+-- post-AUG_FILES_DATE_START (= 2016-07-06 under the 365-day window).
 -- The temp Delta tpcdi_raw_data.cashtransaction{sf} gets dropped by
 -- cleanup_stage0, so this is the persistent copy that survives.
 CREATE OR REPLACE TABLE cashtransactionhistorical (
@@ -69,7 +70,7 @@ TBLPROPERTIES (
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.currentaccountbalances')
 SELECT
   *,
-  if(ct_date = '2015-07-05', True, False) latest_batch
+  if(ct_date = '2016-07-05', True, False) latest_batch  -- day before AUG_FILES_DATE_START
 FROM (
   SELECT
     to_date(max(ct_dts)) ct_date,

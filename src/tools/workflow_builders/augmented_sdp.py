@@ -131,7 +131,7 @@ def _description_child(*, scale_factor: int, catalog: str, wh_db: str,
     return (
         f"TPC-DI Augmented Incremental benchmark (SDP, child) at "
         f"SF={scale_factor}. Triggered once per simulated business day in "
-        f"the 730-day window 2015-07-06 → 2017-07-05 by the parent job's "
+        f"the 365-day window 2016-07-06 → 2017-07-05 by the parent job's "
         f"for_each_task. Each run drops the day's pre-staged files into "
         f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}/` "
         f"then triggers the SDP pipeline (full_refresh=False) for an "

@@ -155,7 +155,7 @@ def build_child(
     desc = (
         f"TPC-DI Augmented Incremental benchmark (DBT, child) at "
         f"SF={scale_factor}. Triggered once per simulated business day in "
-        f"the 730-day window 2015-07-06 → 2017-07-05 by the parent's "
+        f"the 365-day window 2016-07-06 → 2017-07-05 by the parent's "
         f"for_each_task. Each run: drops the day's pre-staged files into "
         f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}/`, "
         f"then a dbt task runs the 15 incremental models (7 bronze + 4 "
@@ -279,7 +279,7 @@ def build_parent(
 
     desc = (
         f"TPC-DI Augmented Incremental benchmark (DBT, **parent**) at "
-        f"SF={scale_factor}. Wraps the child benchmark job in a 730-day "
+        f"SF={scale_factor}. Wraps the child benchmark job in a 365-day "
         f"for_each_task loop. setup_dbt clones the staging schema "
         f"(12 shallow + 6 deep) and emits the date list; the child runs "
         f"per simulated day on warehouse {wh_id}. Cleanup gated by "

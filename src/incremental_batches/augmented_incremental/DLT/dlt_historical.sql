@@ -217,10 +217,53 @@ CREATE FLOW factwatches_historical
 COMMENT "Backfill historical factwatches table from staging table"
 AS INSERT INTO ONCE factwatches BY NAME
 SELECT
-  sk_customerid, 
-  sk_securityid, 
-  customerid, 
-  symbol, 
-  sk_dateid_dateplaced, 
+  sk_customerid,
+  sk_securityid,
+  customerid,
+  symbol,
+  sk_dateid_dateplaced,
   sk_dateid_dateremoved
 FROM tpcdi_incremental_staging_${scale_factor}.factwatches;
+
+-- COMMAND ----------
+
+-- Pre-seed factmarkethistory with the prior year (2015-07-06 → 2016-07-05).
+-- This streaming table is also declared in dlt_incremental.sql with the
+-- per-batch incremental flow (CLUSTER BY (sk_dateid)). Both declarations
+-- carry the same schema; the active library determines which flow runs.
+-- During the historical phase only this INSERT INTO ONCE flow fires.
+CREATE OR REFRESH STREAMING TABLE factmarkethistory (
+  sk_securityid BIGINT COMMENT 'Surrogate key for SecurityID',
+  sk_companyid BIGINT COMMENT 'Surrogate key for CompanyID',
+  sk_dateid BIGINT COMMENT 'Surrogate key for the date',
+  peratio DOUBLE COMMENT 'Price to earnings per share ratio',
+  yield DOUBLE COMMENT 'Dividend to price ratio, as a percentage',
+  fiftytwoweekhigh DOUBLE COMMENT 'Security highest price in last 52 weeks from this day',
+  sk_fiftytwoweekhighdate BIGINT COMMENT 'Earliest date on which the 52 week high price was set',
+  fiftytwoweeklow DOUBLE COMMENT 'Security lowest price in last 52 weeks from this day',
+  sk_fiftytwoweeklowdate BIGINT COMMENT 'Earliest date on which the 52 week low price was set',
+  closeprice DOUBLE COMMENT 'Security closing price on this day',
+  dayhigh DOUBLE COMMENT 'Highest price for the security on this day',
+  daylow DOUBLE COMMENT 'Lowest price for the security on this day',
+  volume INT COMMENT 'Trading volume of the security on this day'
+)
+CLUSTER BY (sk_dateid);
+
+CREATE FLOW factmarkethistory_historical
+COMMENT "Backfill historical factmarkethistory table from staging table"
+AS INSERT INTO ONCE factmarkethistory BY NAME
+SELECT
+  sk_securityid,
+  sk_companyid,
+  sk_dateid,
+  peratio,
+  yield,
+  fiftytwoweekhigh,
+  sk_fiftytwoweekhighdate,
+  fiftytwoweeklow,
+  sk_fiftytwoweeklowdate,
+  closeprice,
+  dayhigh,
+  daylow,
+  volume
+FROM tpcdi_incremental_staging_${scale_factor}.factmarkethistory;

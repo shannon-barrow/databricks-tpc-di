@@ -96,3 +96,22 @@ def backfill():
   return spark.sql(f"""
     SELECT * FROM {catalog}.tpcdi_incremental_staging_{scale_factor}.cashtransactionhistorical
   """)
+
+# Seed bronzedailymarket with the prior year (2015-07-06 → 2016-07-05) of
+# DailyMarket data so factmarkethistorystg's 380-day rolling-year MV is
+# fully populated from the first incremental update. Without this seed,
+# factmarkethistorystg would show empty arrays on batch 1 and grow them
+# day-by-day, meaning factmarkethistory's 52-week high/low would be
+# wrong until ~365 days into the run.
+# `bronzedailymarket` (in the staging schema) is created by
+# historical/DailyMarketHistorical.sql from the temp Delta
+# `tpcdi_raw_data.dailymarket{sf}` (cleanup_stage0 drops the temp Delta
+# but the staging table persists).
+@dlt.append_flow(
+  target = "bronzedailymarket",
+  once = True,
+  name = 'bronzedailymarket_backfill')
+def bronzedailymarket_backfill():
+  return spark.sql(f"""
+    SELECT * FROM {catalog}.tpcdi_incremental_staging_{scale_factor}.bronzedailymarket
+  """)

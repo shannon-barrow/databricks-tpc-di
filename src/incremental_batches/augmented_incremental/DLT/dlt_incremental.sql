@@ -396,9 +396,9 @@ CREATE OR REFRESH STREAMING TABLE factmarkethistory (
 )
 CLUSTER BY (sk_dateid) AS
 with dm as (
-  select 
+  select
     dm.dm_date,
-    dm.dm_s_symb, 
+    dm.dm_s_symb,
     dm.dm_close,
     dm.dm_high,
     dm.dm_low,
@@ -409,8 +409,15 @@ with dm as (
     ) date_high_low
   from STREAM(bronzedailymarket) dm
   join factmarkethistorystg fmh
-    on 
+    on
       dm.dm_s_symb = fmh.dm_s_symb
+  -- Skip pre-window rows: bronzedailymarket is pre-seeded with the prior
+  -- year (2015-07-06 → 2016-07-05) via dlt_ingest_bronze's
+  -- bronzedailymarket_backfill append_flow, and factmarkethistory is
+  -- already pre-populated with those rows by dlt_historical.sql's INSERT
+  -- INTO ONCE flow. Without this filter, the first incremental update
+  -- would recompute FMH for the backfill rows and double-insert.
+  where dm.dm_date >= DATE'2016-07-06'  -- AUG_FILES_DATE_START
 )
 SELECT 
   s.sk_securityid,

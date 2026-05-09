@@ -398,9 +398,9 @@ CREATE OR REFRESH STREAMING TABLE factmarkethistory (
 )
 CLUSTER BY (sk_dateid) AS
 with dm as (
-  select 
+  select
     dm.dm_date,
-    dm.dm_s_symb, 
+    dm.dm_s_symb,
     dm.dm_close,
     dm.dm_high,
     dm.dm_low,
@@ -411,8 +411,11 @@ with dm as (
     ) date_high_low
   from STREAM(bronzedailymarket) dm
   join factmarkethistorystg fmh
-    on 
+    on
       dm.dm_s_symb = fmh.dm_s_symb
+  -- Skip pre-window rows pre-seeded by dlt_ingest_bronze backfill +
+  -- dlt_historical_modclust INSERT INTO ONCE flow.
+  where dm.dm_date >= DATE'2016-07-06'  -- AUG_FILES_DATE_START
 )
 SELECT 
   s.sk_securityid,
