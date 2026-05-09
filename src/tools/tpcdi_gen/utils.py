@@ -516,12 +516,24 @@ def _mv_partition(rows):
     storage account triggered cooldowns longer than 19s. Mid-flight
     "source not found" (e.g. partial peer interference) is also
     treated as transient.
+
+    Idempotency: when Spark retries a failed partition on a different
+    executor, some (src, dst) pairs from the failed prior attempt may
+    already be moved (their src now missing, dst present). Treat those
+    as already-done — without this guard the retried partition would
+    spin its full 2-min retry budget on each missing-src then raise,
+    surfacing as a hard task failure that the resume-detect logic in
+    register_copies_from_staging won't recover from in time.
     """
+    import os as _os
     import subprocess as _sp
     import time as _time
     delays = (0.0, 0.2, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0)
     for row in rows:
         src, dst = row["src"], row["dst"]
+        # Already-done check: prior attempt moved this pair.
+        if not _os.path.exists(src) and _os.path.exists(dst):
+            continue
         last_stderr = ""
         for delay in delays:
             if delay:
@@ -532,6 +544,11 @@ def _mv_partition(rows):
                 break
             except _sp.CalledProcessError as e:
                 last_stderr = (e.stderr or "").strip()
+                # If the failure is "src missing, dst present", a peer
+                # finished the move between our existence check and
+                # the mv call — treat as done.
+                if not _os.path.exists(src) and _os.path.exists(dst):
+                    break
             except FileNotFoundError as e:
                 last_stderr = str(e)
         else:
