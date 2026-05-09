@@ -59,11 +59,11 @@ windowed AS (
     dm_date, dm_s_symb, dm_close, dm_high, dm_low, dm_vol,
     max_by(struct(dm_high, dm_date), dm_high) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
-      ROWS BETWEEN 364 PRECEDING AND CURRENT ROW   -- 364 + CURRENT = 365 calendar days (DM has 1 row/day/symbol)
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW  -- historical scope is exactly one year, so the 365-day rolling window is bounded by the data itself
     ) AS fiftytwoweekhigh,
     min_by(struct(dm_low, dm_date), dm_low) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
-      ROWS BETWEEN 364 PRECEDING AND CURRENT ROW   -- 364 + CURRENT = 365 calendar days (DM has 1 row/day/symbol)
+      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW  -- historical scope is exactly one year, so the 365-day rolling window is bounded by the data itself
     ) AS fiftytwoweeklow
   FROM dm
 )
