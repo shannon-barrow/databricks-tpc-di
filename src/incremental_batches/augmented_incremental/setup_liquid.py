@@ -241,7 +241,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (update_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -261,7 +262,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (update_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -279,7 +281,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -297,7 +300,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -325,7 +329,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -343,7 +348,8 @@ for tbl in incr_tbls:
 # MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
