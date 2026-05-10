@@ -96,7 +96,8 @@ def read_intermediate_view(spark, *, catalog: str, wh_db: str, scale_factor,
 def bootstrap(*, spark, dbutils, scale_factor, catalog: str, wh_db: str,
               tpcdi_directory: str, log_level: str,
               augmented_incremental: bool, workspace_src_path: str,
-              load_dicts: bool = True) -> dict:
+              load_dicts: bool = True,
+              raw_data_schema: str = "tpcdi_raw_data") -> dict:
     """One-time setup for a data_gen task notebook.
 
     - Adds the workspace ``tools`` dir (or a volume copy) to ``sys.path`` so
@@ -159,7 +160,8 @@ def bootstrap(*, spark, dbutils, scale_factor, catalog: str, wh_db: str,
     cfg = ScaleConfig(int(scale_factor), catalog,
                       tpcdi_directory=tpcdi_directory,
                       augmented_incremental=augmented_incremental,
-                      wh_db=wh_db)
+                      wh_db=wh_db,
+                      raw_data_schema=raw_data_schema)
 
     dicts = None
     if load_dicts:

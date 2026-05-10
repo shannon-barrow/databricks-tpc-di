@@ -34,7 +34,7 @@ TBLPROPERTIES (
 INSERT OVERWRITE cashtransactionhistorical
 SELECT 'I' AS cdc_flag, cdc_dsn, accountid, ct_dts, ct_amt, ct_name,
        to_date(ct_dts) AS event_dt
-FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.cashtransaction' || :scale_factor)
 WHERE stg_target = 'tables';
 
 CREATE TABLE IF NOT EXISTS factcashbalances (
@@ -76,7 +76,7 @@ FROM (
     to_date(max(ct_dts)) ct_date,
     accountid,
     cast(sum(ct_amt) as DECIMAL(15,2)) current_account_cash
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+  FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.cashtransaction' || :scale_factor)
   WHERE stg_target = 'tables'
   GROUP BY ALL
 )
@@ -93,7 +93,7 @@ WITH dailycash as (
       accountid,
       to_date(ct_dts) datevalue,
       cast(sum(ct_amt) as DECIMAL(15,2)) account_daily_total
-    FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.cashtransaction' || :scale_factor)
+    FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.cashtransaction' || :scale_factor)
     WHERE stg_target = 'tables'
     GROUP BY ALL
   ) c

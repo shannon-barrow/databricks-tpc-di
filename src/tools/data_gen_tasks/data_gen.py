@@ -30,6 +30,7 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10", "100", "1000", "5000", "10
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("wh_db", "tpcdi_incremental_staging")
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
+dbutils.widgets.text("raw_data_schema", "tpcdi_raw_data")
 dbutils.widgets.dropdown("regenerate_data", "NO", ["NO", "YES"])
 dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN", "ERROR"])
 
@@ -38,6 +39,7 @@ scale_factor  = dbutils.widgets.get("scale_factor").strip()
 catalog       = dbutils.widgets.get("catalog").strip()
 wh_db         = dbutils.widgets.get("wh_db").strip()
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
+raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
 regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
 log_level     = dbutils.widgets.get("log_level").strip().upper()
 
@@ -81,14 +83,15 @@ from data_gen_tasks._shared import bootstrap, stage_schema_fq
 ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 catalog=catalog, wh_db=wh_db, tpcdi_directory=tpcdi_directory,
                 log_level=log_level, augmented_incremental=augmented_incremental,
-                workspace_src_path=workspace_src_path, load_dicts=False)
+                workspace_src_path=workspace_src_path, load_dicts=False,
+                raw_data_schema=raw_data_schema)
 cfg = ctx["cfg"]
 
 # COMMAND ----------
 
 # Schemas first.
-spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data")
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume")
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{raw_data_schema}")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{raw_data_schema}.tpcdi_volume")
 
 stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 print(f"[data_gen] ensuring {stage_schema} exists")
@@ -127,9 +130,9 @@ if regenerate_data == "YES":
         for _t in ("customermgmt", "trade", "tradehistory", "cashtransaction",
                    "holdinghistory", "watchhistory", "dailymarket"):
             spark.sql(f"DROP TABLE IF EXISTS "
-                      f"{catalog}.tpcdi_raw_data.{_t}{scale_factor}")
+                      f"{catalog}.{raw_data_schema}.{_t}{scale_factor}")
         print(f"[data_gen] dropped 7 augmented dataset Deltas in "
-              f"{catalog}.tpcdi_raw_data")
+              f"{catalog}.{raw_data_schema}")
 else:
     print(f"[data_gen] regenerate_data=NO → keeping prior state for "
           f"per-task self-skip")

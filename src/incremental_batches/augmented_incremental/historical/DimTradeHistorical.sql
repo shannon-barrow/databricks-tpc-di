@@ -79,8 +79,8 @@ with rawtrade as (
     case when th.status = 'CMPT' then t.fee end fee,
     case when th.status = 'CMPT' then t.commission end commission,
     case when th.status = 'CMPT' then t.tax end tax
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.tradehistory' || :scale_factor) th
-  JOIN IDENTIFIER(:catalog || '.tpcdi_raw_data.trade' || :scale_factor) t
+  FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.tradehistory' || :scale_factor) th
+  JOIN IDENTIFIER(:catalog || '.' || :raw_data_schema || '.trade' || :scale_factor) t
     ON th.tradeid = t.t_id
   WHERE th.stg_target = 'tables'
   QUALIFY row_number() over (partition by th.tradeid order by th.th_dts desc) = 1

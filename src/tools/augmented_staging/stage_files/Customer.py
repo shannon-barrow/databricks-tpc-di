@@ -26,6 +26,7 @@ dbutils.widgets.text("catalog", "main")
 
 scale_factor    = dbutils.widgets.get("scale_factor").strip()
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
+raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
 catalog         = dbutils.widgets.get("catalog").strip()
 
 target_dir = f"{tpcdi_directory.rstrip('/')}/sf={scale_factor}"  # tpcdi_directory base_param already ends with augmented_incremental/_staging/
@@ -69,7 +70,7 @@ SELECT
   to_date(update_ts) AS update_dt,
   -- _pdate is a duplicate of update_dt used ONLY as the partition column. Spark strips partition cols from the written data file, so without this duplicate the per-day file would lose update_dt entirely.
   to_date(update_ts) AS _pdate
-FROM {catalog}.tpcdi_raw_data.customermgmt{scale_factor}
+FROM {catalog}.{raw_data_schema}.customermgmt{scale_factor}
 WHERE stg_target = 'files'
   AND ActionType IN ('NEW', 'INACT', 'UPDCUST')
 """)

@@ -24,6 +24,7 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volu
 dbutils.widgets.dropdown("regenerate_data", "NO", ["NO", "YES"])
 dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN", "ERROR"])
 dbutils.widgets.dropdown("augmented_incremental", "true", ["true", "false"])
+dbutils.widgets.text("raw_data_schema", "tpcdi_raw_data")
 
 scale_factor          = dbutils.widgets.get("scale_factor").strip()
 catalog               = dbutils.widgets.get("catalog").strip()
@@ -32,6 +33,7 @@ tpcdi_directory       = dbutils.widgets.get("tpcdi_directory").strip()
 regenerate_data       = dbutils.widgets.get("regenerate_data").strip()
 log_level             = dbutils.widgets.get("log_level").strip()
 augmented_incremental = dbutils.widgets.get("augmented_incremental").strip().lower() == "true"
+raw_data_schema       = dbutils.widgets.get("raw_data_schema").strip()
 
 # COMMAND ----------
 
@@ -48,7 +50,8 @@ from data_gen_tasks._shared import (
 ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 catalog=catalog, wh_db=wh_db, tpcdi_directory=tpcdi_directory,
                 log_level=log_level, augmented_incremental=augmented_incremental,
-                workspace_src_path=workspace_src_path, load_dicts=True)
+                workspace_src_path=workspace_src_path, load_dicts=True,
+                raw_data_schema=raw_data_schema)
 cfg = ctx["cfg"]
 
 # COMMAND ----------

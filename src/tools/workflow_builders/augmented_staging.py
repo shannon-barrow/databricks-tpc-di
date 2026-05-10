@@ -141,8 +141,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     """Build the augmented_incremental data-gen workflow JSON."""
 
     # tpcdi_directory uses {{job.parameters.catalog}} interpolation so the path tracks any run-time override of `catalog` (the previous build-time interpolation baked the original catalog into the path, which silently went stale if the user later overrode catalog). single_batch SQL notebooks (raw_ingestion / ingest_finwire / Ingest_Incremental) read this via base_parameters per-task; stage_files notebooks read it via the same job-level parameter, but they only need it for the volume path so the dynamic reference is sufficient.
+    # raw_data_schema also interpolated so AWS (where main.tpcdi_raw_data is owned by someone else) can override to a user-owned schema name (e.g. "tpcdi_raw_data_barrow").
     _tpcdi_dir_dynamic = (
-        "/Volumes/{{job.parameters.catalog}}/tpcdi_raw_data/tpcdi_volume/"
+        "/Volumes/{{job.parameters.catalog}}/"
+        "{{job.parameters.raw_data_schema}}/tpcdi_volume/"
         "augmented_incremental/_staging/"
     )
 
@@ -152,7 +154,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # wh_db base_param — hardcoded to the shared staging schema. Not a job-level param: data_gen_type=augmented_incremental fully determines where staging tables go, so there's no user knob.
     _wh_param = {"wh_db": _STAGING_WH_DB}
 
-    _td_wh = {**_td_param, **_wh_param}
+    # raw_data_schema base_param — propagated to each task notebook's widget.
+    _rds_param = {"raw_data_schema": "{{job.parameters.raw_data_schema}}"}
+
+    _td_wh = {**_td_param, **_wh_param, **_rds_param}
 
     tasks: list[dict] = []
 
@@ -172,7 +177,8 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # cleanup_intermediates runs ALL_SUCCESS so failed runs leave the temp
     # tables for the next attempt's repair-run to consume.
     _dgt_path = f"{repo_src_path}/tools/data_gen_tasks"
-    _dgt_params = {**_wh_param, "tpcdi_directory": _tpcdi_dir_dynamic,
+    _dgt_params = {**_wh_param, **_rds_param,
+                   "tpcdi_directory": _tpcdi_dir_dynamic,
                    "augmented_incremental": "true"}
 
     tasks.append(_make_task(
@@ -255,7 +261,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         notebook_path=f"{_dgt_path}/cleanup_intermediates",
         depends_on=_gen_keys + _copy_keys,
         run_if="ALL_SUCCESS",
-        base_params=_wh_param,
+        base_params={**_wh_param, **_rds_param},
     ))
 
     # No staging_check gate — each Stage 1 task wires directly to the
@@ -422,13 +428,13 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # Reads tpcdi_raw_data.customermgmt{sf} (gen_customer's Delta) +
         # the TaxRate ingest output.
         depends_on=["gen_customer", "ingest_TaxRate"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="DimAccountHistorical",
         notebook_path=f"{hist_path}/DimAccountHistorical",
         depends_on=["DimCustomerHistorical", "Silver_DimBroker"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="DimTradeHistorical",
@@ -437,7 +443,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # (gen_trade + gen_tradehistory leaves) plus the dim joins.
         depends_on=["gen_trade", "gen_tradehistory",
                     "Silver_DimSecurity", "DimAccountHistorical"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="FactCashBalancesHistorical",
@@ -445,7 +451,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # Reads tpcdi_raw_data.cashtransaction{sf} (gen_cashtransaction
         # leaf) plus the account dim join.
         depends_on=["gen_cashtransaction", "DimAccountHistorical"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="FactHoldingsHistorical",
@@ -453,7 +459,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # Reads tpcdi_raw_data.holdinghistory{sf} (gen_holdinghistory
         # leaf) plus the trade dim join.
         depends_on=["gen_holdinghistory", "DimTradeHistorical"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="FactWatchesHistorical",
@@ -461,13 +467,13 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # Reads tpcdi_raw_data.watchhistory{sf} (gen_watch_history output)
         # plus the security + customer dim joins.
         depends_on=["gen_watch_history", "Silver_DimSecurity", "DimCustomerHistorical"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     tasks.append(_make_task(
         task_key="CompanyYearEPS",
         notebook_path=f"{hist_path}/CompanyYearEPS",
         depends_on=["Silver_Financial", "Silver_DimCompany"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     # Pre-window DailyMarket. Reads tpcdi_raw_data.dailymarket{sf} (the
     # gen_daily_market leaf's Delta) filtered to stg_target='tables'
@@ -480,7 +486,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="DailyMarketHistorical",
         notebook_path=f"{hist_path}/DailyMarketHistorical",
         depends_on=["gen_daily_market"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
     # Pre-window FactMarketHistory ([2015-07-06, 2016-07-05]). Computed
     # so benchmark batch 1 (2016-07-06) starts with a fully populated
@@ -491,7 +497,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="FactMarketHistoryHistorical",
         notebook_path=f"{hist_path}/FactMarketHistoryHistorical",
         depends_on=["DailyMarketHistorical", "Silver_DimSecurity", "CompanyYearEPS"],
-        base_params=dict(_wh_param),
+        base_params={**_wh_param, **_rds_param},
     ))
 
     # ---------------- Stage 1b: stage_files (per-dataset partitioned CSV) -
@@ -561,6 +567,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             {"name": "catalog", "default": catalog},
             {"name": "regenerate_data", "default": regenerate_data},
             {"name": "log_level", "default": log_level},
+            # Schema name for the per-dataset Delta intermediates + source volume.
+            # Default "tpcdi_raw_data" matches Azure. AWS overrides to a schema
+            # the user owns when the canonical one belongs to someone else.
+            {"name": "raw_data_schema", "default": "tpcdi_raw_data"},
             # tpcdi_directory and wh_db are NOT job-level params — they're hardcoded per-task via base_parameters since data_gen_type=augmented_incremental fully determines both. predictive_optimization is dropped (PO is not enabled on the shared staging schema).
         ],
         "queue": {"enabled": True},

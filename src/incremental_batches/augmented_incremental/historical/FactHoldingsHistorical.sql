@@ -49,7 +49,7 @@ SELECT
   tradeprice currentprice,
   hh_after_qty currentholding
 -- Source: spark-gen temp Delta holdinghistory{sf}; filter stg_target='tables' (= _complete_ts < 2015-07-06).
-FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.holdinghistory' || :scale_factor) h
+FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.holdinghistory' || :scale_factor) h
 JOIN IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.DimTrade') dt
   ON tradeid = hh_t_id
 WHERE h.stg_target = 'tables'

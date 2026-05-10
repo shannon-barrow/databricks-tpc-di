@@ -49,7 +49,7 @@ WITH acct_updates AS (
       date('9999-12-31')
     ) enddate,
     row_number() OVER (PARTITION BY accountid, date(update_ts) ORDER BY update_ts DESC) rn
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.customermgmt' || :scale_factor)
+  FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.customermgmt' || :scale_factor)
   WHERE stg_target = 'tables'
     AND ActionType IN ('NEW', 'ADDACCT', 'UPDACCT', 'CLOSEACCT')
 ),

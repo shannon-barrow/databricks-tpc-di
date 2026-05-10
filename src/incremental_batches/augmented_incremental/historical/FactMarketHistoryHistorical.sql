@@ -47,7 +47,7 @@ TBLPROPERTIES (
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.factmarkethistory')
 WITH dm AS (
   SELECT dm_date, dm_s_symb, dm_close, dm_high, dm_low, dm_vol
-  FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.dailymarket' || :scale_factor)
+  FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.dailymarket' || :scale_factor)
   WHERE stg_target = 'tables'
 ),
 -- 52-week rolling high/low computed per symbol with a 365-day RANGE window.

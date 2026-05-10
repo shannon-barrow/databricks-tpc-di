@@ -23,6 +23,7 @@ dbutils.widgets.text("catalog", "main")
 
 scale_factor    = dbutils.widgets.get("scale_factor").strip()
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
+raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
 catalog         = dbutils.widgets.get("catalog").strip()
 
 target_dir = f"{tpcdi_directory.rstrip('/')}/sf={scale_factor}"  # tpcdi_directory base_param already ends with augmented_incremental/_staging/
@@ -59,8 +60,8 @@ SELECT
   CASE WHEN th.status = 'CMPT' THEN t.tax END AS tax,
   to_date(th.th_dts) AS event_dt,
   to_date(th.th_dts) AS _pdate  -- duplicate partition col so event_dt stays in the data file
-FROM {catalog}.tpcdi_raw_data.tradehistory{scale_factor} th
-JOIN {catalog}.tpcdi_raw_data.trade{scale_factor} t
+FROM {catalog}.{raw_data_schema}.tradehistory{scale_factor} th
+JOIN {catalog}.{raw_data_schema}.trade{scale_factor} t
   ON t.t_id = th.tradeid
 WHERE th.stg_target = 'files'
 """)

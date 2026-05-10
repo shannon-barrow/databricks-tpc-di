@@ -26,14 +26,14 @@ catalog      = dbutils.widgets.get("catalog").strip()
 
 for tbl in ("customermgmt", "trade", "tradehistory", "cashtransaction",
             "holdinghistory", "watchhistory", "dailymarket"):
-    spark.sql(f"DROP TABLE IF EXISTS {catalog}.tpcdi_raw_data.{tbl}{scale_factor}")
+    spark.sql(f"DROP TABLE IF EXISTS {catalog}.{raw_data_schema}.{tbl}{scale_factor}")
 
 # COMMAND ----------
 
 # Spark-generator intermediate outputs the benchmark doesn't consume.
 # Leaving them around bloats the volume by ~5-10x the per-date file
 # footprint (FINWIRE files alone are ~10GB at SF=5000).
-staging_root = (f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
+staging_root = (f"/Volumes/{catalog}/{raw_data_schema}/tpcdi_volume/"
                 f"augmented_incremental/_staging/sf={scale_factor}")
 for sub in ("Batch1", "Batch2", "Batch3", "_staging"):
     path = f"{staging_root}/{sub}"
