@@ -38,9 +38,23 @@ catalog      = spark.conf.get("catalog")
 wh_db        = spark.conf.get("wh_db")
 
 target_schema = f"{wh_db}_{scale_factor}"
-fmh_target    = f"{catalog}.{target_schema}.factmarkethistory"
+# Sink writes to a *regular* Delta table, not the SDP-managed streaming
+# `factmarkethistory`. SDP rejects external INSERT/REPLACE on streaming
+# tables (they only accept writes from declared flows), so we own a
+# parallel `factmarkethistory_fb` table here. Seeded from
+# staging.factmarkethistory at init so the historical pre-window year
+# is present and the per-batch comparison vs the streaming-table
+# variant is apples-to-apples.
+fmh_target    = f"{catalog}.{target_schema}.factmarkethistory_fb"
 bronze_table  = f"{catalog}.{target_schema}.bronzedailymarket"
 staging_db    = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+
+# CREATE IF NOT EXISTS — idempotent across pipeline updates.
+spark.sql(f"""
+  CREATE TABLE IF NOT EXISTS {fmh_target}
+  CLUSTER BY (sk_dateid)
+  AS SELECT * FROM {staging_db}.factmarkethistory
+""")
 
 # COMMAND ----------
 
