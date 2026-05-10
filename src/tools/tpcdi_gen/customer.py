@@ -644,6 +644,47 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .drop("_rn"))
     all_df = _acct_targets.unionByName(_acct_others)
 
+    # === Cross-type same-day dedup: drop UPDCUST/INACT colliding with NEW ===
+    # The per-update bijection keeps NEW (fresh sequential C_IDs) disjoint
+    # from UPDCUST/INACT (picks from prior updates' pool) WITHIN one update,
+    # but cross-update on the same calendar day a NEW from update K and an
+    # UPDCUST/INACT from update K+1 can land on the same C_ID + day. That
+    # produces two same-day Customer.txt rows for the same C_ID, which
+    # DimCustomer's SCD2 MERGE inserts as two iscurrent=true rows with the
+    # same sk_customerid (= concat(date, c_id)) — silent corruption that
+    # later fires DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW. Customer
+    # creation wins: the customer is being created today, an update or
+    # inactivation on the same day is meaningless.
+    new_cust_days = (all_df
+        .filter(F.col("ActionType") == "NEW")
+        .select(F.col("C_ID").alias("_new_cid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_new_cust_day")))
+    all_df = (all_df
+        .join(new_cust_days,
+              (F.col("ActionType").isin("UPDCUST", "INACT")) &
+              (F.col("C_ID") == F.col("_new_cid")) &
+              (F.col("_day") == F.col("_new_cust_day")),
+              "left_anti")
+        .drop("_new_cid", "_new_cust_day"))
+
+    # === Cross-type same-day dedup: drop UPDACCT/CLOSEACCT colliding with NEW/ADDACCT ===
+    # Same mechanism as the customer-side guard above, but for accounts.
+    # NEW creates the customer AND their first account; ADDACCT creates an
+    # additional account. Both allocate fresh CA_IDs. A cross-update boundary
+    # can place an UPDACCT/CLOSEACCT for that CA_ID on the same calendar day
+    # — same SCD2 MERGE corruption pattern in DimAccount.
+    acct_create_days = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("CA_ID").alias("_create_caid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_create_acct_day")))
+    all_df = (all_df
+        .join(acct_create_days,
+              (F.col("ActionType").isin("UPDACCT", "CLOSEACCT")) &
+              (F.col("CA_ID") == F.col("_create_caid")) &
+              (F.col("_day") == F.col("_create_acct_day")),
+              "left_anti")
+        .drop("_create_caid", "_create_acct_day"))
+
     # Global one-INACT-per-customer and one-CLOSEACCT-per-account dedups are no longer needed: inact_schedule and close_schedule pre-pick unique C_IDs/CA_IDs across all updates by construction (scan-bijection with set exclusion). No duplicates can exist.
 
     # === Filter out ADDACCTs on the same day as their customer's INACT ===
