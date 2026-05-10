@@ -28,6 +28,8 @@
 # MAGIC The CTAS step is wrapped in a parallel future alongside ANALYZE +
 # MAGIC OPTIMIZE so the per-table prep stays concurrent.
 
+# COMMAND ----------
+
 import shutil
 import concurrent.futures
 import requests
