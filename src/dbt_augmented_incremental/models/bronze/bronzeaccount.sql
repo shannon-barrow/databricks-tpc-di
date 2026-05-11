@@ -9,7 +9,7 @@
 
 
 {% if var('use_liquid_clustering', false) %}
-{{ config(liquid_clustered_by='update_dt') }}
+{{ config(liquid_clustered_by='update_dt', tblproperties={'delta.dataSkippingNumIndexedCols': '34'}) }}
 {% else %}
 {{ config(partition_by='update_dt') }}
 {% endif %}

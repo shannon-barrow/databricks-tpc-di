@@ -94,11 +94,18 @@ def liquid_ctas(table_name, cluster_cols):
 
 # COMMAND ----------
 
-# Same shallow set as setup_dbt.py — small static reference tables.
+# Static reference tables — SHALLOW CLONE keeps them cheap.
+# Note: currentaccountbalances is NOT pre-cloned (vs setup_dbt.py): the staging
+# version is PARTITIONED BY latest_batch (boolean), and the dbt model with
+# `use_liquid_clustering=true` declares liquid_clustered_by='accountid'.
+# If we pre-clone the partitioned table, dbt's first incremental run tries
+# `ALTER TABLE ... CLUSTER BY accountid` against the partitioned target and
+# Delta rejects it (DELTA_ALTER_TABLE_CLUSTER_BY_ON_PARTITIONED_TABLE_NOT_ALLOWED).
+# Skipping the clone lets dbt CREATE the table fresh with Liquid layout.
 shallow_tbls = [
     'taxrate', 'dimdate', 'industry', 'tradetype', 'dimbroker',
     'financial', 'companyyeareps', 'dimsecurity', 'statustype',
-    'dimcompany', 'dimtime', 'currentaccountbalances',
+    'dimcompany', 'dimtime',
 ]
 
 # Liquid-clustered tables. Cluster columns mirror setup_liquid.py.
