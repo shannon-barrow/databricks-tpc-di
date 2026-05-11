@@ -146,6 +146,137 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
 # COMMAND ----------
 
 # MAGIC %md
+# MAGIC # Pre-create Bronze + Gold tables (Liquid clustered)
+# MAGIC
+# MAGIC Pre-create the 6 bronze tables and `factcashbalances` here so dbt's
+# MAGIC per-batch run finds them already Liquid-clustered. The dbt models
+# MAGIC under `use_liquid_clustering=true` deliberately omit any
+# MAGIC `liquid_clustered_by` / `tblproperties` config — otherwise
+# MAGIC dbt-databricks issues `ALTER TABLE CLUSTER BY` and
+# MAGIC `ALTER TABLE SET TBLPROPERTIES` against the target on every batch
+# MAGIC (synchronizing model config to table state, even when nothing has
+# MAGIC drifted). That's both noisy in query history and adds per-batch
+# MAGIC overhead. By owning the layout here and leaving dbt unopinionated,
+# MAGIC every batch becomes a clean MERGE/APPEND with no DDL.
+# MAGIC
+# MAGIC `currentaccountbalances` is intentionally NOT pre-created: its
+# MAGIC dbt model uses `insert_overwrite` (no `partition_by` in the Liquid
+# MAGIC path), which degrades to `CREATE OR REPLACE TABLE AS SELECT` on
+# MAGIC every batch — any cluster_by we set here would be wiped. The
+# MAGIC table is small (one row per touched account) so unclustered is fine.
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzecustomer') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, customerid BIGINT, taxid STRING, status STRING,
+# MAGIC   lastname STRING, firstname STRING, middleinitial STRING, gender STRING, tier TINYINT,
+# MAGIC   dob DATE, addressline1 STRING, addressline2 STRING, postalcode STRING, city STRING,
+# MAGIC   stateprov STRING, country STRING,
+# MAGIC   c_ctry_1 STRING, c_area_1 STRING, c_local_1 STRING, c_ext_1 STRING,
+# MAGIC   c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, c_ext_2 STRING,
+# MAGIC   c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, c_ext_3 STRING,
+# MAGIC   email1 STRING, email2 STRING, lcl_tx_id STRING, nat_tx_id STRING, update_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (update_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzeaccount') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT,
+# MAGIC   accountdesc STRING, taxstatus TINYINT, status STRING, update_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (update_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzecashtransaction') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP,
+# MAGIC   ct_amt DOUBLE, ct_name STRING, event_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (event_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzeholdings') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT,
+# MAGIC   hh_before_qty INT, hh_after_qty INT, event_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (event_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzetrade') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, status STRING,
+# MAGIC   t_tt_id STRING, cashflag TINYINT, t_s_symb STRING, quantity INT, bidprice DOUBLE,
+# MAGIC   t_ca_id BIGINT, executedby STRING, tradeprice DOUBLE, fee DOUBLE, commission DOUBLE,
+# MAGIC   tax DOUBLE, event_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (event_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzewatches') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, w_dts TIMESTAMP,
+# MAGIC   w_action STRING, event_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (event_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- factcashbalances: pre-create empty so dbt's first MERGE finds an already-Liquid target.
+# MAGIC -- Schema mirrors models/gold/factcashbalances.sql output columns.
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.factcashbalances') (
+# MAGIC   sk_customerid BIGINT,
+# MAGIC   sk_accountid BIGINT,
+# MAGIC   sk_dateid BIGINT,
+# MAGIC   cash DECIMAL(15,2)
+# MAGIC )
+# MAGIC CLUSTER BY (sk_dateid)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %md
 # MAGIC # Create/Reset Daily Batches Watch Directory
 
 # COMMAND ----------

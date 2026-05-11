@@ -9,7 +9,12 @@
 
 
 {% if var('use_liquid_clustering', false) %}
-{{ config(liquid_clustered_by='update_dt', tblproperties={'delta.dataSkippingNumIndexedCols': '34'}) }}
+{# Liquid path: table is pre-created in setup_dbt_liquid.py with #}
+{# CLUSTER BY + dataSkippingNumIndexedCols=34. We do NOT declare a layout #}
+{# here — declaring liquid_clustered_by in the dbt config makes #}
+{# dbt-databricks issue ALTER TABLE CLUSTER BY (and ALTER TABLE SET #}
+{# TBLPROPERTIES) on every batch, even when the existing table matches. #}
+{# Leaving layout out of dbt config => no DDL noise per batch. #}
 {% else %}
 {{ config(partition_by='update_dt') }}
 {% endif %}

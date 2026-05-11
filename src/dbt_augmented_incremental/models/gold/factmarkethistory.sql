@@ -11,11 +11,12 @@
 {# Liquid variant: switch to merge so the model isn't tied to partition
    replacement semantics (Liquid tables have no partitions). Unique key
    is composite (sk_securityid, sk_dateid) — one row per (security, date).
-   Cluster on sk_dateid: same column the partitioned variant filtered on. #}
+   No `liquid_clustered_by` here on purpose — the table is pre-created in
+   setup_dbt_liquid.py with CLUSTER BY (sk_dateid). Declaring it in dbt
+   config would force per-batch ALTER TABLE CLUSTER BY. #}
 {{ config(
     incremental_strategy='merge',
     unique_key=['sk_securityid','sk_dateid'],
-    liquid_clustered_by='sk_dateid',
 ) }}
 {% else %}
 {# Partitioned variant (default): stock dbt-databricks insert_overwrite.

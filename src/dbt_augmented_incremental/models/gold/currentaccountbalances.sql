@@ -9,13 +9,13 @@
 }}
 
 {% if var('use_liquid_clustering', false) %}
-{# Liquid variant: drop partition_by (which was the boolean `latest_batch`
-   flag — not useful as a Liquid cluster key). Without partition_by,
-   insert_overwrite degrades to CREATE OR REPLACE TABLE AS SELECT — which
-   is exactly what this model does anyway (its body reads {{ this }}
-   before the replace via the prior CTE). Cluster on accountid: the
-   downstream factcashbalances join key. #}
-{{ config(liquid_clustered_by='accountid') }}
+{# Liquid variant: drop partition_by (the boolean `latest_batch` flag —
+   useless as a Liquid cluster key). Without partition_by, insert_overwrite
+   degrades to CREATE OR REPLACE TABLE AS SELECT each batch — same logic
+   the model already runs (its body reads {{ this }} before the replace
+   via the prior CTE). We don't declare a cluster key here: any value we
+   set would be wiped by the next batch's CREATE OR REPLACE anyway, and
+   the table is small (one row per touched account) so unclustered is fine. #}
 {% else %}
 {# Partitioned variant (default): partition on the boolean latest_batch flag
    so the downstream factcashbalances filter `where latest_batch` prunes to

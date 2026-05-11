@@ -10,13 +10,13 @@
 {% if var('use_liquid_clustering', false) %}
 {# Liquid variant: switch to merge with composite key (sk_accountid, sk_dateid).
    Each batch writes one row per touched account keyed at today's sk_dateid;
-   merge inserts new (account,date) pairs without updating existing ones
-   (no UPDATE clause needed, but unique_key is still required by dbt-databricks
-   merge — provide the key to avoid duplicates if a batch reruns). #}
+   merge inserts new (account,date) pairs without updating existing ones.
+   No `liquid_clustered_by` here on purpose — the table is pre-created in
+   setup_dbt_liquid.py with CLUSTER BY (sk_dateid). Declaring it in dbt
+   config would force per-batch ALTER TABLE CLUSTER BY. #}
 {{ config(
     incremental_strategy='merge',
     unique_key=['sk_accountid','sk_dateid'],
-    liquid_clustered_by='sk_dateid',
 ) }}
 {% else %}
 {# Partitioned variant (default): stock dbt-databricks insert_overwrite.
