@@ -122,8 +122,13 @@ liquid_tbls = {
     'bronzedailymarket': ['dm_date'],
 }
 
-# Tables kept on source partitioned layout.
-deep_tbls = ['factcashbalances']
+# No DEEP CLONEs in the Liquid path. factcashbalances would be a candidate
+# (same pattern as setup_liquid.py for the cluster job), but the dbt model
+# declares liquid_clustered_by='sk_dateid' in the Liquid path. A partitioned
+# DEEP CLONE would trip DELTA_ALTER_TABLE_CLUSTER_BY_ON_PARTITIONED_TABLE_NOT_ALLOWED
+# when dbt's first run tried ALTER TABLE ... CLUSTER BY on the existing
+# partitioned target. Let dbt CREATE it fresh on first run instead.
+deep_tbls = []
 
 threads = len(shallow_tbls) + len(liquid_tbls) + len(deep_tbls)
 with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
