@@ -34,7 +34,7 @@ CREATE OR REPLACE TABLE bronzedailymarket (
   dm_low DOUBLE,
   dm_vol INT
 )
-PARTITIONED BY (dm_date)
+CLUSTER BY (dm_date)  -- liquid: matches setup_liquid / dbt-Liquid (FMH 365-day rolling lookback filters on dm_date)
 TBLPROPERTIES (
   -- Match the per-variant bronzedailymarket props (Classic deep-clones from
   -- here; deep clone preserves source TBLPROPERTIES). autoCompact=false to

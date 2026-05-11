@@ -23,7 +23,7 @@ CREATE OR REPLACE TABLE cashtransactionhistorical (
   ct_name STRING,
   event_dt DATE
 )
-PARTITIONED BY (event_dt)
+CLUSTER BY (event_dt)  -- liquid: per-batch ingest filter is on event_dt (matches bronze layout the Liquid variants use)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
   CONSTRAINT cashbalances_account_fk FOREIGN KEY (sk_accountid) REFERENCES DimAccount(sk_accountid),
   CONSTRAINT cashbalances_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid)
 )
-PARTITIONED BY (sk_dateid)
+CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt_liquid pre-create + Liquid dbt model unique key)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
@@ -58,7 +58,10 @@ CREATE OR REPLACE TABLE currentaccountbalances (
   current_account_cash DECIMAL(15,2) COMMENT 'Current running cash balance for the account',
   latest_batch BOOLEAN COMMENT 'Accounts with transactions on the latest date processed'
 )
-PARTITIONED BY (latest_batch)
+-- No clustering — table is small (one row per touched account) and the
+-- prior PARTITIONED BY (latest_batch) was a boolean flag, not a useful
+-- Liquid cluster key. dbt-Liquid recreates this table each batch anyway
+-- (CREATE OR REPLACE TABLE AS SELECT) so any cluster_by would be wiped.
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

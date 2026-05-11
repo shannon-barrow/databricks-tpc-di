@@ -21,8 +21,8 @@ CREATE OR REPLACE TABLE DimAccount (
   CONSTRAINT dimaccount_pk PRIMARY KEY(sk_accountid),
   CONSTRAINT dimaccount_customer_fk FOREIGN KEY (sk_customerid) REFERENCES DimCustomer(sk_customerid),
   CONSTRAINT dimaccount_broker_fk FOREIGN KEY (sk_brokerid) REFERENCES  DimBroker(sk_brokerid)
-) 
-PARTITIONED BY (iscurrent)
+)
+CLUSTER BY (enddate)  -- liquid: matches setup_liquid / setup_dbt_liquid (current rows = enddate=9999-12-31 cluster together)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

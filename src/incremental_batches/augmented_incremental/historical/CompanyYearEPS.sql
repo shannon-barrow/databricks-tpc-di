@@ -13,7 +13,7 @@ CREATE OR REPLACE TABLE CompanyYearEPS (
   prev_year_basic_eps DOUBLE COMMENT 'Basic earnings per share for the year.',
   CONSTRAINT company_eps_pk PRIMARY KEY(sk_companyid, qtr_start_date),
   CONSTRAINT company_eps_fk FOREIGN KEY (sk_companyid) REFERENCES DimCompany(sk_companyid)
-) PARTITIONED BY (qtr_start_date);
+) CLUSTER BY (qtr_start_date);  -- liquid: matches the column we'd previously partition on (FMH per-batch joins filter by qtr_start_date)
 
 -- COMMAND ----------
 
