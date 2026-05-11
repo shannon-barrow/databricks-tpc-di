@@ -18,9 +18,11 @@
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"])
 dbutils.widgets.text("catalog", "main")
+dbutils.widgets.text("raw_data_schema", "tpcdi_raw_data")
 
-scale_factor = dbutils.widgets.get("scale_factor").strip()
-catalog      = dbutils.widgets.get("catalog").strip()
+scale_factor    = dbutils.widgets.get("scale_factor").strip()
+catalog         = dbutils.widgets.get("catalog").strip()
+raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
 
 # COMMAND ----------
 

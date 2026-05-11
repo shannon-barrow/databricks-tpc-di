@@ -541,6 +541,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         notebook_path=f"{repo_src_path}/tools/augmented_staging/cleanup_stage0",
         depends_on=cleanup_deps,
         run_if="ALL_SUCCESS",
+        base_params=dict(_rds_param),
     ))
 
     # No cleanup-on-failure task needed — the early-exit check uses
