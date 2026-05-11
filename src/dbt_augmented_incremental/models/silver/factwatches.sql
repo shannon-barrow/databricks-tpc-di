@@ -3,7 +3,10 @@
     materialized = 'incremental',
     incremental_strategy = 'merge',
     unique_key = ['symbol', 'customerid'],
-    incremental_predicates = ['DBT_INTERNAL_DEST.removed = false'],
+    incremental_predicates = [
+      'DBT_INTERNAL_DEST.removed = false',
+      'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL',
+    ],
     merge_update_columns = ['sk_dateid_dateremoved', 'removed'],
     on_schema_change = 'ignore',
     file_format = 'delta',
@@ -14,10 +17,17 @@
 {# SCD1 watch-list state. Each (customerid, symbol) pair has at most one
    ACTV-PLACED row (removed=false) and optionally a CNCL (removed=true).
    When a CNCL event arrives, we MERGE-UPDATE the existing not-removed
-   row to set removed=true and dateremoved. The incremental_predicates
-   `DBT_INTERNAL_DEST.removed = false` keeps already-removed rows from
-   being matched again — mirrors the Classic build's `!t.removed` ON
-   condition. #}
+   row to set removed=true and dateremoved.
+
+   incremental_predicates are ANDed onto the MERGE ON clause, mirroring
+   the Classic-Liquid build's MERGE condition:
+       `!t.removed AND t.sk_dateid_dateremoved IS NULL`
+   - `removed = false`: keeps already-removed rows from being matched again.
+   - `sk_dateid_dateremoved IS NULL`: redundant with the first (the two
+     columns are kept in sync) but pinning the predicate on the Liquid
+     cluster column (`sk_dateid_dateremoved`) lets Delta data-skipping
+     prune the merge scan to only the files containing NULLs — the same
+     prune the partitioned variant got from `PARTITIONED BY (removed)`. #}
 
 with new_events as (
   select * from {{ ref('bronzewatches') }}
