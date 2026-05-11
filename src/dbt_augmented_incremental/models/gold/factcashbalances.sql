@@ -1,14 +1,36 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'insert_overwrite',
-    partition_by = 'sk_dateid',
-    use_replace_on_for_insert_overwrite = True,
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
+
+{% if var('use_liquid_clustering', false) %}
+{# Liquid variant: switch to merge with composite key (sk_accountid, sk_dateid).
+   Each batch writes one row per touched account keyed at today's sk_dateid;
+   merge inserts new (account,date) pairs without updating existing ones
+   (no UPDATE clause needed, but unique_key is still required by dbt-databricks
+   merge — provide the key to avoid duplicates if a batch reruns). #}
+{{ config(
+    incremental_strategy='merge',
+    unique_key=['sk_accountid','sk_dateid'],
+    liquid_clustered_by='sk_dateid',
+) }}
+{% else %}
+{# Partitioned variant (default): stock dbt-databricks insert_overwrite.
+   The use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit
+   Delta's REPLACE-on-partition primitive that works on SQL Warehouses
+   without the spark.session config tweak. Effect: today's sk_dateid
+   partition is replaced; prior days untouched. Mirrors Classic's
+   INSERT OVERWRITE dynamic-partition behaviour. #}
+{{ config(
+    incremental_strategy='insert_overwrite',
+    partition_by='sk_dateid',
+    use_replace_on_for_insert_overwrite=True,
+) }}
+{% endif %}
 
 {# Stock dbt-databricks insert_overwrite. The
    use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit

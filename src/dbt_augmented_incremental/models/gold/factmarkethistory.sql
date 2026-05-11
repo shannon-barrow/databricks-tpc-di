@@ -1,14 +1,36 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'insert_overwrite',
-    partition_by = 'sk_dateid',
-    use_replace_on_for_insert_overwrite = True,
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
+
+{% if var('use_liquid_clustering', false) %}
+{# Liquid variant: switch to merge so the model isn't tied to partition
+   replacement semantics (Liquid tables have no partitions). Unique key
+   is composite (sk_securityid, sk_dateid) — one row per (security, date).
+   Cluster on sk_dateid: same column the partitioned variant filtered on. #}
+{{ config(
+    incremental_strategy='merge',
+    unique_key=['sk_securityid','sk_dateid'],
+    liquid_clustered_by='sk_dateid',
+) }}
+{% else %}
+{# Partitioned variant (default): stock dbt-databricks insert_overwrite.
+   use_replace_on_for_insert_overwrite=True (1.11+) makes dbt emit Delta's
+   REPLACE-on-partition primitive that works on SQL Warehouses — without
+   it the strategy degraded to full-table TABLE materialization on
+   warehouses. Effect: today's sk_dateid partition is replaced; prior
+   days untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
+   behaviour. #}
+{{ config(
+    incremental_strategy='insert_overwrite',
+    partition_by='sk_dateid',
+    use_replace_on_for_insert_overwrite=True,
+) }}
+{% endif %}
 
 {# Stock dbt-databricks insert_overwrite. The
    use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit

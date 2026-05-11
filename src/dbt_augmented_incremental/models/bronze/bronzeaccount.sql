@@ -2,11 +2,17 @@
   config(
     materialized = 'incremental',
     incremental_strategy = 'append',
-    partition_by = 'update_dt',
     on_schema_change = 'ignore',
     file_format = 'delta',
   )
 }}
+
+
+{% if var('use_liquid_clustering', false) %}
+{{ config(liquid_clustered_by='update_dt') }}
+{% else %}
+{{ config(partition_by='update_dt') }}
+{% endif %}
 
 {# Two sources go into bronzeaccount, mirroring the Classic build:
     1. Direct ingestion of the day's Account.txt drop.

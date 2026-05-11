@@ -2,11 +2,17 @@
   config(
     materialized = 'incremental',
     incremental_strategy = 'append',
-    partition_by = 'dm_date',
     on_schema_change = 'ignore',
     file_format = 'delta',
   )
 }}
+
+
+{% if var('use_liquid_clustering', false) %}
+{{ config(liquid_clustered_by='dm_date') }}
+{% else %}
+{{ config(partition_by='dm_date') }}
+{% endif %}
 
 {%- set schema_str -%}
 cdc_flag STRING, cdc_dsn BIGINT, dm_date DATE, dm_s_symb STRING,

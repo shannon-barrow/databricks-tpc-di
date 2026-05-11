@@ -2,11 +2,17 @@
   config(
     materialized = 'incremental',
     incremental_strategy = 'append',
-    partition_by = 'update_dt',
     on_schema_change = 'ignore',
     file_format = 'delta',
   )
 }}
+
+
+{% if var('use_liquid_clustering', false) %}
+{{ config(liquid_clustered_by='update_dt') }}
+{% else %}
+{{ config(partition_by='update_dt') }}
+{% endif %}
 
 {%- set schema_str -%}
 cdc_flag STRING, cdc_dsn BIGINT, customerid BIGINT, taxid STRING, status STRING,

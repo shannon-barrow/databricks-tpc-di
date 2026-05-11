@@ -2,12 +2,27 @@
   config(
     materialized = 'incremental',
     incremental_strategy = 'insert_overwrite',
-    partition_by = 'latest_batch',
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
+
+{% if var('use_liquid_clustering', false) %}
+{# Liquid variant: drop partition_by (which was the boolean `latest_batch`
+   flag — not useful as a Liquid cluster key). Without partition_by,
+   insert_overwrite degrades to CREATE OR REPLACE TABLE AS SELECT — which
+   is exactly what this model does anyway (its body reads {{ this }}
+   before the replace via the prior CTE). Cluster on accountid: the
+   downstream factcashbalances join key. #}
+{{ config(liquid_clustered_by='accountid') }}
+{% else %}
+{# Partitioned variant (default): partition on the boolean latest_batch flag
+   so the downstream factcashbalances filter `where latest_batch` prunes to
+   the single TRUE partition — fast point-read for the few thousand accounts
+   touched in the current batch. #}
+{{ config(partition_by='latest_batch') }}
+{% endif %}
 
 {# Per-account cumulative cash balance. Mirrors the Classic build's
    INSERT OVERWRITE pattern (incremental/currentaccountbalances Incremental.py):
