@@ -465,7 +465,7 @@ Performance optimizations that change output are worth nothing if the benchmark 
 
 **End-to-end smoke testing.** SF=10 × {Cluster Incremental, DBSQL Single Batch, SDP-CORE} all run green.
 
-**Augmented benchmark validation.** The Augmented Incremental variant (730-day daily streaming) at SF=10 finishes in 7 min on a single serverless cluster (verified via `system.lakeflow.job_task_run_timeline`).
+**Augmented benchmark validation.** The Augmented Incremental variant (365-day daily streaming) at SF=10 finishes in 7 min on a single serverless cluster (verified via `system.lakeflow.job_task_run_timeline`).
 
 ---
 

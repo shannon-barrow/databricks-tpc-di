@@ -14,7 +14,7 @@ from workflow_builders import (
     datagen_spark, datagen_digen,
     workflows_single_batch, workflows_incremental,
     sdp_pipeline, sdp_workflow,
-    augmented_classic, augmented_sdp,
+    augmented_classic, augmented_sdp, augmented_dbt,
     augmented_staging,
 )
 
@@ -385,6 +385,79 @@ def test_augmented_sdp_parent():
     _ok("set_pipeline_incremental swaps back to historical_flag=false")
 
 
+def test_augmented_dbt_child():
+    print("\naugmented_dbt.build_child() — simulate_filedrops + dbt_task")
+    out = augmented_dbt.build_child(
+        job_name="Smoke-Child-DBT",
+        wh_id="abc-warehouse-id",
+        **_AUG_COMMON,
+    )
+    keys = [t["task_key"] for t in out["tasks"]]
+    assert keys == ["simulate_filedrops", "dbt_run"], keys
+    _ok(f"task order = {keys}")
+
+    dbt_task = out["tasks"][1]
+    assert "dbt_task" in dbt_task, "second task must be a dbt_task"
+    assert dbt_task["dbt_task"]["warehouse_id"] == "abc-warehouse-id"
+    assert dbt_task["dbt_task"]["catalog"] == "main"
+    _ok("dbt_task wired to (warehouse_id, catalog)")
+
+    # Per-batch dbt invocation should pass batch_date / scale_factor / wh_db / catalog vars
+    cmds = dbt_task["dbt_task"]["commands"]
+    assert any("dbt deps" in c for c in cmds), "first dbt command should be `dbt deps`"
+    run_cmd = next(c for c in cmds if c.startswith("dbt run"))
+    for v in ("batch_date", "scale_factor", "wh_db", "tpcdi_directory", "catalog"):
+        assert f'"{v}":' in run_cmd, f"dbt --vars payload missing {v!r}"
+    _ok("dbt run --vars payload includes batch_date / scale_factor / wh_db / tpcdi_directory / catalog")
+
+    # The job declares the dbt environment (env install at runtime, not pinned to a cluster)
+    envs = out.get("environments", [])
+    assert envs and envs[0]["environment_key"] == "dbt"
+    deps = envs[0]["spec"]["dependencies"]
+    assert any("dbt-databricks" in d for d in deps), f"dbt-databricks dep missing: {deps}"
+    _ok(f"dbt environment declared: {deps}")
+
+
+def test_augmented_dbt_parent():
+    print("\naugmented_dbt.build_parent() — setup_dbt → for_each(child) → gate → cleanup")
+    out = augmented_dbt.build_parent(
+        job_name="Smoke-Parent-DBT",
+        child_job_id=99999,
+        wh_id="abc-warehouse-id",
+        **_AUG_COMMON,
+    )
+    keys = [t["task_key"] for t in out["tasks"]]
+    assert keys == ["setup", "loop_incremental_tpcdi",
+                    "delete_when_finished_TRUE_FALSE", "cleanup"], keys
+    _ok(f"task order = {keys}")
+
+    setup = out["tasks"][0]
+    assert setup["notebook_task"]["notebook_path"].endswith("/setup_dbt"), \
+        f"setup task must point at setup_dbt notebook (Liquid variant swaps to setup_dbt_liquid post-build): {setup['notebook_task']['notebook_path']}"
+    _ok("default setup notebook is setup_dbt (partitioned)")
+
+    loop = out["tasks"][1]
+    assert "for_each_task" in loop, "loop_incremental_tpcdi must be a for_each_task"
+    assert loop["for_each_task"]["inputs"] == "{{tasks.setup.values.batch_date_ls}}", \
+        "for_each input must read setup's batch_date_ls task value"
+    assert loop["for_each_task"]["task"]["run_job_task"]["job_id"] == 99999, \
+        "for_each iteration must call the child job by id"
+    _ok("for_each loop wired to setup's batch_date_ls + child_job_id")
+
+    # Parent-level job parameters (per-batch batch_date lives on the CHILD job,
+    # injected by the for_each iteration via {{input}})
+    pnames = {p["name"] for p in out["parameters"]}
+    for required in ("catalog", "scale_factor", "tpcdi_directory", "wh_db"):
+        assert required in pnames, f"parent job parameters missing {required!r}: {pnames}"
+    _ok(f"parent declares parameters: {sorted(pnames)}")
+
+    # Per-iteration child params include batch_date={{input}}
+    child_call = loop["for_each_task"]["task"]["run_job_task"]
+    assert child_call["job_parameters"].get("batch_date") == "{{input}}", \
+        f"for_each must pass batch_date={{input}} to the child: {child_call.get('job_parameters')}"
+    _ok("for_each iteration passes batch_date={{input}} to child")
+
+
 def test_augmented_staging_dag():
     print("\naugmented_staging.build() — Stage 0 data_gen DAG present")
     out = augmented_staging.build(
@@ -459,6 +532,8 @@ def main():
         test_augmented_sdp_pipeline,
         test_augmented_sdp_child,
         test_augmented_sdp_parent,
+        test_augmented_dbt_child,
+        test_augmented_dbt_parent,
         test_augmented_staging_dag,
     ]
     for t in tests:

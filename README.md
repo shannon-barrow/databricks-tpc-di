@@ -1,6 +1,6 @@
 # Databricks TPC-DI
 
-A Databricks-native implementation of the [TPC-DI](http://tpc.org/tpcdi/default5.asp) data-integration benchmark, designed to run end-to-end on the Databricks Lakehouse platform across multiple compute SKUs (job clusters, SQL warehouses, Spark Declarative Pipelines) and multiple data-load shapes (single-batch, incremental, and a 730-day daily-streaming "Augmented Incremental" variant).
+A Databricks-native implementation of the [TPC-DI](http://tpc.org/tpcdi/default5.asp) data-integration benchmark, designed to run end-to-end on the Databricks Lakehouse platform across multiple compute SKUs (job clusters, SQL warehouses, Spark Declarative Pipelines) and multiple data-load shapes (single-batch, incremental, and a 365-day daily-streaming "Augmented Incremental" variant).
 
 This repo follows the [TPC-DI v1.1.0 spec](https://www.tpc.org/TPC_Documents_Current_Versions/pdf/TPC-DI_v1.1.0.pdf) for business rules and table outputs; the spec itself does not provide code, only requirements. This project is the implementation.
 
@@ -11,7 +11,7 @@ This repo follows the [TPC-DI v1.1.0 spec](https://www.tpc.org/TPC_Documents_Cur
 
 - **Distributed Spark data generator** (`src/tools/data_gen_tasks/` entry + `src/tools/tpcdi_gen/` modules) — replaces the single-threaded `DIGen.jar` with a parallel PySpark implementation that runs on Databricks Serverless. Linear scaling across executors; large scale factors (SF=10000+) finish in a fraction of the JAR's time. Decomposed into per-dataset workflow tasks (`gen_*` + `copy_*`) so a failed dataset can be repair-run in isolation. Trade family is further split into `gen_trade_base` + 4 parallel leaves (`gen_trade`, `gen_tradehistory`, `gen_cashtransaction`, `gen_holdinghistory`) sharing a Delta-staged base DataFrame. CustomerMgmt scheduling runs as a Pandas-UDF GrowingOffsetPermutation on Spark executors (no driver-side numpy bottleneck). File rename from staging→final layout fans out across executor pods. The DIGen.jar path is preserved for byte-compatible reference output. SF=20k full pipeline: ~19m on serverless.
 - **SDP** (Spark Declarative Pipelines) — the runtime previously branded "DLT". Library names, schema labels, and prose all reflect the rename.
-- **Augmented Incremental benchmark** — a 730-day daily-streaming reshaping of TPC-DI (2015-07-06 → 2017-07-05) that exercises CDC + SCD2 maintenance under a real production-shaped daily load instead of a single bulk import. Available for Cluster and SDP.
+- **Augmented Incremental benchmark** — a 365-day daily-streaming reshaping of TPC-DI (2016-07-06 → 2017-07-05) that exercises CDC + SCD2 maintenance under a real production-shaped daily load instead of a single bulk import. Available for Cluster and SDP.
 - **Python workflow builders** — every job/pipeline JSON is built by a Python module under `src/tools/workflow_builders/`. Jinja templates retired.
 - **Static audit snapshots** — pre-computed `*_audit.csv` snapshots committed to the repo at every common SF, so audit values are instant rather than recomputed each run.
 - **Skills-asset positioning** — this repo is deliberately curated for use by AI agents (Claude, Databricks Genie). See [`CLAUDE.md`](CLAUDE.md) at repo root for architecture context, gotchas, and load-bearing decisions.
@@ -29,6 +29,7 @@ The Driver splits the workflow choice into two widgets so the dropdown stays sho
 | **Cluster** (job cluster, classic or serverless) | ✓ | ✓ | ✓ |
 | **DBSQL** (serverless SQL warehouse) | ✓ | ✓ | — |
 | **SDP** (Spark Declarative Pipelines) | ✓ + edition | — | ✓ |
+| **dbt** (dbt-databricks against a SQL warehouse) | — | — | ✓ |
 
 When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown appears: `CORE`, `PRO` (adds `APPLY CHANGES INTO` for SCD Type 1/2), or `ADVANCED` (adds Data Quality constraints).
 
@@ -36,7 +37,7 @@ When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown appears: `C
 
 - **Single Batch** — all 3 TPC-DI batches in one pass (faster, **no audit checks**).
 - **Incremental** — batches sequentially with audit checks at each boundary (spec validation, CLUSTER + DBSQL only).
-- **Augmented Incremental** — 730-day daily streaming pipeline (CLUSTER + SDP only). Reads pre-staged per-day files from `_staging/sf={sf}/{Dataset}/_pdate={date}/`. Stage 0 (data prep) is a separate workflow built by `workflow_builders/augmented_staging.py` — run it once per SF to populate the staging tree. Validated at SF=10/100/1000/5000/10000/20000. See [`src/incremental_batches/augmented_incremental/README.md`](src/incremental_batches/augmented_incremental/README.md) for the architecture.
+- **Augmented Incremental** — 365-day daily streaming pipeline (CLUSTER + SDP + dbt). Reads pre-staged per-day files from `_staging/sf={sf}/{Dataset}/_pdate={date}/`. Stage 0 (data prep) is a separate workflow built by `workflow_builders/augmented_staging.py` — run it once per SF to populate the staging tree. Validated at SF=10/100/1000/5000/10000/20000. Each variant has a partitioned and a Liquid-clustered flavor (with Liquid as the going-forward default — see [`src/incremental_batches/augmented_incremental/README.md`](src/incremental_batches/augmented_incremental/README.md) for the setup-notebook ↔ variant matrix). dbt is built as a stock dbt-databricks project at [`src/dbt_augmented_incremental/`](src/dbt_augmented_incremental/README.md) for cross-CDW comparison (Databricks DBSQL vs Snowflake, etc.).
 
 ## How to run
 
@@ -107,11 +108,11 @@ Pre-flight on the native path: before any volume side effect, `digen_runner` ver
 
 ## Augmented Incremental — what's different
 
-Standard TPC-DI is heavily skewed to a single bulk historical load — Batch 2 and Batch 3 are tiny by comparison. Augmented Incremental reshapes this into 730 daily increments (2015-07-06 → 2017-07-05), exercising CDC + SCD2 maintenance + cumulative compaction the way a production daily pipeline does.
+Standard TPC-DI is heavily skewed to a single bulk historical load — Batch 2 and Batch 3 are tiny by comparison. Augmented Incremental reshapes this into 365 daily increments (2016-07-06 → 2017-07-05), exercising CDC + SCD2 maintenance + cumulative compaction the way a production daily pipeline does.
 
-- **Setup** clones the static dimension tables from `tpcdi_incremental_staging_{sf}` (a shared per-SF staging schema), creates per-user `_dailybatches/{wh_db}_{sf}/` and `_checkpoints/{wh_db}_{sf}/` directories, and emits a 730-day list as a job task value.
+- **Setup** clones the static dimension tables from `tpcdi_incremental_staging_{sf}` (a shared per-SF staging schema), creates per-user `_dailybatches/{wh_db}_{sf}/` and `_checkpoints/{wh_db}_{sf}/` directories, and emits a 365-day list as a job task value.
 - **Loop** (via Databricks `for_each_task`): each iteration runs `simulate_filedrops` (drops one day's pre-staged files into the Autoloader watch dir) → bronze ingest fan-out → silver/gold MERGE incrementals.
-- **Cleanup** is gated by a `delete_when_finished_TRUE_FALSE` condition_task; default is `FALSE` because a full 730-day run takes ~a week and you'll typically want to inspect the result tables. Set the parameter to `TRUE` per-run if you want to drop them.
+- **Cleanup** is gated by a `delete_when_finished_TRUE_FALSE` condition_task; default is `FALSE` because a full 365-day run takes ~a week and you'll typically want to inspect the result tables. Set the parameter to `TRUE` per-run if you want to drop them.
 - **No audit step** — the standard TPC-DI audit checks don't apply to a daily streaming model. (Future work: add row-count parity vs a known-good staged result.)
 
 The SDP variant uses a library-swap trick (`update_pipeline_notebook`) to bulk-load history with `dlt_historical` first, then swap to `dlt_incremental` for the streaming loop. Same physical pipeline, different libraries between phases.

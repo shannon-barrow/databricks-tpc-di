@@ -399,15 +399,15 @@ truth. Quick orientation for AI agents:
 - **Stage 0** is a separate workflow (`augmented_staging`) run once per
   SF. The per-dataset gen tasks write the 7 datasets to Delta tables at
   `tpcdi_raw_data.{dataset}{sf}` with an `stg_target` column that splits
-  rows into 'tables' (pre-2015-07-06, source for the historical SCD2
-  builds) and 'files' (the 730-day window, source for the per-day file
+  rows into 'tables' (pre-2016-07-06, source for the historical SCD2
+  builds) and 'files' (the 365-day window, source for the per-day file
   drops). 7 `stage_files/*.py` notebooks then write Spark-native
   partitioned-CSV at `_staging/sf={sf}/{Dataset}/_pdate={date}/part-*.csv`.
   No post-write rename or concat at stage time.
 - **Early-exit** on Stage 0 uses Spark's `_SUCCESS` marker per dataset
   dir, NOT a date-dir count. Authoritative — half-written datasets can't
   false-positive.
-- **Stage 1** (the benchmark) is a parent job that loops 730 dates via
+- **Stage 1** (the benchmark) is a parent job that loops 365 dates via
   `for_each_task`. Per iteration: `simulate_filedrops.py` does
   `dbutils.fs.cp` (NOT `mv`) of one day's part files into the auto-loader
   watch dir, renamed to `{Dataset}.{file_ext}` (job param `file_ext`,
@@ -423,12 +423,86 @@ truth. Quick orientation for AI agents:
   `_sort_key` / `_ordered_pos`; ActionTS now derives directly from
   `pos_in_update`. Each ActionType (NEW / UPDCUST / INACT) spreads
   uniformly across each 8.4-day update window — Customer touches all
-  730 dates instead of the prior 404. Mirrors DIGen's per-row-index
+  365 dates instead of the prior 404. Mirrors DIGen's per-row-index
   timestamping with action-type permutation.
 - **B2/B3 generation is skipped** in augmented mode (gated at the call
   sites in `customer.py`, `trade.py`, `watch_history.py`, `prospect.py`).
-  The 730-day window's events come from the `'files'` partition of the
+  The 365-day window's events come from the `'files'` partition of the
   Stage 0 Delta tables.
+
+### Augmented Incremental — dbt variant
+
+`src/dbt_augmented_incremental/` is a dbt port of the Augmented Incremental
+benchmark for cross-CDW comparison (Databricks DBSQL vs Snowflake / BigQuery
+/ Redshift). Same 365-day daily streaming workload, same source data, same
+business logic — expressed as a stock dbt project (no custom materializations).
+
+- **Scope:** per-batch incremental only. Stage 0 (data gen) and Stage 1 setup
+  (CLONE staging, reset autoloader dirs, emit batch dates) stay in the
+  Databricks notebooks. dbt enters when the daily loop starts.
+- **Orchestrator:** `tools/workflow_builders/augmented_dbt.py` builds parent +
+  child Jobs that wire setup_dbt + simulate_filedrops + a Databricks-native
+  `dbt_task` (env: dbt-databricks==1.11.7) into a `for_each_task` loop.
+- **15 dbt-managed models:** 7 bronze (append) + 4 silver (merge, with
+  `incremental_predicates` on dimtrade/factwatches for non-canceled-rows
+  prune) + 4 gold (factholdings append; factmarkethistory/factcashbalances
+  `insert_overwrite` partitioned OR `merge` Liquid; currentaccountbalances
+  `insert_overwrite`). Stock dbt-databricks strategies — no custom macros.
+- **Liquid toggle:** `dbt run --vars '{..., use_liquid_clustering: true}'`
+  selects between partitioned and Liquid behavior per model (see next).
+
+### Augmented Incremental — Liquid clustering
+
+The Liquid path is the **default direction** going forward (partitioned
+variants will retire once SF=20k regenerates against Liquid staging — see
+"Setup-notebook matrix" in
+`src/incremental_batches/augmented_incremental/README.md` for the
+benchmark-variant ↔ setup-notebook pairing).
+
+- **Staging is now Liquid.** All `historical/*.sql` files build
+  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY` (cluster column
+  matches setup_liquid's choice for each table — e.g. dimcustomer/dimaccount
+  on `enddate`, factwatches on `sk_dateid_dateremoved`, factmarkethistory
+  /factholdings/factcashbalances on `sk_dateid`, bronzedailymarket on
+  `dm_date`).
+- **Setup-owns-layout pattern** (dbt path): `setup_dbt_liquid.py`
+  pre-creates every Liquid-clustered table — dim/fact via CTAS,
+  bronze (6 tables) + factcashbalances via explicit
+  `CREATE TABLE ... CLUSTER BY ... TBLPROPERTIES`. dbt model configs in
+  the `use_liquid_clustering=true` branch deliberately **omit** any
+  `liquid_clustered_by` / `tblproperties`. Reason: dbt-databricks otherwise
+  issues `ALTER TABLE CLUSTER BY` and `ALTER TABLE SET TBLPROPERTIES`
+  against the target on every batch (synchronizing model config to table
+  state, even when nothing drifted) — that's significant DDL noise +
+  per-batch overhead.
+- **`delta.dataSkippingNumIndexedCols=34`** on bronzecustomer + every
+  CLUSTER BY-on-update_dt bronze table: the cluster column is past the
+  default 32-col stats window, so Delta rejects the write without this
+  TBLPROPERTY. Set in setup_liquid.py and setup_dbt_liquid.py.
+- **Why Liquid wins** (factwatches case study from the SDP thread): when
+  the partition column is updated by the per-batch MERGE (e.g. `removed`
+  on factwatches flipping from false→true), Delta has to rewrite the
+  entire source partition because vectorized writes can't move rows
+  across partition boundaries. Liquid avoids this cross-partition
+  rewrite — net write amplification is much lower even though
+  partitioning prunes more on read. Same dynamic applies to dimcustomer/
+  dimaccount (`iscurrent`) and any SCD2 table where partitions go stale.
+
+### Benchmark variant matrix (current)
+
+16 variants on the cross-cloud benchmark dashboard:
+
+| Variant                       | Setup notebook              | Storage |
+|-------------------------------|-----------------------------|---------|
+| Cluster Partitioned (PERF-OPT/STD) | `setup.py`             | PARTITIONED BY |
+| Cluster Liquid (PERF-OPT/STD)      | `setup_liquid.py`      | CLUSTER BY |
+| SDP Partitioned                | `DLT/pipelines_setup.py`         | partition (pipeline) |
+| SDP Liquid (PERF-OPT/STD)      | `DLT/pipelines_setup_liquid.py`  | CLUSTER BY (pipeline) |
+| SDP "Perf-Opt SDP with Dhruv's Liquid Columns" (was: ModClust) | `DLT/pipelines_setup_modclust.py` | engineer-suggested cluster keys |
+| dbt Partitioned Small/Medium WH | `setup_dbt.py`          | inherits staging layout (now Liquid) |
+| dbt Liquid Small WH            | `setup_dbt_liquid.py`     | CLUSTER BY + setup-owns-layout |
+
+Both clouds (Azure + AWS) run the same matrix where applicable.
 
 ## Common workflows
 
