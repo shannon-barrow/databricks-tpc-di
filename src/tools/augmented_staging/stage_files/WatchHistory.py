@@ -17,9 +17,7 @@ dbutils.widgets.text("tpcdi_directory",
 dbutils.widgets.text("catalog", "main")
 
 scale_factor    = dbutils.widgets.get("scale_factor").strip()
-tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
-raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
-catalog         = dbutils.widgets.get("catalog").strip()
+tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()catalog         = dbutils.widgets.get("catalog").strip()
 
 target_dir = f"{tpcdi_directory.rstrip('/')}/sf={scale_factor}"  # tpcdi_directory base_param already ends with augmented_incremental/_staging/
 
@@ -42,7 +40,7 @@ SELECT
   w_action,
   to_date(w_dts) AS event_dt,
   to_date(w_dts) AS _pdate  -- duplicate partition col so event_dt stays in the data file
-FROM {catalog}.{raw_data_schema}.watchhistory{scale_factor}
+FROM {catalog}.tpcdi_raw_data.watchhistory{scale_factor}
 WHERE stg_target = 'files'
 """)
 

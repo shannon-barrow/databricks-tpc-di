@@ -210,18 +210,12 @@ class ScaleConfig:
     def __init__(self, scale_factor: int, catalog: str,
                  tpcdi_directory: str | None = None,
                  augmented_incremental: bool = False,
-                 wh_db: str | None = None,
-                 raw_data_schema: str = "tpcdi_raw_data"):
+                 wh_db: str | None = None):
         self.sf = scale_factor
-        # Augmented-Incremental staging mode: skip Batch2/Batch3 generation, write Delta tables to {catalog}.{raw_data_schema}.{dataset}{sf} instead of CSV/XML/TXT files. Downstream stage_files / stage_tables tasks read from these temp Delta tables; cleanup_stage0 drops them once the per-day files + tpcdi_incremental_staging_{sf} schema are populated.
+        # Augmented-Incremental staging mode: skip Batch2/Batch3 generation, write Delta tables to {catalog}.tpcdi_raw_data.{dataset}{sf} instead of CSV/XML/TXT files. Downstream stage_files / stage_tables tasks read from these temp Delta tables; cleanup_stage0 drops them once the per-day files + tpcdi_incremental_staging_{sf} schema are populated.
         self.augmented_incremental = augmented_incremental
         # wh_db plumbs through to disk_cache so within-task materializations (CustomerMgmt schedules, trade_df, etc.) can target {catalog}.{wh_db}_{sf}_stage Delta tables (matching dw_init.sql's interim convention) instead of the legacy parquet path under {volume}/_staging/. None = legacy parquet fallback.
         self.wh_db = wh_db
-        # Schema name for the per-dataset Delta intermediates and the source volume
-        # (`/Volumes/{catalog}/{raw_data_schema}/tpcdi_volume/`). Default "tpcdi_raw_data"
-        # matches the Azure convention. Override (e.g. "tpcdi_raw_data_barrow") when
-        # the canonical schema is owned by someone else and we need a writable schema.
-        self.raw_data_schema = raw_data_schema
         # DIGen multiplies the user-facing SF by 1000 to get the internal scaling base. All row counts are expressed as a coefficient times internal_sf. See DIGen source: DataGenParameters.java, "sf = scaleFactor * 1000".
         self.internal_sf = scale_factor * 1000
         self.catalog = catalog

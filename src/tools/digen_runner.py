@@ -289,10 +289,17 @@ def run(
             if not catalog_exists:
                 spark.sql(f"CREATE CATALOG IF NOT EXISTS {catalog}")
                 spark.sql(f"GRANT ALL PRIVILEGES ON CATALOG {catalog} TO `account users`")
+            # tpcdi_raw_data + its volume are SHARED across all workspace users.
+            # Always GRANT ALL PRIVILEGES so the first creator doesn't lock everyone
+            # else out (matches data_gen_tasks/data_gen.py for the Spark path).
             spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
-                      f"COMMENT 'Schema for TPC-DI Raw Files Volume'")
+                      f"COMMENT 'Shared TPC-DI raw files schema'")
+            spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+                      f"TO `account users`")
             spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
-                      f"COMMENT 'TPC-DI Raw Files'")
+                      f"COMMENT 'Shared TPC-DI raw files volume'")
+            spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+                      f"TO `account users`")
 
         filenames = [
             os.path.join(root, name)

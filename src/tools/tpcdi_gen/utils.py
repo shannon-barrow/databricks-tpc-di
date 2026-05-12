@@ -780,7 +780,7 @@ def safe_conf_set(spark, key: str, value) -> bool:
 
 def write_delta(df: DataFrame, *, cfg, dataset: str,
                 partition_cols: list = None) -> str:
-    """Write ``df`` as a Delta table at ``{catalog}.{cfg.raw_data_schema}.{dataset}{sf}``.
+    """Write ``df`` as a Delta table at ``{catalog}.{'tpcdi_raw_data'}.{dataset}{sf}``.
 
     Used by the augmented-incremental staging mode in place of file output.
     The downstream ``stage_files`` / ``stage_tables`` tasks read from these
@@ -793,7 +793,7 @@ def write_delta(df: DataFrame, *, cfg, dataset: str,
 
     Returns the fully-qualified table name written.
     """
-    fq = f"{cfg.catalog}.{cfg.raw_data_schema}.{dataset}{cfg.sf}"
+    fq = f"{cfg.catalog}.{'tpcdi_raw_data'}.{dataset}{cfg.sf}"
 
     # DDL-first so Delta auto-assigns cdc_dsn during the INSERT. Drop+recreate so the IDENTITY sequence restarts at 0 on every run.
     spark = df.sparkSession

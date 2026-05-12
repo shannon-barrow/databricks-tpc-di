@@ -30,7 +30,6 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10", "100", "1000", "5000", "10
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("wh_db", "tpcdi_incremental_staging")
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("raw_data_schema", "tpcdi_raw_data")
 dbutils.widgets.dropdown("regenerate_data", "NO", ["NO", "YES"])
 dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN", "ERROR"])
 
@@ -38,9 +37,7 @@ data_gen_type = dbutils.widgets.get("data_gen_type").strip().lower()
 scale_factor  = dbutils.widgets.get("scale_factor").strip()
 catalog       = dbutils.widgets.get("catalog").strip()
 wh_db         = dbutils.widgets.get("wh_db").strip()
-tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
-raw_data_schema = dbutils.widgets.get("raw_data_schema").strip()
-regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
+tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
 log_level     = dbutils.widgets.get("log_level").strip().upper()
 
 if data_gen_type not in ("spark", "native", "augmented_incremental"):
@@ -83,15 +80,25 @@ from data_gen_tasks._shared import bootstrap, stage_schema_fq
 ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 catalog=catalog, wh_db=wh_db, tpcdi_directory=tpcdi_directory,
                 log_level=log_level, augmented_incremental=augmented_incremental,
-                workspace_src_path=workspace_src_path, load_dicts=False,
-                raw_data_schema=raw_data_schema)
+                workspace_src_path=workspace_src_path, load_dicts=False)
 cfg = ctx["cfg"]
 
 # COMMAND ----------
 
 # Schemas first.
-spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{raw_data_schema}")
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.{raw_data_schema}.tpcdi_volume")
+# tpcdi_raw_data + its volume are SHARED resources: every user in the
+# workspace should be able to read existing data AND write new scale
+# factors. Grant ALL PRIVILEGES to `account users` so the first creator
+# doesn't lock everyone else out. The GRANT is idempotent — it runs on
+# every data_gen invocation but only takes effect once.
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
+          f"COMMENT 'Shared TPC-DI raw files schema'")
+spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+          f"TO `account users`")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
+          f"COMMENT 'Shared TPC-DI raw files volume'")
+spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+          f"TO `account users`")
 
 stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 print(f"[data_gen] ensuring {stage_schema} exists")
@@ -99,10 +106,14 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {stage_schema} "
           f"COMMENT 'data_gen + benchmark interim temp tables'")
 
 if augmented_incremental:
-    # The augmented benchmark also reads from these schemas.
+    # The augmented benchmark also reads from these schemas. Open this one
+    # up to `account users` for the same reasons as tpcdi_raw_data above.
     spark.sql(f"CREATE DATABASE IF NOT EXISTS "
               f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
               f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
+    spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA "
+              f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
+              f"TO `account users`")
 
 # COMMAND ----------
 
@@ -130,9 +141,9 @@ if regenerate_data == "YES":
         for _t in ("customermgmt", "trade", "tradehistory", "cashtransaction",
                    "holdinghistory", "watchhistory", "dailymarket"):
             spark.sql(f"DROP TABLE IF EXISTS "
-                      f"{catalog}.{raw_data_schema}.{_t}{scale_factor}")
+                      f"{catalog}.tpcdi_raw_data.{_t}{scale_factor}")
         print(f"[data_gen] dropped 7 augmented dataset Deltas in "
-              f"{catalog}.{raw_data_schema}")
+              f"{catalog}.tpcdi_raw_data")
 else:
     print(f"[data_gen] regenerate_data=NO → keeping prior state for "
           f"per-task self-skip")

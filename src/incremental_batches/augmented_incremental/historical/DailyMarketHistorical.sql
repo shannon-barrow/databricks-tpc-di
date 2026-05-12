@@ -53,5 +53,5 @@ SELECT
   dm_high,
   dm_low,
   dm_vol
-FROM IDENTIFIER(:catalog || '.' || :raw_data_schema || '.dailymarket' || :scale_factor)
+FROM IDENTIFIER(:catalog || '.tpcdi_raw_data.dailymarket' || :scale_factor)
 WHERE stg_target = 'tables';
