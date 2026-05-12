@@ -446,61 +446,65 @@ business logic — expressed as a stock dbt project (no custom materializations)
 - **15 dbt-managed models:** 7 bronze (append) + 4 silver (merge, with
   `incremental_predicates` on dimtrade/factwatches for non-canceled-rows
   prune) + 4 gold (factholdings append; factmarkethistory/factcashbalances
-  `insert_overwrite` partitioned OR `merge` Liquid; currentaccountbalances
-  `insert_overwrite`). Stock dbt-databricks strategies — no custom macros.
-- **Liquid toggle:** `dbt run --vars '{..., use_liquid_clustering: true}'`
-  selects between partitioned and Liquid behavior per model (see next).
+  merge keyed on `(sk_*id, sk_dateid)`; currentaccountbalances
+  `insert_overwrite` no-partition → CREATE OR REPLACE each batch). Stock
+  dbt-databricks strategies — no custom macros. See next section for the
+  setup-owns-layout pattern that owns Liquid clustering at the setup-notebook
+  level so dbt model configs don't trigger per-batch ALTER TABLE noise.
 
 ### Augmented Incremental — Liquid clustering
 
-The Liquid path is the **default direction** going forward (partitioned
-variants will retire once SF=20k regenerates against Liquid staging — see
-"Setup-notebook matrix" in
-`src/incremental_batches/augmented_incremental/README.md` for the
-benchmark-variant ↔ setup-notebook pairing).
+Liquid clustering is the **only path** across the whole Augmented
+Incremental benchmark. The partitioned approach has been retired — for
+the SCD2 update patterns we run (`removed` flipping on factwatches,
+`iscurrent`/`enddate` flipping on dimcustomer/dimaccount), Liquid is
+strictly faster than partitioning. See the case study at the end of
+this section.
 
-- **Staging is now Liquid.** All `historical/*.sql` files build
-  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY` (cluster column
-  matches setup_liquid's choice for each table — e.g. dimcustomer/dimaccount
-  on `enddate`, factwatches on `sk_dateid_dateremoved`, factmarkethistory
-  /factholdings/factcashbalances on `sk_dateid`, bronzedailymarket on
-  `dm_date`).
-- **Setup-owns-layout pattern** (dbt path): `setup_dbt_liquid.py`
+- **Staging is Liquid.** All `historical/*.sql` files build
+  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY` matching
+  each downstream variant's setup notebook choice — e.g.
+  dimcustomer/dimaccount on `enddate`, factwatches on
+  `sk_dateid_dateremoved`, factmarkethistory / factholdings /
+  factcashbalances on `sk_dateid`, bronzedailymarket on `dm_date`.
+- **Setup-owns-layout pattern** (dbt path): `setup_dbt.py`
   pre-creates every Liquid-clustered table — dim/fact via CTAS,
   bronze (6 tables) + factcashbalances via explicit
-  `CREATE TABLE ... CLUSTER BY ... TBLPROPERTIES`. dbt model configs in
-  the `use_liquid_clustering=true` branch deliberately **omit** any
-  `liquid_clustered_by` / `tblproperties`. Reason: dbt-databricks otherwise
-  issues `ALTER TABLE CLUSTER BY` and `ALTER TABLE SET TBLPROPERTIES`
-  against the target on every batch (synchronizing model config to table
-  state, even when nothing drifted) — that's significant DDL noise +
-  per-batch overhead.
+  `CREATE TABLE ... CLUSTER BY ... TBLPROPERTIES`. dbt model configs
+  deliberately **omit** any `liquid_clustered_by` / `tblproperties`.
+  Reason: dbt-databricks otherwise issues `ALTER TABLE CLUSTER BY` and
+  `ALTER TABLE SET TBLPROPERTIES` against the target on every batch
+  (synchronizing model config to table state, even when nothing
+  drifted) — significant DDL noise + per-batch overhead.
 - **`delta.dataSkippingNumIndexedCols=34`** on bronzecustomer + every
   CLUSTER BY-on-update_dt bronze table: the cluster column is past the
   default 32-col stats window, so Delta rejects the write without this
-  TBLPROPERTY. Set in setup_liquid.py and setup_dbt_liquid.py.
-- **Why Liquid wins** (factwatches case study from the SDP thread): when
-  the partition column is updated by the per-batch MERGE (e.g. `removed`
-  on factwatches flipping from false→true), Delta has to rewrite the
-  entire source partition because vectorized writes can't move rows
-  across partition boundaries. Liquid avoids this cross-partition
-  rewrite — net write amplification is much lower even though
-  partitioning prunes more on read. Same dynamic applies to dimcustomer/
-  dimaccount (`iscurrent`) and any SCD2 table where partitions go stale.
+  TBLPROPERTY. Set in `setup.py` (Cluster Jobs) and `setup_dbt.py`
+  (dbt).
+- **Why Liquid wins** (factwatches case study from the SDP thread):
+  when the partition column is updated by the per-batch MERGE (e.g.
+  `removed` on factwatches flipping from false→true), Delta has to
+  rewrite the entire source partition because vectorized writes can't
+  move rows across partition boundaries. Liquid avoids this
+  cross-partition rewrite — net write amplification is much lower
+  even though partitioning prunes more on read. Same dynamic applies
+  to dimcustomer / dimaccount (`iscurrent`) and any SCD2 table where
+  partitions go stale.
 
-### Benchmark variant matrix (current)
+### Benchmark variant matrix
 
-16 variants on the cross-cloud benchmark dashboard:
+Active variants on the cross-cloud benchmark dashboard:
 
-| Variant                       | Setup notebook              | Storage |
-|-------------------------------|-----------------------------|---------|
-| Cluster Partitioned (PERF-OPT/STD) | `setup.py`             | PARTITIONED BY |
-| Cluster Liquid (PERF-OPT/STD)      | `setup_liquid.py`      | CLUSTER BY |
-| SDP Partitioned                | `DLT/pipelines_setup.py`         | partition (pipeline) |
-| SDP Liquid (PERF-OPT/STD)      | `DLT/pipelines_setup_liquid.py`  | CLUSTER BY (pipeline) |
-| SDP "Perf-Opt SDP with Dhruv's Liquid Columns" (was: ModClust) | `DLT/pipelines_setup_modclust.py` | engineer-suggested cluster keys |
-| dbt Partitioned Small/Medium WH | `setup_dbt.py`          | inherits staging layout (now Liquid) |
-| dbt Liquid Small WH            | `setup_dbt_liquid.py`     | CLUSTER BY + setup-owns-layout |
+| Variant                       | Setup notebook                          | Notes |
+|-------------------------------|-----------------------------------------|-------|
+| Cluster Jobs (PERF-OPT / STD) | `setup.py`                              | CLUSTER BY + pre-create bronze tables |
+| SDP (PERF-OPT / STD)          | `DLT/pipelines_setup.py`                | pipeline-managed CLUSTER BY |
+| SDP ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns") | `DLT/pipelines_setup_modclust.py` | engineer-suggested cluster keys (different from canonical SDP Liquid) |
+| dbt Small WH                  | `setup_dbt.py`                          | dbt-databricks 1.11.7 against premium SQL warehouse |
+
+A small number of historical "Partitioned" variants (from before the
+Liquid consolidation) remain in the Run-History sheet for reference but
+have been retired from active testing.
 
 Both clouds (Azure + AWS) run the same matrix where applicable.
 

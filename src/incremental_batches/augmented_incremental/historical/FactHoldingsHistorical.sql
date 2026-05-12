@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS FactHoldings (
   CONSTRAINT factholdings_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid),
   CONSTRAINT factholdings_time_fk FOREIGN KEY (sk_timeid) REFERENCES DimTime(sk_timeid)
 )
-CLUSTER BY (sk_dateid)  -- liquid: matches setup_liquid choice
+CLUSTER BY (sk_dateid)  -- liquid: matches setup choice
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

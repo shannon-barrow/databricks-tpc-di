@@ -1,4 +1,36 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Augmented Incremental — Cluster Jobs setup
+# MAGIC
+# MAGIC Builds the per-run schema for the Cluster Jobs benchmark variant.
+# MAGIC Every dim/fact table is liquid-clustered (Liquid is the project default;
+# MAGIC the partition-by approach has been retired). Cluster columns mirror the
+# MAGIC SDP-liquid pipeline so the two variants compare apples-to-apples:
+# MAGIC
+# MAGIC | Table | Cluster column | Notes |
+# MAGIC |---|---|---|
+# MAGIC | bronzecustomer / bronzeaccount | `update_dt` | per-batch ingest filter |
+# MAGIC | bronzecashtransaction / bronzeholdings / bronzetrade / bronzewatches | `event_dt` | per-batch filter |
+# MAGIC | bronzedailymarket | `dm_date` | FMH 365-day rolling window scan |
+# MAGIC | dimcustomer / dimaccount | `enddate` | SCD2 — equivalent of SDP's `__END_AT` (current rows = 9999-12-31 cluster together) |
+# MAGIC | dimtrade | `sk_closedateid` | matches SDP |
+# MAGIC | factmarkethistory | `sk_dateid` | matches SDP |
+# MAGIC | factwatches | `sk_dateid_dateremoved` | matches SDP |
+# MAGIC | factholdings | `sk_dateid` | matches SDP |
+# MAGIC | factcashbalances | (kept as DEEP CLONE) | SDP doesn't override; small running-aggregate state |
+# MAGIC
+# MAGIC ## Why CTAS instead of DEEP CLONE
+# MAGIC The staging tables (`tpcdi_incremental_staging_{sf}.*`) are now produced
+# MAGIC Liquid-clustered too, but historically were partitioned — so a DEEP CLONE
+# MAGIC would inherit whichever layout staging was last built with. CTAS forces
+# MAGIC the rewrite up front using THIS variant's cluster column choices,
+# MAGIC guaranteeing the starting state regardless of staging history.
+# MAGIC
+# MAGIC The CTAS step is wrapped in a parallel future alongside ANALYZE +
+# MAGIC OPTIMIZE so the per-table prep stays concurrent.
+
+# COMMAND ----------
+
 import shutil
 import concurrent.futures
 import requests
@@ -25,7 +57,7 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Deep Clone Staging Tables to New Benchmark Schema
+# MAGIC # Build target schema
 
 # COMMAND ----------
 
@@ -35,61 +67,89 @@ display(spark.sql(f"ALTER SCHEMA {catalog}.{tgt_db} ENABLE PREDICTIVE OPTIMIZATI
 
 # COMMAND ----------
 
-def clone_table(table_name, clone_type):
-  spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} {clone_type} CLONE {catalog}.{staging_db}.{table_name}")
-  spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
+# MAGIC %md
+# MAGIC # Per-table prep helpers
 
 # COMMAND ----------
 
+def shallow_clone(table_name):
+    """SHALLOW clone — small static reference tables. Inherits source layout
+    (no rewrite). ANALYZE for stats."""
+    spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} SHALLOW CLONE {catalog}.{staging_db}.{table_name}")
+    spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
+
+def deep_clone(table_name):
+    """DEEP clone — used for tables we don't want to liquid-cluster (only
+    factcashbalances in this notebook). Inherits source partitioning."""
+    spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} DEEP CLONE {catalog}.{staging_db}.{table_name}")
+    spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
+
+def liquid_ctas(table_name, cluster_cols):
+    """CTAS with liquid clustering, then OPTIMIZE + ANALYZE.
+    Forces a rewrite (vs deep-clone-then-alter) so the starting layout is
+    actually liquid. OPTIMIZE inside the same future keeps each table's
+    prep self-contained and concurrent across the pool."""
+    cluster_clause = f"CLUSTER BY ({', '.join(cluster_cols)})"
+    spark.sql(
+        f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} "
+        f"{cluster_clause} AS SELECT * FROM {catalog}.{staging_db}.{table_name}")
+    spark.sql(f"OPTIMIZE {catalog}.{tgt_db}.{table_name}")
+    spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Submit clones / CTAS in parallel
+
+# COMMAND ----------
+
+# Small reference tables — SHALLOW CLONE keeps them cheap.
 shallow_tbls = [
-  'taxrate',
-  'dimdate',
-  'industry',
-  'tradetype',
-  'dimbroker',
-  'financial',
-  'companyyeareps',
-  'dimsecurity',
-  'statustype',
-  'dimcompany',
-  'dimtime',
-  'currentaccountbalances'
+    'taxrate',
+    'dimdate',
+    'industry',
+    'tradetype',
+    'dimbroker',
+    'financial',
+    'companyyeareps',
+    'dimsecurity',
+    'statustype',
+    'dimcompany',
+    'dimtime',
+    'currentaccountbalances',
 ]
-deep_tbls = [
-  'dimtrade',
-  'factwatches',
-  'factholdings',
-  'dimcustomer',
-  'dimaccount',
-  'factcashbalances',
-  # 365-day window: pre-window data is staged so factmarkethistory's
-  # rolling-year lookback into bronzedailymarket is fully populated from
-  # batch 1 (2016-07-06). DailyMarketHistorical.sql writes
-  # `bronzedailymarket` to the staging schema; FactMarketHistoryHistorical.sql
-  # writes `factmarkethistory`. Auto Loader appends daily drops on top of
-  # the cloned bronzedailymarket; the FMH incremental MERGEs into the
-  # cloned factmarkethistory.
-  'bronzedailymarket',
-  'factmarkethistory',
-]
-threads = len(shallow_tbls) + len(deep_tbls)
+
+# Liquid-clustered SCD2 / fact tables. Cluster columns mirror SDP-liquid
+# (dlt_historical.sql) where applicable. dimcustomer/dimaccount
+# use `enddate` (Cluster path's equivalent of SDP's `__END_AT`).
+liquid_tbls = {
+    'dimcustomer':       ['enddate'],
+    'dimaccount':        ['enddate'],
+    'dimtrade':          ['sk_closedateid'],
+    'factwatches':       ['sk_dateid_dateremoved'],
+    'factholdings':      ['sk_dateid'],
+    'factmarkethistory': ['sk_dateid'],
+    # bronzedailymarket is staged with the prior year of DM rows; the
+    # FMH incremental does a 365-day rolling lookback into it. dm_date
+    # is the dominant filter column.
+    'bronzedailymarket': ['dm_date'],
+}
+
+# DEEP CLONE for tables we keep on partitioned/source layout.
+deep_tbls = ['factcashbalances']
+
+threads = len(shallow_tbls) + len(liquid_tbls) + len(deep_tbls)
 with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
-  futures = []
-  for tbl in shallow_tbls:
-    futures.append(executor.submit(clone_table, table_name=tbl, clone_type="SHALLOW"))
-  for tbl in deep_tbls:
-    futures.append(executor.submit(clone_table, table_name=tbl, clone_type="DEEP"))
-  for future in concurrent.futures.as_completed(futures):
-    try: print(future.result())
-    except requests.ConnectTimeout: print("ConnectTimeout.")
-
-# COMMAND ----------
-
-# factmarkethistory is now DEEP CLONEd from the staging schema (populated
-# by FactMarketHistoryHistorical.sql with the prior year of FMH rows for
-# 2015-07-06 → 2016-07-05 — see the deep_tbls list above). The incremental
-# MERGE/REPLACE pattern adds new sk_dateid partitions on top of the
-# cloned starting state.
+    futures = []
+    for tbl in shallow_tbls:
+        futures.append(executor.submit(shallow_clone, table_name=tbl))
+    for tbl, cols in liquid_tbls.items():
+        futures.append(executor.submit(liquid_ctas, table_name=tbl, cluster_cols=cols))
+    for tbl in deep_tbls:
+        futures.append(executor.submit(deep_clone, table_name=tbl))
+    for future in concurrent.futures.as_completed(futures):
+        try: print(future.result())
+        except requests.ConnectTimeout: print("ConnectTimeout.")
 
 # COMMAND ----------
 
@@ -99,8 +159,8 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
 # COMMAND ----------
 
 if os.path.exists(batches_dir):
-  print(f"Removing existing batches directory and recreating new one. ")
-  dbutils.fs.rm(batches_dir, recurse=True)
+    print(f"Removing existing batches directory and recreating new one. ")
+    dbutils.fs.rm(batches_dir, recurse=True)
 dbutils.fs.mkdirs(batches_dir)
 
 # COMMAND ----------
@@ -136,7 +196,9 @@ for tbl in incr_tbls:
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Create/Reset Bronze Ingestion Tables
+# MAGIC # Create/Reset Bronze Ingestion Tables (liquid-clustered)
+# MAGIC
+# MAGIC Same column on the cluster key as the original `PARTITIONED BY`.
 
 # COMMAND ----------
 
@@ -177,10 +239,11 @@ for tbl in incr_tbls:
 # MAGIC   nat_tx_id STRING,
 # MAGIC   update_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (update_dt)
+# MAGIC CLUSTER BY (update_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -197,53 +260,49 @@ for tbl in incr_tbls:
 # MAGIC   status STRING,
 # MAGIC   update_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (update_dt)
+# MAGIC CLUSTER BY (update_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzecashtransaction') (
-# MAGIC   cdc_flag STRING, 
+# MAGIC   cdc_flag STRING,
 # MAGIC   cdc_dsn BIGINT,
-# MAGIC   accountid BIGINT, 
-# MAGIC   ct_dts TIMESTAMP, 
-# MAGIC   ct_amt DOUBLE, 
+# MAGIC   accountid BIGINT,
+# MAGIC   ct_dts TIMESTAMP,
+# MAGIC   ct_amt DOUBLE,
 # MAGIC   ct_name STRING,
 # MAGIC   event_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (event_dt)
+# MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
-
-# COMMAND ----------
-
-# bronzedailymarket is now DEEP CLONEd from the staging schema (populated
-# by DailyMarketHistorical.sql with the prior year of DM rows for
-# 2015-07-06 → 2016-07-05 — see the deep_tbls list above). Auto Loader
-# appends new daily drops post-clone.
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzeholdings') (
-# MAGIC   cdc_flag STRING, 
+# MAGIC   cdc_flag STRING,
 # MAGIC   cdc_dsn BIGINT,
-# MAGIC   hh_h_t_id BIGINT, 
-# MAGIC   hh_t_id BIGINT, 
-# MAGIC   hh_before_qty INT, 
+# MAGIC   hh_h_t_id BIGINT,
+# MAGIC   hh_t_id BIGINT,
+# MAGIC   hh_before_qty INT,
 # MAGIC   hh_after_qty INT,
 # MAGIC   event_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (event_dt)
+# MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
@@ -268,35 +327,36 @@ for tbl in incr_tbls:
 # MAGIC   tax DOUBLE,
 # MAGIC   event_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (event_dt)
+# MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzewatches') (
-# MAGIC   cdc_flag STRING, 
+# MAGIC   cdc_flag STRING,
 # MAGIC   cdc_dsn BIGINT,
-# MAGIC   w_c_id BIGINT, 
-# MAGIC   w_s_symb STRING, 
-# MAGIC   w_dts TIMESTAMP, 
+# MAGIC   w_c_id BIGINT,
+# MAGIC   w_s_symb STRING,
+# MAGIC   w_dts TIMESTAMP,
 # MAGIC   w_action STRING,
 # MAGIC   event_dt DATE
 # MAGIC )
-# MAGIC PARTITIONED BY (event_dt)
+# MAGIC CLUSTER BY (event_dt)
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
-# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true'
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
 # MAGIC )
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Create list of dates that will loop in subsequent step of the pipeline 
-# MAGIC - Set the list of dates as a jobs task value and use "for each" task loop to execute each batch date in order
+# MAGIC # Emit batch_date list for the parent for_each loop
 
 # COMMAND ----------
 
@@ -305,6 +365,6 @@ from datetime import date, timedelta, datetime
 batch_date_ls = []
 start_date    = datetime(2016, 7, 6)
 for dt_interval in range(0, n_batches):
-  batch_date_ls.append((start_date + timedelta(days=dt_interval)).strftime("%Y-%m-%d"))
+    batch_date_ls.append((start_date + timedelta(days=dt_interval)).strftime("%Y-%m-%d"))
 print(f"Emitting {len(batch_date_ls)} batch dates ({batch_date_ls[0]} → {batch_date_ls[-1]})")
 dbutils.jobs.taskValues.set(key = "batch_date_ls", value = batch_date_ls)

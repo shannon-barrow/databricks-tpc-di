@@ -39,7 +39,7 @@ CREATE OR REPLACE TABLE DimTrade (
   CONSTRAINT dimtrade_createtime_fk FOREIGN KEY (sk_createtimeid) REFERENCES DimTime(sk_timeid),
   CONSTRAINT dimtrade_closetime_fk FOREIGN KEY (sk_closetimeid) REFERENCES DimTime(sk_timeid)
 )
-CLUSTER BY (sk_closedateid)  -- liquid: matches setup_liquid choice
+CLUSTER BY (sk_closedateid)  -- liquid: matches setup choice
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

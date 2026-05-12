@@ -8,16 +8,12 @@
 }}
 
 
-{% if var('use_liquid_clustering', false) %}
-{# Liquid path: table is pre-created in setup_dbt_liquid.py with #}
-{# CLUSTER BY + dataSkippingNumIndexedCols=34. We do NOT declare a layout #}
-{# here — declaring liquid_clustered_by in the dbt config makes #}
-{# dbt-databricks issue ALTER TABLE CLUSTER BY (and ALTER TABLE SET #}
-{# TBLPROPERTIES) on every batch, even when the existing table matches. #}
-{# Leaving layout out of dbt config => no DDL noise per batch. #}
-{% else %}
-{{ config(partition_by='dm_date') }}
-{% endif %}
+{# Table is pre-created in setup_dbt.py with CLUSTER BY + #}
+{# delta.dataSkippingNumIndexedCols=34. We do NOT declare a layout here — #}
+{# declaring liquid_clustered_by in the dbt config makes dbt-databricks #}
+{# issue ALTER TABLE CLUSTER BY (and ALTER TABLE SET TBLPROPERTIES) on #}
+{# every batch, even when the existing table matches. Layout is owned by #}
+{# the setup notebook ("setup-owns-layout" pattern), not dbt. #}
 
 {%- set schema_str -%}
 cdc_flag STRING, cdc_dsn BIGINT, dm_date DATE, dm_s_symb STRING,

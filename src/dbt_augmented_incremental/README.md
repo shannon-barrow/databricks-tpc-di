@@ -11,9 +11,8 @@ business logic — expressed as a dbt project so we can compare:
 dbt's scope is **per-batch incremental only**. Stage 0 (data generation)
 and Stage 1 setup (CLONE staging schema, reset `_dailybatches/`,
 populate the historical SCD2 dims/facts) stay in the existing
-Databricks notebooks — `setup_dbt.py` (partitioned) or
-`setup_dbt_liquid.py` (Liquid) next to this directory. dbt enters when
-the daily loop starts.
+Databricks notebooks — `setup_dbt.py` next to this directory. dbt
+enters when the daily loop starts.
 
 ## Layout
 
@@ -34,69 +33,68 @@ dbt_augmented_incremental/
 ## End-to-end flow
 
 ```
-augmented_incremental/setup_dbt.py        # partitioned variant
-  or  augmented_incremental/setup_dbt_liquid.py   # Liquid variant
-     → CLONE staging → run schema, reset _dailybatches, emit batch_date list
+augmented_incremental/setup_dbt.py    # CLONE staging → run schema, reset
+                                      # _dailybatches, emit batch_date list
    │
    └─ for batch_date in batch_date_ls:
         simulate_filedrops.py --batch_date <date>
-        dbt run --vars '{batch_date: <date>, scale_factor, wh_db, ...,
-                          use_liquid_clustering: true|false}'
+        dbt run --vars '{batch_date: <date>, scale_factor, wh_db, ...}'
 ```
 
 The orchestrator is `tools/workflow_builders/augmented_dbt.py` —
-parent + child Databricks Jobs that wire setup_dbt(_liquid) +
-simulate_filedrops + a Databricks-native dbt task into a
-`for_each_task` loop, mirroring the Classic / SDP variants.
+parent + child Databricks Jobs that wire setup_dbt + simulate_filedrops
++ a Databricks-native dbt task into a `for_each_task` loop, mirroring
+the Classic / SDP variants.
 
 ## Materialization summary (15 dbt-managed models)
 
-All models use **stock dbt-databricks strategies** — no custom
-macros for materialization. The Jinja gate `var('use_liquid_clustering')`
-selects partitioned vs Liquid behavior per model where they differ.
+All models use **stock dbt-databricks strategies** — no custom macros
+for materialization. Liquid clustering is the project default (the
+partition-by approach has been retired across the whole benchmark);
+every Liquid-clustered table is **pre-created by `setup_dbt.py`** so
+dbt model configs deliberately omit `liquid_clustered_by` /
+`tblproperties` ("setup-owns-layout" pattern — see next section).
 
-| Layer | Strategy | Partitioned default | Liquid (`use_liquid_clustering=true`) |
-|---|---|---|---|
-| **bronze** (7) | `incremental` `append` | `partition_by` = batch-date column | (no layout config — table pre-created in setup_dbt_liquid with CLUSTER BY + dataSkippingNumIndexedCols=34) |
-| **silver** dimcustomer | `incremental` `merge` | (no partition or cluster) | (no partition or cluster) |
-| **silver** dimaccount | `incremental` `merge` | (no partition or cluster) | (no partition or cluster) |
-| **silver** dimtrade | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.sk_closedateid IS NULL']` | partitioned target | clustered target |
-| **silver** factwatches | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.removed = false', 'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL']` | partitioned target | clustered target (second predicate added to leverage Liquid skipping on the cluster column) |
-| **gold** factholdings | `incremental` `append` | partitioned target | clustered target |
-| **gold** factmarkethistory | `insert_overwrite` + `partition_by='sk_dateid'` (default) → `merge` + `unique_key=['sk_securityid','sk_dateid']` (Liquid) | partitioned: partition replace today's sk_dateid | Liquid: MERGE keyed on (sk_securityid, sk_dateid) |
-| **gold** factcashbalances | `insert_overwrite` + `partition_by='sk_dateid'` (default) → `merge` + `unique_key=['sk_accountid','sk_dateid']` (Liquid) | partitioned: partition replace today's sk_dateid | Liquid: MERGE keyed on (sk_accountid, sk_dateid) |
-| **gold** currentaccountbalances | `insert_overwrite` (full table replace) | `partition_by='latest_batch'` (boolean) | no partition (Liquid model's CREATE OR REPLACE doesn't keep cluster_by anyway) |
+| Layer | Strategy | Notes |
+|---|---|---|
+| **bronze** (7) | `incremental` `append` | Tables pre-created in setup_dbt.py with CLUSTER BY + dataSkippingNumIndexedCols=34 |
+| **silver** dimcustomer / dimaccount | `incremental` `merge` | (target pre-CTAS'd Liquid by setup_dbt.py on `enddate`) |
+| **silver** dimtrade | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.sk_closedateid IS NULL']` | predicate matches the Liquid cluster column for data-skipping prune |
+| **silver** factwatches | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.removed = false', 'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL']` | first predicate is the business-logic prune; second is pinned on the Liquid cluster column for skipping |
+| **gold** factholdings | `incremental` `append` | target pre-CTAS'd Liquid on `sk_dateid` |
+| **gold** factmarkethistory | `incremental` `merge` + `unique_key=['sk_securityid','sk_dateid']` | target pre-CTAS'd Liquid on `sk_dateid` |
+| **gold** factcashbalances | `incremental` `merge` + `unique_key=['sk_accountid','sk_dateid']` | target pre-created empty by setup_dbt.py with CLUSTER BY (sk_dateid) |
+| **gold** currentaccountbalances | `incremental` `insert_overwrite` (no partition_by) | small running-aggregate; CREATE OR REPLACE TABLE AS SELECT each batch — unclustered |
 
-The 12 read-only static + FinWire reference tables are populated by Stage
+The 11 read-only static + FinWire reference tables are populated by Stage
 0 + CLONEd into the run schema by the setup notebook; the dbt project
 `source()`s them but doesn't write to them.
 
-## Liquid clustering path
+## Setup-owns-layout pattern
 
-When `use_liquid_clustering=true` is passed to `dbt run --vars`:
+`setup_dbt.py` is responsible for the table layout (cluster columns,
+tblproperties); dbt is responsible only for writing data. This avoids
+dbt-databricks's per-batch `ALTER TABLE CLUSTER BY` /
+`ALTER TABLE SET TBLPROPERTIES` (which it issues whenever a model
+declares `liquid_clustered_by` / `tblproperties` to "synchronize"
+target state to model config, even when nothing has drifted).
 
-1. **Layout is owned by `setup_dbt_liquid.py`, not dbt.** The setup notebook
-   pre-creates every Liquid-clustered table with the right `CLUSTER BY` and
-   `delta.dataSkippingNumIndexedCols` TBLPROPERTIES. dbt model configs
-   in the Liquid branch deliberately omit `liquid_clustered_by` /
-   `tblproperties`. This avoids dbt-databricks emitting an
-   `ALTER TABLE CLUSTER BY` + `ALTER TABLE SET TBLPROPERTIES` on every
-   batch's MERGE/APPEND to "synchronize" model config to table state
-   (even when nothing has drifted).
-2. **Strategy changes** for `factmarkethistory` and `factcashbalances`:
-   the partitioned variant uses `insert_overwrite` + `partition_by`
-   to replace today's date partition; the Liquid variant uses `merge` +
-   composite `unique_key=(sk_*_id, sk_dateid)` because Liquid tables
-   have no partitions to replace.
-3. **`currentaccountbalances`** drops `partition_by='latest_batch'`
-   entirely (boolean partition isn't useful as a Liquid cluster key,
-   and `insert_overwrite` without `partition_by` degrades to
-   `CREATE OR REPLACE TABLE AS SELECT` — same logic the model already
-   runs).
-4. **`factwatches`** adds a second `incremental_predicate` on
-   `sk_dateid_dateremoved IS NULL` (redundant with `removed = false`
-   but pinned on the Liquid cluster column so Delta data-skipping
-   can prune the merge scan).
+Concretely, `setup_dbt.py`:
+- **CTAS**s the dim/fact tables with `CLUSTER BY` (matches the SDP
+  pipeline's choices: `enddate` for dimcustomer/dimaccount,
+  `sk_closedateid` for dimtrade, `sk_dateid_dateremoved` for factwatches,
+  `sk_dateid` for factholdings + factmarkethistory + factcashbalances,
+  `dm_date` for bronzedailymarket).
+- **Pre-creates the 6 bronze tables empty** (account / customer /
+  cashtransaction / holdings / trade / watches) with `CLUSTER BY` on
+  the per-batch ingest column (update_dt / event_dt) +
+  `delta.dataSkippingNumIndexedCols = 34` (bronzecustomer's
+  cluster column is past the default 32-col stats window).
+- **Pre-creates factcashbalances** empty with `CLUSTER BY (sk_dateid)`
+  so the dbt MERGE has a Liquid target to write into.
+- Does NOT pre-create `currentaccountbalances` — dbt's `insert_overwrite`
+  without `partition_by` does `CREATE OR REPLACE TABLE AS SELECT` each
+  batch, which would wipe any cluster_by we set.
 
 ## Adapter targets
 
@@ -105,9 +103,9 @@ Per-model dispatch hooks handle the differences:
 | Concern | Databricks | Snowflake |
 |---|---|---|
 | Daily file ingest | `read_files('<path>', schema => …)` | `select $1::T from @stage/…/<file>` |
-| Materialization | Delta tables w/ partitions or Liquid clustering | Snowflake transient/permanent tables |
+| Materialization | Delta tables with Liquid clustering | Snowflake transient/permanent tables |
 | `merge` strategy | native MERGE | native MERGE |
-| `insert_overwrite` strategy | partition replace (DBR 17.1+) / TABLE materialization (warehouse) | (no native) |
+| `insert_overwrite` strategy | full-table replace via CREATE OR REPLACE TABLE AS SELECT (no partition_by — `currentaccountbalances` model already handles state carryover via the `prior` CTE on `{{ this }}`) | (no native; falls back to TABLE materialization) |
 
 ## Re-run safety
 
@@ -132,10 +130,9 @@ cp profiles.yml.template ~/.dbt/profiles.yml   # fill in credentials
 dbt run --vars '{
   batch_date: "2016-07-06",
   scale_factor: "10",
-  wh_db: "shannon_barrow_AugmentedIncremental_DBT_Small_Liquid",
+  wh_db: "shannon_barrow_AugmentedIncremental_DBT",
   catalog: "main",
-  tpcdi_directory: "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
-  use_liquid_clustering: true
+  tpcdi_directory: "/Volumes/main/tpcdi_raw_data/tpcdi_volume/"
 }'
 ```
 

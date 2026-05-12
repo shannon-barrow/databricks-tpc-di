@@ -433,7 +433,7 @@ def test_augmented_dbt_parent():
 
     setup = out["tasks"][0]
     assert setup["notebook_task"]["notebook_path"].endswith("/setup_dbt"), \
-        f"setup task must point at setup_dbt notebook (Liquid variant swaps to setup_dbt_liquid post-build): {setup['notebook_task']['notebook_path']}"
+        f"setup task must point at setup_dbt notebook (Liquid-clustering is the canonical path now): {setup['notebook_task']['notebook_path']}"
     _ok("default setup notebook is setup_dbt (partitioned)")
 
     loop = out["tasks"][1]

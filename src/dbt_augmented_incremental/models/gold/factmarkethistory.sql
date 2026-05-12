@@ -7,39 +7,16 @@
   )
 }}
 
-{% if var('use_liquid_clustering', false) %}
-{# Liquid variant: switch to merge so the model isn't tied to partition
-   replacement semantics (Liquid tables have no partitions). Unique key
+{# `merge` (not `insert_overwrite`) so the model isn't tied to partition
+   replacement semantics — Liquid tables have no partitions. Unique key
    is composite (sk_securityid, sk_dateid) — one row per (security, date).
    No `liquid_clustered_by` here on purpose — the table is pre-created in
-   setup_dbt_liquid.py with CLUSTER BY (sk_dateid). Declaring it in dbt
-   config would force per-batch ALTER TABLE CLUSTER BY. #}
+   setup_dbt.py with CLUSTER BY (sk_dateid). Declaring it in dbt config
+   would force per-batch ALTER TABLE CLUSTER BY. #}
 {{ config(
     incremental_strategy='merge',
     unique_key=['sk_securityid','sk_dateid'],
 ) }}
-{% else %}
-{# Partitioned variant (default): stock dbt-databricks insert_overwrite.
-   use_replace_on_for_insert_overwrite=True (1.11+) makes dbt emit Delta's
-   REPLACE-on-partition primitive that works on SQL Warehouses — without
-   it the strategy degraded to full-table TABLE materialization on
-   warehouses. Effect: today's sk_dateid partition is replaced; prior
-   days untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
-   behaviour. #}
-{{ config(
-    incremental_strategy='insert_overwrite',
-    partition_by='sk_dateid',
-    use_replace_on_for_insert_overwrite=True,
-) }}
-{% endif %}
-
-{# Stock dbt-databricks insert_overwrite. The
-   use_replace_on_for_insert_overwrite=True flag (1.11+) makes dbt emit
-   Delta's REPLACE-on-partition primitive that works on SQL Warehouses
-   — without it the strategy degraded to full-table TABLE materialization
-   on warehouses. Effect: today's sk_dateid partition is replaced; prior
-   days untouched. Mirrors Classic's INSERT OVERWRITE dynamic-partition
-   behaviour. #}
 
 {# Daily market history with rolling 365-day high/low. Each batch:
    1. Compute per-symbol min_by/max_by(low, high) over the 365 days
@@ -48,14 +25,13 @@
       365-day window cheaply, so we recompute it each batch.)
    2. Join the day's new bronzedailymarket rows to the aggregate +
       dimsecurity (effective-date join) + companyyeareps (left).
-   3. dbt's delete+insert on sk_dateid replaces only today's partition;
-      prior days' rows remain untouched. #}
+   3. MERGE on composite key (sk_securityid, sk_dateid) inserts new
+      (security, date) rows; existing rows for prior days are untouched. #}
 
 with new_dm as (
   -- Only today's bronze rows. The factmarkethistory target is keyed by
-  -- sk_dateid (not dm_date), so since_last_load(dm_date) doesn't apply.
-  -- insert_overwrite with partition_by sk_dateid replaces only today's
-  -- partition; prior days remain.
+  -- sk_dateid, so the merge writes a fresh set of (sk_securityid, sk_dateid)
+  -- rows for today.
   select * from {{ ref('bronzedailymarket') }}
   where dm_date = cast('{{ var("batch_date") }}' as date)
 ),

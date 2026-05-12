@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -88,7 +88,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -135,7 +135,7 @@ CREATE OR REFRESH STREAMING TABLE dimtrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade'
 )
-PARTITIONED BY (sk_closedateid);
+CLUSTER BY (sk_closedateid);
 
 -- COMMAND ----------
 
@@ -179,7 +179,7 @@ CREATE OR REFRESH STREAMING TABLE factholdings (
   currentprice DOUBLE COMMENT 'Unit price of this security for the current trade',
   currentholding INT COMMENT 'Quantity of a security held after the current trade.'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
@@ -207,10 +207,9 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   customerid BIGINT COMMENT 'Customer associated with watch list',
   symbol STRING COMMENT 'Security listed on watch list',
   sk_dateid_dateplaced BIGINT COMMENT 'Date the watch list item was added',
-  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
-  removed BOOLEAN COMMENT 'True if this watch has been removed'
+  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed'
 )
-PARTITIONED BY (removed);
+CLUSTER BY (sk_dateid_dateremoved);
 
 -- COMMAND ----------
 
@@ -223,17 +222,16 @@ SELECT
   customerid,
   symbol,
   sk_dateid_dateplaced,
-  sk_dateid_dateremoved,
-  removed
+  sk_dateid_dateremoved
 FROM tpcdi_incremental_staging_${scale_factor}.factwatches;
 
 -- COMMAND ----------
 
 -- Pre-seed factmarkethistory with the prior year (2015-07-06 → 2016-07-05).
 -- This streaming table is also declared in dlt_incremental.sql with the
--- per-batch incremental flow. Both declarations carry the same schema; the
--- active library determines which flow runs. During the historical phase
--- only this INSERT INTO ONCE flow fires.
+-- per-batch incremental flow (CLUSTER BY (sk_dateid)). Both declarations
+-- carry the same schema; the active library determines which flow runs.
+-- During the historical phase only this INSERT INTO ONCE flow fires.
 CREATE OR REFRESH STREAMING TABLE factmarkethistory (
   sk_securityid BIGINT COMMENT 'Surrogate key for SecurityID',
   sk_companyid BIGINT COMMENT 'Surrogate key for CompanyID',
@@ -249,7 +247,7 @@ CREATE OR REFRESH STREAMING TABLE factmarkethistory (
   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
   volume INT COMMENT 'Trading volume of the security on this day'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 CREATE FLOW factmarkethistory_historical
 COMMENT "Backfill historical factmarkethistory table from staging table"

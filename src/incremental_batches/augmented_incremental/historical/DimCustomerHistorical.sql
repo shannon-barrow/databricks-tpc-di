@@ -37,7 +37,7 @@ CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_fa
   iscurrent BOOLEAN COMMENT 'True if this is the current record',
   CONSTRAINT dimcustomer_pk PRIMARY KEY(sk_customerid)
 ) 
-CLUSTER BY (enddate)  -- liquid: matches setup_liquid / setup_dbt_liquid choice; current rows (enddate=9999-12-31) cluster together
+CLUSTER BY (enddate)  -- liquid: matches setup / setup_dbt choice; current rows (enddate=9999-12-31) cluster together
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

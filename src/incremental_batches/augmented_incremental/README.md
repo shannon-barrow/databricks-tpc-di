@@ -70,14 +70,11 @@ in this directory and is built by `augmented_classic.py` / `augmented_sdp.py`.
 
 ```
 augmented_incremental/
-├── setup.py                       # Cluster (partitioned) — CLONE staging into run schema
-├── setup_liquid.py                # Cluster (Liquid) — CTAS dim/fact with CLUSTER BY +
-│                                  # pre-create bronze tables with CLUSTER BY + tblproperties
-├── setup_dbt.py                   # dbt (partitioned) — CLONE staging, no bronze pre-create
-│                                  # (dbt model creates bronze tables via read_files)
-├── setup_dbt_liquid.py            # dbt (Liquid) — CTAS dim/fact + pre-create bronze AND
-│                                  # factcashbalances with CLUSTER BY; dbt model configs in
-│                                  # the Liquid path have NO layout config (owned by setup)
+├── setup.py                       # Cluster Jobs setup: CTAS dim/fact with CLUSTER BY +
+│                                  # pre-create bronze with CLUSTER BY + tblproperties
+├── setup_dbt.py                   # dbt setup: CTAS dim/fact + pre-create bronze AND
+│                                  # factcashbalances with CLUSTER BY (setup-owns-layout —
+│                                  # dbt model configs declare NO cluster_by)
 ├── teardown.py                    # Drop the run's schema and wipe its checkpoints
 ├── create_dates_loop.py           # Emits the 365-date list as a job task value
 ├── simulate_filedrops.py          # Per-batch: copy day's part files into autoloader watch dir
@@ -103,15 +100,12 @@ augmented_incremental/
 │   ├── FactWatches Incremental.py
 │   ├── FactMarketHistory Incremental.py
 │   └── currentaccountbalances Incremental.py
-└── DLT/                           # SDP variants (3 flavors)
-    ├── pipelines_setup.py                  # partitioned
-    ├── pipelines_setup_liquid.py           # Liquid (matches setup_liquid.py)
-    ├── pipelines_setup_modclust.py         # ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns")
+└── DLT/                           # SDP variants
+    ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
+    ├── pipelines_setup_modclust.py         # ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns") — engineer-suggested cluster keys
     ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
-    ├── dlt_ingest_bronze.py                # partitioned bronze ingest
-    ├── dlt_ingest_bronze_liquid.py         # Liquid bronze ingest
-    ├── dlt_historical.sql / dlt_incremental.sql                # partitioned variant
-    ├── dlt_historical_liquid.sql / dlt_incremental_liquid.sql  # Liquid variant
+    ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
+    ├── dlt_historical.sql / dlt_incremental.sql                    # canonical SDP variant (Liquid)
     └── dlt_historical_modclust.sql / dlt_incremental_modclust.sql  # ModClust variant
 ```
 
@@ -119,25 +113,28 @@ augmented_incremental/
 
 Each benchmark variant pairs with a specific setup notebook:
 
-| Benchmark variant         | Setup notebook        | Storage layout |
-|---------------------------|-----------------------|----------------|
-| Cluster Jobs (partitioned)| `setup.py`            | CTAS with PARTITIONED BY (legacy; will retire post-20k regen) |
-| Cluster Jobs (Liquid)     | `setup_liquid.py`     | CTAS with CLUSTER BY + pre-create bronze tables |
-| dbt (partitioned)         | `setup_dbt.py`        | DEEP CLONE staging (inherits staging layout — now Liquid) |
-| dbt (Liquid)              | `setup_dbt_liquid.py` | CTAS dim/fact with CLUSTER BY + pre-create bronze + factcashbalances |
-| SDP (partitioned)         | `DLT/pipelines_setup.py`        | pipeline-managed |
-| SDP (Liquid)              | `DLT/pipelines_setup_liquid.py` | pipeline-managed (CLUSTER BY) |
-| SDP (ModClust)            | `DLT/pipelines_setup_modclust.py` | pipeline-managed (engineer-suggested cluster keys) |
+| Benchmark variant | Setup notebook | Storage layout |
+|---|---|---|
+| Cluster Jobs    | `setup.py`                          | CTAS with CLUSTER BY + pre-create bronze tables (CLUSTER BY + dataSkippingNumIndexedCols=34) |
+| dbt             | `setup_dbt.py`                      | CTAS dim/fact with CLUSTER BY + pre-create bronze + factcashbalances ("setup-owns-layout") |
+| SDP             | `DLT/pipelines_setup.py`            | pipeline-managed (CLUSTER BY) |
+| SDP ModClust    | `DLT/pipelines_setup_modclust.py`   | pipeline-managed (engineer-suggested cluster keys) |
 
-**Staging-tables layout.** The `historical/*.sql` files build the
+**Liquid is the only path.** Earlier in this project's life there were
+parallel partitioned and Liquid setup notebooks (`setup.py` vs
+`setup.py`, etc.). The partitioned approach has been retired —
+benchmarks against the SCD2 update patterns we run (factwatches `removed`
+flipping, dimcustomer/dimaccount `iscurrent` flipping) showed Liquid is
+strictly faster because it avoids the cross-partition row-rewrite that
+those updates trigger under PARTITIONED BY.
+
+**Staging layout.** The `historical/*.sql` files build the
 `tpcdi_incremental_staging_{sf}` schema once per SF (during Stage 0) and
-all use **`CLUSTER BY`** — partitioning has been retired in staging.
-Variants that want partitioned dim/fact tables (Cluster Jobs partitioned,
-dbt partitioned) get them via the setup notebook re-issuing CTAS or
-running on top of an already-Liquid clone. Once the 20k dataset is
-regenerated post-Liquid-staging, the partitioned variants will retire
-entirely and Liquid will be the only path (`setup_liquid.py` becomes
-`setup.py` and similar for dbt/SDP).
+all use `CLUSTER BY` (matching each variant's setup notebook choices).
+Setup notebooks CTAS the dim/fact tables into the run schema regardless
+of staging layout (they don't rely on DEEP CLONE preserving any specific
+layout), so the project is robust to whichever layout staging was last
+built with.
 
 ---
 

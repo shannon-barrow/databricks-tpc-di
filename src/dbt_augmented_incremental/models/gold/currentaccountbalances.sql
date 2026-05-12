@@ -8,38 +8,19 @@
   )
 }}
 
-{% if var('use_liquid_clustering', false) %}
-{# Liquid variant: drop partition_by (the boolean `latest_batch` flag —
-   useless as a Liquid cluster key). Without partition_by, insert_overwrite
-   degrades to CREATE OR REPLACE TABLE AS SELECT each batch — same logic
-   the model already runs (its body reads {{ this }} before the replace
-   via the prior CTE). We don't declare a cluster key here: any value we
-   set would be wiped by the next batch's CREATE OR REPLACE anyway, and
-   the table is small (one row per touched account) so unclustered is fine. #}
-{% else %}
-{# Partitioned variant (default): partition on the boolean latest_batch flag
-   so the downstream factcashbalances filter `where latest_batch` prunes to
-   the single TRUE partition — fast point-read for the few thousand accounts
-   touched in the current batch. #}
-{{ config(partition_by='latest_batch') }}
-{% endif %}
-
 {# Per-account cumulative cash balance. Mirrors the Classic build's
    INSERT OVERWRITE pattern (incremental/currentaccountbalances Incremental.py):
    union new bronze transactions with the existing target rows, aggregate
    per accountid taking max(ct_date) + sum(ct_amt) + max(latest_batch),
    then INSERT OVERWRITE the entire table.
 
-   Partitioned by `latest_batch` so the downstream factcashbalances model
-   (which filters `where latest_batch`) prunes to the single TRUE
-   partition — fast point-read for the few thousand accounts touched in
-   the current batch, instead of scanning the full multi-million-row
-   account-balance set.
-
-   On a SQL Warehouse, dbt-databricks's insert_overwrite degrades to
-   `CREATE OR REPLACE TABLE AS SELECT` (full table replace). The model
-   body reads {{ this }} BEFORE the replace happens, so prior balances
-   carry through the union — same outcome as Classic's INSERT OVERWRITE. #}
+   No `partition_by` (the legacy boolean `latest_batch` partition is gone —
+   it was useless as a Liquid cluster key and is no longer needed for
+   downstream pruning). Without `partition_by`, insert_overwrite degrades
+   to CREATE OR REPLACE TABLE AS SELECT — which is exactly what this
+   model already does (its body reads {{ this }} BEFORE the replace via
+   the prior CTE, so balances carry through the union). The table is
+   small (one row per touched account) so unclustered is fine. #}
 
 with new_txns as (
   select

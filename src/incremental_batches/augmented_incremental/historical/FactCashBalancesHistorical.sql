@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
   CONSTRAINT cashbalances_account_fk FOREIGN KEY (sk_accountid) REFERENCES DimAccount(sk_accountid),
   CONSTRAINT cashbalances_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid)
 )
-CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt_liquid pre-create + Liquid dbt model unique key)
+CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt pre-create + Liquid dbt model unique key)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

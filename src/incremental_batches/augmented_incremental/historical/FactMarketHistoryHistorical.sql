@@ -36,7 +36,7 @@ CREATE OR REPLACE TABLE factmarkethistory (
   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
   volume INT COMMENT 'Trading volume of the security on this day'
 )
-CLUSTER BY (sk_dateid)  -- liquid: matches setup_liquid choice
+CLUSTER BY (sk_dateid)  -- liquid: matches setup choice
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
