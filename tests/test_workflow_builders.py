@@ -314,11 +314,11 @@ def test_augmented_classic_parent():
         "task_key": "delete_when_finished_TRUE_FALSE", "outcome": "true"}
     _ok("cleanup depends on gate outcome=true")
 
-    # delete_tables_when_finished defaults FALSE for augmented (long runs)
+    # delete_tables_when_finished defaults TRUE across all augmented builders
     finished_param = next(p for p in out["parameters"]
                            if p["name"] == "delete_tables_when_finished")
-    assert finished_param["default"] == "FALSE"
-    _ok("delete_tables_when_finished default = FALSE (long-run safe)")
+    assert finished_param["default"] == "TRUE"
+    _ok("delete_tables_when_finished default = TRUE")
 
 
 def test_augmented_sdp_pipeline():

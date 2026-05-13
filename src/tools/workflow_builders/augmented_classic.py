@@ -112,11 +112,11 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
         f"staging schema `{catalog}.tpcdi_incremental_staging_{scale_factor}` "
         f"(populated once-per-SF by Phase B file-splitting tools), then "
         f"the child runs per simulated day. Final cleanup is gated by the "
-        f"`delete_tables_when_finished` job parameter — set to `TRUE` to "
-        f"drop the run's schema and Autoloader directories on completion. "
-        f"Default is `FALSE` because a full 365-day run takes ~a week and "
-        f"users typically want to inspect the result tables. The shared "
-        f"`_staging/sf={scale_factor}/` data is preserved across runs."
+        f"`delete_tables_when_finished` job parameter — defaults to `TRUE` "
+        f"so the run's schema and Autoloader directories are dropped on "
+        f"completion. Set to `FALSE` to keep the result tables for "
+        f"inspection. The shared `_staging/sf={scale_factor}/` data is "
+        f"preserved across runs."
     )
 
 
@@ -320,7 +320,7 @@ def build_parent(
         "webhook_notifications": {},
     }
 
-    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure runs still reach it; outcome=true on cleanup so it skips entirely (no compute spin-up) when the user keeps `delete_tables_when_finished` at its default of FALSE.
+    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure runs still reach it; outcome=true on cleanup runs the drop when `delete_tables_when_finished` is at its default of TRUE — set the parameter to FALSE to keep the run's tables for inspection.
     GATE = "delete_when_finished_TRUE_FALSE"
     gate_task: dict[str, Any] = {
         "task_key": GATE,
@@ -361,7 +361,7 @@ def build_parent(
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
-            {"name": "delete_tables_when_finished", "default": "FALSE"},
+            {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run", "default": "365"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
