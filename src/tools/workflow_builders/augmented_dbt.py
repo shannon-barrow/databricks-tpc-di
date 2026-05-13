@@ -7,7 +7,7 @@ tasks per iteration:
   1. ``simulate_filedrops``  — drops the day's pre-staged CSV files into
      the Auto-Loader-style watch directory.
   2. ``dbt_run``             — Databricks-native dbt task that executes
-     the dbt project at ``src/dbt_augmented_incremental/``, passing
+     the dbt project at ``src/incremental_batches/augmented_incremental/dbt/``, passing
      ``batch_date`` and the run-level vars. The dbt project's model DAG
      (bronze → silver → gold) handles the rest.
 
@@ -38,7 +38,7 @@ _RETRY_POLICY = {
 }
 
 _AUG_PATH = "incremental_batches/augmented_incremental"
-_DBT_PROJECT_RELPATH = "dbt_augmented_incremental"
+_DBT_PROJECT_RELPATH = f"{_AUG_PATH}/dbt"
 
 _COMMON_PARAMS = {
     "catalog":         "{{job.parameters.catalog}}",
@@ -108,9 +108,10 @@ def build_child(
     """Inner per-batch_date job: simulate_filedrops → dbt_run.
 
     Args:
-        repo_src_path: Workspace absolute path up to (but not including)
-            ``dbt_augmented_incremental/`` — same convention as the other
-            augmented builders.
+        repo_src_path: Workspace absolute path to the ``src/`` directory.
+            The dbt project lives at
+            ``{repo_src_path}/incremental_batches/augmented_incremental/dbt/``
+            — same convention as the other augmented builders.
         wh_id: DBSQL warehouse id for the dbt task. Must already exist.
         simulate_filedrops_cluster_id: Optional warm interactive cluster
             for the file-copy task; None → serverless.

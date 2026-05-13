@@ -68,8 +68,8 @@ The first year of generator output (DailyMarket, Trade, etc. for 2015-07-06 → 
   - Add new historical-staged tables to `shallow_tbls` clone list
 
 ### dbt
-- `src/dbt_augmented_incremental/setup_dbt.py`: clone the new staged FMH + bronzedailymarket-historical into the run schema
-- `src/dbt_augmented_incremental/models/`: factmarkethistory's `bronzedailymarket` reference works fine if bronze is pre-seeded with the year of historical data
+- `src/incremental_batches/augmented_incremental/dbt/setup_dbt.py`: clone the new staged FMH + bronzedailymarket-historical into the run schema
+- `src/incremental_batches/augmented_incremental/dbt/models/`: factmarkethistory's `bronzedailymarket` reference works fine if bronze is pre-seeded with the year of historical data
 
 ### Audit / regen
 - Static audit snapshots at `src/tools/tpcdi_gen/static_audits/sf={SF}/` — per-batch counts unchanged (daily activity rate didn't change), but TOTALS over the benchmark window will be smaller. Need to regen at SF=20k after this.

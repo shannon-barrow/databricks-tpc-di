@@ -17,7 +17,7 @@ enters when the daily loop starts.
 ## Layout
 
 ```
-dbt_augmented_incremental/
+src/incremental_batches/augmented_incremental/dbt/
 ├── dbt_project.yml             # vars + per-folder materialization defaults
 ├── profiles.yml.template       # databricks + snowflake outputs (template)
 ├── macros/
@@ -122,7 +122,7 @@ Silver/gold models filter the source bronze with `WHERE date_col =
 
 ```bash
 pip install dbt-databricks
-cd src/dbt_augmented_incremental
+cd src/incremental_batches/augmented_incremental/dbt
 cp profiles.yml.template ~/.dbt/profiles.yml   # fill in credentials
 
 # Per batch (orchestrated by tools/workflow_builders/augmented_dbt.py

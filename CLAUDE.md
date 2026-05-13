@@ -432,7 +432,7 @@ truth. Quick orientation for AI agents:
 
 ### Augmented Incremental — dbt variant
 
-`src/dbt_augmented_incremental/` is a dbt port of the Augmented Incremental
+`src/incremental_batches/augmented_incremental/dbt/` is a dbt port of the Augmented Incremental
 benchmark for cross-CDW comparison (Databricks DBSQL vs Snowflake / BigQuery
 / Redshift). Same 365-day daily streaming workload, same source data, same
 business logic — expressed as a stock dbt project (no custom materializations).
