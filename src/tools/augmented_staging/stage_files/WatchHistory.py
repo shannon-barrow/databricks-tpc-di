@@ -17,7 +17,8 @@ dbutils.widgets.text("tpcdi_directory",
 dbutils.widgets.text("catalog", "main")
 
 scale_factor    = dbutils.widgets.get("scale_factor").strip()
-tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()catalog         = dbutils.widgets.get("catalog").strip()
+tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
+catalog         = dbutils.widgets.get("catalog").strip()
 
 target_dir = f"{tpcdi_directory.rstrip('/')}/sf={scale_factor}"  # tpcdi_directory base_param already ends with augmented_incremental/_staging/
 
