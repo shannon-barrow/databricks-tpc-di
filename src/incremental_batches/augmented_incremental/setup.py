@@ -2,32 +2,18 @@
 # MAGIC %md
 # MAGIC # Augmented Incremental — Cluster Jobs setup
 # MAGIC
-# MAGIC Builds the per-run schema for the Cluster Jobs benchmark variant.
-# MAGIC Every dim/fact table is liquid-clustered (Liquid is the project default;
-# MAGIC the partition-by approach has been retired). Cluster columns mirror the
-# MAGIC SDP-liquid pipeline so the two variants compare apples-to-apples:
+# MAGIC Builds the per-run schema for the Cluster Jobs benchmark variant by
+# MAGIC cloning the shared `tpcdi_incremental_staging_{sf}` schema. Staging
+# MAGIC is now Liquid-clustered (each `historical/*.sql` builds its dim/fact
+# MAGIC table with `CLUSTER BY (...)` already), so DEEP CLONE inherits the
+# MAGIC layout directly — no per-table CTAS needed.
 # MAGIC
-# MAGIC | Table | Cluster column | Notes |
+# MAGIC | Group | Tables | Operation |
 # MAGIC |---|---|---|
-# MAGIC | bronzecustomer / bronzeaccount | `update_dt` | per-batch ingest filter |
-# MAGIC | bronzecashtransaction / bronzeholdings / bronzetrade / bronzewatches | `event_dt` | per-batch filter |
-# MAGIC | bronzedailymarket | `dm_date` | FMH 365-day rolling window scan |
-# MAGIC | dimcustomer / dimaccount | `enddate` | SCD2 — equivalent of SDP's `__END_AT` (current rows = 9999-12-31 cluster together) |
-# MAGIC | dimtrade | `sk_closedateid` | matches SDP |
-# MAGIC | factmarkethistory | `sk_dateid` | matches SDP |
-# MAGIC | factwatches | `sk_dateid_dateremoved` | matches SDP |
-# MAGIC | factholdings | `sk_dateid` | matches SDP |
-# MAGIC | factcashbalances | (kept as DEEP CLONE) | SDP doesn't override; small running-aggregate state |
+# MAGIC | Reference (small, static) | taxrate, dimdate, industry, tradetype, dimbroker, financial, companyyeareps, dimsecurity, statustype, dimcompany, dimtime, currentaccountbalances | SHALLOW CLONE |
+# MAGIC | Dim/Fact + bronzedailymarket | dimcustomer, dimaccount, dimtrade, factwatches, factholdings, factmarkethistory, bronzedailymarket, factcashbalances | DEEP CLONE (Liquid layout inherited from staging) |
 # MAGIC
-# MAGIC ## Why CTAS instead of DEEP CLONE
-# MAGIC The staging tables (`tpcdi_incremental_staging_{sf}.*`) are now produced
-# MAGIC Liquid-clustered too, but historically were partitioned — so a DEEP CLONE
-# MAGIC would inherit whichever layout staging was last built with. CTAS forces
-# MAGIC the rewrite up front using THIS variant's cluster column choices,
-# MAGIC guaranteeing the starting state regardless of staging history.
-# MAGIC
-# MAGIC The CTAS step is wrapped in a parallel future alongside ANALYZE +
-# MAGIC OPTIMIZE so the per-table prep stays concurrent.
+# MAGIC The 6 streaming bronze tables (account, cashtransaction, customer, holdings, trade, watches) are NOT cloned — they're populated fresh from Auto Loader during the daily loop and start empty.
 
 # COMMAND ----------
 
@@ -72,34 +58,15 @@ display(spark.sql(f"ALTER SCHEMA {catalog}.{tgt_db} ENABLE PREDICTIVE OPTIMIZATI
 
 # COMMAND ----------
 
-def shallow_clone(table_name):
-    """SHALLOW clone — small static reference tables. Inherits source layout
-    (no rewrite). ANALYZE for stats."""
-    spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} SHALLOW CLONE {catalog}.{staging_db}.{table_name}")
-    spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
-
-def deep_clone(table_name):
-    """DEEP clone — used for tables we don't want to liquid-cluster (only
-    factcashbalances in this notebook). Inherits source partitioning."""
-    spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} DEEP CLONE {catalog}.{staging_db}.{table_name}")
-    spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
-
-def liquid_ctas(table_name, cluster_cols):
-    """CTAS with liquid clustering, then OPTIMIZE + ANALYZE.
-    Forces a rewrite (vs deep-clone-then-alter) so the starting layout is
-    actually liquid. OPTIMIZE inside the same future keeps each table's
-    prep self-contained and concurrent across the pool."""
-    cluster_clause = f"CLUSTER BY ({', '.join(cluster_cols)})"
-    spark.sql(
-        f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} "
-        f"{cluster_clause} AS SELECT * FROM {catalog}.{staging_db}.{table_name}")
-    spark.sql(f"OPTIMIZE {catalog}.{tgt_db}.{table_name}")
+def clone_table(table_name, clone_type):
+    """SHALLOW or DEEP clone from staging, then ANALYZE for stats."""
+    spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} {clone_type} CLONE {catalog}.{staging_db}.{table_name}")
     spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Submit clones / CTAS in parallel
+# MAGIC # Submit clones in parallel
 
 # COMMAND ----------
 
@@ -119,34 +86,26 @@ shallow_tbls = [
     'currentaccountbalances',
 ]
 
-# Liquid-clustered SCD2 / fact tables. Cluster columns mirror SDP-liquid
-# (dlt_historical.sql) where applicable. dimcustomer/dimaccount
-# use `enddate` (Cluster path's equivalent of SDP's `__END_AT`).
-liquid_tbls = {
-    'dimcustomer':       ['enddate'],
-    'dimaccount':        ['enddate'],
-    'dimtrade':          ['sk_closedateid'],
-    'factwatches':       ['sk_dateid_dateremoved'],
-    'factholdings':      ['sk_dateid'],
-    'factmarkethistory': ['sk_dateid'],
-    # bronzedailymarket is staged with the prior year of DM rows; the
-    # FMH incremental does a 365-day rolling lookback into it. dm_date
-    # is the dominant filter column.
-    'bronzedailymarket': ['dm_date'],
-}
+# DEEP CLONE for dim/fact + bronzedailymarket. Layout (Liquid CLUSTER BY)
+# inherited from staging — see historical/*.sql for cluster columns.
+deep_tbls = [
+    'dimcustomer',
+    'dimaccount',
+    'dimtrade',
+    'factwatches',
+    'factholdings',
+    'factmarkethistory',
+    'bronzedailymarket',
+    'factcashbalances',
+]
 
-# DEEP CLONE for tables we keep on partitioned/source layout.
-deep_tbls = ['factcashbalances']
-
-threads = len(shallow_tbls) + len(liquid_tbls) + len(deep_tbls)
+threads = len(shallow_tbls) + len(deep_tbls)
 with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
     futures = []
     for tbl in shallow_tbls:
-        futures.append(executor.submit(shallow_clone, table_name=tbl))
-    for tbl, cols in liquid_tbls.items():
-        futures.append(executor.submit(liquid_ctas, table_name=tbl, cluster_cols=cols))
+        futures.append(executor.submit(clone_table, table_name=tbl, clone_type="SHALLOW"))
     for tbl in deep_tbls:
-        futures.append(executor.submit(deep_clone, table_name=tbl))
+        futures.append(executor.submit(clone_table, table_name=tbl, clone_type="DEEP"))
     for future in concurrent.futures.as_completed(futures):
         try: print(future.result())
         except requests.ConnectTimeout: print("ConnectTimeout.")

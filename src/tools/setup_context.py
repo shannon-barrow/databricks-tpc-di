@@ -34,6 +34,7 @@ class SetupContext:
         "SDP-ADVANCED":     "ADVANCED Spark Declarative Pipelines with DQ",
         "AUGMENTED-CLUSTER":"Augmented Incremental Workflow (Cluster) — 730-day streaming pipeline",
         "AUGMENTED-SDP":    "Augmented Incremental Workflow (SDP) — 730-day streaming pipeline",
+        "AUGMENTED-DBT":    "Augmented Incremental Workflow (dbt) — 730-day streaming pipeline against a DBSQL warehouse",
     }
     min_dbr_version = 14.1
     invalid_dbr_list = [
