@@ -31,6 +31,32 @@ _WH_SCALE_FACTOR_MAP = {
 }
 
 
+def _dbt_wh_size(scale_factor: int) -> str:
+    """Pick a DBSQL warehouse size for the augmented-incremental dbt variant.
+
+    Anchored at "Small for SF=20000" (the SF we tuned for), each WH size
+    covers a doubling of the SF range above it:
+
+        SF <=  5000  -> 2X-Small
+        SF <= 10000  ->   X-Small
+        SF <= 20000  ->     Small
+        SF <= 40000  ->    Medium
+        SF <= 80000  ->     Large
+        ...
+
+    Per-day MERGE/INSERT load is small enough that an oversized warehouse
+    just wastes idle DBUs.
+    """
+    sizes = ["2X-Small", "X-Small", "Small", "Medium", "Large",
+             "X-Large", "2X-Large", "3X-Large", "4X-Large"]
+    ceiling = 5000
+    for size in sizes:
+        if scale_factor <= ceiling:
+            return size
+        ceiling *= 2
+    return sizes[-1]
+
+
 def _generate_augmented(*, variant: str, parent_job_name: str,
                          catalog: str, wh_target: str, scale_factor: int,
                          tpcdi_directory: str, repo_src_path: str,
@@ -94,7 +120,7 @@ def _generate_augmented(*, variant: str, parent_job_name: str,
         # task type runs commands against it. Warehouse name follows the same
         # pattern as the rest of the augmented workflow.
         wh_name = f"{wh_target}-tpcdi-dbt"
-        wh_dag_args = {"name": wh_name, "size": _WH_SCALE_FACTOR_MAP.get(str(scale_factor), "X-Large")}
+        wh_dag_args = {"name": wh_name, "size": _dbt_wh_size(scale_factor)}
         wh_id = _get_or_create_warehouse(wh_name, wh_dag_args, workspace_src_path, api_call)
         print(f"  warehouse:      {wh_name} ({wh_id})")
         print()
