@@ -37,7 +37,8 @@ data_gen_type = dbutils.widgets.get("data_gen_type").strip().lower()
 scale_factor  = dbutils.widgets.get("scale_factor").strip()
 catalog       = dbutils.widgets.get("catalog").strip()
 wh_db         = dbutils.widgets.get("wh_db").strip()
-tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
+tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
+regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
 log_level     = dbutils.widgets.get("log_level").strip().upper()
 
 if data_gen_type not in ("spark", "native", "augmented_incremental"):
