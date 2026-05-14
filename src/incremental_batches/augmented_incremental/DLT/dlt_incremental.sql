@@ -300,30 +300,8 @@ CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
--- Two-pronged attempt to make dimtrade prune in SDP:
---   1. Pre-derive sk_closedateid in CTE h so the join is a plain col=col
---      equi-join (vs col = func(col) inline). Symmetric equi-joins are
---      most likely to trigger Spark's Runtime Filter Pushdown.
---   2. Add an explicit `t.sk_closedateid IN (SELECT DISTINCT sk_closedateid
---      FROM h)` semi-join filter on dimtrade. Each microbatch has rows
---      with just one sk_closedateid value (today's date), so this becomes
---      a tiny in-list that prunes dimtrade BEFORE the join — independent
---      of whether RFP fires.
---
--- The dbt + Cluster variants get this pruning "for free" because their
--- query builders inject batch_date as a SQL literal. SDP has no literal
--- (STREAM source has no parameterized filter), so we have to derive the
--- distinct values at query time and use them explicitly.
 CREATE FLOW factholdings_incremental
 AS INSERT INTO factholdings BY NAME
-WITH h AS (
-  SELECT
-    hh_h_t_id,
-    hh_t_id,
-    hh_after_qty,
-    bigint(date_format(event_dt, 'yyyyMMdd')) AS sk_closedateid
-  FROM STREAM(bronzeholdings)
-)
 SELECT
   h.hh_h_t_id tradeid,
   h.hh_t_id currenttradeid,
@@ -335,11 +313,11 @@ SELECT
   t.sk_closetimeid sk_timeid,
   t.tradeprice currentprice,
   h.hh_after_qty currentholding
-FROM h
+FROM STREAM(bronzeholdings) h
 JOIN dimtrade t
-  ON t.tradeid = h.hh_h_t_id
- AND t.sk_closedateid = h.sk_closedateid
-WHERE t.sk_closedateid IN (SELECT DISTINCT sk_closedateid FROM h)
+  ON
+    t.tradeid = h.hh_h_t_id
+    and t.sk_closedateid = bigint(date_format(h.event_dt, 'yyyyMMdd'))
 
 -- COMMAND ----------
 

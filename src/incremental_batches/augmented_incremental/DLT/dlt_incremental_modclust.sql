@@ -300,20 +300,8 @@ CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
--- See note on dlt_incremental.sql — pre-derive sk_closedateid in CTE h so
--- the join is a plain equi-join, then add an explicit IN-list semi-join
--- filter on dimtrade to force the prune (the dbt/Cluster path gets this
--- via a literal; SDP has no literal because STREAM, so we derive it).
 CREATE FLOW factholdings_incremental
 AS INSERT INTO factholdings BY NAME
-WITH h AS (
-  SELECT
-    hh_h_t_id,
-    hh_t_id,
-    hh_after_qty,
-    bigint(date_format(event_dt, 'yyyyMMdd')) AS sk_closedateid
-  FROM STREAM(bronzeholdings)
-)
 SELECT
   h.hh_h_t_id tradeid,
   h.hh_t_id currenttradeid,
@@ -325,11 +313,11 @@ SELECT
   t.sk_closetimeid sk_timeid,
   t.tradeprice currentprice,
   h.hh_after_qty currentholding
-FROM h
+FROM STREAM(bronzeholdings) h
 JOIN dimtrade t
-  ON t.tradeid = h.hh_h_t_id
- AND t.sk_closedateid = h.sk_closedateid
-WHERE t.sk_closedateid IN (SELECT DISTINCT sk_closedateid FROM h)
+  ON
+    t.tradeid = h.hh_h_t_id
+    and t.sk_closedateid = bigint(date_format(h.event_dt, 'yyyyMMdd'))
 
 -- COMMAND ----------
 

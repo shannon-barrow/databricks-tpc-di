@@ -1,8 +1,15 @@
 # Databricks notebook source
 import dlt
 
-# spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
-# spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+# Match the Cluster-variant broadcast threshold (currentaccountbalances Incremental.py
+# bumps it to 250 MB and that conf persists across tasks on a shared job cluster).
+# Apply here so the SDP pipeline runs under the same plan budget — factholdings's
+# h-side broadcast hash join on dimtrade depends on this being roomy enough.
+try:
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
+    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+except Exception:
+    pass
 
 # COMMAND ----------
 
