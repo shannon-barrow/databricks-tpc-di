@@ -70,22 +70,22 @@ in this directory and is built by `augmented_classic.py` / `augmented_sdp.py`.
 
 ```
 augmented_incremental/
-├── setup.py                       # Cluster Jobs setup: CTAS dim/fact with CLUSTER BY +
-│                                  # pre-create bronze with CLUSTER BY + tblproperties
-├── setup_dbt.py                   # dbt setup: CTAS dim/fact + pre-create bronze AND
-│                                  # factcashbalances with CLUSTER BY (setup-owns-layout —
-│                                  # dbt model configs declare NO cluster_by)
+├── README.md                      # this file — Cluster variant + overview for SDP/dbt
+├── setup.py                       # Cluster Jobs setup: DEEP CLONE staging (Liquid layout
+│                                  # inherited) + 6 streaming bronze CREATEs
+├── setup_dbt.py                   # dbt setup: same DEEP CLONE pattern + 6 streaming bronze
+│                                  # CREATEs (dbt-databricks "setup-owns-layout")
 ├── teardown.py                    # Drop the run's schema and wipe its checkpoints
 ├── create_dates_loop.py           # Emits the 365-date list as a job task value
 ├── simulate_filedrops.py          # Per-batch: copy day's part files into autoloader watch dir
 ├── bronze/
 │   ├── ingest_bronze.py           # Auto Loader stream for the 7 raw datasets
 │   └── account_updates_from_customer.py  # DimCustomer events that also touch DimAccount
-├── historical/                    # Pre-2015-07-06 SCD2 builds — all CLUSTER BY (Liquid)
+├── historical/                    # Pre-2016-07-06 SCD2 builds — all CLUSTER BY (Liquid)
 │   ├── DimCustomerHistorical.sql           # CLUSTER BY (enddate)
 │   ├── DimAccountHistorical.sql            # CLUSTER BY (enddate)
 │   ├── DimTradeHistorical.sql              # CLUSTER BY (sk_closedateid)
-│   ├── FactCashBalancesHistorical.sql      # CLUSTER BY (sk_dateid) / (event_dt) / (none for currentaccountbalances)
+│   ├── FactCashBalancesHistorical.sql      # CLUSTER BY (sk_dateid) / (event_dt for currentaccountbalances)
 │   ├── FactHoldingsHistorical.sql          # CLUSTER BY (sk_dateid)
 │   ├── FactWatchesHistorical.sql           # CLUSTER BY (sk_dateid_dateremoved)
 │   ├── FactMarketHistoryHistorical.sql     # CLUSTER BY (sk_dateid)
@@ -100,41 +100,43 @@ augmented_incremental/
 │   ├── FactWatches Incremental.py
 │   ├── FactMarketHistory Incremental.py
 │   └── currentaccountbalances Incremental.py
-└── DLT/                           # SDP variants
-    ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
-    ├── pipelines_setup_modclust.py         # ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns") — engineer-suggested cluster keys
-    ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
-    ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
-    ├── dlt_historical.sql / dlt_incremental.sql                    # canonical SDP variant (Liquid)
-    └── dlt_historical_modclust.sql / dlt_incremental_modclust.sql  # ModClust variant
+├── DLT/                           # SDP variants — see DLT/README.md for the deep-dive
+│   ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
+│   ├── pipelines_setup_modclust.py         # ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns")
+│   ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
+│   ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
+│   ├── dlt_historical.sql / dlt_incremental.sql                    # canonical SDP variant
+│   └── dlt_historical_modclust.sql / dlt_incremental_modclust.sql  # ModClust variant
+└── dbt/                           # dbt variant — see dbt/README.md for the deep-dive
+    ├── dbt_project.yml / profiles.yml.template
+    ├── macros/
+    └── models/                    # bronze / silver / gold (16 dbt-managed models)
 ```
 
 ## Setup-notebook matrix
 
 Each benchmark variant pairs with a specific setup notebook:
 
-| Benchmark variant | Setup notebook | Storage layout |
+| Benchmark variant | Setup notebook | What it does |
 |---|---|---|
-| Cluster Jobs    | `setup.py`                          | CTAS with CLUSTER BY + pre-create bronze tables (CLUSTER BY + dataSkippingNumIndexedCols=34) |
-| dbt             | `setup_dbt.py`                      | CTAS dim/fact with CLUSTER BY + pre-create bronze + factcashbalances ("setup-owns-layout") |
-| SDP             | `DLT/pipelines_setup.py`            | pipeline-managed (CLUSTER BY) |
+| Cluster Jobs    | `setup.py`                          | DEEP CLONE 8 dim/fact + bronzedailymarket from staging; SHALLOW CLONE 12 reference tables; 6 streaming bronze tables left for Auto Loader to populate |
+| dbt             | `setup_dbt.py`                      | Same DEEP/SHALLOW CLONE shape as `setup.py`, plus 6 streaming bronze pre-creates with `CLUSTER BY` + `dataSkippingNumIndexedCols=34` (setup-owns-layout pattern — dbt model configs declare no `liquid_clustered_by` / `tblproperties`) |
+| SDP             | `DLT/pipelines_setup.py`            | pipeline-managed CLUSTER BY |
 | SDP ModClust    | `DLT/pipelines_setup_modclust.py`   | pipeline-managed (engineer-suggested cluster keys) |
 
 **Liquid is the only path.** Earlier in this project's life there were
-parallel partitioned and Liquid setup notebooks (`setup.py` vs
-`setup.py`, etc.). The partitioned approach has been retired —
-benchmarks against the SCD2 update patterns we run (factwatches `removed`
-flipping, dimcustomer/dimaccount `iscurrent` flipping) showed Liquid is
-strictly faster because it avoids the cross-partition row-rewrite that
-those updates trigger under PARTITIONED BY.
+parallel partitioned and Liquid setup notebooks. The partitioned
+approach has been retired — benchmarks against the SCD2 update patterns
+we run (factwatches `removed` flipping, dimcustomer/dimaccount
+`iscurrent` flipping) showed Liquid is strictly faster because it
+avoids the cross-partition row-rewrite that those updates trigger
+under PARTITIONED BY.
 
 **Staging layout.** The `historical/*.sql` files build the
-`tpcdi_incremental_staging_{sf}` schema once per SF (during Stage 0) and
-all use `CLUSTER BY` (matching each variant's setup notebook choices).
-Setup notebooks CTAS the dim/fact tables into the run schema regardless
-of staging layout (they don't rely on DEEP CLONE preserving any specific
-layout), so the project is robust to whichever layout staging was last
-built with.
+`tpcdi_incremental_staging_{sf}` schema once per SF (during Stage 0)
+and all use `CLUSTER BY` matching each downstream variant's needs.
+DEEP CLONE in `setup.py` / `setup_dbt.py` inherits this layout directly
+— no per-table CTAS dance, no `OPTIMIZE` step.
 
 ---
 

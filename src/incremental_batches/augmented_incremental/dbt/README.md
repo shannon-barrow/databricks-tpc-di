@@ -58,6 +58,7 @@ dbt model configs deliberately omit `liquid_clustered_by` /
 | Layer | Strategy | Notes |
 |---|---|---|
 | **bronze** (7) | `incremental` `append` | Tables pre-created in setup_dbt.py with CLUSTER BY + dataSkippingNumIndexedCols=34 |
+| **bronze** `account_updates_from_customer` | `incremental` `append` | Derived rows from bronzecustomer 'U' events joined to dimaccount AS-OF batch start. Mirrors SDP's `account_updates_from_customers` flow and Cluster's per-batch notebook — keeps bronzeaccount pure (file drops only); dimaccount UNIONs both at MERGE time |
 | **silver** dimcustomer / dimaccount | `incremental` `merge` | (target pre-CTAS'd Liquid by setup_dbt.py on `enddate`) |
 | **silver** dimtrade | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.sk_closedateid IS NULL']` | predicate matches the Liquid cluster column for data-skipping prune |
 | **silver** factwatches | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.removed = false', 'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL']` | first predicate is the business-logic prune; second is pinned on the Liquid cluster column for skipping |

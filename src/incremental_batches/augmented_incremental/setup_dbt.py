@@ -17,7 +17,7 @@
 # MAGIC |---|---|---|
 # MAGIC | Reference (small, static) + currentaccountbalances | taxrate, dimdate, industry, tradetype, dimbroker, financial, companyyeareps, dimsecurity, statustype, dimcompany, dimtime, currentaccountbalances | SHALLOW CLONE (currentaccountbalances dbt model reads `{{ this }}` once for historical baseline, then rewrites via CREATE OR REPLACE TABLE AS SELECT — a pointer is enough) |
 # MAGIC | Dim/Fact + bronzedailymarket | dimcustomer, dimaccount, dimtrade, factwatches, factholdings, factmarkethistory, bronzedailymarket, factcashbalances | DEEP CLONE (Liquid layout inherited from staging) |
-# MAGIC | 6 streaming bronze | bronzeaccount, bronzecashtransaction, bronzecustomer, bronzeholdings, bronzetrade, bronzewatches | Empty `CREATE TABLE … CLUSTER BY` (no staging source — populated by Auto Loader during the daily loop) |
+# MAGIC | 6 streaming bronze + account_updates_from_customer | bronzeaccount, bronzecashtransaction, bronzecustomer, bronzeholdings, bronzetrade, bronzewatches, account_updates_from_customer | Empty `CREATE TABLE … CLUSTER BY` (no staging source — 6 bronze are populated by Auto Loader during the daily loop; account_updates_from_customer is a dbt-managed staging table derived from bronzecustomer 'U' events for dimaccount to UNION) |
 
 # COMMAND ----------
 
@@ -148,6 +148,24 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=threads) as executor:
 
 # MAGIC %sql
 # MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.bronzeaccount') (
+# MAGIC   cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT,
+# MAGIC   accountdesc STRING, taxstatus TINYINT, status STRING, update_dt DATE
+# MAGIC )
+# MAGIC CLUSTER BY (update_dt)
+# MAGIC TBLPROPERTIES (
+# MAGIC   'delta.autoOptimize.autoCompact' = 'false',
+# MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC )
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- account_updates_from_customer: staged rows derived from bronzecustomer
+# MAGIC -- SCD2 'U' events joined to dimaccount AS-OF batch start. dimaccount
+# MAGIC -- UNIONs this with the day's bronzeaccount file drops. Schema mirrors
+# MAGIC -- bronzeaccount so the UNION ALL doesn't need column shimming.
+# MAGIC CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.account_updates_from_customer') (
 # MAGIC   cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, customerid BIGINT,
 # MAGIC   accountdesc STRING, taxstatus TINYINT, status STRING, update_dt DATE
 # MAGIC )

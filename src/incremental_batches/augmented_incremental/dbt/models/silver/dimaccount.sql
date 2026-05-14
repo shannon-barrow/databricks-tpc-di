@@ -13,16 +13,23 @@
 {# SCD2 via stock dbt-databricks merge + dual-row pattern (close + insert).
    See models/silver/dimcustomer.sql for the pattern explanation.
 
-   bronzeaccount holds two flavors of input: raw Account.txt rows
-   (cdc_flag = 'I' / 'U') and customer-driven cascade rows
-   (cdc_flag = 'cust_update'). Both flow into the same SCD2 MERGE.
+   Two upstream sources, kept separate per variant parity:
+     * bronzeaccount                  — raw Account.txt rows (cdc_flag 'I'/'U')
+     * account_updates_from_customer  — derived rows (cdc_flag 'cust_update')
+                                        from bronzecustomer 'U' events
+                                        joined to this dimaccount AS-OF
+                                        batch start
 
    QUALIFY collapses (update_dt, accountid) duplicates: when a single
-   batch_date has both an 'I' and a 'U' for the same account, prefer 'I'.
-   ORDER BY cdc_flag DESC matches the Classic build's tie-break. #}
+   batch_date has both an 'I' and a 'U' (or a cust_update) for the same
+   account, ORDER BY cdc_flag DESC keeps the highest-sorting flag —
+   matches the Classic build's tie-break. #}
 
 with new_events as (
   select * from {{ ref('bronzeaccount') }}
+  where update_dt = cast('{{ var("batch_date") }}' as date)
+  union all
+  select * from {{ ref('account_updates_from_customer') }}
   where update_dt = cast('{{ var("batch_date") }}' as date)
 ),
 
