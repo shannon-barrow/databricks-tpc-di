@@ -9,7 +9,17 @@
 }}
 
 {# Append-only fact. One row per holding-history event whose corresponding
-   trade just closed in this batch (sk_closedateid = today). #}
+   trade just closed in this batch (sk_closedateid = today).
+
+   Query shape intentionally mirrors the SDP factholdings_incremental flow
+   so the cross-variant comparison stays apples-to-apples — the
+   sk_closedateid predicate lives in the ON clause and references the
+   per-row h.event_dt instead of a constant pulled from `batch_date`.
+   DBSQL/Photon constant-folds h.event_dt = batch_date through the CTE
+   into the join's sk_closedateid predicate, which lets dimtrade prune
+   via its Liquid CLUSTER BY (sk_closedateid). If we put the filter in
+   WHERE with the literal, dbt gets the prune trivially — but then we
+   wouldn't be testing the same plan SDP runs against. #}
 
 with new_events as (
   select
@@ -35,4 +45,4 @@ select
 from new_events h
 join {{ ref('dimtrade') }} t
   on t.tradeid = h.tradeid
-where t.sk_closedateid = cast(date_format(cast('{{ var("batch_date") }}' as date), 'yyyyMMdd') as bigint)
+ and t.sk_closedateid = cast(date_format(h.event_dt, 'yyyyMMdd') as bigint)
