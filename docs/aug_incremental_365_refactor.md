@@ -58,13 +58,13 @@ The first year of generator output (DailyMarket, Trade, etc. for 2015-07-06 → 
   - May also need `{staging}.factmarkethistorystghistorical` (the per-symbol array MV state as of 2016-07-05) for SDP
 
 ### SDP DLT (per-pipeline)
-- `dlt_ingest_bronze.py` (and `_modclust` clone)
+- `dlt_ingest_bronze.py`
   - Add `bronzedailymarket_backfill` append_flow_once that loads from `{staging}.bronzedailymarketstaging`
   - (already has `bronzecashtransaction_backfill` as the template)
-- `dlt_historical.sql` (and `_modclust` clone)
+- `dlt_historical.sql`
   - Add `factmarkethistory` declaration with `INSERT INTO ONCE` flow pointing at staging
   - May add `factmarkethistorystg` if we need to seed the MV state
-- `pipelines_setup.py` (and `_modclust` clone)
+- `pipelines_setup.py`
   - Add new historical-staged tables to `shallow_tbls` clone list
 
 ### dbt

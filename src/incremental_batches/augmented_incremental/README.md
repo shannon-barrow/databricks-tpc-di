@@ -76,7 +76,6 @@ augmented_incremental/
 ├── setup_dbt.py                   # dbt setup: same DEEP CLONE pattern + 6 streaming bronze
 │                                  # CREATEs (dbt-databricks "setup-owns-layout")
 ├── teardown.py                    # Drop the run's schema and wipe its checkpoints
-├── create_dates_loop.py           # Emits the 365-date list as a job task value
 ├── simulate_filedrops.py          # Per-batch: copy day's part files into autoloader watch dir
 ├── bronze/
 │   ├── ingest_bronze.py           # Auto Loader stream for the 7 raw datasets
@@ -102,11 +101,9 @@ augmented_incremental/
 │   └── currentaccountbalances Incremental.py
 ├── DLT/                           # SDP variants — see DLT/README.md for the deep-dive
 │   ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
-│   ├── pipelines_setup_modclust.py         # ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns")
 │   ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
 │   ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
-│   ├── dlt_historical.sql / dlt_incremental.sql                    # canonical SDP variant
-│   └── dlt_historical_modclust.sql / dlt_incremental_modclust.sql  # ModClust variant
+│   └── dlt_historical.sql / dlt_incremental.sql  # canonical SDP variant
 └── dbt/                           # dbt variant — see dbt/README.md for the deep-dive
     ├── dbt_project.yml / profiles.yml.template
     ├── macros/
@@ -122,7 +119,6 @@ Each benchmark variant pairs with a specific setup notebook:
 | Cluster Jobs    | `setup.py`                          | DEEP CLONE 8 dim/fact + bronzedailymarket from staging; SHALLOW CLONE 12 reference tables; 6 streaming bronze tables left for Auto Loader to populate |
 | dbt             | `setup_dbt.py`                      | Same DEEP/SHALLOW CLONE shape as `setup.py`, plus 6 streaming bronze pre-creates with `CLUSTER BY` + `dataSkippingNumIndexedCols=34` (setup-owns-layout pattern — dbt model configs declare no `liquid_clustered_by` / `tblproperties`) |
 | SDP             | `DLT/pipelines_setup.py`            | pipeline-managed CLUSTER BY |
-| SDP ModClust    | `DLT/pipelines_setup_modclust.py`   | pipeline-managed (engineer-suggested cluster keys) |
 
 **Liquid is the only path.** Earlier in this project's life there were
 parallel partitioned and Liquid setup notebooks. The partitioned
@@ -184,7 +180,8 @@ NEW/UPDCUST/INACT were each packed into <1-day sub-slabs of each window.
 1. Runs `setup.py`: CLONEs the per-SF shared staging schema into the run's
    per-user schema (`{catalog}.{wh_db}_AugmentedIncremental_{Cluster|SDP}_{sf}`),
    resets `_dailybatches/{wh_db}_{sf}/` and `_checkpoints/{wh_db}_{sf}/`, and
-   emits the 365-date list via `create_dates_loop.py` as a task value.
+   emits the 365-date list as a task value (`batch_date_ls`) consumed by the
+   parent's `for_each` loop.
 2. Runs the date loop (Databricks `for_each_task`). Each iteration is a
    child job that:
    - `simulate_filedrops` — `dbutils.fs.cp` the day's `_staging/sf={sf}/

@@ -504,7 +504,6 @@ Active variants on the cross-cloud benchmark dashboard:
 |-------------------------------|-----------------------------------------|-------|
 | Cluster Jobs (PERF-OPT / STD) | `setup.py`                              | DEEP CLONE staging (Liquid layout inherited) + 6 streaming bronze CREATEs |
 | SDP (PERF-OPT / STD)          | `DLT/pipelines_setup.py`                | pipeline-managed CLUSTER BY |
-| SDP ModClust ("Perf-Opt SDP with Dhruv's Liquid Columns") | `DLT/pipelines_setup_modclust.py` | engineer-suggested cluster keys (different from canonical SDP Liquid) |
 | dbt (Small WH anchor at SF=20k) | `setup_dbt.py`                          | dbt-databricks 1.11.7 against premium SQL warehouse; setup-owns-layout pattern |
 
 A small number of historical "Partitioned" variants (from before the
