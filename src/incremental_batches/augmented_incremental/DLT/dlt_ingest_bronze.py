@@ -1,13 +1,10 @@
 # Databricks notebook source
 import dlt
 
-# Match the Cluster-variant broadcast threshold (currentaccountbalances Incremental.py
-# bumps it to 250 MB and that conf persists across tasks on a shared job cluster).
-# Apply here so the SDP pipeline runs under the same plan budget — factholdings's
-# h-side broadcast hash join on dimtrade depends on this being roomy enough.
+# Bumped broadcast threshold so SDP's factholdings_incremental gets the same h-side broadcast hash join on dimtrade that the Cluster variant gets implicitly. Dropped to 200 MB (was 250 MB matching Cluster's currentaccountbalances Incremental conf); 250 MB was producing intermittent SparkOutOfMemoryError during DeltaOptimizedWriterExec shuffle-map stages on SDP serverless DLT compute — see ES ticket. Testing 200 MB to find the OOM-safe ceiling.
 try:
-    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
-    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 209715200)
+    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 209715200)
 except Exception:
     pass
 
