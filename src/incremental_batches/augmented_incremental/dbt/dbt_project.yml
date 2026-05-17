@@ -1,0 +1,55 @@
+name: 'dbt_augmented_incremental'
+version: '1.0.0'
+config-version: 2
+
+profile: 'dbt_augmented_incremental'
+
+vars:
+  # Set per invocation. The driver passes these as --vars or via env-derived defaults.
+  catalog: main
+  staging_schema: tpcdi_incremental_staging
+  scale_factor: '10'
+  wh_db: ''
+  tpcdi_directory: '/Volumes/main/tpcdi_raw_data/tpcdi_volume/'
+  batch_date: ''               # ISO date for the current incremental run (per-batch)
+  benchmark_start_date: '2015-07-06'
+  # Disable dbt-databricks's auto-OPTIMIZE behaviors (1.11+ runs
+  # `OPTIMIZE table` after snapshot / table v2 materializations and
+  # liquid-clustered incrementals). Equivalent to the
+  # DATABRICKS_SKIP_OPTIMIZE=true env var. We don't want dbt-launched
+  # OPTIMIZE during the benchmark — it would skew per-batch timings.
+  databricks_skip_optimize: true
+
+model-paths: ["models/"]
+macro-paths: ["macros/"]
+seed-paths: ["seeds/"]
+test-paths: ["tests/"]
+target-path: "target"
+clean-targets:
+  - target
+  - dbt_packages
+  - logs
+
+dispatch:
+  - macro_namespace: dbt
+    search_order: ['dbt_augmented_incremental', 'dbt']
+
+models:
+  dbt_augmented_incremental:
+    # NOTE: target schema is the connection's default schema (set by the
+    # caller — for the augmented_dbt workflow that's `{wh_db}_{sf}`, set
+    # via the dbt_task config). We deliberately do NOT set `+schema` here:
+    # dbt's default `generate_schema_name` macro APPENDS `+schema` to the
+    # connection schema as `{default}_{custom}`, which would produce a
+    # doubled name like `wh_db_sf_wh_db_sf`.
+    bronze:
+      +materialized: incremental
+      +incremental_strategy: append
+      +on_schema_change: ignore
+    silver:
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: ignore
+    gold:
+      +materialized: incremental
+      +on_schema_change: ignore

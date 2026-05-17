@@ -87,8 +87,19 @@ cfg = ctx["cfg"]
 # COMMAND ----------
 
 # Schemas first.
-spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data")
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume")
+# tpcdi_raw_data + its volume are SHARED resources: every user in the
+# workspace should be able to read existing data AND write new scale
+# factors. Grant ALL PRIVILEGES to `account users` so the first creator
+# doesn't lock everyone else out. The GRANT is idempotent — it runs on
+# every data_gen invocation but only takes effect once.
+spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
+          f"COMMENT 'Shared TPC-DI raw files schema'")
+spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+          f"TO `account users`")
+spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
+          f"COMMENT 'Shared TPC-DI raw files volume'")
+spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+          f"TO `account users`")
 
 stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 print(f"[data_gen] ensuring {stage_schema} exists")
@@ -96,10 +107,14 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {stage_schema} "
           f"COMMENT 'data_gen + benchmark interim temp tables'")
 
 if augmented_incremental:
-    # The augmented benchmark also reads from these schemas.
+    # The augmented benchmark also reads from these schemas. Open this one
+    # up to `account users` for the same reasons as tpcdi_raw_data above.
     spark.sql(f"CREATE DATABASE IF NOT EXISTS "
               f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
               f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
+    spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA "
+              f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
+              f"TO `account users`")
 
 # COMMAND ----------
 

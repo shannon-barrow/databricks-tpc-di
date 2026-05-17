@@ -65,6 +65,7 @@ def upsertToDelta(microBatchOutputDF, batch_id):
       JOIN {catalog}.{tgt_db}.DimAccount t
         ON s.accountid = t.accountid
       WHERE t.iscurrent
+        AND t.enddate = DATE'9999-12-31'
     )
     MERGE INTO {tgt_table} t USING (
       SELECT
@@ -72,12 +73,12 @@ def upsertToDelta(microBatchOutputDF, batch_id):
         *
       FROM all_incr_updates
       UNION ALL
-      SELECT 
+      SELECT
         accountid mergeKey,
         *
       FROM matched_accts
-    ) s 
-    ON t.accountid = s.mergeKey AND t.iscurrent
+    ) s
+    ON t.accountid = s.mergeKey AND t.iscurrent AND t.enddate = DATE'9999-12-31'
     WHEN MATCHED AND t.iscurrent THEN UPDATE SET
       t.iscurrent = false,
       t.enddate = s.effectivedate

@@ -325,8 +325,9 @@ combination using Python builders under `src/tools/workflow_builders/`:
 - `augmented_staging.py` — Stage 0 for Augmented Incremental (one-time
   data prep per SF: per-dataset gen DAG in Delta-only mode + per-dataset
   partitioned-CSV trees + cleanup of spark-gen leftovers)
-- `augmented_classic.py` / `augmented_sdp.py` — Augmented Incremental
-  benchmark workflows (730-day daily streaming loop). See
+- `augmented_classic.py` / `augmented_sdp.py` / `augmented_dbt.py` —
+  Augmented Incremental benchmark workflows (365-day daily streaming
+  loop) for the Cluster / SDP / dbt variants. See
   `src/incremental_batches/augmented_incremental/README.md` for the full
   architecture.
 - `warehouse.py` — DBSQL warehouse spec
@@ -338,7 +339,7 @@ combination using Python builders under `src/tools/workflow_builders/`:
 - Augmented Incremental Stage 0 (`augmented_staging`): `{base}-SF{N}-AugmentedGen`
 - Cluster/DBSQL benchmark: `{base}-SF{N}-{Incremental|SingleBatch}-{Cluster|DBSQL}-{SparkGen|NativeGen}`
 - SDP benchmark: `{base}-SF{N}-{SDP-CORE|SDP-PRO|SDP-ADVANCED}-{SparkGen|NativeGen}`
-- Augmented benchmark parent: `{base}-SF{N}-AugmentedIncremental-{Cluster|SDP}-Parent`
+- Augmented benchmark parent: `{base}-SF{N}-AugmentedIncremental-{Cluster|SDP|DBT}-Parent`
 
 Every created job carries a `data_generator: spark|native_jar` tag so the
 Jobs UI / API can filter without parsing the name.
@@ -399,15 +400,15 @@ truth. Quick orientation for AI agents:
 - **Stage 0** is a separate workflow (`augmented_staging`) run once per
   SF. The per-dataset gen tasks write the 7 datasets to Delta tables at
   `tpcdi_raw_data.{dataset}{sf}` with an `stg_target` column that splits
-  rows into 'tables' (pre-2015-07-06, source for the historical SCD2
-  builds) and 'files' (the 730-day window, source for the per-day file
+  rows into 'tables' (pre-2016-07-06, source for the historical SCD2
+  builds) and 'files' (the 365-day window, source for the per-day file
   drops). 7 `stage_files/*.py` notebooks then write Spark-native
   partitioned-CSV at `_staging/sf={sf}/{Dataset}/_pdate={date}/part-*.csv`.
   No post-write rename or concat at stage time.
 - **Early-exit** on Stage 0 uses Spark's `_SUCCESS` marker per dataset
   dir, NOT a date-dir count. Authoritative — half-written datasets can't
   false-positive.
-- **Stage 1** (the benchmark) is a parent job that loops 730 dates via
+- **Stage 1** (the benchmark) is a parent job that loops 365 dates via
   `for_each_task`. Per iteration: `simulate_filedrops.py` does
   `dbutils.fs.cp` (NOT `mv`) of one day's part files into the auto-loader
   watch dir, renamed to `{Dataset}.{file_ext}` (job param `file_ext`,
@@ -423,12 +424,93 @@ truth. Quick orientation for AI agents:
   `_sort_key` / `_ordered_pos`; ActionTS now derives directly from
   `pos_in_update`. Each ActionType (NEW / UPDCUST / INACT) spreads
   uniformly across each 8.4-day update window — Customer touches all
-  730 dates instead of the prior 404. Mirrors DIGen's per-row-index
+  365 dates instead of the prior 404. Mirrors DIGen's per-row-index
   timestamping with action-type permutation.
 - **B2/B3 generation is skipped** in augmented mode (gated at the call
   sites in `customer.py`, `trade.py`, `watch_history.py`, `prospect.py`).
-  The 730-day window's events come from the `'files'` partition of the
+  The 365-day window's events come from the `'files'` partition of the
   Stage 0 Delta tables.
+
+### Augmented Incremental — dbt variant
+
+`src/incremental_batches/augmented_incremental/dbt/` is a dbt port of the Augmented Incremental
+benchmark for cross-CDW comparison (Databricks DBSQL vs Snowflake / BigQuery
+/ Redshift). Same 365-day daily streaming workload, same source data, same
+business logic — expressed as a stock dbt project (no custom materializations).
+
+- **Scope:** per-batch incremental only. Stage 0 (data gen) and Stage 1 setup
+  (CLONE staging, reset autoloader dirs, emit batch dates) stay in the
+  Databricks notebooks. dbt enters when the daily loop starts.
+- **Orchestrator:** `tools/workflow_builders/augmented_dbt.py` builds parent +
+  child Jobs that wire setup_dbt + simulate_filedrops + a Databricks-native
+  `dbt_task` (env: dbt-databricks==1.11.7) into a `for_each_task` loop.
+- **16 dbt-managed models:** 7 bronze (append) + 4 silver (merge, with
+  `incremental_predicates` on dimtrade/factwatches for non-canceled-rows
+  prune) + 5 gold (factholdings append; factmarkethistory/factcashbalances
+  merge keyed on `(sk_*id, sk_dateid)`; currentaccountbalances
+  `insert_overwrite` no-partition → CREATE OR REPLACE each batch). Stock
+  dbt-databricks strategies — no custom macros. See next section for the
+  setup-owns-layout pattern that owns Liquid clustering at the setup-notebook
+  level so dbt model configs don't trigger per-batch ALTER TABLE noise.
+- **Warehouse sizing.** Driver picks an XS/Small/Medium/... warehouse by
+  scale factor (Small for SF=20k anchor, doubling SF moves up one size).
+  See `_dbt_wh_size()` in `generate_benchmark_workflow.py`.
+
+### Augmented Incremental — Liquid clustering
+
+Liquid clustering is the **only path** across the whole Augmented
+Incremental benchmark. The partitioned approach has been retired — for
+the SCD2 update patterns we run (`removed` flipping on factwatches,
+`iscurrent`/`enddate` flipping on dimcustomer/dimaccount), Liquid is
+strictly faster than partitioning. See the case study at the end of
+this section.
+
+- **Staging is Liquid.** All `historical/*.sql` files build
+  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY` matching
+  each downstream variant's setup notebook choice — e.g.
+  dimcustomer/dimaccount on `enddate`, factwatches on
+  `sk_dateid_dateremoved`, factmarkethistory / factholdings /
+  factcashbalances on `sk_dateid`, bronzedailymarket on `dm_date`.
+- **Setup-owns-layout pattern** (dbt path): `setup_dbt.py`
+  pre-creates every Liquid-clustered table — dim/fact + bronzedailymarket
+  + factcashbalances via DEEP CLONE from staging (inherits CLUSTER BY),
+  6 streaming bronze tables via explicit `CREATE TABLE ... CLUSTER BY
+  ... TBLPROPERTIES` (no staging source — populated by Auto Loader).
+  dbt model configs deliberately **omit** any `liquid_clustered_by` /
+  `tblproperties`. Reason: dbt-databricks otherwise issues `ALTER TABLE
+  CLUSTER BY` and `ALTER TABLE SET TBLPROPERTIES` against the target on
+  every batch (synchronizing model config to table state, even when
+  nothing drifted) — significant DDL noise + per-batch overhead.
+- **`delta.dataSkippingNumIndexedCols=34`** on bronzecustomer + every
+  CLUSTER BY-on-update_dt bronze table: the cluster column is past the
+  default 32-col stats window, so Delta rejects the write without this
+  TBLPROPERTY. Set in `setup.py` (Cluster Jobs) and `setup_dbt.py`
+  (dbt).
+- **Why Liquid wins** (factwatches case study from the SDP thread):
+  when the partition column is updated by the per-batch MERGE (e.g.
+  `removed` on factwatches flipping from false→true), Delta has to
+  rewrite the entire source partition because vectorized writes can't
+  move rows across partition boundaries. Liquid avoids this
+  cross-partition rewrite — net write amplification is much lower
+  even though partitioning prunes more on read. Same dynamic applies
+  to dimcustomer / dimaccount (`iscurrent`) and any SCD2 table where
+  partitions go stale.
+
+### Benchmark variant matrix
+
+Active variants on the cross-cloud benchmark dashboard:
+
+| Variant                       | Setup notebook                          | Notes |
+|-------------------------------|-----------------------------------------|-------|
+| Cluster Jobs (PERF-OPT / STD) | `setup.py`                              | DEEP CLONE staging (Liquid layout inherited) + 6 streaming bronze CREATEs |
+| SDP (PERF-OPT / STD)          | `DLT/pipelines_setup.py`                | pipeline-managed CLUSTER BY |
+| dbt (Small WH anchor at SF=20k) | `setup_dbt.py`                          | dbt-databricks 1.11.7 against premium SQL warehouse; setup-owns-layout pattern |
+
+A small number of historical "Partitioned" variants (from before the
+Liquid consolidation) remain in the Run-History sheet for reference but
+have been retired from active testing.
+
+Both clouds (Azure + AWS) run the same matrix where applicable.
 
 ## Common workflows
 
@@ -464,11 +546,11 @@ databricks jobs run-now --profile tpc-di --json '{
   "job_parameters": {"scale_factor": "10", "incremental_batches_to_run": "30"}
 }'
 ```
-- `incremental_batches_to_run` (default `730`) caps the daily-streaming
+- `incremental_batches_to_run` (default `365`) caps the daily-streaming
   loop to the first N days. Useful for smoke runs without committing
-  ~a week of compute. Wired into both `augmented_classic` and
-  `augmented_sdp` parent jobs; `setup.py` and `DLT/pipelines_setup.py`
-  clamp the value to [1, 730].
+  ~a week of compute. Wired into `augmented_classic`, `augmented_sdp`,
+  and `augmented_dbt` parent jobs; `setup.py`, `setup_dbt.py`, and
+  `DLT/pipelines_setup.py` clamp the value to [1, 365].
 
 ### Regenerate audits without re-running datagen
 Open `src/tools/regenerate_audits` notebook in workspace, set widgets,
@@ -543,6 +625,7 @@ src/
       augmented_staging.py        # Augmented Incremental Stage 0 (data prep)
       augmented_classic.py        # Augmented Incremental Cluster benchmark parent
       augmented_sdp.py            # Augmented Incremental SDP benchmark parent
+      augmented_dbt.py            # Augmented Incremental dbt benchmark parent
       warehouse.py                # DBSQL warehouse spec
     augmented_staging/            # Stage 0 notebooks for Augmented Incremental
       _stage_ingestion.py         # stage_to_files() helper — partitioned-CSV writer
@@ -579,12 +662,13 @@ src/
     dw_init.sql                   # schema + Audit table bootstrap
     augmented_incremental/        # Augmented Incremental benchmark — see its README
       README.md                   # source of truth for this variant
-      setup.py / teardown.py      # Stage 1 setup/cleanup
+      setup.py / setup_dbt.py / teardown.py    # Stage 1 setup/cleanup
       simulate_filedrops.py       # per-batch cp from _staging into auto-loader watch dir
-      bronze/ historical/ incremental/ DLT/  # SQL + notebooks
+      bronze/ historical/ incremental/ DLT/ dbt/  # variant-specific code
   single_batch/
     SQL/                          # all-batches-in-one variant (Cluster + DBSQL)
     spark_declarative_pipelines/  # SDP notebooks (was delta_live_tables/)
+    dbt/                          # single-batch dbt project (legacy; cross-CDW compare)
 tests/
   test_workflow_builders.py       # unit tests for workflow JSON shape + naming
   smoke_run_workflows.py          # integration smoke test (creates+runs 4 jobs)

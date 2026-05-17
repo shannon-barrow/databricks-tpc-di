@@ -16,6 +16,7 @@ from workflow_builders import workflows_single_batch as _single_batch_builder
 from workflow_builders import workflows_incremental as _incremental_builder
 from workflow_builders import augmented_classic as _augmented_classic_builder
 from workflow_builders import augmented_sdp as _augmented_sdp_builder
+from workflow_builders import augmented_dbt as _augmented_dbt_builder
 
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -30,22 +31,49 @@ _WH_SCALE_FACTOR_MAP = {
 }
 
 
+def _dbt_wh_size(scale_factor: int) -> str:
+    """Pick a DBSQL warehouse size for the augmented-incremental dbt variant.
+
+    Anchored at "Small for SF=20000" (the SF we tuned for), each WH size
+    covers a doubling of the SF range above it:
+
+        SF <=  5000  -> 2X-Small
+        SF <= 10000  ->   X-Small
+        SF <= 20000  ->     Small
+        SF <= 40000  ->    Medium
+        SF <= 80000  ->     Large
+        ...
+
+    Per-day MERGE/INSERT load is small enough that an oversized warehouse
+    just wastes idle DBUs.
+    """
+    sizes = ["2X-Small", "X-Small", "Small", "Medium", "Large",
+             "X-Large", "2X-Large", "3X-Large", "4X-Large"]
+    ceiling = 5000
+    for size in sizes:
+        if scale_factor <= ceiling:
+            return size
+        ceiling *= 2
+    return sizes[-1]
+
+
 def _generate_augmented(*, variant: str, parent_job_name: str,
                          catalog: str, wh_target: str, scale_factor: int,
                          tpcdi_directory: str, repo_src_path: str,
-                         api_call: Callable) -> int:
+                         workspace_src_path: str, api_call: Callable) -> int:
     """Submit the augmented-incremental benchmark resources and return the
     parent job_id.
 
     Creates (in order):
       - CLUSTER variant: child job → parent job
-      - SDP variant: pipeline → child job → parent job
+      - SDP     variant: pipeline → child job → parent job
+      - DBT     variant: warehouse (if missing) → child job → parent job
 
-    `wh_db` is built as ``{wh_target}_AugmentedIncremental_{Cluster|SDP}``
+    `wh_db` is built as ``{wh_target}_AugmentedIncremental_{Cluster|SDP|DBT}``
     so two users running concurrently don't share Autoloader state under
     ``_dailybatches/{wh_db}_{sf}/``.
     """
-    label = "Cluster" if variant == "CLUSTER" else "SDP"
+    label = {"CLUSTER": "Cluster", "SDP": "SDP", "DBT": "DBT"}[variant]
     wh_db = f"{wh_target}_AugmentedIncremental_{label}"
 
     # parent_job_name comes from the Driver as ``{base}-SF{sf}-AugmentedIncremental-{Cluster|SDP}-Parent`` — derive child + pipeline names by stripping/replacing the suffix.
@@ -84,6 +112,29 @@ def _generate_augmented(*, variant: str, parent_job_name: str,
         parent_dag = _augmented_sdp_builder.build_parent(
             job_name=parent_job_name, child_job_id=child_job_id,
             pipeline_id=pipeline_id, **common)
+        print("Submitting parent workflow JSON to Databricks Jobs API")
+        return submit_dag(parent_dag, _JOBS_API_ENDPOINT, api_call)
+
+    if variant == "DBT":
+        # Get or create a DBSQL warehouse for the dbt task; the dbt-databricks
+        # task type runs commands against it. Warehouse name follows the same
+        # pattern as the rest of the augmented workflow.
+        wh_name = f"{wh_target}-tpcdi-dbt"
+        wh_dag_args = {"name": wh_name, "size": _dbt_wh_size(scale_factor)}
+        wh_id = _get_or_create_warehouse(wh_name, wh_dag_args, workspace_src_path, api_call)
+        print(f"  warehouse:      {wh_name} ({wh_id})")
+        print()
+
+        print("Building child workflow JSON via workflow_builders.augmented_dbt.build_child")
+        child_dag = _augmented_dbt_builder.build_child(
+            job_name=child_job_name, wh_id=wh_id, **common)
+        print("Submitting child workflow JSON to Databricks Jobs API")
+        child_job_id = submit_dag(child_dag, _JOBS_API_ENDPOINT, api_call)
+
+        print("Building parent workflow JSON via workflow_builders.augmented_dbt.build_parent")
+        parent_dag = _augmented_dbt_builder.build_parent(
+            job_name=parent_job_name, child_job_id=child_job_id,
+            wh_id=wh_id, **common)
         print("Submitting parent workflow JSON to Databricks Jobs API")
         return submit_dag(parent_dag, _JOBS_API_ENDPOINT, api_call)
 
@@ -153,7 +204,7 @@ def generate_benchmark_workflow(
     """
     sku = wf_key.split("-")
 
-    # AUGMENTED variants take an early-exit path. They don't use the CLUSTER/DBSQL/SDP compute selection, always use Spark-staged data, and create multiple resources (parent + child + optional pipeline) rather than a single workflow.
+    # AUGMENTED variants take an early-exit path. They don't use the CLUSTER/DBSQL/SDP compute selection, always use Spark-staged data, and create multiple resources (parent + child + optional pipeline or warehouse) rather than a single workflow.
     if sku[0] == "AUGMENTED":
         return _generate_augmented(
             variant=sku[1],
@@ -163,6 +214,7 @@ def generate_benchmark_workflow(
             scale_factor=scale_factor,
             tpcdi_directory=tpcdi_directory,
             repo_src_path=repo_src_path,
+            workspace_src_path=workspace_src_path,
             api_call=api_call,
         )
 

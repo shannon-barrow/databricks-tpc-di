@@ -28,6 +28,12 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 # COMMAND ----------
 
 def upsertToDelta(microBatchOutputDF, batch_id):
+  # Query shape intentionally mirrors the SDP factholdings_incremental flow
+  # so the cross-variant comparison stays apples-to-apples — the
+  # sk_closedateid predicate lives in the ON clause and references the
+  # per-row h.event_dt rather than a constant. Spark constant-folds
+  # bronzeholdings's per-microbatch event_dt into the join's sk_closedateid
+  # filter, letting dimtrade prune via its Liquid CLUSTER BY (sk_closedateid).
   microBatchOutputDF.createOrReplaceTempView("bronzeholdings")
   microBatchOutputDF.sparkSession.sql(f"""
     INSERT INTO {tgt_table}
@@ -35,7 +41,8 @@ def upsertToDelta(microBatchOutputDF, batch_id):
       SELECT
         h.hh_h_t_id tradeid,
         h.hh_t_id currenttradeid,
-        h.hh_after_qty currentholding
+        h.hh_after_qty currentholding,
+        h.event_dt
       FROM bronzeholdings h
     )
     SELECT
@@ -50,10 +57,9 @@ def upsertToDelta(microBatchOutputDF, batch_id):
       t.tradeprice currentprice,
       currentholding
     FROM h
-    JOIN {catalog}.{tgt_db}.dimtrade t 
-      ON 
-        t.tradeid = h.tradeid
-    WHERE t.sk_closedateid = bigint(date_format('{batch_date}', 'yyyyMMdd'))
+    JOIN {catalog}.{tgt_db}.dimtrade t
+      ON t.tradeid = h.tradeid
+     AND t.sk_closedateid = bigint(date_format(h.event_dt, 'yyyyMMdd'))
     """)
 
 # COMMAND ----------

@@ -20,8 +20,8 @@ CREATE OR REPLACE TABLE factwatches (
   CONSTRAINT factwatches_security_fk FOREIGN KEY (sk_securityid) REFERENCES DimSecurity(sk_securityid),
   CONSTRAINT factwatches_dateplaced_fk FOREIGN KEY (sk_dateid_dateplaced) REFERENCES DimDate(sk_dateid),
   CONSTRAINT factwatches_dateremoved_fk FOREIGN KEY (sk_dateid_dateremoved) REFERENCES DimDate(sk_dateid)
-) 
-PARTITIONED BY (removed)
+)
+CLUSTER BY (sk_dateid_dateremoved)  -- liquid: matches setup choice. NOT the `removed` boolean — the same sk_dateid_dateremoved the SDP/cluster liquid variants cluster on
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'

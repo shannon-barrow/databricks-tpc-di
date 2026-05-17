@@ -58,10 +58,11 @@ def upsertToDelta(microBatchOutputDF, batch_id):
     )
     MERGE INTO {tgt_table} t
     USING stage s
-    ON 
+    ON
       !t.removed
       AND t.symbol = s.symbol
       AND t.customerid = s.customerid
+      AND t.sk_dateid_dateremoved IS NULL
     WHEN MATCHED THEN UPDATE SET
       t.sk_dateid_dateremoved = s.sk_dateid_dateremoved,
       t.removed = True

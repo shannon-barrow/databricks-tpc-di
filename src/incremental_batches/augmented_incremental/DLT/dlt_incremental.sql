@@ -31,7 +31,7 @@ CREATE OR REFRESH STREAMING TABLE dimcustomer (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -122,7 +122,7 @@ CREATE OR REFRESH STREAMING TABLE dimaccount (
   __START_AT DATE COMMENT 'Beginning of date range when this record was the current record', 
   __END_AT DATE COMMENT 'Ending of date range when this record was the current record.'
 )
-PARTITIONED BY (iscurrent);
+CLUSTER BY (__END_AT);
 
 -- COMMAND ----------
 
@@ -225,7 +225,7 @@ CREATE OR REFRESH STREAMING TABLE dimtrade (
   commission DOUBLE COMMENT 'Commission earned on this trade',
   tax DOUBLE COMMENT 'Amount of tax due on this trade'
 )
-PARTITIONED BY (sk_closedateid);
+CLUSTER BY (sk_closedateid);
 
 -- COMMAND ----------
 
@@ -296,7 +296,7 @@ CREATE OR REFRESH STREAMING TABLE factholdings (
   currentprice DOUBLE COMMENT 'Unit price of this security for the current trade',
   currentholding INT COMMENT 'Quantity of a security held after the current trade.'
 )
-PARTITIONED BY (sk_dateid);
+CLUSTER BY (sk_dateid);
 
 -- COMMAND ----------
 
@@ -314,8 +314,8 @@ SELECT
   t.tradeprice currentprice,
   h.hh_after_qty currentholding
 FROM STREAM(bronzeholdings) h
-JOIN dimtrade t 
-  ON 
+JOIN dimtrade t
+  ON
     t.tradeid = h.hh_h_t_id
     and t.sk_closedateid = bigint(date_format(h.event_dt, 'yyyyMMdd'))
 
@@ -327,10 +327,9 @@ CREATE OR REFRESH STREAMING TABLE factwatches (
   customerid BIGINT COMMENT 'Customer associated with watch list',
   symbol STRING COMMENT 'Security listed on watch list',
   sk_dateid_dateplaced BIGINT COMMENT 'Date the watch list item was added',
-  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed',
-  removed BOOLEAN COMMENT 'True if this watch has been removed'
+  sk_dateid_dateremoved BIGINT COMMENT 'Date the watch list item was removed'
 )
-PARTITIONED BY (removed);
+CLUSTER BY (sk_dateid_dateremoved);
 
 -- COMMAND ----------
 
@@ -343,7 +342,6 @@ FROM (
     w.w_s_symb symbol,
     case when w_action != 'CNCL' then BIGINT(date_format(w_dts, 'yyyyMMdd')) end sk_dateid_dateplaced,
     case when w_action = 'CNCL' then BIGINT(date_format(w_dts, 'yyyyMMdd')) end sk_dateid_dateremoved,
-    if(w_action = 'CNCL', True, False) removed,
     w.w_dts
   from STREAM(bronzewatches) w
   JOIN tpcdi_incremental_staging_${scale_factor}.dimsecurity s 
@@ -363,82 +361,10 @@ STORED AS SCD TYPE 1;
 
 -- COMMAND ----------
 
-CREATE OR REFRESH MATERIALIZED VIEW factmarkethistorystg AS 
-select 
-  dm_s_symb, 
-  array_sort(
-    collect_list(
-      struct(
-        dm_date,
-        dm_high,
-        dm_low
-      )
-    )
-  ) date_high_low
-  from bronzedailymarket src
-  where dm_date >= (select date_sub(max(dm_date), 380) from bronzedailymarket)
-  group by all;
-
--- COMMAND ----------
-
-CREATE OR REFRESH STREAMING TABLE factmarkethistory (
-  sk_securityid BIGINT COMMENT 'Surrogate key for SecurityID',
-  sk_companyid BIGINT COMMENT 'Surrogate key for CompanyID',
-  sk_dateid BIGINT COMMENT 'Surrogate key for the date',
-  peratio DOUBLE COMMENT 'Price to earnings per share ratio',
-  yield DOUBLE COMMENT 'Dividend to price ratio, as a percentage',
-  fiftytwoweekhigh DOUBLE COMMENT 'Security highest price in last 52 weeks from this day',
-  sk_fiftytwoweekhighdate BIGINT COMMENT 'Earliest date on which the 52 week high price was set',
-  fiftytwoweeklow DOUBLE COMMENT 'Security lowest price in last 52 weeks from this day',
-  sk_fiftytwoweeklowdate BIGINT COMMENT 'Earliest date on which the 52 week low price was set',
-  closeprice DOUBLE COMMENT 'Security closing price on this day',
-  dayhigh DOUBLE COMMENT 'Highest price for the security on this day',
-  daylow DOUBLE COMMENT 'Lowest price for the security on this day',
-  volume INT COMMENT 'Trading volume of the security on this day'
-)
-PARTITIONED BY (sk_dateid) AS 
-with dm as (
-  select 
-    dm.dm_date,
-    dm.dm_s_symb, 
-    dm.dm_close,
-    dm.dm_high,
-    dm.dm_low,
-    dm.dm_vol,
-    filter(
-      fmh.date_high_low,
-      x -> x.dm_date between date_sub(dm.dm_date, 365) and dm.dm_date
-    ) date_high_low
-  from STREAM(bronzedailymarket) dm
-  join factmarkethistorystg fmh
-    on 
-      dm.dm_s_symb = fmh.dm_s_symb
-)
-SELECT 
-  s.sk_securityid,
-  s.sk_companyid,
-  bigint(date_format(dm.dm_date, 'yyyyMMdd')) sk_dateid,
-  try_divide(dm.dm_close, f.prev_year_basic_eps) AS peratio,
-  (try_divide(s.dividend, dm.dm_close)) / 100 yield,
-  array_max(dm.date_high_low.dm_high) fiftytwoweekhigh,
-  bigint(date_format(get(dm.date_high_low.dm_date, array_position(dm.date_high_low.dm_high, fiftytwoweekhigh) - 1), 'yyyyMMdd')) sk_fiftytwoweekhighdate,
-  array_min(dm.date_high_low.dm_low) fiftytwoweeklow,
-  bigint(date_format(get(dm.date_high_low.dm_date, array_position(dm.date_high_low.dm_low, fiftytwoweeklow) - 1), 'yyyyMMdd')) sk_fiftytwoweeklowdate,
-  dm.dm_close closeprice,
-  dm.dm_high dayhigh,
-  dm.dm_low daylow,
-  dm.dm_vol volume  
-FROM dm
-JOIN tpcdi_incremental_staging_${scale_factor}.dimsecurity s 
-  ON 
-    s.symbol = dm.dm_s_symb
-    AND dm.dm_date >= s.effectivedate 
-    AND dm.dm_date < s.enddate
-LEFT JOIN tpcdi_incremental_staging_${scale_factor}.companyyeareps f 
-  ON 
-    f.sk_companyid = s.sk_companyid
-    AND quarter(dm.dm_date) = quarter(f.qtr_start_date)
-    AND year(dm.dm_date) = year(f.qtr_start_date);
+-- factmarkethistorystg + factmarkethistory live in dlt_incremental_fmh.py
+-- (Python @dlt.table + REPLACE WHERE per-batch). Library-swap logic in
+-- update_pipeline_notebook.py adds dlt_incremental_fmh alongside this
+-- notebook during the incremental phase and removes both during historical.
 
 -- COMMAND ----------
 
@@ -447,7 +373,7 @@ CREATE OR REFRESH MATERIALIZED VIEW dailytransactionstotals (
   totalcashtransactions DECIMAL(15,2) COMMENT 'Cash transactions totals for the day',
   ct_date DATE COMMENT 'Date of the transactions'
 )
-PARTITIONED BY (ct_date) AS
+CLUSTER BY (ct_date) AS
 SELECT
   accountid,
   cast(sum(ct_amt) as DECIMAL(15,2)) totalcashtransactions,
@@ -463,7 +389,7 @@ CREATE OR REFRESH MATERIALIZED VIEW factcashbalances (
   sk_dateid BIGINT NOT NULL COMMENT 'Surrogate key for the date',
   cash DECIMAL(25,2) COMMENT 'Cash balance for the account after applying'
 )
-PARTITIONED BY (sk_dateid) AS 
+CLUSTER BY (sk_dateid) AS
 SELECT 
   a.sk_customerid, 
   a.sk_accountid, 

@@ -22,16 +22,16 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 
 # COMMAND ----------
 
-try:
-    spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-except Exception:
-    pass  # serverless: not on the user-settable allowlist
-
+# Switched from INSERT OVERWRITE (with partitionOverwriteMode='dynamic') to
+# REPLACE USING — modern Delta selective-overwrite primitive that works
+# compute-independently (cluster, serverless, warehouse) without the
+# spark.session config tweak. Aligns with the dbt port's replace_using.
 spark.sql(f"""
-  INSERT OVERWRITE {tgt_table}
-  SELECT 
-    a.sk_customerid, 
-    a.sk_accountid, 
+  INSERT INTO {tgt_table}
+  REPLACE USING (sk_dateid)
+  SELECT
+    a.sk_customerid,
+    a.sk_accountid,
     bigint(date_format(c.ct_date, 'yyyyMMdd')) sk_dateid,
     c.current_account_cash
   FROM {src_table} c

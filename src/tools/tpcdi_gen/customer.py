@@ -609,8 +609,40 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
             F.concat(ah, F.lit('\t\t<Customer C_ID="'), F.col("C_ID_str"), F.lit('">\n'), ac, F.lit("\t\t</Customer>\n"), ft))
     )
 
-    # Same-day (C_ID, day) and (CA_ID, day) dedups are no longer needed: the per-update bijection (see _bij_pos/C_ID assignment above) guarantees UPDCUST/INACT/UPDACCT/CLOSEACCT pick unique C_IDs within each update, so they cannot collide on the same day. NEW/ADDACCT use sequential allocation for C_IDs/CA_IDs that never reuse existing IDs, and different updates are 8+ days apart so cross-update same-day collisions are also impossible.
+    # === Cross-update same-day dedup for non-NEW/ADDACCT actions ===
+    # The per-update bijection guarantees unique (C_ID, CA_ID) picks WITHIN
+    # one update, but adjacent updates K and K+1 share a window boundary —
+    # each window is ~8.4 days at SF=20k and they abut, so the last row of K
+    # and the first row of K+1 are only ~3 seconds apart. Two consecutive
+    # updates can therefore both pick the same C_ID for UPDCUST/INACT (or
+    # the same CA_ID for UPDACCT/CLOSEACCT) and have their ActionTS land on
+    # the same calendar day, producing duplicate (entity, day) rows that
+    # break SCD2 MERGEs in downstream silver.
+    # Dedup matches the spec: at most one customer-level action per
+    # (C_ID, day) and one account-level action per (CA_ID, day). Earliest
+    # ActionTS wins. NEW/ADDACCT are exempt — they always allocate fresh
+    # sequential IDs and cannot collide with anything.
     all_df = all_df.withColumn("_day", F.substring(F.col("ActionTS"), 1, 10))
+
+    _cust_actions = ("UPDCUST", "INACT")
+    _cust_targets = all_df.filter(F.col("ActionType").isin(*_cust_actions))
+    _cust_others  = all_df.filter(~F.col("ActionType").isin(*_cust_actions))
+    _cust_targets = (_cust_targets
+        .withColumn("_rn", F.row_number().over(
+            Window.partitionBy("C_ID", "_day").orderBy("ActionTS")))
+        .filter(F.col("_rn") == 1)
+        .drop("_rn"))
+    all_df = _cust_targets.unionByName(_cust_others)
+
+    _acct_actions = ("UPDACCT", "CLOSEACCT")
+    _acct_targets = all_df.filter(F.col("ActionType").isin(*_acct_actions))
+    _acct_others  = all_df.filter(~F.col("ActionType").isin(*_acct_actions))
+    _acct_targets = (_acct_targets
+        .withColumn("_rn", F.row_number().over(
+            Window.partitionBy("CA_ID", "_day").orderBy("ActionTS")))
+        .filter(F.col("_rn") == 1)
+        .drop("_rn"))
+    all_df = _acct_targets.unionByName(_acct_others)
 
     # Global one-INACT-per-customer and one-CLOSEACCT-per-account dedups are no longer needed: inact_schedule and close_schedule pre-pick unique C_IDs/CA_IDs across all updates by construction (scan-bijection with set exclusion). No duplicates can exist.
 
@@ -620,14 +652,13 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .filter(F.col("ActionType") == "INACT")
         .select(F.col("C_ID").alias("_inact_cid"),
                 F.substring(F.col("ActionTS"), 1, 10).alias("_inact_day")))
-    all_df = all_df.withColumn("_day_tmp", F.substring(F.col("ActionTS"), 1, 10))
     all_df = (all_df
         .join(inact_days,
               (F.col("ActionType") == "ADDACCT") &
               (F.col("C_ID") == F.col("_inact_cid")) &
-              (F.col("_day_tmp") == F.col("_inact_day")),
+              (F.col("_day") == F.col("_inact_day")),
               "left_anti")
-        .drop("_day_tmp", "_inact_cid", "_inact_day"))
+        .drop("_inact_cid", "_inact_day"))
 
     # No cascade CLOSEACCT for INACT'd customers — DIGen's CustomerAccountBlackBox generates Customer DELETE (INACT) and Account DELETE (CLOSEACCT) as independent streams; INACT does not imply that the customer's accounts are closed. Adding cascade closes produced ~+51% CA_CLOSEACCT drift vs DIGen and indirectly suppressed UPDACCTs (Rule 3: no UPDACCT after CLOSEACCT) causing -29.7% CA_UPDACCT drift.
 
@@ -636,6 +667,45 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     all_df, _all_df_cleanup = disk_cache(all_df, spark, "CustomerMgmt actions",
                                           volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg,
                                           max_records_per_file=_xml_records_per_file)
+
+    # === Cross-type same-day dedup: drop UPDCUST/INACT colliding with NEW ===
+    # The per-update bijection keeps NEW (fresh sequential C_IDs) disjoint
+    # from UPDCUST/INACT (picks from prior updates' pool) WITHIN one update,
+    # but cross-update on the same calendar day a NEW from update K and an
+    # UPDCUST/INACT from update K+1 can land on the same C_ID + day. That
+    # produces two same-day Customer.txt rows for the same C_ID, which
+    # DimCustomer's SCD2 MERGE inserts as two iscurrent=true rows with the
+    # same sk_customerid (= concat(date, c_id)) — silent corruption that
+    # later fires DELTA_MULTIPLE_SOURCE_ROW_MATCHING_TARGET_ROW. Customer
+    # creation wins: same-day update/inactivate is meaningless.
+    # IMPORTANT: must run AFTER disk_cache(all_df) — the upstream lineage
+    # includes the customer_scheduler Pandas UDF, and chaining self-joins
+    # on top of that pre-materialization stalls Catalyst (3 self-references
+    # back-to-back made SF=10 hang for 12+ minutes).
+    new_cust_days = (all_df
+        .filter(F.col("ActionType") == "NEW")
+        .select(F.col("C_ID").alias("_new_cid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_new_cust_day")))
+    all_df = (all_df
+        .join(new_cust_days,
+              (F.col("ActionType").isin("UPDCUST", "INACT")) &
+              (F.col("C_ID") == F.col("_new_cid")) &
+              (F.col("_day") == F.col("_new_cust_day")),
+              "left_anti")
+        .drop("_new_cid", "_new_cust_day"))
+
+    # === Cross-type same-day dedup: drop UPDACCT/CLOSEACCT colliding with NEW/ADDACCT ===
+    acct_create_days = (all_df
+        .filter(F.col("ActionType").isin("NEW", "ADDACCT"))
+        .select(F.col("CA_ID").alias("_create_caid"),
+                F.substring(F.col("ActionTS"), 1, 10).alias("_create_acct_day")))
+    all_df = (all_df
+        .join(acct_create_days,
+              (F.col("ActionType").isin("UPDACCT", "CLOSEACCT")) &
+              (F.col("CA_ID") == F.col("_create_caid")) &
+              (F.col("_day") == F.col("_create_acct_day")),
+              "left_anti")
+        .drop("_create_caid", "_create_acct_day"))
 
     # === _account_owners temp view ===
     # Maps each created CA_ID to its owning C_ID. Used by incremental Batch2/3 to (a) force INAC candidates to ACTV when they have no accounts, (b) drop U rows referencing non-existent CA_IDs, and (c) emit cascade INAC account rows for newly-inactive customers. Not used by Trade.

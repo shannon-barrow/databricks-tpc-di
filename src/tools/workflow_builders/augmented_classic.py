@@ -2,10 +2,10 @@
 
 The "ideal path" for the augmented benchmark: a wrapper PARENT job runs
 setup once, then loops the CHILD benchmark job per date via a
-for_each_task over a 730-day list, with an opt-in cleanup gate at the end.
+for_each_task over a 365-day list, with an opt-in cleanup gate at the end.
 
 The augmented benchmark reshapes TPC-DI from the standard 3-batch bulk
-load into a 730-day streaming pipeline (2015-07-06 → 2017-07-05). Each
+load into a 365-day streaming pipeline (2016-07-06 → 2017-07-05). Each
 iteration: simulate_filedrops drops one day's pre-staged files into an
 Autoloader watch directory, then 7 bronze ingest tasks fan out, then
 silver/gold incremental MERGEs follow the dimensional dependency chain.
@@ -64,7 +64,7 @@ def _make_task(
     """Standard notebook-task envelope. `existing_cluster_id` (when
     provided) pins the task to a warm interactive cluster — used for
     `simulate_filedrops` and the lightweight setup/teardown tasks so the
-    per-iteration cluster startup tax doesn't dominate over 730 loops.
+    per-iteration cluster startup tax doesn't dominate over 365 loops.
     Leaving it None falls back to serverless (perf-optimized at the job
     level)."""
     nb: dict[str, Any] = {
@@ -94,7 +94,7 @@ def _description_child(*, scale_factor: int, catalog: str, wh_db: str,
     return (
         f"TPC-DI Augmented Incremental benchmark (Cluster, child) at "
         f"SF={scale_factor}. Triggered once per simulated business day in "
-        f"the 730-day window 2015-07-06 → 2017-07-05 by the parent job's "
+        f"the 365-day window 2016-07-06 → 2017-07-05 by the parent job's "
         f"for_each_task. Each run: drops the day's pre-staged files into "
         f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}/` "
         f"for Autoloader, fans out 7 bronze ingestion tasks, then runs "
@@ -107,16 +107,16 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
                          tpcdi_directory: str) -> str:
     return (
         f"TPC-DI Augmented Incremental benchmark (Cluster, **parent**) at "
-        f"SF={scale_factor}. Wraps the child benchmark job in a 730-day "
+        f"SF={scale_factor}. Wraps the child benchmark job in a 365-day "
         f"for_each_task loop. Setup deep/shallow-clones from the shared "
         f"staging schema `{catalog}.tpcdi_incremental_staging_{scale_factor}` "
         f"(populated once-per-SF by Phase B file-splitting tools), then "
         f"the child runs per simulated day. Final cleanup is gated by the "
-        f"`delete_tables_when_finished` job parameter — set to `TRUE` to "
-        f"drop the run's schema and Autoloader directories on completion. "
-        f"Default is `FALSE` because a full 730-day run takes ~a week and "
-        f"users typically want to inspect the result tables. The shared "
-        f"`_staging/sf={scale_factor}/` data is preserved across runs."
+        f"`delete_tables_when_finished` job parameter — defaults to `TRUE` "
+        f"so the run's schema and Autoloader directories are dropped on "
+        f"completion. Set to `FALSE` to keep the result tables for "
+        f"inspection. The shared `_staging/sf={scale_factor}/` data is "
+        f"preserved across runs."
     )
 
 
@@ -139,7 +139,7 @@ def build_child(
         simulate_filedrops_cluster_id: Optional warm interactive cluster id
             to pin `simulate_filedrops` to. None ⇒ runs on serverless. The
             production pattern keeps this on a dedicated warm cluster so
-            (a) per-iteration startup tax is amortized over 730 loops and
+            (a) per-iteration startup tax is amortized over 365 loops and
             (b) the non-benchmark file-copy cost is isolated from
             benchmark compute for clean cost attribution.
     """
@@ -320,7 +320,7 @@ def build_parent(
         "webhook_notifications": {},
     }
 
-    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure runs still reach it; outcome=true on cleanup so it skips entirely (no compute spin-up) when the user keeps `delete_tables_when_finished` at its default of FALSE.
+    # Cleanup gate + cleanup pair. ALL_DONE on the gate so partial-failure runs still reach it; outcome=true on cleanup runs the drop when `delete_tables_when_finished` is at its default of TRUE — set the parameter to FALSE to keep the run's tables for inspection.
     GATE = "delete_when_finished_TRUE_FALSE"
     gate_task: dict[str, Any] = {
         "task_key": GATE,
@@ -361,8 +361,8 @@ def build_parent(
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
-            {"name": "delete_tables_when_finished", "default": "FALSE"},
-            {"name": "incremental_batches_to_run", "default": "730"},
+            {"name": "delete_tables_when_finished", "default": "TRUE"},
+            {"name": "incremental_batches_to_run", "default": "365"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         "queue": {"enabled": True},

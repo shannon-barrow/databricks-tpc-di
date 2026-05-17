@@ -99,15 +99,17 @@ def upsertToDelta(microBatchOutputDF, batch_id):
       JOIN {tgt_table} t
         ON s.customerid = t.customerid
       WHERE t.iscurrent
+        AND t.enddate = DATE'9999-12-31'
       UNION ALL
       SELECT
         cast(null as bigint) AS mergeKey,
         *
       FROM incr_cust
-    ) s 
-      ON 
+    ) s
+      ON
         t.customerid = s.mergeKey
         AND t.iscurrent
+        AND t.enddate = DATE'9999-12-31'
     WHEN MATCHED AND s.sk_customerid is not null THEN UPDATE SET
       t.iscurrent = false,
       t.enddate = s.effectivedate

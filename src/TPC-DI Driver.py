@@ -88,13 +88,16 @@ for _legacy in ("workflow_type", "batched",
 
 # --- sku / batch_type / edition (What) ---
 # `batch_type` options are dynamically constrained to what each SKU actually supports: DBSQL has no Augmented Incremental, SDP has no per-day Incremental. `edition` only appears for SDP × Single Batch.
-dbutils.widgets.dropdown("sku", "Cluster", ["Cluster", "DBSQL", "SDP"], "01 SKU")
+dbutils.widgets.dropdown("sku", "Cluster", ["Cluster", "DBSQL", "SDP", "dbt"], "01 SKU")
 _sku_choice = dbutils.widgets.get("sku")
 
 if _sku_choice == "SDP":
   _batch_options = ["Single Batch", "Augmented Incremental"]
 elif _sku_choice == "DBSQL":
   _batch_options = ["Single Batch", "Incremental"]
+elif _sku_choice == "dbt":
+  # dbt-databricks is implemented for the augmented_incremental workload only.
+  _batch_options = ["Augmented Incremental"]
 else:  # Cluster
   _batch_options = ["Single Batch", "Incremental", "Augmented Incremental"]
 dbutils.widgets.dropdown("batch_type", _batch_options[0], _batch_options, "02 Batch Type")
@@ -196,8 +199,10 @@ datagen_job_name = f"{_base_name}-SF{scale_factor}-{_gen_label}"
 if sku[0] in ['CLUSTER','DBSQL']:
   job_name = f"{_base_name}-SF{scale_factor}-{_batched_label}-{_exec_label}-{_gen_label}"
 elif sku[0] == "AUGMENTED":
-  # AUGMENTED creates parent + child (+ pipeline for SDP). job_name here is the PARENT name; the dispatcher derives child by stripping `-Parent` and pipeline (SDP only) by appending `-Pipeline`.
-  _aug_variant = "Cluster" if sku[1] == "CLUSTER" else "SDP"
+  # AUGMENTED creates parent + child (+ pipeline for SDP, + warehouse for dbt).
+  # job_name here is the PARENT name; the dispatcher derives child by stripping
+  # `-Parent` and pipeline (SDP only) by appending `-Pipeline`.
+  _aug_variant = {"CLUSTER": "Cluster", "SDP": "SDP", "DBT": "DBT"}[sku[1]]
   job_name = f"{_base_name}-SF{scale_factor}-AugmentedIncremental-{_aug_variant}-Parent"
 else:
   job_name = f"{_base_name}-SF{scale_factor}-{_exec_label}-{_gen_label}"

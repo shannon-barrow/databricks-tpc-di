@@ -1,6 +1,6 @@
 # Augmented Incremental TPC-DI
 
-A 730-day daily-streaming reshaping of the standard TPC-DI benchmark. Splits
+A 365-day daily-streaming reshaping of the standard TPC-DI benchmark. Splits
 the bulk historical batches into per-day file drops and runs the pipeline
 incrementally — exercising CDC + SCD2 + cumulative compaction the way a
 production daily pipeline does.
@@ -29,7 +29,7 @@ source of truth.
 │    1. data_gen DAG (augmented mode) writes 7 datasets to Delta     │
 │       at {catalog}.tpcdi_raw_data.{dataset}{sf}, with stg_target   │
 │       column splitting rows into 'tables' (< 2015-07-06) and       │
-│       'files' (the 730-day window).                                │
+│       'files' (the 365-day window).                                │
 │    2. stage_tables: builds the shared staging schema               │
 │       tpcdi_incremental_staging_{sf} from stg_target='tables'      │
 │       (DimCustomer/DimAccount/DimTrade Historical, FactCash/       │
@@ -47,7 +47,7 @@ source of truth.
 ┌─ Stage 1: Benchmark (one parent job per run) ──────────────────────┐
 │  Driver → augmented_classic OR augmented_sdp parent job:           │
 │    - setup.py: CLONE staging schema → per-user run schema; reset   │
-│      the autoloader watch dir + checkpoints; emit the 730-day      │
+│      the autoloader watch dir + checkpoints; emit the 365-day      │
 │      date list as a job task value.                                │
 │    - Loop (for_each_task over the 730 dates), each iteration:      │
 │        a. simulate_filedrops.py: dbutils.fs.cp the day's per-      │
@@ -70,22 +70,27 @@ in this directory and is built by `augmented_classic.py` / `augmented_sdp.py`.
 
 ```
 augmented_incremental/
-├── setup.py                       # Stage 1 setup: CLONE staging → run schema, reset dirs
+├── README.md                      # this file — Cluster variant + overview for SDP/dbt
+├── setup.py                       # Cluster Jobs setup: DEEP CLONE staging (Liquid layout
+│                                  # inherited) + 6 streaming bronze CREATEs
+├── setup_dbt.py                   # dbt setup: same DEEP CLONE pattern + 6 streaming bronze
+│                                  # CREATEs (dbt-databricks "setup-owns-layout")
 ├── teardown.py                    # Drop the run's schema and wipe its checkpoints
-├── create_dates_loop.py           # Emits the 730-date list as a job task value
 ├── simulate_filedrops.py          # Per-batch: copy day's part files into autoloader watch dir
 ├── bronze/
 │   ├── ingest_bronze.py           # Auto Loader stream for the 7 raw datasets
 │   └── account_updates_from_customer.py  # DimCustomer events that also touch DimAccount
-├── historical/                    # Pre-2015-07-06 SCD2 builds (read from spark-gen Delta)
-│   ├── DimCustomerHistorical.sql
-│   ├── DimAccountHistorical.sql
-│   ├── DimTradeHistorical.sql
-│   ├── FactCashBalancesHistorical.sql
-│   ├── FactHoldingsHistorical.sql
-│   ├── FactWatchesHistorical.sql
-│   └── CompanyYearEPS.sql
-├── incremental/                   # Per-batch SCD2 / aggregate MERGEs
+├── historical/                    # Pre-2016-07-06 SCD2 builds — all CLUSTER BY (Liquid)
+│   ├── DimCustomerHistorical.sql           # CLUSTER BY (enddate)
+│   ├── DimAccountHistorical.sql            # CLUSTER BY (enddate)
+│   ├── DimTradeHistorical.sql              # CLUSTER BY (sk_closedateid)
+│   ├── FactCashBalancesHistorical.sql      # CLUSTER BY (sk_dateid) / (event_dt for currentaccountbalances)
+│   ├── FactHoldingsHistorical.sql          # CLUSTER BY (sk_dateid)
+│   ├── FactWatchesHistorical.sql           # CLUSTER BY (sk_dateid_dateremoved)
+│   ├── FactMarketHistoryHistorical.sql     # CLUSTER BY (sk_dateid)
+│   ├── DailyMarketHistorical.sql           # CLUSTER BY (dm_date) — bronzedailymarket
+│   └── CompanyYearEPS.sql                  # CLUSTER BY (qtr_start_date)
+├── incremental/                   # Per-batch SCD2 / aggregate MERGEs (Cluster Jobs variant)
 │   ├── DimCustomer Incremental.py
 │   ├── DimAccount Incremental.py
 │   ├── DimTrade Incremental.py
@@ -94,13 +99,40 @@ augmented_incremental/
 │   ├── FactWatches Incremental.py
 │   ├── FactMarketHistory Incremental.py
 │   └── currentaccountbalances Incremental.py
-└── DLT/                           # SDP variant
-    ├── pipelines_setup.py
-    ├── update_pipeline_notebook.py    # Library-swap: dlt_historical → dlt_incremental
-    ├── dlt_ingest_bronze.py
-    ├── dlt_historical.sql
-    └── dlt_incremental.sql
+├── DLT/                           # SDP variants — see DLT/README.md for the deep-dive
+│   ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
+│   ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
+│   ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
+│   └── dlt_historical.sql / dlt_incremental.sql  # canonical SDP variant
+└── dbt/                           # dbt variant — see dbt/README.md for the deep-dive
+    ├── dbt_project.yml / profiles.yml.template
+    ├── macros/
+    └── models/                    # bronze / silver / gold (16 dbt-managed models)
 ```
+
+## Setup-notebook matrix
+
+Each benchmark variant pairs with a specific setup notebook:
+
+| Benchmark variant | Setup notebook | What it does |
+|---|---|---|
+| Cluster Jobs    | `setup.py`                          | DEEP CLONE 8 dim/fact + bronzedailymarket from staging; SHALLOW CLONE 12 reference tables; 6 streaming bronze tables left for Auto Loader to populate |
+| dbt             | `setup_dbt.py`                      | Same DEEP/SHALLOW CLONE shape as `setup.py`, plus 6 streaming bronze pre-creates with `CLUSTER BY` + `dataSkippingNumIndexedCols=34` (setup-owns-layout pattern — dbt model configs declare no `liquid_clustered_by` / `tblproperties`) |
+| SDP             | `DLT/pipelines_setup.py`            | pipeline-managed CLUSTER BY |
+
+**Liquid is the only path.** Earlier in this project's life there were
+parallel partitioned and Liquid setup notebooks. The partitioned
+approach has been retired — benchmarks against the SCD2 update patterns
+we run (factwatches `removed` flipping, dimcustomer/dimaccount
+`iscurrent` flipping) showed Liquid is strictly faster because it
+avoids the cross-partition row-rewrite that those updates trigger
+under PARTITIONED BY.
+
+**Staging layout.** The `historical/*.sql` files build the
+`tpcdi_incremental_staging_{sf}` schema once per SF (during Stage 0)
+and all use `CLUSTER BY` matching each downstream variant's needs.
+DEEP CLONE in `setup.py` / `setup_dbt.py` inherits this layout directly
+— no per-table CTAS dance, no `OPTIMIZE` step.
 
 ---
 
@@ -130,7 +162,7 @@ short-circuits the check and forces a rebuild.
 
 **Customer event distribution.** The CustomerMgmt scheduler runs 434 update
 windows across the full 10-year CM range; ~88 of those windows fall in the
-730-day augmented window. Each window's actions (NEW / ADDACCT / UPDACCT /
+365-day augmented window. Each window's actions (NEW / ADDACCT / UPDACCT /
 CLOSEACCT / UPDCUST / INACT) are randomly interleaved across the row positions
 within the window via a deterministic permutation, so timestamps for any single
 ActionType are spread uniformly across the window — mirroring DIGen's
@@ -148,7 +180,8 @@ NEW/UPDCUST/INACT were each packed into <1-day sub-slabs of each window.
 1. Runs `setup.py`: CLONEs the per-SF shared staging schema into the run's
    per-user schema (`{catalog}.{wh_db}_AugmentedIncremental_{Cluster|SDP}_{sf}`),
    resets `_dailybatches/{wh_db}_{sf}/` and `_checkpoints/{wh_db}_{sf}/`, and
-   emits the 730-date list via `create_dates_loop.py` as a task value.
+   emits the 365-date list as a task value (`batch_date_ls`) consumed by the
+   parent's `for_each` loop.
 2. Runs the date loop (Databricks `for_each_task`). Each iteration is a
    child job that:
    - `simulate_filedrops` — `dbutils.fs.cp` the day's `_staging/sf={sf}/
@@ -175,9 +208,9 @@ Auto Loader checkpoint sees only the day's intended files.
 | `catalog`                           | `main`  | Same as Stage 0. |
 | `wh_db`                             | (user)  | Per-user prefix for the run schema, dailybatches, checkpoints. |
 | `tpcdi_directory`                   | (req.)  | Path to the volume containing `augmented_incremental/_staging/sf={sf}/`. |
-| `delete_when_finished_TRUE_FALSE`   | `FALSE` | A full 730-day run takes hours; default keeps the result tables for inspection. |
+| `delete_when_finished_TRUE_FALSE`   | `FALSE` | A full 365-day run takes hours; default keeps the result tables for inspection. |
 | `file_ext`                          | `txt`   | Output file extension at filedrop time. `read_file_ext` becomes `csv` when this is `txt` (the CSV writer produces `.csv` part files we rename), or matches `file_ext` for any other value. |
-| `incremental_batches_to_run`        | `730`   | Cap on the daily-streaming loop length, clamped to [1, 730]. Use a small value (e.g. `30`) for smoke tests without committing to the full benchmark wall. Honored by both the Cluster and SDP variants. |
+| `incremental_batches_to_run`        | `365`   | Cap on the daily-streaming loop length, clamped to [1, 365]. Use a small value (e.g. `30`) for smoke tests without committing to the full benchmark wall. Honored by Cluster, SDP, and dbt variants. |
 
 ---
 
@@ -185,18 +218,18 @@ Auto Loader checkpoint sees only the day's intended files.
 
 | Dataset         | Total rows  | Rows/day | Source range       |
 |-----------------|------------:|---------:|--------------------|
-| Customer        | 8,692,760   | 11,908   | 730 days           |
-| Account         | 17,385,945  | 23,816   | 730 days           |
-| Trade           | (large)     | ~3.5M    | 730 days           |
-| CashTransaction | (large)     | ~1.3M    | 730 days           |
-| HoldingHistory  | (large)     | ~1.3M    | 730 days           |
-| DailyMarket     | (large)     | ~14.8M   | 730 days           |
-| WatchHistory    | (large)     | ~3.3M    | 730 days           |
+| Customer        | 8,692,760   | 11,908   | 365 days           |
+| Account         | 17,385,945  | 23,816   | 365 days           |
+| Trade           | (large)     | ~3.5M    | 365 days           |
+| CashTransaction | (large)     | ~1.3M    | 365 days           |
+| HoldingHistory  | (large)     | ~1.3M    | 365 days           |
+| DailyMarket     | (large)     | ~14.8M   | 365 days           |
+| WatchHistory    | (large)     | ~3.3M    | 365 days           |
 
 DIGen baseline (Customer/Account, B2+B3 portion that lands in the same
 2015-07-06 onward window): 11,886 / 23,809 rows/day at SF=20k. Augmented
 matches DIGen within 0.2% on per-day density; the +30-day extra coverage
-(augmented runs 730 days vs DIGen's 700) accounts for the total-row gap.
+(augmented runs 365 days vs DIGen's 700) accounts for the total-row gap.
 
 ---
 

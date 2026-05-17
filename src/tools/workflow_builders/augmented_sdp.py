@@ -3,17 +3,21 @@
 The SDP path of the augmented benchmark has compromises vs the Classic
 "ideal path" — SDP can't easily switch between bulk-loading historical
 data and streaming incrementals in the same pipeline run, so the parent
-job swaps the pipeline's library notebook between two versions:
+job swaps the pipeline's library notebooks between two sets:
 
-  - `DLT/dlt_historical` — INSERT INTO ONCE flows that read from the
-    pre-staged historical schema and bulk-load into the SDP target tables.
-  - `DLT/dlt_incremental` — Auto CDC streaming flows that consume the
-    Autoloader-fed bronze tables.
+  - Historical set: `DLT/dlt_historical` — INSERT INTO ONCE flows that
+    read from the pre-staged historical schema and bulk-load into the
+    SDP target tables (including the factmarkethistory pre-seed).
+  - Incremental set: `DLT/dlt_incremental` (Auto CDC + non-FMH streams)
+    plus `DLT/dlt_incremental_fmh` (Python @dlt.table with REPLACE WHERE
+    for factmarkethistory — split out because REPLACE WHERE isn't
+    available in SQL declarative-pipeline syntax).
 
 The swap is implemented by `DLT/update_pipeline_notebook.py`: it loads
-the pipeline spec via the SDK, finds the library notebook entry whose
-path ends with the current suffix, rewrites it to the desired suffix,
-and PUTs the spec back.
+the pipeline spec via the SDK, removes all managed library notebooks
+(those whose basename is in {dlt_historical, dlt_incremental,
+dlt_incremental_fmh}), appends the target set back, and PUTs the spec.
+Non-managed libraries (e.g. dlt_ingest_bronze) are preserved.
 
 Three builders here:
 - ``build_pipeline(...)`` — the SDP pipeline definition
@@ -116,6 +120,7 @@ def build_pipeline(
         "libraries": [
             {"notebook": {"path": f"{dlt_path}/dlt_ingest_bronze"}},
             {"notebook": {"path": f"{dlt_path}/dlt_incremental"}},
+            {"notebook": {"path": f"{dlt_path}/dlt_incremental_fmh"}},
         ],
         "configuration": {
             "scale_factor":    str(scale_factor),
@@ -131,7 +136,7 @@ def _description_child(*, scale_factor: int, catalog: str, wh_db: str,
     return (
         f"TPC-DI Augmented Incremental benchmark (SDP, child) at "
         f"SF={scale_factor}. Triggered once per simulated business day in "
-        f"the 730-day window 2015-07-06 → 2017-07-05 by the parent job's "
+        f"the 365-day window 2016-07-06 → 2017-07-05 by the parent job's "
         f"for_each_task. Each run drops the day's pre-staged files into "
         f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}/` "
         f"then triggers the SDP pipeline (full_refresh=False) for an "
@@ -148,13 +153,13 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
         f"static dim tables from "
         f"`{catalog}.tpcdi_incremental_staging_{scale_factor}` into "
         f"`{catalog}.{wh_db}_{scale_factor}`; (2) `set_pipeline_historical` "
-        f"swaps the SDP pipeline's library to `dlt_historical`; (3) "
-        f"`run_historical_pipeline` runs the pipeline with full_refresh=True "
-        f"to bulk-load history; (4) `set_pipeline_incremental` swaps "
-        f"back to `dlt_incremental`; (5) `loop_incremental_tpcdi` "
+        f"swaps the SDP pipeline's managed libraries to `dlt_historical`; "
+        f"(3) `run_historical_pipeline` runs the pipeline with "
+        f"full_refresh=True to bulk-load history; (4) `set_pipeline_incremental` "
+        f"swaps to {{dlt_incremental, dlt_incremental_fmh}}; (5) `loop_incremental_tpcdi` "
         f"for_each-loops the child job per simulated day. Cleanup gated "
-        f"by `delete_tables_when_finished` (default FALSE — long runs make "
-        f"keep-by-default the safer choice). Shared `_staging/sf={scale_factor}/` "
+        f"by `delete_tables_when_finished` (default TRUE — set to FALSE if "
+        f"you want to inspect tables after the run). Shared `_staging/sf={scale_factor}/` "
         f"is preserved across runs."
     )
 
@@ -357,8 +362,8 @@ def build_parent(
             {"name": "scale_factor", "default": str(scale_factor)},
             {"name": "tpcdi_directory", "default": tpcdi_directory},
             {"name": "wh_db", "default": wh_db},
-            {"name": "delete_tables_when_finished", "default": "FALSE"},
-            {"name": "incremental_batches_to_run", "default": "730"},
+            {"name": "delete_tables_when_finished", "default": "TRUE"},
+            {"name": "incremental_batches_to_run", "default": "365"},
         ],
         "tasks": [setup_task, set_historical, run_historical, set_incremental,
                   loop_task, gate_task, cleanup_task],

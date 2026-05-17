@@ -149,10 +149,21 @@ def _gen_daily_market(spark, cfg, dbutils):
     # Write batch 1 (historical): pipe-delimited flat file, OR Delta table when augmented_incremental staging mode is on.
     if cfg.augmented_incremental:
         from .utils import write_delta
-        # Filter out post-window rows entirely (DM_END_DATE = 2017-07-06 → 2 extra days). All surviving rows are >= 2015-07-06 (DM_BEGIN_DATE), so stg_target='files' for everything.
+        from .config import AUG_FILES_DATE_START, AUG_FILES_DATE_END_EXCL
+        # Filter out post-window rows entirely (DM_END_DATE = 2017-07-06 — 2 days
+        # past the augmented window). The remaining rows split into:
+        #   - 'tables' (dm_date < AUG_FILES_DATE_START = 2016-07-06): pre-staged
+        #     into the benchmark schema by the DailyMarketHistorical loader so
+        #     factmarkethistory has a full 365-day lookback from batch 1.
+        #   - 'files'  (dm_date in [AUG_FILES_DATE_START, AUG_FILES_DATE_END_EXCL)):
+        #     daily file drops fed by simulate_filedrops.
+        # Under the prior 730-day window AUG_FILES_DATE_START coincided with
+        # DM_BEGIN_DATE, so 'tables' was empty and everything was 'files'.
         dm_p = (dm_df
-            .filter(F.col("dm_date") < F.lit("2017-07-05"))
-            .withColumn("stg_target", F.lit("files")))
+            .filter(F.col("dm_date") < F.lit(AUG_FILES_DATE_END_EXCL))
+            .withColumn("stg_target",
+                F.when(F.col("dm_date") < F.lit(AUG_FILES_DATE_START), F.lit("tables"))
+                 .otherwise(F.lit("files"))))
         write_delta(dm_p, cfg=cfg, dataset="dailymarket",
                     partition_cols=["stg_target"])
     else:

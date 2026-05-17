@@ -7,10 +7,11 @@
 -- COMMAND ----------
 
 USE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor);
--- Persist the pre-2015-07-06 cash transaction events as their own staging
--- table. The SDP pipeline's bronzecashtransaction backfill reads from this
--- so its `sum() over (partition by accountid order by ct_date)` running
--- balance starts from the correct historical baseline post-2015-07-06.
+-- Persist the pre-AUG_FILES_DATE_START cash transaction events as their
+-- own staging table. The SDP pipeline's bronzecashtransaction backfill
+-- reads from this so its `sum() over (partition by accountid order by
+-- ct_date)` running balance starts from the correct historical baseline
+-- post-AUG_FILES_DATE_START (= 2016-07-06 under the 365-day window).
 -- The temp Delta tpcdi_raw_data.cashtransaction{sf} gets dropped by
 -- cleanup_stage0, so this is the persistent copy that survives.
 CREATE OR REPLACE TABLE cashtransactionhistorical (
@@ -22,7 +23,7 @@ CREATE OR REPLACE TABLE cashtransactionhistorical (
   ct_name STRING,
   event_dt DATE
 )
-PARTITIONED BY (event_dt)
+CLUSTER BY (event_dt)  -- liquid: per-batch ingest filter is on event_dt (matches bronze layout the Liquid variants use)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
@@ -46,7 +47,7 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
   CONSTRAINT cashbalances_account_fk FOREIGN KEY (sk_accountid) REFERENCES DimAccount(sk_accountid),
   CONSTRAINT cashbalances_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid)
 )
-PARTITIONED BY (sk_dateid)
+CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt pre-create + Liquid dbt model unique key)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
@@ -57,7 +58,10 @@ CREATE OR REPLACE TABLE currentaccountbalances (
   current_account_cash DECIMAL(15,2) COMMENT 'Current running cash balance for the account',
   latest_batch BOOLEAN COMMENT 'Accounts with transactions on the latest date processed'
 )
-PARTITIONED BY (latest_batch)
+-- No clustering — table is small (one row per touched account) and the
+-- prior PARTITIONED BY (latest_batch) was a boolean flag, not a useful
+-- Liquid cluster key. dbt-Liquid recreates this table each batch anyway
+-- (CREATE OR REPLACE TABLE AS SELECT) so any cluster_by would be wiped.
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true'
@@ -69,7 +73,7 @@ TBLPROPERTIES (
 INSERT OVERWRITE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_factor || '.currentaccountbalances')
 SELECT
   *,
-  if(ct_date = '2015-07-05', True, False) latest_batch
+  if(ct_date = '2016-07-05', True, False) latest_batch  -- day before AUG_FILES_DATE_START
 FROM (
   SELECT
     to_date(max(ct_dts)) ct_date,

@@ -18,11 +18,8 @@
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"])
 dbutils.widgets.text("catalog", "main")
-
-scale_factor = dbutils.widgets.get("scale_factor").strip()
-catalog      = dbutils.widgets.get("catalog").strip()
-
-# COMMAND ----------
+scale_factor    = dbutils.widgets.get("scale_factor").strip()
+catalog         = dbutils.widgets.get("catalog").strip()# COMMAND ----------
 
 for tbl in ("customermgmt", "trade", "tradehistory", "cashtransaction",
             "holdinghistory", "watchhistory", "dailymarket"):

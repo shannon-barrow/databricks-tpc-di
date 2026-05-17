@@ -27,15 +27,18 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 
 # COMMAND ----------
 
-try:
-    spark.conf.set("spark.sql.sources.partitionOverwriteMode", "dynamic")
-except Exception:
-    pass  # serverless: not on the user-settable allowlist
-
 def upsertToDelta(microBatchOutputDF, batch_id):
-  microBatchOutputDF.createOrReplaceTempView("bronzedailymarket")
+  # bronzedailymarket is pre-seeded by setup.py with the prior year of
+  # DM data ([2015-07-06, 2016-07-05]). On the FIRST streaming microbatch
+  # the Delta stream emits that initial commit's rows; without this filter
+  # we'd recompute (and REPLACE USING) FMH for the pre-window sk_dateids
+  # already covered by the FactMarketHistoryHistorical clone — wasteful
+  # and would make batch 1 ~365× heavier than steady-state batches.
+  from pyspark.sql import functions as F
+  microBatchOutputDF.filter(F.col("dm_date") >= "2016-07-06").createOrReplaceTempView("bronzedailymarket")
   microBatchOutputDF.sparkSession.sql(f"""
-    INSERT OVERWRITE {tgt_table}
+    INSERT INTO {tgt_table}
+    REPLACE USING (sk_dateid)
     with sym_min_max as (
       SELECT 
         dm_s_symb, 

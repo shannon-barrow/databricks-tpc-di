@@ -1,8 +1,12 @@
 # Databricks notebook source
 import dlt
 
-# spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
-# spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+# Bumped broadcast threshold so SDP's factholdings_incremental gets the same h-side broadcast hash join on dimtrade that the Cluster variant gets implicitly. Back to 250 MB (matching Cluster's currentaccountbalances Incremental conf) after splitting factmarkethistory out into dlt_incremental_fmh.py — the prior 250 MB OOMs may have been driven by FMH's array-of-structs join, which no longer runs in the same pipeline update.
+try:
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
+    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
+except Exception:
+    pass
 
 # COMMAND ----------
 
@@ -63,7 +67,8 @@ def generate_tables(tbl):
   tbl_name = (f"bronze{tbl}")
   @dlt.table(
     name=tbl_name,
-    partition_cols=partitions.get(tbl)
+    cluster_by=partitions.get(tbl),
+    table_properties={"delta.dataSkippingNumIndexedCols": "34"}
   )
   def create_table(): 
     return build_autoloader_stream(tbl)
@@ -94,4 +99,23 @@ catalog = spark.conf.get("catalog")
 def backfill():
   return spark.sql(f"""
     SELECT * FROM {catalog}.tpcdi_incremental_staging_{scale_factor}.cashtransactionhistorical
+  """)
+
+# Seed bronzedailymarket with the prior year (2015-07-06 → 2016-07-05) of
+# DailyMarket data so factmarkethistorystg's 380-day rolling-year MV is
+# fully populated from the first incremental update. Without this seed,
+# factmarkethistorystg would show empty arrays on batch 1 and grow them
+# day-by-day, meaning factmarkethistory's 52-week high/low would be
+# wrong until ~365 days into the run.
+# `bronzedailymarket` (in the staging schema) is created by
+# historical/DailyMarketHistorical.sql from the temp Delta
+# `tpcdi_raw_data.dailymarket{sf}` (cleanup_stage0 drops the temp Delta
+# but the staging table persists).
+@dlt.append_flow(
+  target = "bronzedailymarket",
+  once = True,
+  name = 'bronzedailymarket_backfill')
+def bronzedailymarket_backfill():
+  return spark.sql(f"""
+    SELECT * FROM {catalog}.tpcdi_incremental_staging_{scale_factor}.bronzedailymarket
   """)

@@ -42,15 +42,34 @@ DATE_BEGIN = datetime(1950, 1, 1)
 DATE_END = datetime(2021, 1, 1)
 
 # ---------------------------------------------------------------------------
-# Augmented-Incremental window. setup.py loops range(0, 730) starting at
-# AUG_FILES_DATE_START → 2015-07-06 .. 2017-07-04 inclusive (730 days).
-# AUG_FILES_DATE_END_EXCL = AUG_FILES_DATE_START + 730 days (the first
-# "out of window" date). Used by spark gen for stg_target assignment
-# (rows < AUG_FILES_DATE_START → 'tables', else → 'files').
+# Augmented-Incremental window. setup loops range(0, 365) starting at
+# AUG_FILES_DATE_START → 2016-07-06 .. 2017-07-05 inclusive (365 days).
+# AUG_FILES_DATE_END_EXCL = AUG_FILES_DATE_START + 365 days (the first
+# "out of window" date).
+#
+# Window was 2015-07-06..2017-07-04 (730 days) before; tightened to 365 to
+# (a) make the full run feasible across every variant, and (b) put every
+# incremental table at steady-state from batch 1. Notably FactMarketHistory
+# does a rolling 365-day lookback for 52-week high/low — under the old
+# window, batches 1..364 ran with a partial lookback, so the benchmark
+# only hit "real" workload from batch 365 (which we rarely reached).
+#
+# `stg_target` semantics for spark gen:
+#   - rows with date < AUG_FILES_DATE_START → 'tables' (consumed by the
+#     historical loaders during one-time setup).
+#   - rows in [AUG_FILES_DATE_START, AUG_FILES_DATE_END_EXCL) → 'files'
+#     (per-day partitioned-CSV drops, fed by simulate_filedrops).
+# Pushing the start to 2016-07-06 means the prior year (2015-07-06 to
+# 2016-07-05) of DailyMarket / Trade / Customer / etc. now lands in the
+# 'tables' partition and gets pre-staged into the benchmark schema by
+# the historical loaders. Notably this is the FIRST time DailyMarket has
+# a non-empty 'tables' partition (DM_BEGIN_DATE was previously identical
+# to AUG_FILES_DATE_START), so a new DailyMarketHistorical loader is
+# required and FactMarketHistory must also pre-compute its first year.
 # ---------------------------------------------------------------------------
-AUG_FILES_DATE_START = "2015-07-06"
+AUG_FILES_DATE_START = "2016-07-06"
 AUG_FILES_DATE_END_EXCL = "2017-07-05"
-AUG_FILES_DAYS = 730
+AUG_FILES_DAYS = 365
 
 # ---------------------------------------------------------------------------
 # FINWIRE file dates.
