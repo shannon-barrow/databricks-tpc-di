@@ -228,10 +228,12 @@ FROM tpcdi_incremental_staging_${scale_factor}.factwatches;
 -- COMMAND ----------
 
 -- Pre-seed factmarkethistory with the prior year (2015-07-06 → 2016-07-05).
--- This streaming table is also declared in dlt_incremental.sql with the
--- per-batch incremental flow (CLUSTER BY (sk_dateid)). Both declarations
--- carry the same schema; the active library determines which flow runs.
--- During the historical phase only this INSERT INTO ONCE flow fires.
+-- The streaming table is also declared in dlt_incremental_fmh.py with the
+-- per-batch @dlt.table(replace_where=...) flow (Python — REPLACE WHERE is
+-- not available in SQL @dlt.materialized_view / streaming-table syntax).
+-- Both declarations carry the same schema; the active library set
+-- determines which flow runs. During the historical phase only this
+-- INSERT INTO ONCE flow fires.
 CREATE OR REFRESH STREAMING TABLE factmarkethistory (
   sk_securityid BIGINT COMMENT 'Surrogate key for SecurityID',
   sk_companyid BIGINT COMMENT 'Surrogate key for CompanyID',

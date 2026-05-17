@@ -1,10 +1,10 @@
 # Databricks notebook source
 import dlt
 
-# Bumped broadcast threshold so SDP's factholdings_incremental gets the same h-side broadcast hash join on dimtrade that the Cluster variant gets implicitly. Dropped to 200 MB (was 250 MB matching Cluster's currentaccountbalances Incremental conf); 250 MB was producing intermittent SparkOutOfMemoryError during DeltaOptimizedWriterExec shuffle-map stages on SDP serverless DLT compute — see ES ticket. Testing 200 MB to find the OOM-safe ceiling.
+# Bumped broadcast threshold so SDP's factholdings_incremental gets the same h-side broadcast hash join on dimtrade that the Cluster variant gets implicitly. Back to 250 MB (matching Cluster's currentaccountbalances Incremental conf) after splitting factmarkethistory out into dlt_incremental_fmh.py — the prior 250 MB OOMs may have been driven by FMH's array-of-structs join, which no longer runs in the same pipeline update.
 try:
-    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 209715200)
-    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 209715200)
+    spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
+    spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
 except Exception:
     pass
 

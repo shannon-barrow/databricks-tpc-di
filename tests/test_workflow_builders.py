@@ -333,9 +333,10 @@ def test_augmented_sdp_pipeline():
     assert out["target"] == "test_aug_sdp_20000"
     _ok(f"target schema = {out['target']}")
     libs = [lib["notebook"]["path"] for lib in out["libraries"]]
-    assert any("dlt_ingest_bronze" in p for p in libs)
-    assert any("dlt_incremental" in p for p in libs)
-    _ok("libraries: dlt_ingest_bronze + dlt_incremental")
+    assert any(p.endswith("/dlt_ingest_bronze") for p in libs)
+    assert any(p.endswith("/dlt_incremental") for p in libs)
+    assert any(p.endswith("/dlt_incremental_fmh") for p in libs)
+    _ok("libraries: dlt_ingest_bronze + dlt_incremental + dlt_incremental_fmh")
     assert out["serverless"] is True and out["photon"] is True
     _ok("serverless + Photon")
 
