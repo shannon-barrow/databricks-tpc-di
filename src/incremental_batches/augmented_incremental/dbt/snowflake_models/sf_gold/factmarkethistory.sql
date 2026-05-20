@@ -19,7 +19,7 @@
                                       we project the date field out via :)
      - date_format(d, 'yyyyMMdd') -> to_char(d, 'YYYYMMDD')
      - date_sub(d, n)             -> dateadd(day, -n, d)
-     - try_divide(...)            -> Snowflake has try_divide natively
+     - try_divide(...)            -> Snowflake doesn't have try_divide; use div0 (returns 0 instead of NULL)
      - cast as bigint             -> NUMBER (Snowflake uses NUMBER for bigint)
      - group by all               -> Snowflake supports GROUP BY ALL since 2024
    Target table is pre-created in the engine-specific setup with a CLUSTER
@@ -47,8 +47,8 @@ select
   s.sk_securityid,
   s.sk_companyid,
   to_char(dm.dm_date, 'YYYYMMDD')::number                          as sk_dateid,
-  try_divide(dm.dm_close, f.prev_year_basic_eps)                    as peratio,
-  try_divide(s.dividend, dm.dm_close) / 100                          as yield,
+  div0(dm.dm_close,  f.prev_year_basic_eps)                    as peratio,
+  div0(s.dividend,  dm.dm_close) / 100                          as yield,
   agg.fiftytwoweekhigh:dm_high::float                                as fiftytwoweekhigh,
   to_char(agg.fiftytwoweekhigh:dm_date::date, 'YYYYMMDD')::number    as sk_fiftytwoweekhighdate,
   agg.fiftytwoweeklow:dm_low::float                                  as fiftytwoweeklow,

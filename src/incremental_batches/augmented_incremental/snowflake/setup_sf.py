@@ -57,11 +57,19 @@ print(f"[ok] schema {catalog}.{target_schema} ready")
 
 # COMMAND ----------
 
-# 1. CLONE reference + dimension tables from the staging schema
+# 1. CLONE reference + dimension tables from the staging schema.
+# Match seed_staging_py.STAGING_TABLES — every table the staging job
+# pre-populates needs to be CLONEd into the run schema so dbt's
+# incremental MERGE/APPEND models build on top of historical rows
+# (otherwise factwatches/dimtrade/etc. join against an empty dimcustomer
+# and emit 0 rows).
 STAGING_TABLES = [
     "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
     "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
     "companyyeareps", "currentaccountbalances", "dimaccount",
+    "dimcustomer", "dimtrade", "factwatches", "factcashbalances",
+    "factholdings", "factmarkethistory", "bronzedailymarket",
+    "cashtransactionhistorical", "batchdate",
 ]
 for t in STAGING_TABLES:
     cur.execute(
@@ -82,17 +90,10 @@ def _ddl(name, schema_sql, cluster_by=None):
 _ddl("bronzeaccount", "cdc_flag STRING, cdc_dsn NUMBER, accountid NUMBER, brokerid NUMBER, customerid NUMBER, accountdesc STRING, taxstatus NUMBER, status STRING, update_dt DATE", "update_dt")
 _ddl("bronzecashtransaction", "cdc_flag STRING, cdc_dsn NUMBER, accountid NUMBER, ct_dts TIMESTAMP, ct_amt FLOAT, ct_name STRING, event_dt DATE", "event_dt")
 _ddl("bronzecustomer", "cdc_flag STRING, cdc_dsn NUMBER, customerid NUMBER, taxid STRING, status STRING, lastname STRING, firstname STRING, middleinitial STRING, gender STRING, tier NUMBER, dob DATE, addressline1 STRING, addressline2 STRING, postalcode STRING, city STRING, stateprov STRING, country STRING, c_ctry_1 STRING, c_area_1 STRING, c_local_1 STRING, c_ext_1 STRING, c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, c_ext_2 STRING, c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, c_ext_3 STRING, email1 STRING, email2 STRING, lcl_tx_id STRING, nat_tx_id STRING, update_dt DATE", "update_dt")
-_ddl("bronzedailymarket", "cdc_flag STRING, cdc_dsn NUMBER, dm_date DATE, dm_s_symb STRING, dm_close FLOAT, dm_high FLOAT, dm_low FLOAT, dm_vol NUMBER", "dm_date")
 _ddl("bronzeholdings", "cdc_flag STRING, cdc_dsn NUMBER, hh_h_t_id NUMBER, hh_t_id NUMBER, hh_before_qty NUMBER, hh_after_qty NUMBER, event_dt DATE", "event_dt")
 _ddl("bronzetrade", "cdc_flag STRING, cdc_dsn NUMBER, tradeid NUMBER, t_dts TIMESTAMP, status STRING, t_tt_id STRING, cashflag NUMBER, t_s_symb STRING, quantity NUMBER, bidprice FLOAT, t_ca_id NUMBER, executedby STRING, tradeprice FLOAT, fee FLOAT, commission FLOAT, tax FLOAT, event_dt DATE", "event_dt")
 _ddl("bronzewatches", "cdc_flag STRING, cdc_dsn NUMBER, w_c_id NUMBER, w_s_symb STRING, w_dts TIMESTAMP, w_action STRING, event_dt DATE", "event_dt")
 _ddl("account_updates_from_customer", "cdc_flag STRING, cdc_dsn NUMBER, accountid NUMBER, brokerid NUMBER, customerid NUMBER, accountdesc STRING, taxstatus NUMBER, status STRING, update_dt DATE", "update_dt")
-_ddl("dimcustomer", "sk_customerid NUMBER(38,0), customerid NUMBER, taxid STRING, status STRING, lastname STRING, firstname STRING, middleinitial STRING, gender STRING, tier NUMBER, dob DATE, addressline1 STRING, addressline2 STRING, postalcode STRING, city STRING, stateprov STRING, country STRING, phone1 STRING, phone2 STRING, phone3 STRING, email1 STRING, email2 STRING, nationaltaxratedesc STRING, nationaltaxrate FLOAT, localtaxratedesc STRING, localtaxrate FLOAT, effectivedate DATE, enddate DATE, iscurrent BOOLEAN", "effectivedate")
-_ddl("dimtrade", "tradeid NUMBER, sk_brokerid NUMBER, sk_createdateid NUMBER, sk_createtimeid NUMBER, sk_closedateid NUMBER, sk_closetimeid NUMBER, status STRING, type STRING, cashflag BOOLEAN, sk_securityid NUMBER, sk_companyid NUMBER, quantity NUMBER, bidprice FLOAT, sk_customerid NUMBER(38,0), sk_accountid NUMBER(38,0), executedby STRING, tradeprice FLOAT, fee FLOAT, commission FLOAT, tax FLOAT", "sk_closedateid")
-_ddl("factwatches", "sk_customerid NUMBER(38,0), sk_securityid NUMBER, customerid NUMBER, symbol STRING, sk_dateid_dateplaced NUMBER, sk_dateid_dateremoved NUMBER, removed BOOLEAN", "sk_dateid_dateremoved")
-_ddl("factcashbalances", "sk_customerid NUMBER(38,0), sk_accountid NUMBER(38,0), sk_dateid NUMBER, cash NUMBER(15,2)", "sk_dateid")
-_ddl("factmarkethistory", "sk_securityid NUMBER, sk_companyid NUMBER, sk_dateid NUMBER, peratio FLOAT, yield FLOAT, fiftytwoweekhigh FLOAT, sk_fiftytwoweekhighdate NUMBER, fiftytwoweeklow FLOAT, sk_fiftytwoweeklowdate NUMBER, closeprice FLOAT, dayhigh FLOAT, daylow FLOAT, volume NUMBER", "sk_dateid")
-_ddl("factholdings", "tradeid NUMBER, currenttradeid NUMBER, sk_customerid NUMBER(38,0), sk_accountid NUMBER(38,0), sk_securityid NUMBER, sk_companyid NUMBER, sk_dateid NUMBER, sk_timeid NUMBER, currentprice FLOAT, currentholding NUMBER", "sk_dateid")
 # Note: dimaccount target is CLONED above (the SCD2 history pre-batch-start
 # is in STAGING_SF{sf}); the per-batch silver/dimaccount dbt model writes
 # back into the cloned table — that's intentional, matches Databricks side.

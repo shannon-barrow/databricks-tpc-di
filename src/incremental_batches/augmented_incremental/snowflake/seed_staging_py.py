@@ -86,9 +86,16 @@ print(f"[ok] {sf_db}.{sf_schema} exists")
 # COMMAND ----------
 
 STAGING_TABLES = [
+    # reference + dim tables (pure seed)
     "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
     "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
     "companyyeareps", "currentaccountbalances", "dimaccount",
+    # historical SCD2 dims + facts (the dbt incremental models MERGE/APPEND
+    # new rows on top of these — they MUST be pre-loaded for joins like
+    # factwatches → dimcustomer to find historical-period customers).
+    "dimcustomer", "dimtrade", "factwatches", "factcashbalances",
+    "factholdings", "factmarkethistory", "bronzedailymarket",
+    "cashtransactionhistorical", "batchdate",
 ]
 
 # COMMAND ----------
