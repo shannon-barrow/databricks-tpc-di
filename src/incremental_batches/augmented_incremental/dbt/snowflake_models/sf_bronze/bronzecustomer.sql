@@ -49,6 +49,5 @@ select * from (
     $34::date   as update_dt
   from
     @{{ var('snowflake_stage') }}/{{ tgt_db() }}/{{ var('batch_date') }}/Customer.txt
-    (file_format => (type => csv field_delimiter => '|' skip_header => 0))
 )
 {{ since_last_load('update_dt') }}

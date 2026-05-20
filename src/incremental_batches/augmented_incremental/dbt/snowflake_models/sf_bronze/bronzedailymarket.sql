@@ -25,6 +25,5 @@ select * from (
     $8::int     as dm_vol
   from
     @{{ var('snowflake_stage') }}/{{ tgt_db() }}/{{ var('batch_date') }}/DailyMarket.txt
-    (file_format => (type => csv field_delimiter => '|' skip_header => 0))
 )
 {{ since_last_load('dm_date') }}

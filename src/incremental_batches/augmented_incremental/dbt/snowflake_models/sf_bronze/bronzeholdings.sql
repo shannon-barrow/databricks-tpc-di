@@ -19,6 +19,5 @@ select * from (
     $7::date   as event_dt
   from
     @{{ var('snowflake_stage') }}/{{ tgt_db() }}/{{ var('batch_date') }}/HoldingHistory.txt
-    (file_format => (type => csv field_delimiter => '|' skip_header => 0))
 )
 {{ since_last_load('event_dt') }}
