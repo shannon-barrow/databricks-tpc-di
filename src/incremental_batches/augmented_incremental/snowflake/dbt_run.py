@@ -130,7 +130,31 @@ print("dbt cmd:", " ".join(cmd))
 res = subprocess.run(cmd, capture_output=True, text=True)
 print(res.stdout)
 print(res.stderr, file=sys.stderr)
+
+# Persist dbt output to a volume file so we can inspect failures even when
+# Databricks's run-output API truncates the notebook stdout.
+log_dir = f"{tpcdi_directory}_dbt_run_logs/{wh_db}_{scale_factor}"
+log_path = f"{log_dir}/{batch_date}.log"
+try:
+    dbutils.fs.mkdirs(log_dir)
+    dbutils.fs.put(
+        log_path,
+        f"# dbt run target=snowflake batch_date={batch_date} exit_code={res.returncode}\n"
+        f"# --- stdout ---\n{res.stdout}\n"
+        f"# --- stderr ---\n{res.stderr}\n",
+        overwrite=True,
+    )
+    print(f"[log] wrote dbt output to {log_path}")
+except Exception as e:
+    print(f"[log] failed to persist dbt output: {e}")
+
 if res.returncode != 0:
-    raise RuntimeError(f"dbt run failed with exit code {res.returncode}")
+    # Emit the tail of dbt output to notebook result via dbutils.notebook.exit
+    # so it shows up in the runs API. Exit instead of raise so the message is
+    # captured as notebook_output.result rather than a Python traceback.
+    tail = (res.stdout + res.stderr)[-3000:]
+    dbutils.notebook.exit(
+        f"FAILED exit={res.returncode}\nlog={log_path}\n---tail---\n{tail}"
+    )
 
 print(f"[done] dbt run --target snowflake batch_date={batch_date} complete.")
