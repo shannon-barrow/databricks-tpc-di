@@ -24,6 +24,7 @@ dbutils.widgets.text("batch_date",     "")
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_benchmarking/")
 dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
 dbutils.widgets.text("secret_scope",   "tpcdi_snowflake")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
 catalog          = dbutils.widgets.get("catalog")
@@ -64,7 +65,8 @@ def _secret(name, default=None):
 account   = _secret("account")
 user      = _secret("user")
 role      = _secret("role")
-warehouse = _secret("warehouse")
+# job-param override wins; falls back to secret if widget is empty
+warehouse = dbutils.widgets.get("snowflake_warehouse") or _secret("warehouse")
 pk_pem    = _secret("private_key")
 password  = _secret("password")
 

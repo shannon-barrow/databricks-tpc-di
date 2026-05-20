@@ -56,13 +56,18 @@ _RETRY_POLICY = {
 _AUG_PATH = "incremental_batches/augmented_incremental"
 
 # Job parameters that the setup task emits + every per-batch task needs.
+# snowflake_warehouse is a job parameter (not a hardcoded secret) so the
+# same job can target XS / S / M / L by overriding it at run-now time
+# without changing code or secrets. Default is XS — fine for SF=10; SF=20k
+# benchmark runs want Small or larger.
 _COMMON_PARAMS = {
-    "catalog":         "{{job.parameters.catalog}}",
-    "scale_factor":    "{{job.parameters.scale_factor}}",
-    "tpcdi_directory": "{{job.parameters.tpcdi_directory}}",
-    "wh_db":           "{{job.parameters.wh_db}}",
-    "snowflake_stage": "{{job.parameters.snowflake_stage}}",
-    "secret_scope":    "{{job.parameters.secret_scope}}",
+    "catalog":             "{{job.parameters.catalog}}",
+    "scale_factor":        "{{job.parameters.scale_factor}}",
+    "tpcdi_directory":     "{{job.parameters.tpcdi_directory}}",
+    "wh_db":               "{{job.parameters.wh_db}}",
+    "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
+    "secret_scope":        "{{job.parameters.secret_scope}}",
+    "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
 
@@ -140,6 +145,7 @@ def build_child(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
+    snowflake_warehouse: str = "BARROW_XS_GEN2",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -184,13 +190,14 @@ def build_child(
         "max_concurrent_runs": 1000,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
-            {"name": "catalog",         "default": catalog},
-            {"name": "scale_factor",    "default": str(scale_factor)},
-            {"name": "tpcdi_directory", "default": tpcdi_directory},
-            {"name": "wh_db",           "default": wh_db},
-            {"name": "snowflake_stage", "default": snowflake_stage},
-            {"name": "secret_scope",    "default": secret_scope},
-            {"name": "batch_date",      "default": ""},
+            {"name": "catalog",             "default": catalog},
+            {"name": "scale_factor",        "default": str(scale_factor)},
+            {"name": "tpcdi_directory",     "default": tpcdi_directory},
+            {"name": "wh_db",               "default": wh_db},
+            {"name": "snowflake_stage",     "default": snowflake_stage},
+            {"name": "secret_scope",        "default": secret_scope},
+            {"name": "snowflake_warehouse", "default": snowflake_warehouse},
+            {"name": "batch_date",          "default": ""},
         ],
         "tasks": tasks,
         "queue": {"enabled": True},
@@ -208,6 +215,7 @@ def build_parent(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
+    snowflake_warehouse: str = "BARROW_XS_GEN2",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -241,13 +249,14 @@ def build_parent(
                 "run_job_task": {
                     "job_id": child_job_id,
                     "job_parameters": {
-                        "catalog":         "{{job.parameters.catalog}}",
-                        "scale_factor":    "{{job.parameters.scale_factor}}",
-                        "tpcdi_directory": "{{job.parameters.tpcdi_directory}}",
-                        "wh_db":           "{{job.parameters.wh_db}}",
-                        "snowflake_stage": "{{job.parameters.snowflake_stage}}",
-                        "secret_scope":    "{{job.parameters.secret_scope}}",
-                        "batch_date":      "{{input}}",
+                        "catalog":             "{{job.parameters.catalog}}",
+                        "scale_factor":        "{{job.parameters.scale_factor}}",
+                        "tpcdi_directory":     "{{job.parameters.tpcdi_directory}}",
+                        "wh_db":               "{{job.parameters.wh_db}}",
+                        "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
+                        "secret_scope":        "{{job.parameters.secret_scope}}",
+                        "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
+                        "batch_date":          "{{input}}",
                     },
                 },
                 "timeout_seconds": 0,
@@ -297,12 +306,13 @@ def build_parent(
         "max_concurrent_runs": 1,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
-            {"name": "catalog",         "default": catalog},
-            {"name": "scale_factor",    "default": str(scale_factor)},
-            {"name": "tpcdi_directory", "default": tpcdi_directory},
-            {"name": "wh_db",           "default": wh_db},
-            {"name": "snowflake_stage", "default": snowflake_stage},
-            {"name": "secret_scope",    "default": secret_scope},
+            {"name": "catalog",                     "default": catalog},
+            {"name": "scale_factor",                "default": str(scale_factor)},
+            {"name": "tpcdi_directory",             "default": tpcdi_directory},
+            {"name": "wh_db",                       "default": wh_db},
+            {"name": "snowflake_stage",             "default": snowflake_stage},
+            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],

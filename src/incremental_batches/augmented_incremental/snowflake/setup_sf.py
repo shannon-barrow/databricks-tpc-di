@@ -23,6 +23,7 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_benc
                      "UC external volume root the per-batch files land under")
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
 dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse default)")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the prior-year backfill window")
 
@@ -30,6 +31,7 @@ catalog          = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 secret_scope     = dbutils.widgets.get("secret_scope")
+warehouse        = dbutils.widgets.get("snowflake_warehouse") or None  # None lets sf_connect fall back to secret
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 
 if not wh_db:
@@ -46,7 +48,8 @@ print(f"staging = {catalog}.{staging_schema} (cloned per-run; seeded once by see
 
 # COMMAND ----------
 
-conn = sf_connect(database=catalog, secret_scope=secret_scope)
+conn = sf_connect(database=catalog, secret_scope=secret_scope, warehouse=warehouse)
+print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from secret_scope default)'}")
 cur  = conn.cursor()
 
 cur.execute(f"CREATE DATABASE IF NOT EXISTS {catalog}")

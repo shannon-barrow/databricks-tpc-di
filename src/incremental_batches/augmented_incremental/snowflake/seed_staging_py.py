@@ -27,11 +27,13 @@ dbutils.widgets.text("catalog", "main")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("snowflake_database", "TPCDI_TEST")
 dbutils.widgets.text("secret_scope",       "tpcdi_snowflake")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
 
 src_catalog  = dbutils.widgets.get("catalog")
 scale_factor = dbutils.widgets.get("scale_factor")
 sf_db        = dbutils.widgets.get("snowflake_database")
 secret_scope = dbutils.widgets.get("secret_scope")
+warehouse_override = dbutils.widgets.get("snowflake_warehouse")
 
 src_schema = f"tpcdi_incremental_staging_{scale_factor}"
 sf_schema  = f"STAGING_SF{scale_factor}"
@@ -47,7 +49,7 @@ def _secret(name, default=None):
 account   = _secret("account")
 user      = _secret("user")
 role      = _secret("role") or "ACCOUNTADMIN"
-warehouse = _secret("warehouse") or "BARROW_XS_GEN2"
+warehouse = warehouse_override or _secret("warehouse") or "BARROW_XS_GEN2"
 pk_pem    = _secret("private_key")
 
 if not (account and user and pk_pem):
