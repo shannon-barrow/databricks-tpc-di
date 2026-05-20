@@ -93,19 +93,24 @@ STAGING_TABLES = [
 
 # COMMAND ----------
 
-import time
+import time, pandas as pd
 for t in STAGING_TABLES:
     src_fq = f"{src_catalog}.{src_schema}.{t}"
     t0 = time.time()
     try:
-        pdf = spark.read.table(src_fq).toPandas()
+        spdf = spark.read.table(src_fq).toPandas()
     except Exception as e:
         print(f"[skip] {src_fq} not found: {e}")
         continue
 
-    # Snowflake column names are case-sensitive when quoted. write_pandas
-    # uppercases by default; force matching by setting column names upper.
-    pdf.columns = [c.upper() for c in pdf.columns]
+    # spark.toPandas() carries PlanMetrics in df.attrs, which snowflake-
+    # connector's write_pandas chokes on when JSON-serializing for the
+    # auto_create_table DDL. Rebuild the DataFrame cleanly to drop metadata.
+    pdf = pd.DataFrame(spdf.values, columns=[c.upper() for c in spdf.columns])
+    # Preserve dtypes from the Spark-derived frame so int/timestamp columns
+    # don't degrade to object.
+    pdf = pdf.astype({c.upper(): spdf.dtypes[c_orig] for c, c_orig in
+                       zip(pdf.columns, spdf.columns)})
 
     # OVERWRITE: drop + recreate via auto_create_table=True. write_pandas
     # infers the schema from the DataFrame dtypes.
