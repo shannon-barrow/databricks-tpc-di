@@ -364,7 +364,13 @@ def _gen_historical(spark, cfg, dbutils):
 
     # === Step 5: Deduplicate on INTEGER keys before symbol join ===
     # Dedup on (w_c_id, _sym_join_idx) instead of string (w_c_id, w_s_symb). This is equivalent (same _sym_join_idx always maps to same symbol) but the shuffle carries integer keys instead of strings, and the symbol broadcast join runs on the smaller deduped result (~905M rows instead of ~1.2B at SF=5000).
-    deduped_df = all_df.dropDuplicates(["w_c_id", "_sym_join_idx"])
+    # CRITICAL: dropDuplicates is non-deterministic in WHICH row survives — the surviving row's `_ts` drives the temporal-fallback check at line ~386 (does the symbol fall back to `_sym0` or keep its real symbol?), which then changes the count after the (w_c_id, w_s_symb) dedup at step 5b. Same code on three workspaces produced three different factwatches row counts at SF=20k. Use row_number() with explicit ordering instead so the surviving row is deterministic across runs/workspaces. Order by (_ts asc, wh_id asc) — wh_id is globally unique by construction so this is a total order.
+    from pyspark.sql.window import Window
+    _wkey = Window.partitionBy("w_c_id", "_sym_join_idx").orderBy(F.col("_ts").asc(), F.col("wh_id").asc())
+    deduped_df = (all_df
+        .withColumn("_dd_rn", F.row_number().over(_wkey))
+        .filter(F.col("_dd_rn") == 1)
+        .drop("_dd_rn"))
 
     # Now join symbols on the smaller deduped DataFrame
     fw_begin_s_sym = int(FW_BEGIN_DATE.timestamp())
@@ -393,7 +399,12 @@ def _gen_historical(spark, cfg, dbutils):
 
     # === Step 5b: Dedup on (w_c_id, w_s_symb) after symbol join ===
     # The step-5 dedup is on _sym_join_idx; after the join, multiple distinct _sym_join_idx values can fall back to the same _sym0 symbol, producing duplicate (w_c_id, w_s_symb) pairs. The ETL's FactWatches Historical silver loader does GROUP BY (w_c_id, w_s_symb), collapsing such dupes, so our audit WH_ACTIVE/WH_RECORDS must reflect the post-ETL count. Dedup here so the file matches what ETL will load.
-    deduped_df = deduped_df.dropDuplicates(["w_c_id", "w_s_symb"])
+    # Same determinism fix as step 5 — use deterministic row_number() dedup, not dropDuplicates.
+    _wkey2 = Window.partitionBy("w_c_id", "w_s_symb").orderBy(F.col("_ts").asc(), F.col("wh_id").asc())
+    deduped_df = (deduped_df
+        .withColumn("_dd_rn", F.row_number().over(_wkey2))
+        .filter(F.col("_dd_rn") == 1)
+        .drop("_dd_rn"))
 
     # === Step 6: ACTV + CNCL generation using deterministic hash-based selection ===
     # Previously used .sample(fraction).limit(target) which is stochastic per-partition and produces slightly different row counts on each re-evaluation (groupBy.count() vs. write_file). That divergence over-counts WH_RECORDS in the audit file by a few hundred rows vs. the actual file, breaking the automated_audit check "FactWatches active watches" (Row count + Inactive watches == cumulative WH_RECORDS). Replacing with a deterministic hash filter: pick rows where hash(c_id|symbol) mod M < cutoff. Count and write see identical rows.
@@ -541,8 +552,15 @@ def _gen_incremental(spark, cfg, batch_id, dbutils):
     inc_df = inc_df.select("cdc_flag", "cdc_dsn", "w_c_id", "w_s_symb", "w_dts", "w_action")
 
     # Dedup ACTV rows on (w_c_id, w_s_symb) — the ETL's FactWatches silver loader GROUP BYs on these, collapsing any duplicates. CNCL is also deduped so our audit WH_RECORDS/cncl count matches the ETL's 'Inactive watches' count (which is one-per-pair, not one-per-row). Without CNCL dedup, rare (c_id, symb) collisions leak extra rows into our audit total that the ETL doesn't count, breaking the FactWatches active watches audit check.
-    actv_part = inc_df.filter(F.col("w_action") == "ACTV").dropDuplicates(["w_c_id", "w_s_symb"])
-    cncl_part = inc_df.filter(F.col("w_action") == "CNCL").dropDuplicates(["w_c_id", "w_s_symb"])
+    # Determinism fix (same as historical path above): replace dropDuplicates with row_number() dedup ordered by cdc_dsn (unique per row by construction) so the surviving row is deterministic across runs.
+    from pyspark.sql.window import Window as _IncW
+    _winc = _IncW.partitionBy("w_c_id", "w_s_symb").orderBy(F.col("cdc_dsn").asc())
+    actv_part = (inc_df.filter(F.col("w_action") == "ACTV")
+                       .withColumn("_dd_rn", F.row_number().over(_winc))
+                       .filter(F.col("_dd_rn") == 1).drop("_dd_rn"))
+    cncl_part = (inc_df.filter(F.col("w_action") == "CNCL")
+                       .withColumn("_dd_rn", F.row_number().over(_winc))
+                       .filter(F.col("_dd_rn") == 1).drop("_dd_rn"))
     inc_df = actv_part.unionByName(cncl_part)
 
     staging_inc = f"{cfg.batch_path(batch_id)}/WatchHistory"  # write_file dataset-name dir
