@@ -162,7 +162,7 @@ def build_child(
         ),
         _make_task(
             task_key="dbt_run",
-            notebook_path=f"{aug}/snowflake/dbt_run",
+            notebook_path=f"{aug}/snowflake/run_dbt",
             depends_on=["simulate_filedrops_sf"],
             base_params=dict(
                 _BATCHED_PARAMS,
