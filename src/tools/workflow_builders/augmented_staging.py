@@ -384,7 +384,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="Silver_DimCompany",
         notebook_path=f"{repo_src_path}/single_batch/SQL/DimCompany",
-        depends_on=["ingest_FinWire", "ingest_industry"],
+        # ingest_StatusType: DimCompany SQL joins against statustype to
+        # resolve the status code. On serverless the StatusType ingest can
+        # lag the FinWire/Industry ones; without an explicit dep this races
+        # and DimCompany hits TABLE_OR_VIEW_NOT_FOUND.
+        depends_on=["ingest_FinWire", "ingest_industry", "ingest_StatusType"],
         base_params={
             "tgt_schema": f"sk_companyid BIGINT {_NN} COMMENT 'Surrogate key for CompanyID', companyid BIGINT COMMENT 'Company identifier (CIK number)', status STRING COMMENT 'Company status', name STRING COMMENT 'Company name', industry STRING COMMENT 'Company\u2019s industry', sprating STRING COMMENT 'Standard & Poor company\u2019s rating', islowgrade BOOLEAN COMMENT 'True if this company is low grade', ceo STRING COMMENT 'CEO name', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', description STRING COMMENT 'Company description', foundingdate DATE COMMENT 'Date the company was founded', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimcompany_pk PRIMARY KEY(sk_companyid), CONSTRAINT dimcompany_status_fk FOREIGN KEY (status) REFERENCES StatusType(st_name), CONSTRAINT dimcompany_industry_fk FOREIGN KEY (industry) REFERENCES Industry(in_name)",
