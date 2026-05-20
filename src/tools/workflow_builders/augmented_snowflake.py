@@ -140,7 +140,7 @@ def build_child(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
-    interactive_cluster_id: str,
+    interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
     """Builds the per-date child job spec.
@@ -208,7 +208,7 @@ def build_parent(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
-    interactive_cluster_id: str,
+    interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
     """Builds the parent (orchestration + loop wrapper) job spec.
