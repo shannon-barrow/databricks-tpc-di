@@ -183,11 +183,11 @@ print(f"[ok] all 16 target tables ready under {catalog}.{target_schema}")
 # COMMAND ----------
 
 # --- 4. Build the batch_date_ls task value for the for_each_task loop ---
-# Mirrors augmented_dbt's setup behaviour. Same iso-date list spanning
-# (benchmark_start_date + 365 days) onward, capped at incremental_batches_to_run.
+# Mirrors setup_dbt.py: AUG_FILES_DATE_START is hardcoded to 2016-07-06.
+# Don't compute it as benchmark_start + 365 days — 2016 is a leap year so
+# that lands a day early (2016-07-05) and the first batch finds no data.
 import datetime as dt
-start = dt.date.fromisoformat(dbutils.widgets.get("benchmark_start_date"))
-incr_start = start + dt.timedelta(days=365)  # AUG_FILES_DATE_START
+incr_start = dt.date(2016, 7, 6)  # AUG_FILES_DATE_START, see tpcdi_gen/config.py
 batches = [(incr_start + dt.timedelta(days=i)).isoformat()
            for i in range(incremental_batches_to_run)]
 dbutils.jobs.taskValues.set("batch_date_ls", batches)

@@ -100,10 +100,12 @@ print(f"[ok] target tables ready under {catalog}.{target_schema}")
 
 # COMMAND ----------
 
-# 3. Emit batch_date_ls — same convention as augmented_sdp's `pipelines_setup`
+# 3. Emit batch_date_ls — match setup_dbt.py exactly: AUG_FILES_DATE_START
+# is hardcoded to 2016-07-06. (Computing it as benchmark_start + 365 days
+# lands on 2016-07-05 because 2016 is a leap year — the resulting batch
+# falls one day before any source data exists.)
 import datetime as dt
-start = dt.date.fromisoformat(dbutils.widgets.get("benchmark_start_date"))
-incr_start = start + dt.timedelta(days=365)  # AUG_FILES_DATE_START
+incr_start = dt.date(2016, 7, 6)  # AUG_FILES_DATE_START, see tpcdi_gen/config.py
 batches = [(incr_start + dt.timedelta(days=i)).isoformat() for i in range(incremental_n)]
 dbutils.jobs.taskValues.set("batch_date_ls", batches)
 print(f"emitted batch_date_ls: {len(batches)} dates, first={batches[0]}, last={batches[-1]}")
