@@ -25,6 +25,7 @@ dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_bench
 dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
 dbutils.widgets.text("secret_scope",   "tpcdi_snowflake")
 dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
+dbutils.widgets.dropdown("table_format", "snowflake_native", ["snowflake_native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
 catalog          = dbutils.widgets.get("catalog")
@@ -84,6 +85,22 @@ if pk_pem:
         f.write(pk_pem)
     os.chmod(pk_path, 0o600)
 
+# query_tag is a JSON-encoded string Snowflake stamps on every query this
+# connection issues. Lets the task-time extract attribute every row in
+# SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY back to (batch_date, variant)
+# without scraping the dbt logs.
+try:
+    _tf = dbutils.widgets.get("table_format")
+except Exception:
+    _tf = "snowflake_native"
+query_tag = json.dumps({
+    "batch_date":   batch_date,
+    "wh_db":        wh_db,
+    "scale_factor": scale_factor,
+    "table_format": _tf,
+    "task":         "dbt_run",
+}, separators=(",", ":")).replace("'", "\\'")
+
 lines = [
     "dbt_augmented_incremental:",
     "  target: snowflake",
@@ -96,6 +113,7 @@ lines = [
     f"      warehouse: {warehouse or 'COMPUTE_WH'}",
     f"      database: {catalog}",
     f"      schema: {wh_db}_{scale_factor}",
+    f"      query_tag: '{query_tag}'",
     "      threads: 8",
 ]
 if pk_pem:
