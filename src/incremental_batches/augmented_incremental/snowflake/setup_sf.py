@@ -24,6 +24,8 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_benc
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
 dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
 dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse default)")
+dbutils.widgets.dropdown("table_format", "snowflake_native", ["snowflake_native","iceberg"],
+                          "Source of the per-run seed: 'snowflake_native' = CLONE from STAGING_SF{sf} (parquet→COPY INTO seed); 'iceberg' = CTAS from STAGING_SF{sf}_DBX (federated Iceberg, zero parquet copy)")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the prior-year backfill window")
 
@@ -32,15 +34,21 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 secret_scope     = dbutils.widgets.get("secret_scope")
 warehouse        = dbutils.widgets.get("snowflake_warehouse") or None  # None lets sf_connect fall back to secret
+table_format     = dbutils.widgets.get("table_format")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 
 if not wh_db:
     raise ValueError("wh_db is required")
+if table_format not in ("snowflake_native","iceberg"):
+    raise ValueError(f"table_format must be 'snowflake_native' or 'iceberg', got: {table_format!r}")
 
 target_schema    = f"{wh_db}_{scale_factor}"
-staging_schema   = f"STAGING_SF{scale_factor}"
-print(f"target  = {catalog}.{target_schema}")
-print(f"staging = {catalog}.{staging_schema} (cloned per-run; seeded once by seed_staging.py)")
+# snowflake_native: parquet → COPY INTO seeded schema (TPCDI_TEST.STAGING_SF{sf})
+# iceberg:          federated UC Iceberg schema (TPCDI_TEST.STAGING_SF{sf}_DBX)
+staging_schema   = f"STAGING_SF{scale_factor}" if table_format == "snowflake_native" else f"STAGING_SF{scale_factor}_DBX"
+print(f"target       = {catalog}.{target_schema}")
+print(f"staging      = {catalog}.{staging_schema}")
+print(f"table_format = {table_format}")
 
 # COMMAND ----------
 
@@ -75,11 +83,23 @@ STAGING_TABLES = [
     "cashtransactionhistorical", "batchdate",
 ]
 for t in STAGING_TABLES:
-    cur.execute(
-        f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} "
-        f"CLONE {catalog}.{staging_schema}.{t}"
-    )
-    print(f"[clone] {t}")
+    if table_format == "iceberg":
+        # External-catalog Iceberg tables can't be CLONEd into Snowflake-native;
+        # CTAS materializes from the federated Iceberg source into a writable
+        # native Snowflake table. Replaces the parquet→COPY INTO seed step
+        # entirely — Snowflake reads parquet directly from the bucket Databricks
+        # wrote, no separate seed job needed.
+        cur.execute(
+            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} AS "
+            f"SELECT * FROM {catalog}.{staging_schema}.{t}"
+        )
+        print(f"[ctas]  {t}")
+    else:
+        cur.execute(
+            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} "
+            f"CLONE {catalog}.{staging_schema}.{t}"
+        )
+        print(f"[clone] {t}")
 
 # COMMAND ----------
 

@@ -68,6 +68,7 @@ _COMMON_PARAMS = {
     "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
     "secret_scope":        "{{job.parameters.secret_scope}}",
     "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
+    "table_format":        "{{job.parameters.table_format}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
 
@@ -146,6 +147,7 @@ def build_child(
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
     snowflake_warehouse: str = "BARROW_XS_GEN2",
+    table_format: str = "snowflake_native",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -197,6 +199,7 @@ def build_child(
             {"name": "snowflake_stage",     "default": snowflake_stage},
             {"name": "secret_scope",        "default": secret_scope},
             {"name": "snowflake_warehouse", "default": snowflake_warehouse},
+            {"name": "table_format",        "default": table_format},
             {"name": "batch_date",          "default": ""},
         ],
         "tasks": tasks,
@@ -216,6 +219,7 @@ def build_parent(
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
     snowflake_warehouse: str = "BARROW_XS_GEN2",
+    table_format: str = "snowflake_native",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -256,6 +260,7 @@ def build_parent(
                         "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
                         "secret_scope":        "{{job.parameters.secret_scope}}",
                         "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
+                        "table_format":        "{{job.parameters.table_format}}",
                         "batch_date":          "{{input}}",
                     },
                 },
@@ -313,6 +318,7 @@ def build_parent(
             {"name": "snowflake_stage",             "default": snowflake_stage},
             {"name": "secret_scope",                "default": secret_scope},
             {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
+            {"name": "table_format",                "default": table_format},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],
