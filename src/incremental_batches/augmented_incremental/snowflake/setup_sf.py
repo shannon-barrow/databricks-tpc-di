@@ -92,7 +92,28 @@ STAGING_TABLES = [
     "factholdings", "factmarkethistory", "bronzedailymarket",
     "cashtransactionhistorical", "batchdate",
 ]
+# Cluster keys mirror the Databricks-side Liquid layout (see
+# historical/*.sql `CLUSTER BY (...)` clauses + setup.py / setup_dbt.py
+# DEEP CLONE targets). For Snowflake-side iceberg mode we set them at
+# CTAS time so auto-clustering kicks in on the run-schema target without
+# dbt's per-batch model needing to re-issue ALTER CLUSTER BY (same
+# setup-owns-layout pattern the dbt-Databricks variant uses).
+# Tables not in this dict are CTAS'd plain (no clustering — reference /
+# small dims where clustering offers no benefit).
+CLUSTER_KEYS = {
+    "dimcustomer":       "enddate",
+    "dimaccount":        "enddate",
+    "dimtrade":          "sk_closedateid",
+    "factwatches":       "sk_dateid_dateremoved",
+    "factmarkethistory": "sk_dateid",
+    "factcashbalances":  "sk_dateid",
+    "factholdings":      "sk_dateid",
+    "bronzedailymarket": "dm_date",
+    "companyyeareps":    "qtr_start_date",
+}
+
 for t in STAGING_TABLES:
+    cluster_clause = f"\n  CLUSTER BY ({CLUSTER_KEYS[t]})" if t in CLUSTER_KEYS else ""
     if table_format == "iceberg":
         # External-catalog Iceberg tables can't be CLONEd into Snowflake-native;
         # CTAS materializes from the federated Iceberg source into a writable
@@ -100,11 +121,16 @@ for t in STAGING_TABLES:
         # entirely — Snowflake reads parquet directly from the bucket Databricks
         # wrote, no separate seed job needed.
         cur.execute(
-            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} AS "
+            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t}"
+            f"{cluster_clause} AS "
             f"SELECT * FROM {catalog}.{staging_schema}.{t}"
         )
-        print(f"[ctas]  {t}")
+        print(f"[ctas]  {t}{' (CLUSTER BY ' + CLUSTER_KEYS[t] + ')' if t in CLUSTER_KEYS else ''}")
     else:
+        # Snowflake-native CLONE: source table (TPCDI_TEST.STAGING_SF{sf}.X)
+        # carries its own clustering from seed_staging — preserve via plain
+        # CLONE. (If it doesn't, the next batch's MERGE will scan-all; should
+        # be set on the seed side then.)
         cur.execute(
             f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} "
             f"CLONE {catalog}.{staging_schema}.{t}"
