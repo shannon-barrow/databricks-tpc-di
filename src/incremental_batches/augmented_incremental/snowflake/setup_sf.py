@@ -24,6 +24,7 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_benc
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
 dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
 dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse default)")
+dbutils.widgets.text("snowflake_warehouse_setup", "", "Setup-only WH override (empty = same as snowflake_warehouse). Setup CTAS is one-time and resource-heavy at SF=20k — size up here (e.g., BARROW_LARGE_GEN2) without affecting per-batch dbt perf.")
 dbutils.widgets.dropdown("table_format", "snowflake_native", ["snowflake_native","iceberg"],
                           "Source of the per-run seed: 'snowflake_native' = CLONE from STAGING_SF{sf} (parquet→COPY INTO seed); 'iceberg' = CTAS from STAGING_SF{sf}_DBX (federated Iceberg, zero parquet copy)")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
@@ -34,6 +35,10 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 secret_scope     = dbutils.widgets.get("secret_scope")
 warehouse        = dbutils.widgets.get("snowflake_warehouse") or None  # None lets sf_connect fall back to secret
+# Setup-specific WH override: setup_sf does 22 large CTAS operations one-time
+# per benchmark run — sized up to BARROW_LARGE_GEN2 typically. Falls back to
+# snowflake_warehouse if not set so existing callers don't break.
+setup_warehouse  = dbutils.widgets.get("snowflake_warehouse_setup") or warehouse
 table_format     = dbutils.widgets.get("table_format")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 
@@ -59,7 +64,7 @@ print(f"table_format = {table_format}")
 conn = sf_connect(
     database=catalog,
     secret_scope=secret_scope,
-    warehouse=warehouse,
+    warehouse=setup_warehouse,
     query_tag={
         "wh_db":        wh_db,
         "scale_factor": scale_factor,
@@ -67,7 +72,7 @@ conn = sf_connect(
         "task":         "setup_sf",
     },
 )
-print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from secret_scope default)'}")
+print(f"[ok] connected to Snowflake; setup_warehouse={setup_warehouse or '(from secret_scope default)'}  per-batch warehouse={warehouse or '(secret default)'}")
 cur  = conn.cursor()
 
 cur.execute(f"CREATE DATABASE IF NOT EXISTS {catalog}")
@@ -112,30 +117,68 @@ CLUSTER_KEYS = {
     "companyyeareps":    "qtr_start_date",
 }
 
-for t in STAGING_TABLES:
-    cluster_clause = f"\n  CLUSTER BY ({CLUSTER_KEYS[t]})" if t in CLUSTER_KEYS else ""
-    if table_format == "iceberg":
-        # External-catalog Iceberg tables can't be CLONEd into Snowflake-native;
-        # CTAS materializes from the federated Iceberg source into a writable
-        # native Snowflake table. Replaces the parquet→COPY INTO seed step
-        # entirely — Snowflake reads parquet directly from the bucket Databricks
-        # wrote, no separate seed job needed.
-        cur.execute(
-            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t}"
-            f"{cluster_clause} AS "
-            f"SELECT * FROM {catalog}.{staging_schema}.{t}"
-        )
-        print(f"[ctas]  {t}{' (CLUSTER BY ' + CLUSTER_KEYS[t] + ')' if t in CLUSTER_KEYS else ''}")
-    else:
-        # Snowflake-native CLONE: source table (TPCDI_TEST.STAGING_SF{sf}.X)
-        # carries its own clustering from seed_staging — preserve via plain
-        # CLONE. (If it doesn't, the next batch's MERGE will scan-all; should
-        # be set on the seed side then.)
-        cur.execute(
-            f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{t} "
-            f"CLONE {catalog}.{staging_schema}.{t}"
-        )
-        print(f"[clone] {t}")
+# Submit the 22 CTAS / CLONE statements in parallel — matches the
+# Databricks-side setup.py / setup_dbt.py pattern (ThreadPoolExecutor
+# over clone_table). snowflake-connector connections are NOT thread-safe,
+# so each worker opens its own. max_workers=8 saturates BARROW_S's
+# max_concurrency_level. Each worker's query_tag mirrors the schema-
+# create conn's so QUERY_HISTORY attributes them all to task='setup_sf'.
+import concurrent.futures as _cf
+import time as _time
+
+def _seed_one(table_name: str) -> tuple[str, str, float]:
+    """Open a fresh Snowflake conn, run the CTAS / CLONE for `table_name`,
+    return (table_name, status_msg, wall_sec). Caller raises on exception."""
+    _t0 = _time.time()
+    _conn = sf_connect(
+        database=catalog,
+        secret_scope=secret_scope,
+        warehouse=setup_warehouse,
+        query_tag={
+            "wh_db":        wh_db,
+            "scale_factor": scale_factor,
+            "table_format": table_format,
+            "task":         "setup_sf",
+        },
+    )
+    try:
+        _cluster = f"\n  CLUSTER BY ({CLUSTER_KEYS[table_name]})" if table_name in CLUSTER_KEYS else ""
+        with _conn.cursor() as _c:
+            if table_format == "iceberg":
+                # External-catalog Iceberg can't be CLONEd into Snowflake-native;
+                # CTAS materializes from federated Iceberg into a writable native
+                # table. Replaces the parquet→COPY INTO seed step entirely.
+                _c.execute(
+                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{table_name}"
+                    f"{_cluster} AS "
+                    f"SELECT * FROM {catalog}.{staging_schema}.{table_name}"
+                )
+                _op = "ctas"
+            else:
+                # Snowflake-native CLONE preserves source clustering.
+                _c.execute(
+                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{table_name} "
+                    f"CLONE {catalog}.{staging_schema}.{table_name}"
+                )
+                _op = "clone"
+        return (table_name, _op, _time.time() - _t0)
+    finally:
+        _conn.close()
+
+_t_setup = _time.time()
+print(f"[parallel] seeding {len(STAGING_TABLES)} tables on {setup_warehouse or '(secret default)'} (8 concurrent)...")
+with _cf.ThreadPoolExecutor(max_workers=8) as _ex:
+    _futures = {_ex.submit(_seed_one, t): t for t in STAGING_TABLES}
+    for _f in _cf.as_completed(_futures):
+        try:
+            _name, _op, _wall = _f.result()
+            _key = f" (CLUSTER BY {CLUSTER_KEYS[_name]})" if _name in CLUSTER_KEYS else ""
+            print(f"[{_op}]  {_name:30s} {_wall:6.1f}s{_key}")
+        except Exception as _e:
+            _name = _futures[_f]
+            print(f"[FAIL] {_name:30s}  {type(_e).__name__}: {_e}")
+            raise
+print(f"[parallel] seed done in {_time.time() - _t_setup:.1f}s")
 
 # COMMAND ----------
 
