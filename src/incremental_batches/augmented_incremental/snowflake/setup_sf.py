@@ -56,7 +56,17 @@ print(f"table_format = {table_format}")
 
 # COMMAND ----------
 
-conn = sf_connect(database=catalog, secret_scope=secret_scope, warehouse=warehouse)
+conn = sf_connect(
+    database=catalog,
+    secret_scope=secret_scope,
+    warehouse=warehouse,
+    query_tag={
+        "wh_db":        wh_db,
+        "scale_factor": scale_factor,
+        "table_format": table_format,
+        "task":         "setup_sf",
+    },
+)
 print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from secret_scope default)'}")
 cur  = conn.cursor()
 

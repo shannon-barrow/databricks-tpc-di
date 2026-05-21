@@ -32,12 +32,19 @@ def _maybe_install_connector():
 
 def sf_connect(*, database: str | None = None, schema: str | None = None,
                warehouse: str | None = None, role: str | None = None,
-               secret_scope: str = "tpcdi_snowflake"):
+               secret_scope: str = "tpcdi_snowflake",
+               query_tag: str | dict | None = None):
     """Open a Snowflake connection using creds from a Databricks secret scope.
 
     Prefers private-key auth when the `private_key` secret is set; otherwise
     falls back to password (which means MFA needs to already be cached on
-    the account, or the user must allow password-only auth)."""
+    the account, or the user must allow password-only auth).
+
+    query_tag (str or dict) is stamped on every query issued through this
+    connection. The task-time extract reads it from
+    SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY to attribute queries back to
+    specific tasks/runs without scraping logs. Pass a dict and we'll
+    JSON-encode it (matches the shape run_dbt.py uses)."""
     _maybe_install_connector()
     import snowflake.connector
 
@@ -87,4 +94,11 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
     if schema:    conn_kwargs["schema"]    = schema
 
     conn = snowflake.connector.connect(**conn_kwargs)
+
+    if query_tag is not None:
+        import json
+        tag = query_tag if isinstance(query_tag, str) else json.dumps(query_tag, separators=(",", ":"))
+        with conn.cursor() as _cur:
+            _cur.execute(f"ALTER SESSION SET QUERY_TAG = $${tag}$$")
+
     return conn
