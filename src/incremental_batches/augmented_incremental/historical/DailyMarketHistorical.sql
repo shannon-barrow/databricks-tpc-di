@@ -36,11 +36,15 @@ CREATE OR REPLACE TABLE bronzedailymarket (
 )
 CLUSTER BY (dm_date)  -- liquid: matches setup / dbt-Liquid (FMH 365-day rolling lookback filters on dm_date)
 TBLPROPERTIES (
-  -- Match the per-variant bronzedailymarket props (Classic deep-clones from
-  -- here; deep clone preserves source TBLPROPERTIES). autoCompact=false to
+  -- Match the per-variant bronzedailymarket props -- Classic deep-clones from
+  -- here; deep clone preserves source TBLPROPERTIES. autoCompact=false to
   -- avoid contention during the daily Auto Loader appends post-clone.
   'delta.autoOptimize.autoCompact' = 'false',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false',
+  'delta.enableIcebergCompatV2' = 'true',
+  'delta.universalFormat.enabledFormats' = 'iceberg'
 );
 
 INSERT OVERWRITE bronzedailymarket

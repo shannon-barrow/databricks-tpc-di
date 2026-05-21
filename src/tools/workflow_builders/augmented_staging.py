@@ -125,13 +125,21 @@ def _tprops() -> str:
     """Stable tbl_props for staging tables — autoCompact off (we'll do a
     final OPTIMIZE later if needed), optimizeWrite on for fewer/larger files."""
     return ("'delta.autoOptimize.autoCompact'=False, "
-            "'delta.autoOptimize.optimizeWrite'=True")
+            "'delta.autoOptimize.optimizeWrite'=True, "
+            "'delta.columnMapping.mode'='name', "
+            "'delta.enableDeletionVectors'=False, "
+            "'delta.enableIcebergCompatV2'=True, "
+            "'delta.universalFormat.enabledFormats'='iceberg'")
 
 
 def _finwire_tprops() -> str:
     return ("'delta.dataSkippingNumIndexedCols' = 0, "
             "'delta.autoOptimize.autoCompact'=False, "
-            "'delta.autoOptimize.optimizeWrite'=True")
+            "'delta.autoOptimize.optimizeWrite'=True, "
+            "'delta.columnMapping.mode'='name', "
+            "'delta.enableDeletionVectors'=False, "
+            "'delta.enableIcebergCompatV2'=True, "
+            "'delta.universalFormat.enabledFormats'='iceberg'")
 
 
 def build(*, job_name: str, scale_factor: int, catalog: str,
