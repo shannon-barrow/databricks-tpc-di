@@ -534,13 +534,94 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         ))
         stage_files_keys.append(key)
 
+    # ---------------- Stage 1c: bronze_staging (DT variant prereq) ----------
+    # Optional — only runs when job parameter generate_bronze_staging=YES.
+    # Materializes the 7 historical bronze events (stg_target='tables' partition
+    # of each per-dataset Delta) into Iceberg-UniForm tables at
+    # `{catalog}.tpcdi_incremental_staging_{sf}.bronze<dataset>` so the Snowflake
+    # DT variant can clone them into bronze*_raw and let the DT DAG backfill
+    # silver/gold from cumulative bronze (no anchor-table problem).
+    #
+    # Gated by a condition_task on the job parameter. When the parameter is
+    # NO (or unset), the gate evaluates false and all 7 bronze tasks are
+    # SKIPPED — same-as-zero overhead for regular runs. When YES, the gate
+    # passes and the 7 tasks run in parallel with the historical SCD2 builds
+    # (they read the same source Delta tables but project to bronze schema).
+    BRONZE_STAGING_GATE = "bronze_staging_gate"
+    tasks.append({
+        "task_key": BRONZE_STAGING_GATE,
+        "depends_on": [{"task_key": "data_gen"}],
+        "run_if": "ALL_SUCCESS",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{job.parameters.generate_bronze_staging}}",
+            "right": "YES",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "notification_settings": {
+            "no_alert_for_skipped_runs": False,
+            "no_alert_for_canceled_runs": False,
+            "alert_on_last_attempt": False,
+        },
+        "webhook_notifications": {},
+    })
+
+    bs_path = f"{repo_src_path}/incremental_batches/augmented_incremental/bronze_staging"
+    _bronze_deps = {
+        "customer":         ["gen_customer"],
+        "account":          ["gen_customer"],
+        "cashtransaction":  ["gen_cashtransaction"],
+        "dailymarket":      ["gen_daily_market"],
+        "holdings":         ["gen_holdinghistory"],
+        "trade":            ["gen_trade", "gen_tradehistory"],
+        "watches":          ["gen_watch_history"],
+    }
+    bronze_staging_keys: list[str] = []
+    for ds, deps in _bronze_deps.items():
+        key = f"bronze_staging_{ds}"
+        bronze_staging_keys.append(key)
+        # depends_on = gate (gated to TRUE) + the gen task(s) producing the source Delta
+        gated_deps: list = [{"task_key": BRONZE_STAGING_GATE, "outcome": "true"}]
+        gated_deps.extend({"task_key": d} for d in deps)
+        tasks.append({
+            "task_key": key,
+            "depends_on": gated_deps,
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": f"{bs_path}/stage_bronze_to_iceberg",
+                "source": "WORKSPACE",
+                "base_parameters": {
+                    "dataset": ds,
+                    "scale_factor": "{{job.parameters.scale_factor}}",
+                    "catalog": "{{job.parameters.catalog}}",
+                    "staging_schema": _STAGING_WH_DB,
+                },
+            },
+            "timeout_seconds": 0,
+            "email_notifications": {},
+            "notification_settings": {
+                "no_alert_for_skipped_runs": False,
+                "no_alert_for_canceled_runs": False,
+                "alert_on_last_attempt": False,
+            },
+            "webhook_notifications": {},
+            "max_retries": 3,
+            "min_retry_interval_millis": 15000,
+            "retry_on_timeout": True,
+        })
+
     # ---------------- Cleanup: drop the 7 temp Delta tables ----------------
     # Depends on every leaf in both branches. ALL_SUCCESS (not ALL_DONE) so
     # any failed task can be repair-run from the same source data — the
     # temp Delta tables stay around until everything has succeeded. Not
     # gated by delete_tables_when_finished because the temp Delta tables
     # are unconditionally temporary once we're past this point.
-    cleanup_deps = stage_files_keys + [
+    #
+    # Bronze staging tasks added to deps too — when the gate is FALSE, those
+    # tasks are SKIPPED, and ALL_SUCCESS treats SKIPPED as success-equivalent
+    # so cleanup still runs.
+    cleanup_deps = stage_files_keys + bronze_staging_keys + [
         "DimAccountHistorical", "DimTradeHistorical",
         "FactCashBalancesHistorical", "FactHoldingsHistorical",
         "FactWatchesHistorical", "CompanyYearEPS",
@@ -581,6 +662,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             # Default "tpcdi_raw_data" matches Azure. AWS overrides to a schema
             # the user owns when the canonical one belongs to someone else.
                         # tpcdi_directory and wh_db are NOT job-level params — they're hardcoded per-task via base_parameters since data_gen_type=augmented_incremental fully determines both. predictive_optimization is dropped (PO is not enabled on the shared staging schema).
+            # Optional — gates the 7 bronze_staging tasks. Default NO so
+            # standard runs are unaffected. Set to YES at run-now time to
+            # also produce historical bronze events for the Snowflake DT
+            # variant.
+            {"name": "generate_bronze_staging", "default": "NO"},
         ],
         "queue": {"enabled": True},
         "tasks": tasks,
