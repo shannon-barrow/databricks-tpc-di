@@ -593,11 +593,9 @@ WITH per_day AS (
     dm_vol
   FROM {catalog}.{schema}.bronzedailymarket
 ),
-windowed AS (
-  -- 52-week rolling MIN_BY(low, low) and MAX_BY(high, high) ending at each
-  -- (symbol, day). MIN_BY/MAX_BY with a bounded preceding window: each new
-  -- day's row is appended, and on FULL refresh Snowflake recomputes the
-  -- whole DT (no incremental tracking needed, so the float types are fine).
+windowed_vals AS (
+  -- 52-week rolling MIN/MAX values. Plain MIN/MAX support sliding window
+  -- frames (only MIN_BY/MAX_BY don't, per Snowflake's DT compiler).
   SELECT
     dm_s_symb,
     dm_date,
@@ -605,15 +603,36 @@ windowed AS (
     dm_high,
     dm_low,
     dm_vol,
-    MIN_BY(OBJECT_CONSTRUCT('dm_low',  dm_low,  'dm_date', dm_date), dm_low) OVER (
+    MIN(dm_low)  OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweeklow,
-    MAX_BY(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date), dm_high) OVER (
+    MAX(dm_high) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweekhigh
   FROM per_day
+),
+windowed AS (
+  -- Recover the date on which each 52-week low/high occurred by self-joining
+  -- back to per_day on (symbol, value, date in window). Pick MAX(date) to
+  -- break ties toward the most recent matching day.
+  SELECT
+    w.dm_s_symb, w.dm_date, w.dm_close, w.dm_high, w.dm_low, w.dm_vol,
+    w.fiftytwoweeklow, w.fiftytwoweekhigh,
+    MAX(plow.dm_date)  AS fiftytwoweeklowdate,
+    MAX(phigh.dm_date) AS fiftytwoweekhighdate
+  FROM windowed_vals w
+  LEFT JOIN per_day plow
+    ON  plow.dm_s_symb = w.dm_s_symb
+    AND plow.dm_date BETWEEN DATEADD('day', -364, w.dm_date) AND w.dm_date
+    AND plow.dm_low = w.fiftytwoweeklow
+  LEFT JOIN per_day phigh
+    ON  phigh.dm_s_symb = w.dm_s_symb
+    AND phigh.dm_date BETWEEN DATEADD('day', -364, w.dm_date) AND w.dm_date
+    AND phigh.dm_high = w.fiftytwoweekhigh
+  GROUP BY w.dm_s_symb, w.dm_date, w.dm_close, w.dm_high, w.dm_low, w.dm_vol,
+           w.fiftytwoweeklow, w.fiftytwoweekhigh
 )
 SELECT
   s.sk_securityid,
@@ -621,10 +640,10 @@ SELECT
   TO_CHAR(dm.dm_date, 'YYYYMMDD')::number             AS sk_dateid,
   DIV0(dm.dm_close,  f.prev_year_basic_eps)            AS peratio,
   DIV0(s.dividend,   dm.dm_close) / 100                AS yield,
-  dm.fiftytwoweekhigh:dm_high::float                                 AS fiftytwoweekhigh,
-  TO_CHAR(dm.fiftytwoweekhigh:dm_date::date, 'YYYYMMDD')::number     AS sk_fiftytwoweekhighdate,
-  dm.fiftytwoweeklow:dm_low::float                                   AS fiftytwoweeklow,
-  TO_CHAR(dm.fiftytwoweeklow:dm_date::date, 'YYYYMMDD')::number      AS sk_fiftytwoweeklowdate,
+  dm.fiftytwoweekhigh                                      AS fiftytwoweekhigh,
+  TO_CHAR(dm.fiftytwoweekhighdate, 'YYYYMMDD')::number     AS sk_fiftytwoweekhighdate,
+  dm.fiftytwoweeklow                                       AS fiftytwoweeklow,
+  TO_CHAR(dm.fiftytwoweeklowdate,  'YYYYMMDD')::number     AS sk_fiftytwoweeklowdate,
   dm.dm_close AS closeprice,
   dm.dm_high  AS dayhigh,
   dm.dm_low   AS daylow,
