@@ -29,8 +29,8 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volu
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
 dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
 dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse default)")
-dbutils.widgets.dropdown("table_format", "snowflake_native", ["snowflake_native","iceberg"],
-                          "Lineage tag for query attribution: 'snowflake_native' = STAGING_SF{sf} seeded via parquet→COPY INTO from Databricks; 'iceberg' = STAGING_SF{sf} materialized via CTAS from the federated UC Iceberg catalog. Setup_sf clones from STAGING_SF{sf} either way; the tag flows through to Snowflake query_tag so the dashboard can split runs by lineage.")
+dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"],
+                          "Lineage tag for query attribution. 'native' = the per-run tables are Snowflake-native (current default — what setup_sf actually does today, regardless of this value). 'iceberg' is reserved for when we plumb a real Iceberg-table path; setting it today is just a tag, NOT a behavior switch. Flows through to Snowflake query_tag so the dashboard can split runs by lineage.")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the prior-year backfill window")
 

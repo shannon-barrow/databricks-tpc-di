@@ -25,7 +25,7 @@ dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_bench
 dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
 dbutils.widgets.text("secret_scope",   "tpcdi_snowflake")
 dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
-dbutils.widgets.dropdown("table_format", "snowflake_native", ["snowflake_native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution")
+dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution. 'native' = the actual current behavior (Snowflake-native tables); 'iceberg' is a reserved label for a future Iceberg-table path — no behavior switch today.")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
 catalog          = dbutils.widgets.get("catalog")

@@ -149,7 +149,7 @@ def build_child(
     secret_scope: str = "tpcdi_snowflake",
     snowflake_warehouse: str = "BARROW_XS_GEN2",
     snowflake_warehouse_setup: str = "",
-    table_format: str = "snowflake_native",
+    table_format: str = "native",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -223,7 +223,7 @@ def build_parent(
     secret_scope: str = "tpcdi_snowflake",
     snowflake_warehouse: str = "BARROW_XS_GEN2",
     snowflake_warehouse_setup: str = "",
-    table_format: str = "snowflake_native",
+    table_format: str = "native",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
