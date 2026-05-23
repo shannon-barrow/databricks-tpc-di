@@ -155,6 +155,40 @@ print(f"[ok] bronze_raw tables ready under {catalog}.{target_schema}")
 
 # COMMAND ----------
 
+# 2b. SEED bronze*_raw from the historical bronze staging tables.
+# Prereq: onetime_stg_snowflake_dt_bronze_tables.py must have been run
+# (which CTAS'd the 7 bronze tables from federated Iceberg into native
+# STAGING_SF{sf}.bronze<table>). Without that, the bronze_raw tables stay
+# empty and the DT DAG only sees per-batch data — silver/gold won't have
+# proper historical state.
+#
+# This step IS required for the DT DAG to incrementally build correct
+# silver/gold. Each DT first-refresh processes the cumulative bronze
+# (historical seed + per-batch) through the dependency chain.
+_BRONZE_RAW_SEED = [
+    "bronzeaccount",
+    "bronzecashtransaction",
+    "bronzecustomer",
+    "bronzeholdings",
+    "bronzetrade",
+    "bronzewatches",
+]
+print(f"[seed] inserting historical bronze events from {staging_schema} into bronze*_raw...")
+_t_seed = _time.time()
+for ds in _BRONZE_RAW_SEED:
+    _t0 = _time.time()
+    cur.execute(
+        f"INSERT INTO {catalog}.{target_schema}.{ds}_raw "
+        f"SELECT * FROM {catalog}.{staging_schema}.{ds}"
+    )
+    # Confirm row count for telemetry
+    cur.execute(f"SELECT COUNT(*) FROM {catalog}.{target_schema}.{ds}_raw")
+    _n = (cur.fetchone() or [0])[0]
+    print(f"[seed] {ds}_raw: {_n:>12,} rows ({_time.time() - _t0:5.1f}s)")
+print(f"[seed] done in {_time.time() - _t_seed:.1f}s — bronze_raw fully populated with historical events")
+
+# COMMAND ----------
+
 # 3. Execute dt_create.sql — declares all 16 dynamic tables.
 # The SQL file is a template with Python str.format placeholders. Substitute
 # then split on `;` and execute each statement (Snowflake's connector doesn't

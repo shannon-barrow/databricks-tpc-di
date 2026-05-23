@@ -111,9 +111,23 @@ QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY event_dt DESC) = 1;
 --
 -- dbt model: account_updates_from_customer.sql
 -- Source: per-batch derived from bronzecustomer.update_dt=batch_date rows.
--- DT formulation: keep the same join shape but emit rows for every
--- bronzecustomer.U row (across all time), not just today's. dimaccount sees
--- the union and dedups itself.
+--
+-- DT formulation — REWRITTEN to break the circular dimaccount dep that
+-- the dbt version has. The original dbt model joins dimaccount as a
+-- regular MERGE-target table; here dimaccount is itself a DT that
+-- UNIONs this very table, so a direct join would be cyclic and Snowflake
+-- rejects the DAG at CREATE time.
+--
+-- Replacement: join bronzeaccount directly, picking the latest known
+-- state of each account (by accountid, ordered by update_dt + cdc_dsn).
+-- Tradeoff: doesn't honor "what was the account state AT the time of
+-- the customer update" — uses the all-time-latest state. For SF=10
+-- smoke testing that's acceptable; auditing may show drift vs the dbt
+-- variant for cases where account state changed AFTER a customer event.
+-- A more rigorous version would use LATERAL with a correlated subquery
+-- (not incremental-refresh eligible) or a self-join with row-number on
+-- (a.update_dt <= c.update_dt) (sliding-frame window — also likely
+-- forces FULL refresh).
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.account_updates_from_customer
@@ -121,21 +135,27 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.account_updates_from_customer
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
+WITH latest_account AS (
+  SELECT
+    accountid, brokerid, customerid, accountdesc, taxstatus, status, update_dt
+  FROM {catalog}.{schema}.bronzeaccount
+  QUALIFY ROW_NUMBER() OVER (
+    PARTITION BY accountid
+    ORDER BY update_dt DESC, cdc_dsn DESC
+  ) = 1
+)
 SELECT
   'cust_update'  AS cdc_flag,
   -1::bigint     AS cdc_dsn,
-  a.accountid,
-  a.sk_brokerid  AS brokerid,
+  la.accountid,
+  la.brokerid,
   c.customerid,
-  a.accountdesc,
-  a.taxstatus,
-  a.status,
+  la.accountdesc,
+  la.taxstatus,
+  la.status,
   c.update_dt
 FROM {catalog}.{schema}.bronzecustomer c
-JOIN {catalog}.{schema}.dimaccount a
-  ON c.customerid::varchar = SUBSTR(a.sk_customerid::varchar, 9)
- AND a.iscurrent
- AND c.update_dt > a.effectivedate
+JOIN latest_account la ON la.customerid = c.customerid
 WHERE c.cdc_flag = 'U';
 
 
