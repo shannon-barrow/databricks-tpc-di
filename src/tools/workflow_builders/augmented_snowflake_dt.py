@@ -225,11 +225,12 @@ def build_parent(
             "target_lag":                  "{{job.parameters.target_lag}}",
             "incremental_batches_to_run":
                 "{{job.parameters.incremental_batches_to_run}}",
-            # sibling of setup_sf_dt notebook — file-system path (with the
-            # /Workspace prefix that file open() needs, vs the notebook_path
-            # form which doesn't have it).
+            # sibling of setup_sf_dt notebook. `aug` is already passed in
+            # with a /Workspace prefix (matches the dbt-snowflake variant's
+            # convention) so it's directly usable by Python open() from
+            # inside the notebook.
             "dt_create_sql_path":
-                f"/Workspace/{aug.lstrip('/')}/snowflake/dynamic_tables/dt_create.sql",
+                f"{aug}/snowflake/dynamic_tables/dt_create.sql",
         },
         existing_cluster_id=interactive_cluster_id,
     )

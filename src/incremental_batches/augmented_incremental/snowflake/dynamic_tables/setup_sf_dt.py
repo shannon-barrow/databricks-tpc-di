@@ -163,18 +163,22 @@ print(f"[ddl] reading {dt_create_sql_path}")
 with open(dt_create_sql_path, "r") as _f:
     _ddl_template = _f.read()
 
-_ddl = _ddl_template.format(
-    catalog        = catalog,
-    schema         = target_schema,
-    staging_schema = staging_schema,
-    warehouse      = warehouse,
-    target_lag     = f"'{target_lag}'",
-)
-
-# Strip comment-only lines and split on semicolons. The connector only
-# executes one statement per .execute() call.
+# Strip comment-only lines FIRST so any stray {placeholder} in comments
+# can't trip the substitution. Then do plain str.replace for the 5 real
+# placeholders — avoids str.format()'s strict-all-keys behavior.
 import re
-_clean = re.sub(r"--[^\n]*\n", "\n", _ddl)
+_clean = re.sub(r"--[^\n]*\n", "\n", _ddl_template)
+
+_subs = {
+    "{catalog}":        catalog,
+    "{schema}":         target_schema,
+    "{staging_schema}": staging_schema,
+    "{warehouse}":      warehouse,
+    "{target_lag}":     f"'{target_lag}'",
+}
+for _k, _v in _subs.items():
+    _clean = _clean.replace(_k, str(_v))
+_ddl = _clean
 _stmts = [s.strip() for s in _clean.split(";") if s.strip()]
 print(f"[ddl] executing {len(_stmts)} DDL statements...")
 
