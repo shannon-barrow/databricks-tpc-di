@@ -10,9 +10,11 @@
 # MAGIC `main.tpcdi_incremental_staging_{sf}.bronze<dataset>`.
 # MAGIC
 # MAGIC These tables are read by Snowflake via the federated UC Iceberg
-# MAGIC catalog (`STAGING_SF{sf}_DBX.bronze<dataset>`) and then materialized
-# MAGIC into native Snowflake bronze staging by
-# MAGIC `snowflake/onetime_stg_snowflake_dt_bronze_tables.py`.
+# MAGIC catalog (`STAGING_SF{sf}_DBX.bronze<dataset>`) and consumed
+# MAGIC directly from there — no native Snowflake bronze copy. The DT
+# MAGIC variant's `setup_sf_dt.py` seeds `bronze*_raw` via
+# MAGIC `INSERT … SELECT * FROM STAGING_SF{sf}_DBX.bronze<dataset>`,
+# MAGIC preserving Iceberg-native types through the federation.
 # MAGIC
 # MAGIC Projections mirror the corresponding `stage_files/<Dataset>.py`
 # MAGIC notebooks line-for-line — same source filter (other than

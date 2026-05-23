@@ -13,8 +13,12 @@
 #      runs, the refresh DAG is live.
 #   5. Emit batch_date_ls task value for the parent's for_each loop.
 #
-# Prereq: TPCDI_TEST.STAGING_SF{sf} must exist (materialized natively via
-# `onetime_stg_snowflake_tables.py`).
+# Prereqs:
+#   - TPCDI_TEST.STAGING_SF{sf} must exist (silver/gold + reference,
+#     materialized natively via `onetime_stg_snowflake_tables.py`)
+#   - TPCDI_TEST.STAGING_SF{sf}_DBX must exist (bronze, federated Iceberg
+#     via the TPCDI_DBX_UC_SF10_INT catalog integration). Bronze tables
+#     stay Iceberg — no native materialization step.
 
 # COMMAND ----------
 
@@ -49,9 +53,11 @@ if not dt_create_sql_path:
         "absolute workspace path to dt_create.sql (sibling of this notebook).")
 
 target_schema    = f"{wh_db}_{scale_factor}"
-staging_schema   = f"STAGING_SF{scale_factor}"
+staging_schema   = f"STAGING_SF{scale_factor}"               # native, clonable (silver/gold + reference)
+bronze_iceberg_schema = f"STAGING_SF{scale_factor}_DBX"      # federated Iceberg (bronze only, no native copy)
 print(f"target  = {catalog}.{target_schema}")
-print(f"staging = {catalog}.{staging_schema} (clone source)")
+print(f"staging = {catalog}.{staging_schema} (CLONE source for ref/silver/gold)")
+print(f"bronze  = {catalog}.{bronze_iceberg_schema} (federated Iceberg — bronze*_raw seed source)")
 print(f"DT warehouse = {warehouse}, target_lag (leaves) = {target_lag}")
 
 # COMMAND ----------
@@ -91,14 +97,15 @@ print(f"[ok] schema {catalog}.{target_schema} ready")
 # Note: differs from the dbt variant's CLONE list — we EXCLUDE the 8 tables
 # that become dynamic tables (dimcustomer, dimaccount, dimtrade, factwatches,
 # factcashbalances, factholdings, factmarkethistory, currentaccountbalances).
-# bronzedailymarket stays as a regular table because the per-batch
-# DailyMarket.txt rows append into it directly (no separate raw table) —
-# matches the dbt variant's flow.
+# bronzedailymarket is NOT cloned here — it's a bronze table, so per the
+# DT-variant principle it stays Iceberg-only on the staging side. Below we
+# CTAS it from the federated Iceberg schema into a writable native table
+# (the per-batch DailyMarket.txt COPY INTO appends to it; factmarkethistory's
+# DT reads from it directly).
 CLONE_TABLES = [
     "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
     "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
     "companyyeareps", "batchdate", "cashtransactionhistorical",
-    "bronzedailymarket",
 ]
 
 print(f"[clone] {len(CLONE_TABLES)} reference tables (sequential — zero-copy, fast)...")
@@ -110,6 +117,18 @@ for tbl in CLONE_TABLES:
         f"CLONE {catalog}.{staging_schema}.{tbl}"
     )
 print(f"[clone] done in {_time.time() - _t0:.1f}s")
+
+# bronzedailymarket — writable native table seeded from federated Iceberg.
+# Per-batch COPY INTO appends DailyMarket.txt rows here.
+_t0 = _time.time()
+cur.execute(
+    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.bronzedailymarket "
+    f"CLUSTER BY (dm_date) AS "
+    f"SELECT * FROM {catalog}.{bronze_iceberg_schema}.bronzedailymarket"
+)
+cur.execute(f"SELECT COUNT(*) FROM {catalog}.{target_schema}.bronzedailymarket")
+_n = (cur.fetchone() or [0])[0]
+print(f"[ctas] bronzedailymarket: {_n:,} rows ({_time.time() - _t0:.1f}s, from federated Iceberg)")
 
 # COMMAND ----------
 
@@ -155,12 +174,15 @@ print(f"[ok] bronze_raw tables ready under {catalog}.{target_schema}")
 
 # COMMAND ----------
 
-# 2b. SEED bronze*_raw from the historical bronze staging tables.
-# Prereq: onetime_stg_snowflake_dt_bronze_tables.py must have been run
-# (which CTAS'd the 7 bronze tables from federated Iceberg into native
-# STAGING_SF{sf}.bronze<table>). Without that, the bronze_raw tables stay
-# empty and the DT DAG only sees per-batch data — silver/gold won't have
-# proper historical state.
+# 2b. SEED bronze*_raw directly from the federated Iceberg bronze tables.
+# Prereq: augmented_staging Stage 0 must have been run with
+# `generate_bronze_staging=YES` at this SF, producing UniForm Delta
+# tables under `main.tpcdi_incremental_staging_{sf}.bronze<dataset>`.
+# Those are mirrored into Snowflake as federated Iceberg tables under
+# `TPCDI_TEST.STAGING_SF{sf}_DBX.bronze<dataset>` via the
+# TPCDI_DBX_UC_SF10_INT catalog integration. No native materialization
+# of the bronze data ever occurs on the Snowflake side — types are
+# preserved through Iceberg.
 #
 # This step IS required for the DT DAG to incrementally build correct
 # silver/gold. Each DT first-refresh processes the cumulative bronze
@@ -173,13 +195,13 @@ _BRONZE_RAW_SEED = [
     "bronzetrade",
     "bronzewatches",
 ]
-print(f"[seed] inserting historical bronze events from {staging_schema} into bronze*_raw...")
+print(f"[seed] inserting historical bronze events from {bronze_iceberg_schema} (Iceberg) into bronze*_raw...")
 _t_seed = _time.time()
 for ds in _BRONZE_RAW_SEED:
     _t0 = _time.time()
     cur.execute(
         f"INSERT INTO {catalog}.{target_schema}.{ds}_raw "
-        f"SELECT * FROM {catalog}.{staging_schema}.{ds}"
+        f"SELECT * FROM {catalog}.{bronze_iceberg_schema}.{ds}"
     )
     # Confirm row count for telemetry
     cur.execute(f"SELECT COUNT(*) FROM {catalog}.{target_schema}.{ds}_raw")
