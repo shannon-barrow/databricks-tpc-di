@@ -567,28 +567,20 @@ JOIN {catalog}.{schema}.dimtrade t
 -- dbt approach: per-batch new-day rows with 52-week low/high computed via
 -- MIN_BY/MAX_BY(object_construct) over the prior-365-day window.
 --
--- DT approach: this is the model most likely to fall back to FULL refresh
--- due to the sliding 365-day window aggregate. Three formulations tried in
--- order of preference (commented out alternatives):
---
---   A) Sliding 365-day MIN_BY/MAX_BY scoped via WHERE — may force FULL
---      because the lower bound moves daily (rows age out).
---
---   B) Per-day aggregate joined to itself with windowed MIN/MAX over 364
---      preceding rows — uses bounded window frame; should incrementalize.
---
---   C) All-time MIN/MAX per symbol — drops the 52-week semantics but is
---      strictly incremental. Use only if A and B both fall back to FULL.
---
--- Implementing formulation B below; if Snowflake refuses to incrementalize,
--- swap in A's WHERE-filter variant (still semantically correct, just heavier
--- on refresh cost).
+-- DT approach: must use REFRESH_MODE = FULL. Snowflake DT INCREMENTAL
+-- mode rejects this DDL for two independent reasons:
+--   1. MIN_BY/MAX_BY window functions don't support sliding frames
+--      ("Sliding window frame unsupported for function MIN_BY")
+--   2. Float-typed aggregates can't share a query block with a join
+-- A self-join WHERE-filter variant would force FULL anyway because the
+-- lower bound moves daily (rows age out of the 52-week window). FULL
+-- is the honest answer for this pattern on Snowflake DTs today.
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factmarkethistory
   TARGET_LAG   = {target_lag}
   WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
+  REFRESH_MODE = FULL
 AS
 WITH per_day AS (
   -- One row per (symbol, day) — the bronze daily market grain.
@@ -604,8 +596,8 @@ WITH per_day AS (
 windowed AS (
   -- 52-week rolling MIN_BY(low, low) and MAX_BY(high, high) ending at each
   -- (symbol, day). MIN_BY/MAX_BY with a bounded preceding window: each new
-  -- day's row is appended, and Snowflake's incremental engine only needs to
-  -- recompute the 365-day suffix per affected symbol.
+  -- day's row is appended, and on FULL refresh Snowflake recomputes the
+  -- whole DT (no incremental tracking needed, so the float types are fine).
   SELECT
     dm_s_symb,
     dm_date,
@@ -613,14 +605,11 @@ windowed AS (
     dm_high,
     dm_low,
     dm_vol,
-    -- Cast the float comparators to NUMBER inside MIN_BY/MAX_BY — Snowflake
-    -- INCREMENTAL planner rejects float-typed aggregate projections sharing
-    -- a query block with the dimsecurity/companyyeareps joins below.
-    MIN_BY(OBJECT_CONSTRUCT('dm_low',  dm_low,  'dm_date', dm_date), dm_low::number(12,4)) OVER (
+    MIN_BY(OBJECT_CONSTRUCT('dm_low',  dm_low,  'dm_date', dm_date), dm_low) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweeklow,
-    MAX_BY(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date), dm_high::number(12,4)) OVER (
+    MAX_BY(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date), dm_high) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweekhigh
