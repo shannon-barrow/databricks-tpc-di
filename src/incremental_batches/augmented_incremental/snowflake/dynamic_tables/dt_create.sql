@@ -348,13 +348,16 @@ WITH latest_per_trade AS (
     MAX_BY(cashflag,   t_dts) AS cashflag,
     MAX_BY(t_s_symb,   t_dts) AS t_s_symb,
     MAX_BY(quantity,   t_dts) AS quantity,
-    MAX_BY(bidprice,   t_dts) AS bidprice,
+    -- Cast FLOAT → NUMBER(15,2) inside the aggregate. Snowflake INCREMENTAL
+    -- refresh rejects float aggregates that share a query block with a join
+    -- (planner inlines this CTE into the dimsecurity/dimaccount join below).
+    MAX_BY(bidprice::number(15,2),   t_dts) AS bidprice,
     MAX_BY(t_ca_id,    t_dts) AS t_ca_id,
     MAX_BY(executedby, t_dts) AS executedby,
-    MAX_BY(tradeprice, t_dts) AS tradeprice,
-    MAX_BY(fee,        t_dts) AS fee,
-    MAX_BY(commission, t_dts) AS commission,
-    MAX_BY(tax,        t_dts) AS tax
+    MAX_BY(tradeprice::number(15,2), t_dts) AS tradeprice,
+    MAX_BY(fee::number(15,2),        t_dts) AS fee,
+    MAX_BY(commission::number(15,2), t_dts) AS commission,
+    MAX_BY(tax::number(15,2),        t_dts) AS tax
   FROM {catalog}.{schema}.bronzetrade
   GROUP BY tradeid
 ),
@@ -463,10 +466,12 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.currentaccountbalances
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
+-- Cast FLOAT → NUMBER inside SUM (outer cast doesn't satisfy the INCREMENTAL
+-- change-tracking planner — it inspects the aggregate's input type).
 SELECT
   MAX(TO_DATE(ct_dts))               AS ct_date,
   accountid,
-  SUM(ct_amt)::number(15,2)          AS current_account_cash
+  SUM(ct_amt::number(15,2))          AS current_account_cash
 FROM {catalog}.{schema}.bronzecashtransaction
 GROUP BY accountid;
 
@@ -489,10 +494,12 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factcashbalances
   REFRESH_MODE = INCREMENTAL
 AS
 WITH per_day AS (
+  -- Cast FLOAT → NUMBER inside SUM so the windowed running balance below
+  -- runs over a fixed-point type (INCREMENTAL refresh requirement).
   SELECT
     accountid,
     TO_DATE(ct_dts) AS ct_date,
-    SUM(ct_amt) AS day_amt
+    SUM(ct_amt::number(15,2)) AS day_amt
   FROM {catalog}.{schema}.bronzecashtransaction
   GROUP BY accountid, TO_DATE(ct_dts)
 ),
@@ -606,11 +613,14 @@ windowed AS (
     dm_high,
     dm_low,
     dm_vol,
-    MIN_BY(OBJECT_CONSTRUCT('dm_low',  dm_low,  'dm_date', dm_date), dm_low) OVER (
+    -- Cast the float comparators to NUMBER inside MIN_BY/MAX_BY — Snowflake
+    -- INCREMENTAL planner rejects float-typed aggregate projections sharing
+    -- a query block with the dimsecurity/companyyeareps joins below.
+    MIN_BY(OBJECT_CONSTRUCT('dm_low',  dm_low,  'dm_date', dm_date), dm_low::number(12,4)) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweeklow,
-    MAX_BY(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date), dm_high) OVER (
+    MAX_BY(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date), dm_high::number(12,4)) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweekhigh
