@@ -184,12 +184,19 @@ bootstrap.materialize_bronze_into_schema(
 
 # COMMAND ----------
 
-# 5. Execute dt_create.sql — declares all 16 dynamic tables.
-# The SQL file is a template with `{placeholder}` substitutions for
-# catalog/schema/warehouse/target_lag. Strip comment lines first so any
-# stray `{...}` in comments doesn't trip the substitution, then split on
-# `;` and execute statements one at a time (snowflake-connector doesn't
-# multi-statement by default).
+# 5. Execute dt_create.sql — declares N dynamic tables.
+#
+# Each CREATE OR REPLACE DYNAMIC TABLE with INITIALIZE = ON_CREATE
+# (default) blocks until the DT's initial refresh completes. At larger
+# SFs the heavy DTs (dimtrade, factmarkethistory, factwatches) each take
+# minutes. Running them sequentially adds them up; running them by
+# dependency-aware parallel batches makes the wall-clock = max(longest
+# DT in any one level) ≈ a small multiple of one DT's refresh.
+#
+# Dependency detection: each statement is parsed for references to other
+# DTs by name. Topo-sort into levels; within a level, submit all CREATEs
+# concurrently via a ThreadPoolExecutor (max_workers=9, each worker uses
+# its own Snowflake connection — the connector is not thread-safe).
 print(f"[ddl] reading {dt_create_sql_path}")
 with open(dt_create_sql_path, "r") as _f:
     _ddl_template = _f.read()
@@ -207,15 +214,91 @@ _subs = {
 for _k, _v in _subs.items():
     _clean = _clean.replace(_k, str(_v))
 _stmts = [s.strip() for s in _clean.split(";") if s.strip()]
-print(f"[ddl] executing {len(_stmts)} DDL statements...")
+
+# Extract each statement's DT name and dependencies.
+# A dep is a reference to ANOTHER DT name (in this stmt list) that appears
+# in this stmt's body. We look for fully-qualified `{catalog}.{schema}.NAME`
+# references — after substitution those are concrete strings.
+_DT_NAME_RE = re.compile(r"DYNAMIC\s+TABLE\s+\S+\.\S+\.(\w+)", re.IGNORECASE)
+def _parse_one(stmt: str) -> tuple[str | None, str]:
+    m = _DT_NAME_RE.search(stmt)
+    return (m.group(1).lower() if m else None, stmt)
+
+_parsed = [_parse_one(s) for s in _stmts]
+_dt_names = {name for name, _ in _parsed if name}
+_qualified_prefix = f"{catalog}.{target_schema}.".lower()
+
+def _deps_for(stmt: str, self_name: str) -> set[str]:
+    body = stmt.lower()
+    found = set()
+    for other in _dt_names:
+        if other == self_name:
+            continue
+        # `catalog.schema.other_dt` reference indicates dep
+        if f"{_qualified_prefix}{other}" in body:
+            found.add(other)
+    return found
+
+_dt_stmts: dict[str, str] = {}
+_dt_deps: dict[str, set[str]] = {}
+_non_dt_stmts: list[str] = []
+for name, stmt in _parsed:
+    if name is None:
+        _non_dt_stmts.append(stmt)
+    else:
+        _dt_stmts[name] = stmt
+        _dt_deps[name] = _deps_for(stmt, name)
+
+# Topo-sort into levels: each level is the set of DTs whose deps are all
+# already in earlier levels.
+_levels: list[list[str]] = []
+_remaining = dict(_dt_deps)
+while _remaining:
+    ready = [n for n, deps in _remaining.items() if not deps]
+    if not ready:
+        raise RuntimeError(f"dt_create.sql dep cycle detected among {sorted(_remaining)}")
+    _levels.append(sorted(ready))
+    for n in ready:
+        _remaining.pop(n)
+    for n, deps in _remaining.items():
+        deps -= set(ready)
+
+print(f"[ddl] {len(_dt_stmts)} dynamic tables across {len(_levels)} dep level(s); "
+      f"non-DT statements: {len(_non_dt_stmts)}")
+for i, lvl in enumerate(_levels, 1):
+    print(f"  L{i}: {lvl}")
+
+# Run non-DT statements (if any) sequentially first.
+for stmt in _non_dt_stmts:
+    cur.execute(stmt)
+
+import concurrent.futures as _cf
+
+def _exec_one(name: str) -> tuple[str, float]:
+    _c = _new_conn()
+    try:
+        _t0 = _time.time()
+        with _c.cursor() as _cc:
+            _cc.execute(_dt_stmts[name])
+        return (name, _time.time() - _t0)
+    finally:
+        _c.close()
 
 _t_ddl = _time.time()
-for i, _stmt in enumerate(_stmts, 1):
-    _m = re.search(r"DYNAMIC\s+TABLE\s+\S+\.\S+\.(\w+)", _stmt, re.IGNORECASE)
-    _name = _m.group(1) if _m else f"stmt-{i}"
-    _t0 = _time.time()
-    cur.execute(_stmt)
-    print(f"  [{i:2d}/{len(_stmts)}] {_name:35s} {_time.time() - _t0:5.1f}s")
+for level_idx, level in enumerate(_levels, 1):
+    print(f"[ddl] level {level_idx} ({len(level)} DTs, parallel={min(9, len(level))})...")
+    _t_lvl = _time.time()
+    with _cf.ThreadPoolExecutor(max_workers=9) as _ex:
+        _futs = {_ex.submit(_exec_one, name): name for name in level}
+        for _f in _cf.as_completed(_futs):
+            try:
+                _name, _wall = _f.result()
+                print(f"  [L{level_idx}] {_name:35s} {_wall:6.1f}s")
+            except Exception as _e:
+                _name = _futs[_f]
+                print(f"  [L{level_idx}] {_name:35s} FAILED — {type(_e).__name__}: {str(_e)[:140]}")
+                raise
+    print(f"[ddl] level {level_idx} done in {_time.time() - _t_lvl:.1f}s")
 print(f"[ddl] all DDL applied in {_time.time() - _t_ddl:.1f}s")
 
 # COMMAND ----------
