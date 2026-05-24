@@ -137,6 +137,26 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
     )
 
 
+_SF_WH_BY_SCALE_CEILING: tuple[tuple[int, str], ...] = (
+    (5_000,  "BARROW_XS_GEN2"),     # SF <=  5k → X-Small
+    (10_000, "BARROW_SMALL_GEN2"),  # SF == 10k → Small
+    (20_000, "BARROW_MED_GEN2"),    # SF == 20k → Medium
+    (40_000, "BARROW_LARGE_GEN2"),
+    (80_000, "BARROW_XL_GEN2"),
+)
+
+
+def _default_sf_warehouse(scale_factor: int) -> str:
+    """Default Snowflake warehouse sized to scale factor.
+
+    Anchored at "Medium for SF=20k". SF<=5k all run on X-Small.
+    """
+    for ceiling, name in _SF_WH_BY_SCALE_CEILING:
+        if scale_factor <= ceiling:
+            return name
+    return "BARROW_2XL_GEN2"
+
+
 def build_child(
     *,
     job_name: str,
@@ -147,7 +167,7 @@ def build_child(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
-    snowflake_warehouse: str = "BARROW_XS_GEN2",
+    snowflake_warehouse: str | None = None,
     snowflake_warehouse_setup: str = "",
     table_format: str = "native",
     interactive_cluster_id: str | None = None,
@@ -162,6 +182,8 @@ def build_child(
       2. `dbt_run` — pip-checks dbt-snowflake, writes profiles.yml from
          the secret scope, runs `dbt run --target snowflake --vars {...}`
     """
+    if snowflake_warehouse is None:
+        snowflake_warehouse = _default_sf_warehouse(scale_factor)
     aug = f"{repo_src_path}/{_AUG_PATH}"
     tasks = [
         _make_task(
@@ -221,7 +243,7 @@ def build_parent(
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
-    snowflake_warehouse: str = "BARROW_XS_GEN2",
+    snowflake_warehouse: str | None = None,
     snowflake_warehouse_setup: str = "",
     table_format: str = "native",
     interactive_cluster_id: str | None = None,
@@ -232,6 +254,8 @@ def build_parent(
     Three real tasks plus the cleanup pair:
       setup_sf → loop_incremental_tpcdi (for_each) → cleanup (gated)
     """
+    if snowflake_warehouse is None:
+        snowflake_warehouse = _default_sf_warehouse(scale_factor)
     aug = f"{repo_src_path}/{_AUG_PATH}"
 
     setup_task = _make_task(
