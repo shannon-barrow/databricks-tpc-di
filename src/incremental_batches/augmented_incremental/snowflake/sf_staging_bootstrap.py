@@ -148,17 +148,21 @@ def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60)
 # ============================================================================
 
 def enable_uniform_on_sources(
-    spark, *, catalog: str, scale_factor: str, tables: Iterable[str],
+    spark, *, databricks_catalog: str, scale_factor: str, tables: Iterable[str],
 ) -> None:
     """ALTER each source on the Databricks UC side to enable UniForm + drop
     deletion vectors. Required before Snowflake federation `CREATE OR REPLACE
     ICEBERG TABLE ... CATALOG = ...` calls can resolve — Databricks's
     iceberg-rest endpoint only exposes Delta tables with UniForm enabled.
 
+    `databricks_catalog` is the UC catalog name on the Databricks side
+    (e.g. "main"), NOT the Snowflake database. Sources live at
+    `{databricks_catalog}.tpcdi_incremental_staging_{sf}.<tbl>`.
+
     Idempotent: ALTER ... SET TBLPROPERTIES is a no-op when the props are
     already in the requested state.
     """
-    src_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+    src_schema = f"{databricks_catalog}.tpcdi_incremental_staging_{scale_factor}"
     tables = list(tables)
     print(f"[uniform] enabling UniForm on {len(tables)} sources under {src_schema}")
     t0 = _time.time()
@@ -373,6 +377,7 @@ def ensure_staging_environment(
     scale_factor: str,
     catalog_integration: str = "TPCDI_DBX_UC_SF10_INT",
     databricks_catalog_namespace: Optional[str] = None,
+    databricks_catalog: str = "main",
     new_pat: Optional[str] = None,
     new_connection: Optional[Callable[[], object]] = None,
     parallel: int = 8,
@@ -441,7 +446,8 @@ def ensure_staging_environment(
             )
         # Enable UniForm on every source we're about to federate.
         enable_uniform_on_sources(
-            spark, catalog=catalog, scale_factor=scale_factor,
+            spark, databricks_catalog=databricks_catalog,
+            scale_factor=scale_factor,
             tables=FEDERATED_TABLES,
         )
         setup_federation(
