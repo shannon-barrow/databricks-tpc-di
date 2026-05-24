@@ -31,6 +31,7 @@ dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("wh_db", "tpcdi_incremental_staging")
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.dropdown("regenerate_data", "NO", ["NO", "YES"])
+dbutils.widgets.dropdown("generate_bronze_staging", "NO", ["NO", "YES"])
 dbutils.widgets.dropdown("log_level", "INFO", ["DEBUG", "INFO", "WARN", "ERROR"])
 
 data_gen_type = dbutils.widgets.get("data_gen_type").strip().lower()
@@ -39,6 +40,7 @@ catalog       = dbutils.widgets.get("catalog").strip()
 wh_db         = dbutils.widgets.get("wh_db").strip()
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory").strip()
 regenerate_data = dbutils.widgets.get("regenerate_data").strip().upper()
+generate_bronze_staging = dbutils.widgets.get("generate_bronze_staging").strip().upper()
 log_level     = dbutils.widgets.get("log_level").strip().upper()
 
 if data_gen_type not in ("spark", "native", "augmented_incremental"):
@@ -117,6 +119,35 @@ if augmented_incremental:
               f"TO `account users`")
 
 # COMMAND ----------
+
+# Auto-override regenerate_data when bronze staging is requested but the
+# bronze tables don't exist yet on the Databricks side. The bronze tables
+# (main.tpcdi_incremental_staging_{sf}.bronze*) are produced from
+# intermediate state created by the per-dataset gen_* tasks during data
+# generation — they can't be backfilled without re-running the gens.
+#
+# Semantics (per user spec):
+#   - generate_bronze_staging=YES + bronze missing → force regenerate
+#   - generate_bronze_staging=YES + bronze present → respect raw regenerate_data
+#     (NO=skip-if-output-intact, YES=full rebuild)
+#   - generate_bronze_staging=NO → use raw regenerate_data as before
+_BRONZE_TABLES = (
+    "bronzeaccount", "bronzecashtransaction", "bronzecustomer",
+    "bronzedailymarket", "bronzeholdings", "bronzetrade", "bronzewatches",
+)
+if augmented_incremental and generate_bronze_staging == "YES" and regenerate_data != "YES":
+    _staging_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+    _rows = spark.sql(f"SHOW TABLES IN {_staging_schema}").collect()
+    _present = {r["tableName"] for r in _rows}
+    _missing = [t for t in _BRONZE_TABLES if t not in _present]
+    if _missing:
+        print(f"[data_gen] generate_bronze_staging=YES but bronze tables missing: "
+              f"{_missing} → forcing regenerate_data=YES (the gens produce the "
+              f"temp state bronze_staging_* reads from)")
+        regenerate_data = "YES"
+    else:
+        print(f"[data_gen] generate_bronze_staging=YES and all 7 bronze tables "
+              f"already exist in {_staging_schema} — honoring raw regenerate_data=NO")
 
 if regenerate_data == "YES":
     # Wipe the volume's per-SF tree, drop intermediates and dataset Deltas.
