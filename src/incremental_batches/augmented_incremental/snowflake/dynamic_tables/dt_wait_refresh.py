@@ -111,7 +111,9 @@ leaf_durations = {}
 
 print(f"[poll] every {poll_interval}s, timeout {timeout_s}s")
 while leaves_remaining and time.time() < deadline:
-    leaves_csv = ",".join(f"'{l}'" for l in leaves_remaining)
+    leaves_csv = ",".join(f"'{l.upper()}'" for l in leaves_remaining)
+    # DYNAMIC_TABLE_REFRESH_HISTORY only accepts NAME / time / RESULT_LIMIT
+    # args — no SCHEMA_NAME. Filter by SCHEMA_NAME in the WHERE clause.
     cur.execute(f"""
         WITH ranked AS (
           SELECT
@@ -121,10 +123,9 @@ while leaves_remaining and time.time() < deadline:
             refresh_start_time,
             refresh_end_time,
             ROW_NUMBER() OVER (PARTITION BY name ORDER BY refresh_start_time DESC) AS rn
-          FROM TABLE({catalog}.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-              SCHEMA_NAME => '{catalog}.{target_schema}'
-          ))
-          WHERE name IN ({leaves_csv})
+          FROM TABLE({catalog}.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY())
+          WHERE schema_name = '{target_schema.upper()}'
+            AND name IN ({leaves_csv})
             AND refresh_start_time >= '{t_start}'
             AND refresh_trigger IN ('MANUAL', 'TASK', 'SCHEDULED')
         )
@@ -133,26 +134,29 @@ while leaves_remaining and time.time() < deadline:
     """)
     rows = cur.fetchall()
     for name, state, trigger, t_st, t_en in rows:
+        # Snowflake returns NAME in uppercase; LEAF_DTS / leaves_remaining are
+        # lowercase. Normalize for membership ops.
+        name_lc = name.lower()
         if state in TERMINAL:
             dur = (t_en - t_st).total_seconds() if t_en and t_st else None
-            leaf_durations[name] = dur
+            leaf_durations[name_lc] = dur
             if state in FAIL:
                 # Fetch the error detail
                 cur.execute(f"""
                     SELECT state, refresh_action, refresh_trigger, statistics, condition
                     FROM TABLE({catalog}.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-                        NAME => '{catalog}.{target_schema}.{name}'
+                        NAME => '{catalog}.{target_schema}.{name_lc}'
                     ))
                     WHERE refresh_start_time = '{t_st}'
                 """)
                 detail = cur.fetchall()
                 raise RuntimeError(
-                    f"DT refresh {state}: {name}\n"
+                    f"DT refresh {state}: {name_lc}\n"
                     f"  duration={dur}s\n"
                     f"  detail={detail}"
                 )
-            print(f"  ✓ {name:25s} {state:10s} dur={dur:.1f}s")
-            leaves_remaining.discard(name)
+            print(f"  ✓ {name_lc:25s} {state:10s} dur={dur:.1f}s")
+            leaves_remaining.discard(name_lc)
     if leaves_remaining:
         time.sleep(poll_interval)
 
