@@ -231,6 +231,14 @@ def build_parent(
             # inside the notebook.
             "dt_create_sql_path":
                 f"{aug}/snowflake/dynamic_tables/dt_create.sql",
+            # Self-bootstrapping params — setup_sf_dt's first run for a new
+            # SF refreshes the catalog integration token + creates the
+            # federation. Subsequent runs no-op. Leave empty to skip token
+            # refresh (federation must already be live).
+            "catalog_integration":
+                "{{job.parameters.catalog_integration}}",
+            "dbx_pat_secret_key":
+                "{{job.parameters.dbx_pat_secret_key}}",
         },
         existing_cluster_id=interactive_cluster_id,
     )
@@ -313,6 +321,8 @@ def build_parent(
             {"name": "target_lag",                  "default": target_lag},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
+            {"name": "catalog_integration",         "default": "TPCDI_DBX_UC_SF10_INT"},
+            {"name": "dbx_pat_secret_key",          "default": "dbx_pat_workspace"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         "queue": {"enabled": True},
