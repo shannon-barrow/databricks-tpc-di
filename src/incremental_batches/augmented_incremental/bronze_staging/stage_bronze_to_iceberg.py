@@ -86,7 +86,6 @@ PROJECTIONS = {
         WHERE stg_target = 'tables'
           AND ActionType IN ('NEW', 'INACT', 'UPDCUST')
         """,
-        "update_dt",
     ),
     "account": (
         "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT, "
@@ -103,7 +102,6 @@ PROJECTIONS = {
         WHERE stg_target = 'tables'
           AND ActionType NOT IN ('UPDCUST', 'INACT')
         """,
-        "update_dt",
     ),
     "cashtransaction": (
         "cdc_flag STRING, cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP, "
@@ -116,7 +114,6 @@ PROJECTIONS = {
         FROM {src_db}.cashtransaction{scale_factor}
         WHERE stg_target = 'tables'
         """,
-        "event_dt",
     ),
     "dailymarket": (
         "cdc_flag STRING, cdc_dsn BIGINT, dm_date DATE, dm_s_symb STRING, "
@@ -128,7 +125,6 @@ PROJECTIONS = {
         FROM {src_db}.dailymarket{scale_factor}
         WHERE stg_target = 'tables'
         """,
-        "dm_date",
     ),
     "holdings": (
         "cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT, "
@@ -140,7 +136,6 @@ PROJECTIONS = {
         FROM {src_db}.holdinghistory{scale_factor}
         WHERE stg_target = 'tables'
         """,
-        "event_dt",
     ),
     "trade": (
         "cdc_flag STRING, cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP, "
@@ -175,7 +170,6 @@ PROJECTIONS = {
           ON t.t_id = th.tradeid
         WHERE th.stg_target = 'tables'
         """,
-        "event_dt",
     ),
     "watches": (
         "cdc_flag STRING, cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb STRING, "
@@ -188,30 +182,28 @@ PROJECTIONS = {
         FROM {src_db}.watchhistory{scale_factor}
         WHERE stg_target = 'tables'
         """,
-        "event_dt",
     ),
 }
 
 if dataset not in PROJECTIONS:
     raise ValueError(f"unknown dataset {dataset!r} — expected one of {list(PROJECTIONS)}")
-schema_ddl, source_sql, cluster_col = PROJECTIONS[dataset]
+schema_ddl, source_sql = PROJECTIONS[dataset]
 
 # COMMAND ----------
 
-# bronzecustomer has 33 columns, with the cluster key (update_dt) past the
-# 32-col default stats window. dataSkippingNumIndexedCols=34 lets Delta keep
-# stats on the cluster col — required so writes don't reject (see
-# feedback_liquid_cluster_stats_cols memory).
-_extra_props = ""
-if dataset == "customer":
-    _extra_props = ", 'delta.dataSkippingNumIndexedCols' = '34'"
-
+# No CLUSTER BY on the bronze staging tables. These are pure pass-throughs —
+# Snowflake reads them once per per-run setup via `SELECT * FROM
+# {sf_db}.{iceberg_bronze_stg_tbl}` (full table scan, no predicates). Liquid
+# clustering buys nothing without filter pushdown, and skipping it lets us
+# drop the dataSkippingNumIndexedCols=34 override that bronzecustomer
+# otherwise needs because update_dt sits past the default 32-col stats
+# window. (That override is still required on the DimCustomer side, where
+# the column IS filtered — but not here.)
 create_ddl = f"""
 CREATE OR REPLACE TABLE {tgt_table} (
   {schema_ddl}
 )
 USING DELTA
-CLUSTER BY ({cluster_col})
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact'           = 'true',
   'delta.autoOptimize.optimizeWrite'         = 'true',
@@ -219,11 +211,10 @@ TBLPROPERTIES (
   'delta.enableDeletionVectors'               = 'false',
   'delta.enableIcebergCompatV2'               = 'true',
   'delta.universalFormat.enabledFormats'      = 'iceberg'
-  {_extra_props}
 )
 """
 
-print(f"[ddl] CREATE OR REPLACE {tgt_table} (clustered by {cluster_col})")
+print(f"[ddl] CREATE OR REPLACE {tgt_table}")
 spark.sql(create_ddl)
 
 # COMMAND ----------
