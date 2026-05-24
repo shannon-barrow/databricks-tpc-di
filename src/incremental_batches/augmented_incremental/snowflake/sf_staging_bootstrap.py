@@ -60,10 +60,13 @@ BRONZE_FEDERATION_TABLES: tuple[str, ...] = (
     "bronzedailymarket", "bronzeholdings", "bronzetrade", "bronzewatches",
 )
 
-# All tables exposed via the federation schema.
-FEDERATED_TABLES: tuple[str, ...] = tuple(sorted(set(
-    NATIVE_STAGING_TABLES + BRONZE_FEDERATION_TABLES
-)))
+# Tables exposed via the federation schema. Only the 7 bronze tables —
+# they're the ones the DT variant CTASs from per run, and we control
+# their creation so we can guarantee IcebergCompatV2 + UniForm are
+# enabled. The silver/gold/ref staging tables are NOT federated; they
+# come from the existing native STAGING_SF{sf} schema (materialized
+# by the dbt benchmark setup), which the DT variant CLONEs from.
+FEDERATED_TABLES: tuple[str, ...] = BRONZE_FEDERATION_TABLES
 
 # Cluster keys mirror the Databricks-side Liquid layout. Setting CLUSTER BY
 # in the native CTAS lets subsequent CLONEs inherit the layout.
@@ -343,10 +346,18 @@ def ensure_staging_environment(
 ) -> dict:
     """Idempotent self-bootstrap. Returns a dict describing what was done.
 
-    Checks in order:
-      1. Native STAGING_SF{sf} exists with all NATIVE_STAGING_TABLES → if yes, no-op.
-      2. Federation STAGING_SF{sf}_DBX exists with all FEDERATED_TABLES → if no, set it up.
-      3. Native STAGING_SF{sf} missing some tables → CTAS the full set from federation.
+    Two responsibilities:
+      1. Native STAGING_SF{sf} must already exist with all NATIVE_STAGING_TABLES
+         (these are silver/gold/ref tables; built by the dbt benchmark setup
+         or its predecessors on the Databricks side, then materialized into
+         Snowflake natively). If missing, this bootstrap raises — re-materializing
+         native staging from federation requires the source tables to have
+         IcebergCompatV2 + UniForm enabled, and historically the silver/gold
+         models don't. Native staging is set up out-of-band.
+      2. Federation STAGING_SF{sf}_DBX must have the 7 bronze tables
+         (FEDERATED_TABLES). Bronze sources are guaranteed UniForm-enabled
+         by `stage_bronze_to_iceberg.py`, so federation works. If anything
+         is missing, set up federation (CREATE OR REPLACE ICEBERG TABLE per).
 
     `new_pat` only needed on the very first bootstrap (or after the PAT
     backing the catalog integration expires).
@@ -355,55 +366,40 @@ def ensure_staging_environment(
     dbx_schema = f"STAGING_SF{scale_factor}_DBX"
     native_schema = f"STAGING_SF{scale_factor}"
 
-    result = {"federation_setup": False, "native_setup": False}
+    result = {"federation_setup": False}
 
-    # 1. Quick exit if native staging is already complete
-    if _schema_exists(cur, catalog, native_schema):
-        present = _tables_in(cur, catalog, native_schema)
-        miss = _missing(present, NATIVE_STAGING_TABLES)
-        if not miss:
-            print(f"[bootstrap] {native_schema} already complete "
-                  f"({len(present)} tables) — skipping native CTAS")
-            # Still need to ensure federation has ALL expected tables. The DT
-            # variant CTASs the 7 bronze tables directly from federation, so
-            # an _DBX schema that's missing those bronze tables would silently
-            # skip the bronze materialization and the DT DAG would error later.
-            fed_missing = True
-            if _schema_exists(cur, catalog, dbx_schema):
-                fed_present = _tables_in(cur, catalog, dbx_schema)
-                fed_miss = _missing(fed_present, FEDERATED_TABLES)
-                if not fed_miss:
-                    fed_missing = False
-                    print(f"[bootstrap] {dbx_schema} federation already complete")
-                else:
-                    print(f"[bootstrap] {dbx_schema} federation missing: {sorted(fed_miss)}")
-            else:
-                print(f"[bootstrap] {dbx_schema} does not exist")
-            if fed_missing:
-                setup_federation(
-                    conn, catalog=catalog, scale_factor=scale_factor,
-                    catalog_integration=catalog_integration,
-                    databricks_catalog_namespace=databricks_catalog_namespace,
-                    new_pat=new_pat,
-                )
-                result["federation_setup"] = True
-            cur.close()
-            return result
-        else:
-            print(f"[bootstrap] {native_schema} missing tables: {sorted(miss)}")
-    else:
-        print(f"[bootstrap] {native_schema} does not exist")
+    # 1. Native staging must already exist with all expected tables.
+    if not _schema_exists(cur, catalog, native_schema):
+        cur.close()
+        raise RuntimeError(
+            f"{catalog}.{native_schema} does not exist. The Snowflake DT variant "
+            f"requires native staging to be materialized out-of-band (e.g. via "
+            f"a prior dbt benchmark setup). Bootstrap can't CTAS it from "
+            f"federation because the silver/gold source models on the "
+            f"Databricks side don't have IcebergCompatV2 enabled."
+        )
+    present = _tables_in(cur, catalog, native_schema)
+    miss = _missing(present, NATIVE_STAGING_TABLES)
+    if miss:
+        cur.close()
+        raise RuntimeError(
+            f"{catalog}.{native_schema} is missing tables: {sorted(miss)}. "
+            f"Set up native staging out-of-band (e.g. via a dbt benchmark run)."
+        )
+    print(f"[bootstrap] {native_schema} complete ({len(present)} tables)")
 
-    # 2. Ensure federation (covers both DT bronze + CTAS source for native)
+    # 2. Ensure bronze federation has all expected tables.
     fed_ok = False
     if _schema_exists(cur, catalog, dbx_schema):
-        present = _tables_in(cur, catalog, dbx_schema)
-        miss = _missing(present, FEDERATED_TABLES)
-        if not miss:
+        fed_present = _tables_in(cur, catalog, dbx_schema)
+        fed_miss = _missing(fed_present, FEDERATED_TABLES)
+        if not fed_miss:
             fed_ok = True
             print(f"[bootstrap] {dbx_schema} federation already complete")
         else:
-            print(f"[bootstrap] {dbx_schema} federation missing: {sorted(miss)}")
+            print(f"[bootstrap] {dbx_schema} federation missing: {sorted(fed_miss)}")
+    else:
+        print(f"[bootstrap] {dbx_schema} does not exist")
     cur.close()
 
     if not fed_ok:
@@ -415,10 +411,4 @@ def ensure_staging_environment(
         )
         result["federation_setup"] = True
 
-    # 3. CTAS native staging from federation
-    setup_native_staging(
-        conn, catalog=catalog, scale_factor=scale_factor,
-        new_connection=new_connection, parallel=parallel,
-    )
-    result["native_setup"] = True
     return result
