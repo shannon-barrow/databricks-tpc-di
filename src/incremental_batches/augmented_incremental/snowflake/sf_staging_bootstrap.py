@@ -107,6 +107,38 @@ def _missing(actual: set[str], expected: Iterable[str]) -> set[str]:
     return set(expected) - actual
 
 
+# Snowflake catalog integrations occasionally fail credential vending for a
+# few seconds after CREATE OR REPLACE ICEBERG TABLE — the iceberg-rest
+# endpoint exists but isn't ready to vend S3 creds yet. The error surfaces
+# as "Failed to retrieve credentials from the Catalog ... Please ensure
+# that the catalog vends credentials and retry." Retry-with-fixed-delay
+# avoids needing the parent job to fail + retry the whole task.
+_VEND_RETRY_MARKERS = (
+    "Failed to retrieve credentials from the Catalog",
+    "catalog vends credentials",
+)
+
+
+def _is_vending_error(exc: BaseException) -> bool:
+    msg = str(exc)
+    return any(m in msg for m in _VEND_RETRY_MARKERS)
+
+
+def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60):
+    """Run fn() up to `attempts` times. Only retry credential-vending errors;
+    everything else propagates immediately."""
+    for i in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if _is_vending_error(e) and i < attempts:
+                print(f"[retry] {label}: credential vending failed (attempt {i}/{attempts}); "
+                      f"sleeping {delay_sec}s — {str(e)[:120]}")
+                _time.sleep(delay_sec)
+                continue
+            raise
+
+
 # ============================================================================
 # Federation setup — CREATE ICEBERG TABLE per federated table
 # ============================================================================
@@ -179,27 +211,31 @@ def setup_native_staging(
     cur.close()
 
     def _ctas_one(tbl: str) -> tuple[str, float, int]:
-        c = new_connection() if new_connection else conn
-        owned = new_connection is not None
-        try:
-            cluster = f" CLUSTER BY ({CLUSTER_KEYS[tbl]})" if tbl in CLUSTER_KEYS else ""
-            t0 = _time.time()
-            with c.cursor() as cc:
-                cc.execute(
-                    f"CREATE OR REPLACE TABLE {catalog}.{native_schema}.{tbl}"
-                    f"{cluster} AS "
-                    f"SELECT * FROM {catalog}.{dbx_schema}.{tbl}"
-                )
-                cc.execute(
-                    f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
-                    f"WHERE TABLE_SCHEMA = UPPER('{native_schema}') "
-                    f"AND TABLE_NAME = UPPER('{tbl}')"
-                )
-                n = (cc.fetchone() or [0])[0] or 0
-            return (tbl, _time.time() - t0, int(n))
-        finally:
-            if owned:
-                c.close()
+        cluster = f" CLUSTER BY ({CLUSTER_KEYS[tbl]})" if tbl in CLUSTER_KEYS else ""
+
+        def _do():
+            c = new_connection() if new_connection else conn
+            owned = new_connection is not None
+            try:
+                t0 = _time.time()
+                with c.cursor() as cc:
+                    cc.execute(
+                        f"CREATE OR REPLACE TABLE {catalog}.{native_schema}.{tbl}"
+                        f"{cluster} AS "
+                        f"SELECT * FROM {catalog}.{dbx_schema}.{tbl}"
+                    )
+                    cc.execute(
+                        f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
+                        f"WHERE TABLE_SCHEMA = UPPER('{native_schema}') "
+                        f"AND TABLE_NAME = UPPER('{tbl}')"
+                    )
+                    n = (cc.fetchone() or [0])[0] or 0
+                return (tbl, _time.time() - t0, int(n))
+            finally:
+                if owned:
+                    c.close()
+
+        return _retry_on_vending(_do, label=f"ctas {native_schema}.{tbl}")
 
     t_start = _time.time()
     print(f"[native] CTAS {len(NATIVE_STAGING_TABLES)} tables "
@@ -251,26 +287,29 @@ def materialize_bronze_into_schema(
     sources = list(BRONZE_FEDERATION_TABLES)
 
     def _ctas_one(name: str) -> tuple[str, float, int]:
-        c = new_connection() if new_connection else conn
-        owned = new_connection is not None
-        try:
-            t0 = _time.time()
-            with c.cursor() as cc:
-                cc.execute(
-                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
-                    f"CHANGE_TRACKING = TRUE AS "
-                    f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
-                )
-                cc.execute(
-                    f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
-                    f"WHERE TABLE_SCHEMA = UPPER('{target_schema}') "
-                    f"AND TABLE_NAME = UPPER('{name}')"
-                )
-                n = (cc.fetchone() or [0])[0] or 0
-            return (name, _time.time() - t0, int(n))
-        finally:
-            if owned:
-                c.close()
+        def _do():
+            c = new_connection() if new_connection else conn
+            owned = new_connection is not None
+            try:
+                t0 = _time.time()
+                with c.cursor() as cc:
+                    cc.execute(
+                        f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
+                        f"CHANGE_TRACKING = TRUE AS "
+                        f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
+                    )
+                    cc.execute(
+                        f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
+                        f"WHERE TABLE_SCHEMA = UPPER('{target_schema}') "
+                        f"AND TABLE_NAME = UPPER('{name}')"
+                    )
+                    n = (cc.fetchone() or [0])[0] or 0
+                return (name, _time.time() - t0, int(n))
+            finally:
+                if owned:
+                    c.close()
+
+        return _retry_on_vending(_do, label=f"ctas {target_schema}.{name}")
 
     t_start = _time.time()
     print(f"[bronze] CTAS {len(sources)} bronze tables {dbx_schema} → {target_schema}")
