@@ -143,6 +143,44 @@ def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60)
 
 
 # ============================================================================
+# Enable UniForm on the Databricks-side bronze sources (one-time per SF)
+# ============================================================================
+
+def enable_uniform_on_bronze_sources(spark, *, catalog: str, scale_factor: str) -> None:
+    """ALTER each bronze source on the Databricks UC side to enable UniForm
+    + drop deletion vectors. Required before the Snowflake federation
+    `CREATE OR REPLACE ICEBERG TABLE ... CATALOG = ...` calls can resolve —
+    Databricks's iceberg-rest endpoint only exposes Delta tables with
+    UniForm/IcebergCompatV2 enabled.
+
+    Idempotent: ALTER ... SET TBLPROPERTIES is a no-op when the props are
+    already in the requested state.
+    """
+    src_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+    sources = (
+        "bronzeaccount", "bronzecashtransaction", "bronzecustomer",
+        "bronzedailymarket", "bronzeholdings", "bronzetrade", "bronzewatches",
+    )
+    print(f"[uniform] enabling UniForm on {len(sources)} bronze sources under {src_schema}")
+    t0 = _time.time()
+    for tbl in sources:
+        fq = f"{src_schema}.{tbl}"
+        # DV must be off for IcebergCompatV2; both must be set in one ALTER
+        # (engine refuses partial state). REORG TABLE ... APPLY (PURGE) would
+        # be needed only if DV were already TRUE with materialized DVs; the
+        # source tables here are plain Delta with DV=false (workspace default
+        # may vary, but our staging tables don't use DVs).
+        spark.sql(
+            f"ALTER TABLE {fq} SET TBLPROPERTIES ("
+            f"  'delta.enableDeletionVectors'         = 'false',"
+            f"  'delta.enableIcebergCompatV2'         = 'true',"
+            f"  'delta.universalFormat.enabledFormats'= 'iceberg'"
+            f")"
+        )
+    print(f"[uniform] done in {_time.time() - t0:.1f}s")
+
+
+# ============================================================================
 # Federation setup — CREATE ICEBERG TABLE per federated table
 # ============================================================================
 
@@ -343,6 +381,7 @@ def ensure_staging_environment(
     new_pat: Optional[str] = None,
     new_connection: Optional[Callable[[], object]] = None,
     parallel: int = 8,
+    spark = None,
 ) -> dict:
     """Idempotent self-bootstrap. Returns a dict describing what was done.
 
@@ -403,6 +442,18 @@ def ensure_staging_environment(
     cur.close()
 
     if not fed_ok:
+        # First: enable UniForm on the Databricks-side bronze sources so the
+        # iceberg-rest endpoint can expose them. The data generator writes
+        # plain Delta — UniForm is enabled lazily here, the first time we
+        # set up federation for an SF (or after a fresh data regen).
+        if spark is None:
+            raise RuntimeError(
+                "spark session required to enable UniForm on bronze sources. "
+                "Pass spark= to ensure_staging_environment() from the notebook."
+            )
+        enable_uniform_on_bronze_sources(
+            spark, catalog=catalog, scale_factor=scale_factor,
+        )
         setup_federation(
             conn, catalog=catalog, scale_factor=scale_factor,
             catalog_integration=catalog_integration,

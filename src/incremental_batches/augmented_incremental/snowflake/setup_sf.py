@@ -118,6 +118,7 @@ _boot = bootstrap.ensure_staging_environment(
     new_pat=_new_pat,
     new_connection=_new_conn,
     parallel=8,
+    spark=spark,
 )
 print(f"[bootstrap] {_boot}")
 

@@ -42,9 +42,7 @@ TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
-  'delta.enableDeletionVectors' = 'false',
-  'delta.enableIcebergCompatV2' = 'true',
-  'delta.universalFormat.enabledFormats' = 'iceberg'
+  'delta.enableDeletionVectors' = 'false'
 );
 
 INSERT OVERWRITE bronzedailymarket

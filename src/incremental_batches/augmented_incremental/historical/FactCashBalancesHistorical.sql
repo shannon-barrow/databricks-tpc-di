@@ -28,9 +28,7 @@ TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
-  'delta.enableDeletionVectors' = 'false',
-  'delta.enableIcebergCompatV2' = 'true',
-  'delta.universalFormat.enabledFormats' = 'iceberg'
+  'delta.enableDeletionVectors' = 'false'
 );
 -- Spark gen omits cdc_flag from the cashtransaction Delta (it's always
 -- 'I' for CashTransaction); stage_files/CashTransaction.py synthesizes
@@ -56,9 +54,7 @@ TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
-  'delta.enableDeletionVectors' = 'false',
-  'delta.enableIcebergCompatV2' = 'true',
-  'delta.universalFormat.enabledFormats' = 'iceberg'
+  'delta.enableDeletionVectors' = 'false'
 );
 CREATE OR REPLACE TABLE currentaccountbalances (
   ct_date DATE NOT NULL COMMENT 'Date of the latest transactions',
@@ -74,9 +70,7 @@ TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
-  'delta.enableDeletionVectors' = 'false',
-  'delta.enableIcebergCompatV2' = 'true',
-  'delta.universalFormat.enabledFormats' = 'iceberg'
+  'delta.enableDeletionVectors' = 'false'
 );
 
 -- COMMAND ----------

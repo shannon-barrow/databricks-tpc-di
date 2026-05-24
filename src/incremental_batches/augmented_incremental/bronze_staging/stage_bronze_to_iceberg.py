@@ -191,26 +191,18 @@ schema_ddl, source_sql = PROJECTIONS[dataset]
 
 # COMMAND ----------
 
-# No CLUSTER BY on the bronze staging tables. These are pure pass-throughs —
-# Snowflake reads them once per per-run setup via `SELECT * FROM
-# {sf_db}.{iceberg_bronze_stg_tbl}` (full table scan, no predicates). Liquid
-# clustering buys nothing without filter pushdown, and skipping it lets us
-# drop the dataSkippingNumIndexedCols=34 override that bronzecustomer
-# otherwise needs because update_dt sits past the default 32-col stats
-# window. (That override is still required on the DimCustomer side, where
-# the column IS filtered — but not here.)
+# Plain Delta — no CLUSTER BY (pure pass-through tables, full-scan only)
+# and no UniForm/IcebergCompatV2 (added lazily by setup_sf_dt's one-time
+# bootstrap path via ALTER TABLE, only when Snowflake federation needs it).
 create_ddl = f"""
 CREATE OR REPLACE TABLE {tgt_table} (
   {schema_ddl}
 )
 USING DELTA
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact'           = 'true',
-  'delta.autoOptimize.optimizeWrite'         = 'true',
-  'delta.columnMapping.mode'                  = 'name',
-  'delta.enableDeletionVectors'               = 'false',
-  'delta.enableIcebergCompatV2'               = 'true',
-  'delta.universalFormat.enabledFormats'      = 'iceberg'
+  'delta.autoOptimize.autoCompact'   = 'true',
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode'         = 'name'
 )
 """
 

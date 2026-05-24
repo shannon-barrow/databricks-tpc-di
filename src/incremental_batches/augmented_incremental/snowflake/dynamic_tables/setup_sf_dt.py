@@ -130,6 +130,7 @@ boot = bootstrap.ensure_staging_environment(
     new_pat=_new_pat,
     new_connection=_new_conn,
     parallel=8,
+    spark=spark,
 )
 print(f"[bootstrap] result={boot}  ({__import__('time').time() - _t0:.1f}s total)")
 
