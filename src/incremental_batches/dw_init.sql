@@ -71,9 +71,17 @@ CREATE OR REPLACE TABLE ${catalog}.${wh_db}_${scale_factor}_stage.FinWire (
   rectype STRING COMMENT 'Indicates the type of table into which this record will eventually be parsed: CMP FIN or SEC',
   recdate date COMMENT 'Date of the record',
   value STRING COMMENT 'Pre-parsed String Values of all FinWire files'
-) 
+)
 PARTITIONED BY (rectype)
-TBLPROPERTIES ('delta.dataSkippingNumIndexedCols' = 0, 'delta.autoOptimize.autoCompact'=False, 'delta.autoOptimize.optimizeWrite'=True);
+TBLPROPERTIES (
+  'delta.dataSkippingNumIndexedCols' = 0,
+  'delta.autoOptimize.autoCompact'   = False,
+  'delta.autoOptimize.optimizeWrite' = True,
+  -- Explicit DV=false: some workspaces default DV=true via session
+  -- properties, which conflicts with the Delta IcebergCompatV2 validator
+  -- on INSERT OVERWRITE ("DELTA_ICEBERG_COMPAT_VIOLATION.DELETION_VECTORS_SHOULD_BE_DISABLED").
+  'delta.enableDeletionVectors'      = False
+);
 
 -- COMMAND ----------
 

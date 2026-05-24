@@ -572,7 +572,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         "customer":         ["gen_customer"],
         "account":          ["gen_customer"],
         "cashtransaction":  ["gen_cashtransaction"],
-        "dailymarket":      ["gen_daily_market"],
+        # dailymarket: NOT here — the existing DailyMarketHistorical SQL
+        # already produces main.tpcdi_incremental_staging_{sf}.bronzedailymarket
+        # with the exact same projection + Iceberg-UniForm TBLPROPERTIES.
+        # Adding our own bronze_staging_dailymarket would race the historical
+        # task (DELTA_METADATA_CHANGED on CREATE OR REPLACE TABLE).
         "holdings":         ["gen_holdinghistory"],
         "trade":            ["gen_trade", "gen_tradehistory"],
         "watches":          ["gen_watch_history"],
