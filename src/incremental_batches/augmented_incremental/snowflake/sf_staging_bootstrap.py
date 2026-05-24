@@ -363,10 +363,23 @@ def ensure_staging_environment(
         miss = _missing(present, NATIVE_STAGING_TABLES)
         if not miss:
             print(f"[bootstrap] {native_schema} already complete "
-                  f"({len(present)} tables) — skipping setup")
-            # Also ensure federation is present for DT variant bronze access
-            if not _schema_exists(cur, catalog, dbx_schema):
-                print(f"[bootstrap] {dbx_schema} missing — setting up federation")
+                  f"({len(present)} tables) — skipping native CTAS")
+            # Still need to ensure federation has ALL expected tables. The DT
+            # variant CTASs the 7 bronze tables directly from federation, so
+            # an _DBX schema that's missing those bronze tables would silently
+            # skip the bronze materialization and the DT DAG would error later.
+            fed_missing = True
+            if _schema_exists(cur, catalog, dbx_schema):
+                fed_present = _tables_in(cur, catalog, dbx_schema)
+                fed_miss = _missing(fed_present, FEDERATED_TABLES)
+                if not fed_miss:
+                    fed_missing = False
+                    print(f"[bootstrap] {dbx_schema} federation already complete")
+                else:
+                    print(f"[bootstrap] {dbx_schema} federation missing: {sorted(fed_miss)}")
+            else:
+                print(f"[bootstrap] {dbx_schema} does not exist")
+            if fed_missing:
                 setup_federation(
                     conn, catalog=catalog, scale_factor=scale_factor,
                     catalog_integration=catalog_integration,
