@@ -14,10 +14,9 @@
 --
 -- DAG (refresh order — Snowflake infers from query references):
 --
---   bronze_raw tables  (regular tables, populated per-batch via COPY INTO by seed_raw.py)
---      │
---      ▼
---   bronze* DTs        (1:1 SELECT, REFRESH_MODE=INCREMENTAL)
+--   bronze* tables     (regular Snowflake tables with CHANGE_TRACKING = TRUE;
+--                       seeded from federated Iceberg via CTAS at setup time,
+--                       then appended per batch via COPY INTO by seed_raw.py)
 --      │
 --      ▼
 --   account_updates_from_customer DT
@@ -35,6 +34,11 @@
 -- Intermediate DTs use TARGET_LAG=DOWNSTREAM so Snowflake only refreshes them
 -- when the leaf golds need fresh data. Leaves carry the concrete lag.
 --
+-- No bronze* DT pass-through layer. Downstream DTs read directly from the
+-- regular bronze tables — Snowflake's incremental refresh tracks the
+-- CHANGE_TRACKING stream on those tables, so each per-batch COPY INTO
+-- propagates through the silver/gold DAG without an intermediate DT.
+--
 -- All clone-target tables (taxrate, dimdate, industry, tradetype, dimbroker,
 -- dimsecurity, statustype, dimcompany, dimtime, financial, companyyeareps,
 -- batchdate, cashtransactionhistorical) are CLONEd as REGULAR tables by
@@ -42,68 +46,6 @@
 -- don't need DT semantics on them.
 -- ============================================================================
 
-
--- ============================================================================
--- BRONZE — 1:1 mirror of bronze_raw tables. Append-only path; QUALIFY dedups
--- defensively on cdc_dsn so a batch-replay (same {batch_date} re-COPY-INTO)
--- doesn't double-count. cdc_dsn is the TPC-DI per-event change sequence — it's
--- globally unique across the lifetime of the dataset.
--- ============================================================================
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzeaccount
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzeaccount_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY update_dt DESC) = 1;
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzecustomer
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzecustomer_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY update_dt DESC) = 1;
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzecashtransaction
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzecashtransaction_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY event_dt DESC) = 1;
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzeholdings
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzeholdings_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY event_dt DESC) = 1;
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzetrade
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzetrade_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY event_dt DESC) = 1;
-
-CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.bronzewatches
-  TARGET_LAG   = DOWNSTREAM
-  WAREHOUSE    = {warehouse}
-  REFRESH_MODE = INCREMENTAL
-AS
-SELECT * FROM {catalog}.{schema}.bronzewatches_raw
-QUALIFY ROW_NUMBER() OVER (PARTITION BY cdc_dsn ORDER BY event_dt DESC) = 1;
-
--- bronzedailymarket: in the dbt variant this is read from the stage too, but
--- the staging clone already contains the historical bronze. For DT variant,
--- bronzedailymarket is a *regular* CLONE'd table (see setup_sf_dt.py — it's
--- in CLONE_TABLES, not BRONZE_RAW_TABLES) so we don't need a DT for it. The
--- per-batch DailyMarket.txt rows land via append into the cloned table by
--- seed_raw.py.
 
 
 -- ============================================================================
@@ -661,5 +603,6 @@ LEFT JOIN {catalog}.{schema}.companyyeareps f
 
 -- ============================================================================
 -- End of dt_create.sql. After this runs, the DAG is live and any new rows
--- landed into bronze_raw tables propagate to the leaves at TARGET_LAG.
+-- landed into bronze tables propagate to the leaves at TARGET_LAG via
+-- their CHANGE_TRACKING streams.
 -- ============================================================================

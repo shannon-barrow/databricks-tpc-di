@@ -2,19 +2,17 @@
 # Per-batch raw-table load for the Dynamic Tables variant. Replaces the
 # dbt bronze ingestion step.
 #
-# For each of the 6 bronze CDC tables, COPY INTO the day's file from the
-# Snowflake stage into the corresponding `bronze*_raw` regular table. The
-# bronze* dynamic tables then incrementally re-evaluate their projection
-# over the new raw rows.
+# For each of the 7 bronze tables (6 CDC + bronzedailymarket), COPY INTO the
+# day's file from the Snowflake stage into the corresponding bronze table.
+# The tables were created with CHANGE_TRACKING = TRUE during setup (CTAS from
+# the federated Iceberg staging), so each COPY INTO automatically propagates
+# through the downstream silver/gold DT DAG via Snowflake's incremental
+# refresh — no pass-through bronze DT layer needed.
 #
-# Also handles DailyMarket — but that goes straight into `bronzedailymarket`
-# (a regular cloned table, not a raw → DT pair), mirroring the dbt-variant
-# flow where bronzedailymarket is read as a stage file.
-#
-# Idempotency: COPY INTO with the default LOAD HISTORY tracking. Each file
-# path includes {batch_date}, so the same physical file is loaded once. Re-
-# running the same batch_date is a no-op (Snowflake skips already-loaded
-# files). The bronze* DTs also dedup on cdc_dsn defensively.
+# Idempotency: COPY INTO uses Snowflake's default LOAD HISTORY tracking.
+# Each file path includes {batch_date}, so the same physical file is loaded
+# at most once. Re-running the same batch_date is a no-op (Snowflake skips
+# already-loaded files).
 
 import json, time
 
@@ -74,7 +72,7 @@ cur = conn.cursor()
 # _raw() calls; positional ($1..$N) is the canonical Snowflake stage-read
 # pattern.
 COPY_TARGETS = [
-    ("bronzeaccount_raw", "Account.txt", """
+    ("bronzeaccount", "Account.txt", """
         $1::string  AS cdc_flag,
         $2::bigint  AS cdc_dsn,
         $3::bigint  AS accountid,
@@ -85,7 +83,7 @@ COPY_TARGETS = [
         $8::string  AS status,
         $9::date    AS update_dt
     """),
-    ("bronzecashtransaction_raw", "CashTransaction.txt", """
+    ("bronzecashtransaction", "CashTransaction.txt", """
         $1::string    AS cdc_flag,
         $2::bigint    AS cdc_dsn,
         $3::bigint    AS accountid,
@@ -94,7 +92,7 @@ COPY_TARGETS = [
         $6::string    AS ct_name,
         $7::date      AS event_dt
     """),
-    ("bronzecustomer_raw", "Customer.txt", """
+    ("bronzecustomer", "Customer.txt", """
         $1::string  AS cdc_flag,
         $2::bigint  AS cdc_dsn,
         $3::bigint  AS customerid,
@@ -130,7 +128,7 @@ COPY_TARGETS = [
         $33::string AS nat_tx_id,
         $34::date   AS update_dt
     """),
-    ("bronzeholdings_raw", "HoldingHistory.txt", """
+    ("bronzeholdings", "HoldingHistory.txt", """
         $1::string AS cdc_flag,
         $2::bigint AS cdc_dsn,
         $3::bigint AS hh_h_t_id,
@@ -139,7 +137,7 @@ COPY_TARGETS = [
         $6::int    AS hh_after_qty,
         $7::date   AS event_dt
     """),
-    ("bronzetrade_raw", "Trade.txt", """
+    ("bronzetrade", "Trade.txt", """
         $1::string    AS cdc_flag,
         $2::bigint    AS cdc_dsn,
         $3::bigint    AS tradeid,
@@ -158,7 +156,7 @@ COPY_TARGETS = [
         $16::float    AS tax,
         $17::date     AS event_dt
     """),
-    ("bronzewatches_raw", "WatchHistory.txt", """
+    ("bronzewatches", "WatchHistory.txt", """
         $1::string    AS cdc_flag,
         $2::bigint    AS cdc_dsn,
         $3::bigint    AS w_c_id,

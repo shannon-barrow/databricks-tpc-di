@@ -13,15 +13,11 @@
 #   1. ensure_staging_environment() — idempotent self-bootstrap.
 #   2. CREATE OR REPLACE SCHEMA TPCDI_TEST.{wh_db}_{sf}
 #   3. CLONE 13 reference / dim tables from native STAGING_SF{sf}.
-#   4. materialize_bronze_into_schema() — CTAS 7 bronze tables from
-#      federated STAGING_SF{sf}_DBX into the per-run schema:
-#        - bronzeaccount → bronzeaccount_raw
-#        - bronzecashtransaction → bronzecashtransaction_raw
-#        - bronzecustomer → bronzecustomer_raw
-#        - bronzedailymarket → bronzedailymarket (no _raw — direct DT input)
-#        - bronzeholdings → bronzeholdings_raw
-#        - bronzetrade → bronzetrade_raw
-#        - bronzewatches → bronzewatches_raw
+#   4. materialize_bronze_into_schema() — CTAS the 7 bronze tables from
+#      federated STAGING_SF{sf}_DBX into the per-run schema, all named
+#      exactly bronze{name} (no `_raw` suffix). Tables get
+#      CHANGE_TRACKING = TRUE so downstream silver/gold DTs can refresh
+#      incrementally against them with no pass-through bronze DT layer.
 #   5. Run `dt_create.sql` — declares the 16 dynamic tables.
 #   6. Emit batch_date_ls task value for the parent's for_each loop.
 

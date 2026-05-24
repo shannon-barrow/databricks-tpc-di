@@ -14,10 +14,10 @@ Two entry points called by `setup_sf.py` (dbt variant) and
 
   materialize_bronze_into_schema(conn, *, catalog, scale_factor, target_schema, ...)
     Per-run CTAS of the 7 bronze tables from STAGING_SF{sf}_DBX
-    (federated Iceberg) into target_schema. The 6 transactional bronze
-    tables are renamed with the `_raw` suffix so they match the bronze
-    DT engine's input names; bronzedailymarket keeps its native name
-    (factmarkethistory's DT reads it directly).
+    (federated Iceberg) into target_schema. Tables keep their source
+    names (bronzeaccount, bronzecashtransaction, …) and are created
+    with CHANGE_TRACKING = TRUE so downstream silver/gold DTs can
+    refresh incrementally against them with no bronze DT pass-through.
 
 The module replaces the obsolete `onetime_stg_snowflake_*` notebooks
 with a Python module callable from any setup notebook — the same code
@@ -228,20 +228,6 @@ def setup_native_staging(
 # Per-run bronze materialization for the DT variant
 # ============================================================================
 
-# Mapping: source name in _DBX → target name in per-run schema.
-# Only bronzedailymarket keeps its name; the 6 transactional bronze tables
-# get _raw suffix (the DT engine's bronze*_raw input names).
-_BRONZE_RENAME: dict[str, str] = {
-    "bronzeaccount":         "bronzeaccount_raw",
-    "bronzecashtransaction": "bronzecashtransaction_raw",
-    "bronzecustomer":        "bronzecustomer_raw",
-    "bronzedailymarket":     "bronzedailymarket",
-    "bronzeholdings":        "bronzeholdings_raw",
-    "bronzetrade":           "bronzetrade_raw",
-    "bronzewatches":         "bronzewatches_raw",
-}
-
-
 def materialize_bronze_into_schema(
     conn,
     *,
@@ -253,51 +239,51 @@ def materialize_bronze_into_schema(
 ) -> None:
     """Per-run CTAS — copy each of the 7 federated bronze Iceberg tables into
     `target_schema` (the per-benchmark schema, e.g. SHANNON_AUG_SF_DT_10).
-    The 6 transactional bronze tables get the `_raw` suffix; bronzedailymarket
-    keeps its name (factmarkethistory's DT reads it directly).
+
+    Targets keep the source name (no `_raw` suffix). Tables are created
+    with `CHANGE_TRACKING = TRUE` so downstream DTs can incrementally
+    refresh against them directly — no pass-through DT layer needed.
 
     `new_connection`: callable returning a fresh Snowflake connection. Same
     thread-safety reason as setup_native_staging.
     """
     dbx_schema = f"STAGING_SF{scale_factor}_DBX"
+    sources = list(BRONZE_FEDERATION_TABLES)
 
-    def _ctas_one(src: str) -> tuple[str, str, float, int]:
-        dst = _BRONZE_RENAME[src]
+    def _ctas_one(name: str) -> tuple[str, float, int]:
         c = new_connection() if new_connection else conn
         owned = new_connection is not None
         try:
-            cluster = f" CLUSTER BY ({CLUSTER_KEYS[src]})" if src in CLUSTER_KEYS else ""
             t0 = _time.time()
             with c.cursor() as cc:
                 cc.execute(
-                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{dst}"
-                    f"{cluster} AS "
-                    f"SELECT * FROM {catalog}.{dbx_schema}.{src}"
+                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
+                    f"CHANGE_TRACKING = TRUE AS "
+                    f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
                 )
                 cc.execute(
                     f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
                     f"WHERE TABLE_SCHEMA = UPPER('{target_schema}') "
-                    f"AND TABLE_NAME = UPPER('{dst}')"
+                    f"AND TABLE_NAME = UPPER('{name}')"
                 )
                 n = (cc.fetchone() or [0])[0] or 0
-            return (src, dst, _time.time() - t0, int(n))
+            return (name, _time.time() - t0, int(n))
         finally:
             if owned:
                 c.close()
 
     t_start = _time.time()
-    sources = list(_BRONZE_RENAME.keys())
     print(f"[bronze] CTAS {len(sources)} bronze tables {dbx_schema} → {target_schema}")
     if new_connection and parallel > 1:
         with _cf.ThreadPoolExecutor(max_workers=parallel) as ex:
             futures = {ex.submit(_ctas_one, s): s for s in sources}
             for f in _cf.as_completed(futures):
-                src, dst, wall, n = f.result()
-                print(f"[bronze] {src:25s} → {dst:30s} {wall:5.1f}s rows={n:>12,d}")
+                name, wall, n = f.result()
+                print(f"[bronze] {name:30s} {wall:5.1f}s rows={n:>12,d}")
     else:
         for s in sources:
-            src, dst, wall, n = _ctas_one(s)
-            print(f"[bronze] {src:25s} → {dst:30s} {wall:5.1f}s rows={n:>12,d}")
+            name, wall, n = _ctas_one(s)
+            print(f"[bronze] {name:30s} {wall:5.1f}s rows={n:>12,d}")
     print(f"[bronze] done in {_time.time() - t_start:.1f}s")
 
 
