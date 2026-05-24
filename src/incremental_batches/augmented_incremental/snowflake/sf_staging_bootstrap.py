@@ -60,13 +60,14 @@ BRONZE_FEDERATION_TABLES: tuple[str, ...] = (
     "bronzedailymarket", "bronzeholdings", "bronzetrade", "bronzewatches",
 )
 
-# Tables exposed via the federation schema. Only the 7 bronze tables —
-# they're the ones the DT variant CTASs from per run, and we control
-# their creation so we can guarantee IcebergCompatV2 + UniForm are
-# enabled. The silver/gold/ref staging tables are NOT federated; they
-# come from the existing native STAGING_SF{sf} schema (materialized
-# by the dbt benchmark setup), which the DT variant CLONEs from.
-FEDERATED_TABLES: tuple[str, ...] = BRONZE_FEDERATION_TABLES
+# All tables exposed via federation — used by the one-time setup path to
+# CTAS native staging (silver/gold/ref) and by the DT variant to CTAS
+# the 7 bronze tables into per-run schemas. UniForm gets enabled on the
+# Databricks side at federation-creation time via ALTER TABLE (not at
+# data-gen time — data gen writes plain Delta).
+FEDERATED_TABLES: tuple[str, ...] = tuple(sorted(set(
+    NATIVE_STAGING_TABLES + BRONZE_FEDERATION_TABLES
+)))
 
 # Cluster keys mirror the Databricks-side Liquid layout. Setting CLUSTER BY
 # in the native CTAS lets subsequent CLONEs inherit the layout.
@@ -146,30 +147,24 @@ def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60)
 # Enable UniForm on the Databricks-side bronze sources (one-time per SF)
 # ============================================================================
 
-def enable_uniform_on_bronze_sources(spark, *, catalog: str, scale_factor: str) -> None:
-    """ALTER each bronze source on the Databricks UC side to enable UniForm
-    + drop deletion vectors. Required before the Snowflake federation
-    `CREATE OR REPLACE ICEBERG TABLE ... CATALOG = ...` calls can resolve —
-    Databricks's iceberg-rest endpoint only exposes Delta tables with
-    UniForm/IcebergCompatV2 enabled.
+def enable_uniform_on_sources(
+    spark, *, catalog: str, scale_factor: str, tables: Iterable[str],
+) -> None:
+    """ALTER each source on the Databricks UC side to enable UniForm + drop
+    deletion vectors. Required before Snowflake federation `CREATE OR REPLACE
+    ICEBERG TABLE ... CATALOG = ...` calls can resolve — Databricks's
+    iceberg-rest endpoint only exposes Delta tables with UniForm enabled.
 
     Idempotent: ALTER ... SET TBLPROPERTIES is a no-op when the props are
     already in the requested state.
     """
     src_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
-    sources = (
-        "bronzeaccount", "bronzecashtransaction", "bronzecustomer",
-        "bronzedailymarket", "bronzeholdings", "bronzetrade", "bronzewatches",
-    )
-    print(f"[uniform] enabling UniForm on {len(sources)} bronze sources under {src_schema}")
+    tables = list(tables)
+    print(f"[uniform] enabling UniForm on {len(tables)} sources under {src_schema}")
     t0 = _time.time()
-    for tbl in sources:
+    for tbl in tables:
         fq = f"{src_schema}.{tbl}"
-        # DV must be off for IcebergCompatV2; both must be set in one ALTER
-        # (engine refuses partial state). REORG TABLE ... APPLY (PURGE) would
-        # be needed only if DV were already TRUE with materialized DVs; the
-        # source tables here are plain Delta with DV=false (workspace default
-        # may vary, but our staging tables don't use DVs).
+        # DV must be off for IcebergCompatV2; both must be set together.
         spark.sql(
             f"ALTER TABLE {fq} SET TBLPROPERTIES ("
             f"  'delta.enableDeletionVectors'         = 'false',"
@@ -385,18 +380,21 @@ def ensure_staging_environment(
 ) -> dict:
     """Idempotent self-bootstrap. Returns a dict describing what was done.
 
-    Two responsibilities:
-      1. Native STAGING_SF{sf} must already exist with all NATIVE_STAGING_TABLES
-         (these are silver/gold/ref tables; built by the dbt benchmark setup
-         or its predecessors on the Databricks side, then materialized into
-         Snowflake natively). If missing, this bootstrap raises — re-materializing
-         native staging from federation requires the source tables to have
-         IcebergCompatV2 + UniForm enabled, and historically the silver/gold
-         models don't. Native staging is set up out-of-band.
-      2. Federation STAGING_SF{sf}_DBX must have the 7 bronze tables
-         (FEDERATED_TABLES). Bronze sources are guaranteed UniForm-enabled
-         by `stage_bronze_to_iceberg.py`, so federation works. If anything
-         is missing, set up federation (CREATE OR REPLACE ICEBERG TABLE per).
+    Designed for from-zero startup. Prereq: data gen has populated
+    `main.tpcdi_incremental_staging_{sf}` with the 28 staging tables
+    (silver/gold/ref + 7 bronze) as plain Delta. Nothing on the Snowflake
+    side needs to exist beforehand.
+
+    Three states to handle:
+      - Native + federation both complete → no-op (steady state)
+      - Federation missing → enable UniForm on all 28 Databricks sources,
+        create federation (28 CREATE ICEBERG TABLE statements)
+      - Native missing → CTAS the 22 silver/gold/ref tables from
+        federation into native (parallel)
+
+    On a true cold start, all three steps fire in order: enable UniForm →
+    create federation → CTAS native. Subsequent runs short-circuit each
+    step that's already in place.
 
     `new_pat` only needed on the very first bootstrap (or after the PAT
     backing the catalog integration expires).
@@ -405,54 +403,46 @@ def ensure_staging_environment(
     dbx_schema = f"STAGING_SF{scale_factor}_DBX"
     native_schema = f"STAGING_SF{scale_factor}"
 
-    result = {"federation_setup": False}
+    result = {"federation_setup": False, "native_setup": False}
 
-    # 1. Native staging must already exist with all expected tables.
-    if not _schema_exists(cur, catalog, native_schema):
-        cur.close()
-        raise RuntimeError(
-            f"{catalog}.{native_schema} does not exist. The Snowflake DT variant "
-            f"requires native staging to be materialized out-of-band (e.g. via "
-            f"a prior dbt benchmark setup). Bootstrap can't CTAS it from "
-            f"federation because the silver/gold source models on the "
-            f"Databricks side don't have IcebergCompatV2 enabled."
-        )
-    present = _tables_in(cur, catalog, native_schema)
-    miss = _missing(present, NATIVE_STAGING_TABLES)
-    if miss:
-        cur.close()
-        raise RuntimeError(
-            f"{catalog}.{native_schema} is missing tables: {sorted(miss)}. "
-            f"Set up native staging out-of-band (e.g. via a dbt benchmark run)."
-        )
-    print(f"[bootstrap] {native_schema} complete ({len(present)} tables)")
-
-    # 2. Ensure bronze federation has all expected tables.
-    fed_ok = False
-    if _schema_exists(cur, catalog, dbx_schema):
-        fed_present = _tables_in(cur, catalog, dbx_schema)
-        fed_miss = _missing(fed_present, FEDERATED_TABLES)
-        if not fed_miss:
-            fed_ok = True
-            print(f"[bootstrap] {dbx_schema} federation already complete")
+    # State probe
+    native_complete = False
+    if _schema_exists(cur, catalog, native_schema):
+        miss = _missing(_tables_in(cur, catalog, native_schema), NATIVE_STAGING_TABLES)
+        if not miss:
+            native_complete = True
+            print(f"[bootstrap] {native_schema} complete")
         else:
-            print(f"[bootstrap] {dbx_schema} federation missing: {sorted(fed_miss)}")
+            print(f"[bootstrap] {native_schema} missing tables: {sorted(miss)}")
+    else:
+        print(f"[bootstrap] {native_schema} does not exist")
+
+    fed_complete = False
+    if _schema_exists(cur, catalog, dbx_schema):
+        miss = _missing(_tables_in(cur, catalog, dbx_schema), FEDERATED_TABLES)
+        if not miss:
+            fed_complete = True
+            print(f"[bootstrap] {dbx_schema} federation complete")
+        else:
+            print(f"[bootstrap] {dbx_schema} federation missing: {sorted(miss)}")
     else:
         print(f"[bootstrap] {dbx_schema} does not exist")
     cur.close()
 
-    if not fed_ok:
-        # First: enable UniForm on the Databricks-side bronze sources so the
-        # iceberg-rest endpoint can expose them. The data generator writes
-        # plain Delta — UniForm is enabled lazily here, the first time we
-        # set up federation for an SF (or after a fresh data regen).
+    if native_complete and fed_complete:
+        return result
+
+    # Federation setup. Required before native CTAS can pull from it.
+    if not fed_complete:
         if spark is None:
             raise RuntimeError(
-                "spark session required to enable UniForm on bronze sources. "
+                "spark session required to enable UniForm on Databricks sources. "
                 "Pass spark= to ensure_staging_environment() from the notebook."
             )
-        enable_uniform_on_bronze_sources(
+        # Enable UniForm on every source we're about to federate.
+        enable_uniform_on_sources(
             spark, catalog=catalog, scale_factor=scale_factor,
+            tables=FEDERATED_TABLES,
         )
         setup_federation(
             conn, catalog=catalog, scale_factor=scale_factor,
@@ -461,5 +451,14 @@ def ensure_staging_environment(
             new_pat=new_pat,
         )
         result["federation_setup"] = True
+
+    # Native staging setup — CTAS silver/gold/ref from the federation we
+    # just (re)created. Skipped if native already has all 22 tables.
+    if not native_complete:
+        setup_native_staging(
+            conn, catalog=catalog, scale_factor=scale_factor,
+            new_connection=new_connection, parallel=parallel,
+        )
+        result["native_setup"] = True
 
     return result
