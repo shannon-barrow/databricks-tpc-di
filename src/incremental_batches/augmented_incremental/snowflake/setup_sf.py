@@ -12,9 +12,12 @@
 #      with CLUSTER BY (the dbt-managed targets dbt will populate per-batch)
 #   4. Emit batch_date_ls task value for the parent's for_each loop
 #
-# Prereq: TPCDI_TEST.STAGING_SF{sf} must exist (materialized natively).
-# Run `onetime_stg_snowflake_tables` once per SF to produce that schema
-# from the federated UC Iceberg catalog (TPCDI_TEST.STAGING_SF{sf}_DBX).
+# Self-bootstrapping: if TPCDI_TEST.STAGING_SF{sf} doesn't exist yet for
+# this scale factor, this notebook imports `sf_staging_bootstrap` and
+# (a) sets up the catalog federation against
+# main.tpcdi_incremental_staging_{sf} on the Databricks UC side, then
+# (b) CTASs the 22 staging tables into native STAGING_SF{sf} ready for
+# zero-copy CLONEs. No separate one-time notebook required.
 #
 # Auth: reads creds from the {secret_scope} Databricks secret scope
 # (see ./_sf_conn.py).
@@ -33,6 +36,10 @@ dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"],
                           "Lineage tag for query attribution. 'native' = the per-run tables are Snowflake-native (current default — what setup_sf actually does today, regardless of this value). 'iceberg' is reserved for when we plumb a real Iceberg-table path; setting it today is just a tag, NOT a behavior switch. Flows through to Snowflake query_tag so the dashboard can split runs by lineage.")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the prior-year backfill window")
+dbutils.widgets.text("catalog_integration", "TPCDI_DBX_UC_SF10_INT",
+                     "Snowflake catalog integration name pointing at the Databricks UC iceberg-rest endpoint")
+dbutils.widgets.text("dbx_pat_secret_key", "",
+                     "Optional: secret key (in `secret_scope`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
 
 catalog          = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
@@ -41,6 +48,8 @@ secret_scope     = dbutils.widgets.get("secret_scope")
 warehouse        = dbutils.widgets.get("snowflake_warehouse") or None
 table_format     = dbutils.widgets.get("table_format")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
+catalog_integration = dbutils.widgets.get("catalog_integration")
+dbx_pat_secret_key  = dbutils.widgets.get("dbx_pat_secret_key")
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -48,7 +57,7 @@ if not wh_db:
 target_schema    = f"{wh_db}_{scale_factor}"
 staging_schema   = f"STAGING_SF{scale_factor}"
 print(f"target  = {catalog}.{target_schema}")
-print(f"staging = {catalog}.{staging_schema} (clone source — must be materialized via onetime_stg_snowflake_tables)")
+print(f"staging = {catalog}.{staging_schema} (clone source — self-bootstrapped if missing)")
 
 # COMMAND ----------
 
@@ -70,6 +79,50 @@ conn = sf_connect(
 print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from secret_scope default)'}")
 cur = conn.cursor()
 
+# COMMAND ----------
+
+# Self-bootstrap: ensure STAGING_SF{sf} (native) + STAGING_SF{sf}_DBX
+# (federation) exist with all expected tables. No-op if already complete.
+# Locate sf_staging_bootstrap module — sits in the same dir as this notebook.
+import sys, os
+try:
+    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().getOrElse(None)
+    if _nb_path and not _nb_path.startswith("/Workspace"):
+        _nb_path = "/Workspace" + _nb_path
+    _module_dir = os.path.dirname(_nb_path) if _nb_path else os.getcwd()
+except Exception:
+    _module_dir = os.getcwd()
+if _module_dir not in sys.path:
+    sys.path.insert(0, _module_dir)
+import sf_staging_bootstrap as bootstrap
+
+def _new_conn():
+    return sf_connect(
+        database=catalog, secret_scope=secret_scope, warehouse=warehouse,
+        query_tag={"scale_factor": scale_factor, "task": "setup_sf:ctas"},
+    )
+
+_new_pat = None
+if dbx_pat_secret_key:
+    try:
+        _new_pat = dbutils.secrets.get(scope=secret_scope, key=dbx_pat_secret_key)
+        print(f"[ok] picked up PAT from secret_scope.{dbx_pat_secret_key}")
+    except Exception:
+        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in secret_scope — proceeding without token refresh")
+
+_boot = bootstrap.ensure_staging_environment(
+    conn,
+    catalog=catalog,
+    scale_factor=scale_factor,
+    catalog_integration=catalog_integration,
+    new_pat=_new_pat,
+    new_connection=_new_conn,
+    parallel=8,
+)
+print(f"[bootstrap] {_boot}")
+
+# COMMAND ----------
+
 cur.execute(f"CREATE DATABASE IF NOT EXISTS {catalog}")
 cur.execute(f"USE DATABASE {catalog}")
 cur.execute(f"CREATE OR REPLACE SCHEMA {catalog}.{target_schema}")
@@ -81,7 +134,7 @@ print(f"[ok] schema {catalog}.{target_schema} ready")
 # 1. CLONE 22 historical/reference tables from the staging schema.
 # CLONE is zero-copy — Snowflake just stamps new pointers, divergence
 # happens only when dbt MERGEs new rows in. The source's CLUSTER BY
-# (set by onetime_stg_snowflake_tables) propagates to the clone, so
+# (set by sf_staging_bootstrap.setup_native_staging) propagates to the clone, so
 # auto-clustering stays active on the per-run target without any
 # additional work.
 STAGING_TABLES = [

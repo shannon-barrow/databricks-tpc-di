@@ -72,7 +72,7 @@ parent_spec = dt.build_parent(
 Same as the dbt-snowflake variant:
 - Databricks secret scope `tpcdi_snowflake` populated (account, user, role,
   warehouse, private_key PEM).
-- `STAGING_SF{sf}` schema seeded by `../onetime_stg_snowflake_tables.py`.
+- `STAGING_SF{sf}` schema seeded by `sf_staging_bootstrap` (self-bootstrap on first run).
 - Snowflake `STORAGE INTEGRATION` + `STAGE TPCDI_TEST.{wh_db}_{sf}.TPCDI_STAGE`.
 - UC external volume `main.tpcdi_raw_data.tpcdi_benchmarking`.
 - Interactive cluster ID for the orchestration tasks (no Snowflake compute
