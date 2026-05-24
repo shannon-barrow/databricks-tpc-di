@@ -164,15 +164,21 @@ def enable_uniform_on_sources(
     """
     src_schema = f"{databricks_catalog}.tpcdi_incremental_staging_{scale_factor}"
     tables = list(tables)
-    print(f"[uniform] enabling UniForm on {len(tables)} sources under {src_schema}")
+    print(f"[uniform] enabling UniForm (Iceberg V3) on {len(tables)} sources under {src_schema}")
     t0 = _time.time()
     for tbl in tables:
         fq = f"{src_schema}.{tbl}"
-        # DV must be off for IcebergCompatV2; both must be set together.
+        # Use IcebergCompatV3 (not V2). V2 rejects any table whose protocol
+        # advertises the `deletionVectors` table-feature, even when
+        # `delta.enableDeletionVectors=false` is set — Databricks's
+        # workspace default protocol version 7 includes that feature
+        # automatically, so V2 enablement fails with
+        # DELTA_ICEBERG_COMPAT_VIOLATION.DELETION_VECTORS_SHOULD_BE_DISABLED.
+        # V3 supports row tracking + DV natively and is otherwise
+        # transparent to the Snowflake-side iceberg-rest reader.
         spark.sql(
             f"ALTER TABLE {fq} SET TBLPROPERTIES ("
-            f"  'delta.enableDeletionVectors'         = 'false',"
-            f"  'delta.enableIcebergCompatV2'         = 'true',"
+            f"  'delta.enableIcebergCompatV3'         = 'true',"
             f"  'delta.universalFormat.enabledFormats'= 'iceberg'"
             f")"
         )
