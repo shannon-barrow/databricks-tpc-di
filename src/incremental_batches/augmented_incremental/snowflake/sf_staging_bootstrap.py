@@ -462,19 +462,24 @@ def ensure_staging_environment(
     if native_complete and fed_complete:
         return result
 
+    # Always (re)apply UniForm on Databricks bronze sources before any
+    # cross-system read. The `_has_uniform` skip makes this idempotent
+    # and cheap — but it catches the case where federation already exists
+    # from a prior run yet the underlying tables got regenerated as plain
+    # Delta by data_gen (regenerate_data=YES wipes tpcdi_incremental_staging_{sf}).
+    if spark is None:
+        raise RuntimeError(
+            "spark session required to enable UniForm on Databricks sources. "
+            "Pass spark= to ensure_staging_environment() from the notebook."
+        )
+    enable_uniform_on_sources(
+        spark, databricks_catalog=databricks_catalog,
+        scale_factor=scale_factor,
+        tables=FEDERATED_TABLES,
+    )
+
     # Federation setup. Required before native CTAS can pull from it.
     if not fed_complete:
-        if spark is None:
-            raise RuntimeError(
-                "spark session required to enable UniForm on Databricks sources. "
-                "Pass spark= to ensure_staging_environment() from the notebook."
-            )
-        # Enable UniForm on every source we're about to federate.
-        enable_uniform_on_sources(
-            spark, databricks_catalog=databricks_catalog,
-            scale_factor=scale_factor,
-            tables=FEDERATED_TABLES,
-        )
         setup_federation(
             conn, catalog=catalog, scale_factor=scale_factor,
             catalog_integration=catalog_integration,
