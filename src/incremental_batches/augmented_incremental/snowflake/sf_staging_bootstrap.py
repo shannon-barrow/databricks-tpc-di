@@ -183,24 +183,30 @@ def enable_uniform_on_sources(
         # V3 isn't a viable alternative: its enablement triggers an
         # internal protocol manipulation that tries to drop `rowTracking`,
         # which V3 itself depends on (DELTA_FEATURE_DROP_DEPENDENT_FEATURE).
+        # UNSET clears the table property; DROP FEATURE removes the
+        # protocol-level feature. V3 enablement adds both — UNSET alone
+        # leaves the feature on the protocol, which triggers
+        # VERSION_MUTUAL_EXCLUSIVE on the V2 enable below.
         try:
             spark.sql(f"ALTER TABLE {fq} UNSET TBLPROPERTIES IF EXISTS ('delta.enableIcebergCompatV3')")
         except Exception:
             pass
+        for feat in ("icebergCompatV3", "deletionVectors"):
+            try:
+                spark.sql(f"ALTER TABLE {fq} DROP FEATURE '{feat}' TRUNCATE HISTORY")
+            except Exception as e:
+                msg = str(e)
+                # FEATURE_NOT_PRESENT / DOES_NOT_EXIST / ALREADY_DROPPED
+                # are all benign — feature wasn't on the protocol or
+                # was already removed.
+                for marker in ("FEATURE_NOT_PRESENT", "doesn't exist",
+                               "ALREADY_DROPPED", "not supported",
+                               "DELTA_FEATURE_NOT_PRESENT"):
+                    if marker in msg:
+                        break
+                else:
+                    print(f"[uniform] {tbl} DROP FEATURE {feat} warn: {type(e).__name__}: {msg[:160]}")
         spark.sql(f"ALTER TABLE {fq} SET TBLPROPERTIES ('delta.enableDeletionVectors' = 'false')")
-        try:
-            spark.sql(f"ALTER TABLE {fq} DROP FEATURE 'deletionVectors' TRUNCATE HISTORY")
-        except Exception as e:
-            # FEATURE_NOT_PRESENT / FEATURE_ALREADY_DROPPED is safe to
-            # ignore — feature wasn't on the protocol to start with, or
-            # was already removed by a prior run.
-            msg = str(e)
-            for marker in ("FEATURE_NOT_PRESENT", "doesn't exist",
-                           "FEATURE_ALREADY_DROPPED", "not supported"):
-                if marker in msg:
-                    break
-            else:
-                print(f"[uniform] {tbl} DROP FEATURE warn: {type(e).__name__}: {msg[:160]}")
         spark.sql(
             f"ALTER TABLE {fq} SET TBLPROPERTIES ("
             f"  'delta.enableIcebergCompatV2'         = 'true',"
