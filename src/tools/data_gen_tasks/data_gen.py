@@ -157,18 +157,19 @@ if regenerate_data == "YES":
     except Exception as e:
         print(f"  rm {cfg.volume_path} skipped: {type(e).__name__}: {e}")
 
-    # Cross-task `_gen_*` and per-call `_dc_*` temps from any prior run.
+    # All tables in {wh_db}_{sf}_stage — wipes both the _gen_*/_dc_* temps
+    # AND the persistent ingest_*/finwire stage tables produced by benchmark
+    # tasks. Necessary because those persisted tables may have IcebergCompatV2
+    # from prior runs, and a CREATE OR REPLACE TABLE on a UniForm-enabled
+    # table fails with "IcebergCompat cannot be disabled" when the new DDL
+    # is plain Delta. Wiping clean lets the new TBLPROPS take effect.
     rows = spark.sql(f"SHOW TABLES IN {stage_schema}").collect()
-    dropped = []
-    for r in rows:
-        name = r["tableName"]
-        if name.startswith("_gen_") or name.startswith("_dc_"):
-            spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{name}")
-            dropped.append(name)
-    print(f"[data_gen] dropped {len(dropped)} prior data_gen temps "
-          f"in {stage_schema}: {dropped}")
+    dropped = [r["tableName"] for r in rows]
+    for name in dropped:
+        spark.sql(f"DROP TABLE IF EXISTS {stage_schema}.{name}")
+    print(f"[data_gen] dropped {len(dropped)} prior tables in {stage_schema}")
 
-    # Per-dataset Delta deliverables (augmented mode writes these).
+    # Per-dataset Delta deliverables in main.tpcdi_raw_data (augmented mode).
     if augmented_incremental:
         for _t in ("customermgmt", "trade", "tradehistory", "cashtransaction",
                    "holdinghistory", "watchhistory", "dailymarket"):
@@ -176,6 +177,20 @@ if regenerate_data == "YES":
                       f"{catalog}.tpcdi_raw_data.{_t}{scale_factor}")
         print(f"[data_gen] dropped 7 augmented dataset Deltas in "
               f"{catalog}.tpcdi_raw_data")
+
+        # main.tpcdi_incremental_staging_{sf} — bronze tables (from
+        # stage_bronze_to_iceberg) + silver/gold staging tables (from
+        # historical/*.sql). Same IcebergCompat-cannot-be-disabled issue
+        # as the _stage schema: any pre-existing table with V2 enabled
+        # blocks a plain-Delta CREATE OR REPLACE.
+        incr_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+        try:
+            incr_rows = spark.sql(f"SHOW TABLES IN {incr_schema}").collect()
+            for r in incr_rows:
+                spark.sql(f"DROP TABLE IF EXISTS {incr_schema}.{r['tableName']}")
+            print(f"[data_gen] dropped {len(incr_rows)} tables in {incr_schema}")
+        except Exception as e:
+            print(f"[data_gen] {incr_schema} not present or empty: {type(e).__name__}: {e}")
 else:
     print(f"[data_gen] regenerate_data=NO → keeping prior state for "
           f"per-task self-skip")
