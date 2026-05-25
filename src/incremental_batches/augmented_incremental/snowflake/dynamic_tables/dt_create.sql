@@ -104,16 +104,10 @@ WHERE c.cdc_flag = 'U';
 -- ============================================================================
 -- SILVER — dimcustomer (SCD2)
 --
--- dbt approach: per-batch new_rows (iscurrent=T) + close_rows (iscurrent=F)
--- UNION ALL, MERGE keyed on sk_customerid with update-cols {iscurrent, enddate}.
---
--- DT approach: every bronzecustomer.I or .U event becomes a dim row. iscurrent
--- and enddate derived from the next event per customerid via window functions.
--- LAST_VALUE with offset frame replaces dbt's MERGE close-row logic.
---
--- INCREMENTAL refresh eligibility: ROW_NUMBER and LAST_VALUE with bounded
--- frames are documented as supported. Custom frame (ROWS BETWEEN 1 FOLLOWING
--- AND 1 FOLLOWING) may force fall-back — verify at deploy.
+-- Pattern ported from historical/DimCustomerHistorical.sql: LEAD(update_dt)
+-- OVER (PARTITION BY customerid ORDER BY update_dt) gives the next event's
+-- date, which becomes this row's enddate. iscurrent = (next_update_dt IS NULL)
+-- — the row with no successor is the live one.
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimcustomer
@@ -124,15 +118,10 @@ AS
 WITH ranked AS (
   SELECT
     c.*,
-    LAST_VALUE(c.update_dt) OVER (
+    LEAD(c.update_dt) OVER (
       PARTITION BY c.customerid
       ORDER BY c.update_dt
-      ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING
-    ) AS next_update_dt,
-    ROW_NUMBER() OVER (
-      PARTITION BY c.customerid
-      ORDER BY c.update_dt DESC
-    ) AS rn_desc
+    ) AS next_update_dt
   FROM {catalog}.{schema}.bronzecustomer c
 )
 SELECT
@@ -187,7 +176,7 @@ SELECT
   r_lcl.tx_rate AS localtaxrate,
   c.update_dt   AS effectivedate,
   COALESCE(c.next_update_dt, TO_DATE('9999-12-31')) AS enddate,
-  (c.rn_desc = 1) AS iscurrent
+  (c.next_update_dt IS NULL) AS iscurrent
 FROM ranked c
 JOIN {catalog}.{schema}.taxrate r_lcl ON c.lcl_tx_id = r_lcl.tx_id
 JOIN {catalog}.{schema}.taxrate r_nat ON c.nat_tx_id = r_nat.tx_id;
@@ -223,15 +212,10 @@ deduped AS (
 ranked AS (
   SELECT
     a.*,
-    LAST_VALUE(a.update_dt) OVER (
+    LEAD(a.update_dt) OVER (
       PARTITION BY a.accountid
       ORDER BY a.update_dt
-      ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING
-    ) AS next_update_dt,
-    ROW_NUMBER() OVER (
-      PARTITION BY a.accountid
-      ORDER BY a.update_dt DESC
-    ) AS rn_desc
+    ) AS next_update_dt
   FROM deduped a
 )
 SELECT
@@ -249,7 +233,7 @@ SELECT
     'SBMT', 'Submitted',
     'INAC', 'Inactive',
     a.status) AS status,
-  (a.rn_desc = 1) AS iscurrent,
+  (a.next_update_dt IS NULL) AS iscurrent,
   a.update_dt    AS effectivedate,
   COALESCE(a.next_update_dt, TO_DATE('9999-12-31')) AS enddate
 FROM ranked a
@@ -259,20 +243,14 @@ JOIN {catalog}.{schema}.dimcustomer dc
 
 
 -- ============================================================================
--- SILVER — dimtrade (SCD2 with close_ts derivation)
+-- SILVER — dimtrade
 --
--- dbt approach: max_by(object_construct(...), t_dts) over today's bronze rows,
--- then derive close_ts where status IN ('CMPT','CNCL'); MERGE keyed by tradeid
--- with merge_update_columns and incremental_predicate sk_closedateid IS NULL.
---
--- DT approach: per tradeid, take the LATEST bronzetrade row (max t_dts) — no
--- need to "find the last record" because the LATEST IS the dim row. status
--- derivation, sk_closedateid logic same as the dbt model.
---
--- Note: each tradeid's row in dimtrade reflects the most-recent bronzetrade
--- event for that tradeid. Closed trades stay frozen forever (no more events).
--- Open trades update when their next event arrives. Same semantics as dbt
--- MERGE with merge_update_columns restricting the update scope.
+-- Pattern ported from src/incremental_batches/augmented_incremental/historical/
+-- DimTradeHistorical.sql. Single CTE: QUALIFY ROW_NUMBER picks the latest
+-- t_dts row per tradeid (whole row, no per-column MAX_BY); MIN OVER PARTITION
+-- gives create_ts (first t_dts per tradeid); CMPT-only columns wrapped in
+-- CASE WHEN; final SELECT joins to dimsecurity/dimaccount on point-in-time
+-- effectivedate ranges keyed off create_ts.
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimtrade
@@ -280,36 +258,13 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimtrade
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
-WITH latest_per_trade AS (
+WITH rawtrade AS (
   SELECT
     tradeid,
-    MIN(IFF(cdc_flag = 'I', t_dts, NULL)) AS create_ts,
-    MAX_BY(t_dts,      t_dts) AS max_t_dts,
-    MAX_BY(status,     t_dts) AS status_code,
-    MAX_BY(t_tt_id,    t_dts) AS t_tt_id,
-    MAX_BY(cashflag,   t_dts) AS cashflag,
-    MAX_BY(t_s_symb,   t_dts) AS t_s_symb,
-    MAX_BY(quantity,   t_dts) AS quantity,
-    -- Cast FLOAT → NUMBER(15,2) inside the aggregate. Snowflake INCREMENTAL
-    -- refresh rejects float aggregates that share a query block with a join
-    -- (planner inlines this CTE into the dimsecurity/dimaccount join below).
-    MAX_BY(bidprice::number(15,2),   t_dts) AS bidprice,
-    MAX_BY(t_ca_id,    t_dts) AS t_ca_id,
-    MAX_BY(executedby, t_dts) AS executedby,
-    MAX_BY(tradeprice::number(15,2), t_dts) AS tradeprice,
-    MAX_BY(fee::number(15,2),        t_dts) AS fee,
-    MAX_BY(commission::number(15,2), t_dts) AS commission,
-    MAX_BY(tax::number(15,2),        t_dts) AS tax
-  FROM {catalog}.{schema}.bronzetrade
-  GROUP BY tradeid
-),
-derived AS (
-  SELECT
-    tradeid,
-    create_ts,
-    max_t_dts,
-    CASE WHEN status_code IN ('CMPT', 'CNCL') THEN max_t_dts END AS close_ts,
-    DECODE(status_code,
+    t_dts,
+    MIN(t_dts) OVER (PARTITION BY tradeid) AS create_ts,
+    CASE WHEN status IN ('CMPT', 'CNCL') THEN t_dts END AS close_ts,
+    DECODE(status,
       'ACTV', 'Active',
       'CMPT', 'Completed',
       'CNCL', 'Canceled',
@@ -324,29 +279,34 @@ derived AS (
       'TLB', 'Limit Buy') AS type,
     IFF(cashflag = 1, TRUE, FALSE) AS cashflag,
     t_s_symb, quantity, bidprice, t_ca_id, executedby,
-    tradeprice, fee, commission, tax
-  FROM latest_per_trade
+    CASE WHEN status = 'CMPT' THEN tradeprice END AS tradeprice,
+    CASE WHEN status = 'CMPT' THEN fee        END AS fee,
+    CASE WHEN status = 'CMPT' THEN commission END AS commission,
+    CASE WHEN status = 'CMPT' THEN tax        END AS tax
+  FROM {catalog}.{schema}.bronzetrade
+  QUALIFY ROW_NUMBER() OVER (PARTITION BY tradeid ORDER BY t_dts DESC) = 1
 )
 SELECT
-  t.tradeid,
+  trade.tradeid,
   da.sk_brokerid,
-  TO_CHAR(t.create_ts, 'YYYYMMDD')::number AS sk_createdateid,
-  TO_CHAR(t.create_ts, 'HH24MISS')::number AS sk_createtimeid,
-  TO_CHAR(t.close_ts,  'YYYYMMDD')::number AS sk_closedateid,
-  TO_CHAR(t.close_ts,  'HH24MISS')::number AS sk_closetimeid,
-  t.status, t.type, t.cashflag,
+  TO_CHAR(trade.create_ts, 'YYYYMMDD')::number AS sk_createdateid,
+  TO_CHAR(trade.create_ts, 'HH24MISS')::number AS sk_createtimeid,
+  TO_CHAR(trade.close_ts,  'YYYYMMDD')::number AS sk_closedateid,
+  TO_CHAR(trade.close_ts,  'HH24MISS')::number AS sk_closetimeid,
+  trade.status, trade.type, trade.cashflag,
   ds.sk_securityid, ds.sk_companyid,
-  t.quantity, t.bidprice,
+  trade.quantity, trade.bidprice,
   da.sk_customerid, da.sk_accountid,
-  t.executedby, t.tradeprice, t.fee, t.commission, t.tax
-FROM derived t
+  trade.executedby, trade.tradeprice, trade.fee, trade.commission, trade.tax
+FROM rawtrade trade
 JOIN {catalog}.{schema}.dimsecurity ds
-  ON ds.symbol = t.t_s_symb
- AND TO_DATE(t.max_t_dts) >= ds.effectivedate
- AND TO_DATE(t.max_t_dts) <  ds.enddate
+  ON ds.symbol = trade.t_s_symb
+ AND TO_DATE(trade.create_ts) >= ds.effectivedate
+ AND TO_DATE(trade.create_ts) <  ds.enddate
 JOIN {catalog}.{schema}.dimaccount da
-  ON t.t_ca_id = da.accountid
- AND da.iscurrent;
+  ON trade.t_ca_id = da.accountid
+ AND TO_DATE(trade.create_ts) >= da.effectivedate
+ AND TO_DATE(trade.create_ts) <  da.enddate;
 
 
 -- ============================================================================
