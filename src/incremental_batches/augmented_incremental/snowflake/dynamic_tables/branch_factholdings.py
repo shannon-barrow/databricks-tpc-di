@@ -29,7 +29,7 @@ if not (wh_db and batch_date):
     raise ValueError("wh_db and batch_date are required")
 
 target_schema = f"{wh_db}_{scale_factor}"
-stage_root    = f"@{stage}/sf={scale_factor}/{batch_date}"
+stage_root    = f"@{stage}/{target_schema}/{batch_date}"
 print(f"target = {catalog}.{target_schema}, stage_root = {stage_root}")
 
 # COMMAND ----------

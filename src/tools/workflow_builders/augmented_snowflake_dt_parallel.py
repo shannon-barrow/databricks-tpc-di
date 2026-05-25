@@ -215,7 +215,6 @@ def build_parent(
     snowflake_stage: str = "TPCDI_STAGE",
     secret_scope: str = "tpcdi_snowflake",
     snowflake_warehouse: str | None = None,
-    target_lag: str = "1 minute",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -231,7 +230,6 @@ def build_parent(
         notebook_path=f"{aug}/snowflake/dynamic_tables/setup_sf_dt",
         base_params={
             **_COMMON_PARAMS,
-            "target_lag":                  "{{job.parameters.target_lag}}",
             "incremental_batches_to_run":
                 "{{job.parameters.incremental_batches_to_run}}",
             "dt_create_sql_path":
@@ -321,7 +319,6 @@ def build_parent(
             {"name": "snowflake_stage",             "default": snowflake_stage},
             {"name": "secret_scope",                "default": secret_scope},
             {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
-            {"name": "target_lag",                  "default": target_lag},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
             {"name": "catalog_integration",         "default": "TPCDI_DBX_UC_SF10_INT"},
