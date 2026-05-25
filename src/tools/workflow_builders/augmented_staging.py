@@ -123,25 +123,20 @@ _NN = "NOT NULL"
 
 def _tprops() -> str:
     """Stable tbl_props for staging tables — autoCompact off (we'll do a
-    final OPTIMIZE later if needed), optimizeWrite on for fewer/larger files.
-    Plain Delta — no UniForm/IcebergCompatV2 at create time. But DV=false
-    IS set so the workspace default doesn't add the `deletionVectors`
-    table-feature to the protocol — that feature is non-removable once
-    present, and IcebergCompatV2 enabled later (by setup_sf* at convert
-    time) refuses tables that declare it. Setting DV=false at CREATE
-    keeps the protocol clean for downstream V2 enablement."""
+    final OPTIMIZE later if needed), optimizeWrite on for fewer/larger
+    files. Plain Delta — no UniForm/IcebergCompatV2, no DV setting.
+    UniForm + DV-disable are applied lazily by setup_sf*'s one-time
+    bootstrap ALTER."""
     return ("'delta.autoOptimize.autoCompact'=False, "
             "'delta.autoOptimize.optimizeWrite'=True, "
-            "'delta.columnMapping.mode'='name', "
-            "'delta.enableDeletionVectors'=False")
+            "'delta.columnMapping.mode'='name'")
 
 
 def _finwire_tprops() -> str:
     return ("'delta.dataSkippingNumIndexedCols' = 0, "
             "'delta.autoOptimize.autoCompact'=False, "
             "'delta.autoOptimize.optimizeWrite'=True, "
-            "'delta.columnMapping.mode'='name', "
-            "'delta.enableDeletionVectors'=False")
+            "'delta.columnMapping.mode'='name'")
 
 
 def build(*, job_name: str, scale_factor: int, catalog: str,
