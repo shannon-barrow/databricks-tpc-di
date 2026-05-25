@@ -10,7 +10,12 @@
 --   {schema}          {wh_db}_{sf}                 — run schema (CLONE + DTs land here)
 --   {staging_schema}  STAGING_SF{sf}                — clone source (read-only)
 --   {warehouse}       DT refresh warehouse          — e.g. BARROW_DT_MED
---   {target_lag}      DT leaf TARGET_LAG            — e.g. '1 minute'
+--
+-- TARGET_LAG = DOWNSTREAM on every DT. Leaves (factwatches, factcashbalances,
+-- factholdings, factmarkethistory) have no downstream consumers, so Snowflake
+-- never schedules an automatic refresh — manual ALTER DYNAMIC TABLE ... REFRESH
+-- (issued by dt_wait_refresh.py per batch) is the only trigger, and it cascades
+-- through the DOWNSTREAM chain to refresh intermediates exactly once per batch.
 --
 -- DAG (refresh order — Snowflake infers from query references):
 --
@@ -320,7 +325,7 @@ JOIN {catalog}.{schema}.dimaccount da
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factwatches
-  TARGET_LAG   = {target_lag}
+  TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
@@ -391,7 +396,7 @@ GROUP BY accountid;
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factcashbalances
-  TARGET_LAG   = {target_lag}
+  TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
@@ -434,7 +439,7 @@ JOIN {catalog}.{schema}.dimaccount a
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factholdings
-  TARGET_LAG   = {target_lag}
+  TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
 AS
@@ -480,7 +485,7 @@ JOIN {catalog}.{schema}.dimtrade t
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factmarkethistory
-  TARGET_LAG   = {target_lag}
+  TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = FULL
 AS
