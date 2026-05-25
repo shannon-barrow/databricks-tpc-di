@@ -412,9 +412,10 @@ def materialize_bronze_into_schema(
             owned = new_connection is not None
             try:
                 t0 = _time.time()
+                cluster = f" CLUSTER BY ({CLUSTER_KEYS[name]})" if name in CLUSTER_KEYS else ""
                 ctas_sql = (
                     f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
-                    f"CHANGE_TRACKING = TRUE AS "
+                    f"CHANGE_TRACKING = TRUE{cluster} AS "
                     f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
                 )
                 with c.cursor() as cc:
