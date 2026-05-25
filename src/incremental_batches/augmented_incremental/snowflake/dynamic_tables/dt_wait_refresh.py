@@ -1,20 +1,24 @@
 # Databricks notebook source
-# Per-batch refresh trigger + poll for the Dynamic Tables variant. Replaces
+# Per-batch refresh trigger for the Dynamic Tables variant. Replaces
 # `dbt run` in the per-batch loop.
 #
 # What this does:
-#   1. Issue `ALTER DYNAMIC TABLE <leaf> REFRESH;` for each leaf gold DT —
-#      that triggers a cascade through DOWNSTREAM-mode intermediates.
-#   2. Poll `INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY` for each leaf
-#      until the latest refresh issued at-or-after t_start is in a terminal
-#      state (SUCCEEDED / FAILED / CANCELED).
-#   3. Fail loudly on FAILED / CANCELED so the parent job aborts.
+#   1. Fire `ALTER DYNAMIC TABLE <leaf> REFRESH;` on each of the 4 gold leaves
+#      *in parallel*, each on its own connection in its own thread. Each call
+#      blocks until that leaf's refresh (and its DOWNSTREAM cascade) completes
+#      — ALTER REFRESH is synchronous and returns the refresh statistics in
+#      its result set.
+#   2. Snowflake's DT engine dedups shared upstream refreshes across the
+#      threads: if two leaves both depend on dimcustomer, dimcustomer
+#      refreshes once and both threads wait for it.
+#   3. Fail loudly on any thread exception so the parent job aborts.
 #
-# Each batch's wall-clock is roughly: max(refresh_durations across the
-# cascade). The leaves refresh in parallel; intermediates are shared across
-# leaves so cost ≈ each intermediate's incremental cost once.
+# Each batch's wall-clock is now the SLOWEST leaf cascade, not the SUM
+# of all four serialized cascades. Per-leaf wall-times are emitted as
+# task values for downstream dashboards.
 
 import time, json
+import concurrent.futures as _cf
 
 # COMMAND ----------
 
@@ -59,120 +63,80 @@ LEAF_DTS = [
 
 # COMMAND ----------
 
-conn = sf_connect(
+# Connection params shared by each thread's sf_connect() call.
+_SF_KWARGS = dict(
     database=catalog,
     schema=target_schema,
     secret_scope=secret_scope,
     warehouse=warehouse,
-    query_tag={
+)
+
+def _refresh_leaf(leaf: str) -> tuple[str, float, str]:
+    """Open a fresh connection, fire ALTER DYNAMIC TABLE <leaf> REFRESH, drain
+    the result set, return (leaf, wall_seconds, stats_json). ALTER REFRESH is
+    synchronous — it blocks until the refresh + DOWNSTREAM cascade complete."""
+    t0 = time.time()
+    fq = f"{catalog}.{target_schema}.{leaf}"
+    c = sf_connect(**_SF_KWARGS, query_tag={
         "batch_date":   batch_date,
         "wh_db":        wh_db,
         "scale_factor": scale_factor,
         "table_format": "dynamic_tables",
         "task":         "dt_wait_refresh",
-    },
-)
-cur = conn.cursor()
+        "leaf":         leaf,
+    })
+    try:
+        cc = c.cursor()
+        try:
+            cc.execute(f"ALTER DYNAMIC TABLE {fq} REFRESH")
+            rows = cc.fetchall()
+        finally:
+            cc.close()
+        return leaf, time.time() - t0, json.dumps(rows, default=str)
+    finally:
+        c.close()
 
 # COMMAND ----------
 
-# Mark the wall-clock floor so we know which DYNAMIC_TABLE_REFRESH_HISTORY
-# rows to wait on. Use Snowflake's own clock to avoid any host-time skew.
-cur.execute("SELECT CURRENT_TIMESTAMP()")
-t_start = cur.fetchone()[0]
-print(f"[t_start] {t_start}")
+# Fire ALTER REFRESH on all leaves in parallel. Each thread blocks on its own
+# leaf's full cascade; Snowflake's DT engine shares any overlapping upstream
+# refreshes (e.g. dimcustomer if multiple leaves depend on it).
+print(f"[trigger] firing {len(LEAF_DTS)} leaf REFRESHes in parallel...")
+t_batch_start = time.time()
+leaf_durations: dict[str, float] = {}
+errors: list[tuple[str, BaseException]] = []
 
-# COMMAND ----------
+with _cf.ThreadPoolExecutor(max_workers=len(LEAF_DTS)) as ex:
+    futures = {ex.submit(_refresh_leaf, leaf): leaf for leaf in LEAF_DTS}
+    for f in _cf.as_completed(futures):
+        leaf = futures[f]
+        try:
+            name, wall, stats = f.result()
+            leaf_durations[name] = wall
+            print(f"  ✓ {name:25s} {wall:6.1f}s  {stats[:200]}")
+        except BaseException as e:
+            errors.append((leaf, e))
+            print(f"  ✗ {leaf:25s} ERROR: {type(e).__name__}: {e}")
 
-# Trigger refresh on each leaf. ALTER … REFRESH is asynchronous; it returns
-# immediately and the engine schedules the refresh on the DT's own warehouse.
-print(f"[trigger] {len(LEAF_DTS)} leaf refreshes...")
-for dt_name in LEAF_DTS:
-    fq = f"{catalog}.{target_schema}.{dt_name}"
-    cur.execute(f"ALTER DYNAMIC TABLE {fq} REFRESH")
-    print(f"  -> ALTER DYNAMIC TABLE {dt_name} REFRESH (queued)")
-
-# COMMAND ----------
-
-# Poll DYNAMIC_TABLE_REFRESH_HISTORY for terminal state on each leaf. The
-# INFORMATION_SCHEMA table function is the realtime view (vs the
-# 3-hour-lagged ACCOUNT_USAGE one).
-#
-# Each leaf may have multiple refresh rows after t_start (the DT engine can
-# split a refresh into sub-runs). Require the LATEST row per leaf to be
-# terminal, AND its REFRESH_TRIGGER to be 'MANUAL' (our ALTER … REFRESH)
-# to guarantee we're observing OUR trigger.
-TERMINAL = {"SUCCEEDED", "FAILED", "CANCELED"}
-FAIL     = {"FAILED", "CANCELED"}
-
-leaves_remaining = set(LEAF_DTS)
-deadline = time.time() + timeout_s
-leaf_durations = {}
-
-print(f"[poll] every {poll_interval}s, timeout {timeout_s}s")
-while leaves_remaining and time.time() < deadline:
-    leaves_csv = ",".join(f"'{l.upper()}'" for l in leaves_remaining)
-    # DYNAMIC_TABLE_REFRESH_HISTORY only accepts NAME / time / RESULT_LIMIT
-    # args — no SCHEMA_NAME. Filter by SCHEMA_NAME in the WHERE clause.
-    cur.execute(f"""
-        WITH ranked AS (
-          SELECT
-            name,
-            state,
-            refresh_trigger,
-            refresh_start_time,
-            refresh_end_time,
-            ROW_NUMBER() OVER (PARTITION BY name ORDER BY refresh_start_time DESC) AS rn
-          FROM TABLE({catalog}.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY())
-          WHERE schema_name = '{target_schema.upper()}'
-            AND name IN ({leaves_csv})
-            AND refresh_start_time >= '{t_start}'
-            AND refresh_trigger IN ('MANUAL', 'TASK', 'SCHEDULED')
-        )
-        SELECT name, state, refresh_trigger, refresh_start_time, refresh_end_time
-        FROM ranked WHERE rn = 1
-    """)
-    rows = cur.fetchall()
-    for name, state, trigger, t_st, t_en in rows:
-        # Snowflake returns NAME in uppercase; LEAF_DTS / leaves_remaining are
-        # lowercase. Normalize for membership ops.
-        name_lc = name.lower()
-        if state in TERMINAL:
-            dur = (t_en - t_st).total_seconds() if t_en and t_st else None
-            leaf_durations[name_lc] = dur
-            if state in FAIL:
-                # Fetch the error detail
-                cur.execute(f"""
-                    SELECT state, refresh_action, refresh_trigger, statistics, condition
-                    FROM TABLE({catalog}.INFORMATION_SCHEMA.DYNAMIC_TABLE_REFRESH_HISTORY(
-                        NAME => '{catalog}.{target_schema}.{name_lc}'
-                    ))
-                    WHERE refresh_start_time = '{t_st}'
-                """)
-                detail = cur.fetchall()
-                raise RuntimeError(
-                    f"DT refresh {state}: {name_lc}\n"
-                    f"  duration={dur}s\n"
-                    f"  detail={detail}"
-                )
-            print(f"  ✓ {name_lc:25s} {state:10s} dur={dur:.1f}s")
-            leaves_remaining.discard(name_lc)
-    if leaves_remaining:
-        time.sleep(poll_interval)
-
-if leaves_remaining:
-    raise TimeoutError(
-        f"Timeout {timeout_s}s waiting for DTs to refresh: {leaves_remaining}"
+if errors:
+    raise RuntimeError(
+        "One or more DT refreshes failed:\n"
+        + "\n".join(f"  {leaf}: {type(e).__name__}: {e}" for leaf, e in errors)
     )
 
 # COMMAND ----------
 
+dur_wall  = time.time() - t_batch_start
+dur_max   = max(leaf_durations.values())
+dur_sum   = sum(leaf_durations.values())
 print(f"[done] all {len(LEAF_DTS)} leaf DTs refreshed for {batch_date}")
-print(f"durations (s): {json.dumps(leaf_durations, default=str)}")
+print(f"  batch_wall={dur_wall:.1f}s  max_leaf_wall={dur_max:.1f}s  sum_leaf_wall={dur_sum:.1f}s")
+print(f"  per-leaf durations (s): {json.dumps(leaf_durations, default=str)}")
 
 # Emit per-leaf durations as task values so the parent job / dashboard can
 # pick them up without re-querying.
 dbutils.jobs.taskValues.set("leaf_refresh_durations_s", leaf_durations)
+dbutils.jobs.taskValues.set("batch_wall_s",            dur_wall)
 
 cur.close()
 conn.close()
