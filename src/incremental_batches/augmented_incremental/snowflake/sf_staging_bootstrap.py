@@ -170,26 +170,36 @@ def enable_uniform_on_sources(
         fq = f"{src_schema}.{tbl}"
         # IcebergCompatV2 rejects tables whose protocol declares the
         # `deletionVectors` table-feature, even with
-        # delta.enableDeletionVectors=false. Sequence required:
-        #   1. ALTER SET enableDeletionVectors=false (turn off new DV writes)
-        #   2. ALTER DROP FEATURE deletionVectors TRUNCATE HISTORY
-        #      (remove the feature from the table protocol entirely)
-        #   3. ALTER SET enableIcebergCompatV2 + universalFormat
-        # Step 2 succeeds on freshly-created tables that never used DV.
+        # delta.enableDeletionVectors=false. Idempotent sequence that
+        # also clears any V3 state left by prior failed attempts:
+        #   1. SET enableIcebergCompatV3=false (clear V3 if previously on —
+        #      VERSION_MUTUAL_EXCLUSIVE otherwise)
+        #   2. SET enableDeletionVectors=false (stop new DV writes)
+        #   3. DROP FEATURE deletionVectors TRUNCATE HISTORY (remove the
+        #      feature from the table protocol entirely)
+        #   4. SET enableIcebergCompatV2 + universalFormat
+        # Step 3 succeeds on freshly-created tables that never used DV.
         # TRUNCATE HISTORY bypasses the default 24h retention requirement.
-        # IcebergCompatV3 isn't a viable alternative: its enablement
-        # triggers an internal protocol manipulation that tries to drop
-        # `rowTracking`, which V3 itself depends on (DELTA_FEATURE_DROP_DEPENDENT_FEATURE).
+        # V3 isn't a viable alternative: its enablement triggers an
+        # internal protocol manipulation that tries to drop `rowTracking`,
+        # which V3 itself depends on (DELTA_FEATURE_DROP_DEPENDENT_FEATURE).
+        try:
+            spark.sql(f"ALTER TABLE {fq} UNSET TBLPROPERTIES IF EXISTS ('delta.enableIcebergCompatV3')")
+        except Exception:
+            pass
         spark.sql(f"ALTER TABLE {fq} SET TBLPROPERTIES ('delta.enableDeletionVectors' = 'false')")
         try:
             spark.sql(f"ALTER TABLE {fq} DROP FEATURE 'deletionVectors' TRUNCATE HISTORY")
         except Exception as e:
-            # If the feature isn't on the protocol (unusual workspace
-            # config), DROP FEATURE errors with FEATURE_NOT_PRESENT —
-            # safe to ignore. Real failures will surface in the next
-            # ALTER's IcebergCompatV2 validator.
+            # FEATURE_NOT_PRESENT / FEATURE_ALREADY_DROPPED is safe to
+            # ignore — feature wasn't on the protocol to start with, or
+            # was already removed by a prior run.
             msg = str(e)
-            if "FEATURE_NOT_PRESENT" not in msg and "doesn't exist" not in msg:
+            for marker in ("FEATURE_NOT_PRESENT", "doesn't exist",
+                           "FEATURE_ALREADY_DROPPED", "not supported"):
+                if marker in msg:
+                    break
+            else:
                 print(f"[uniform] {tbl} DROP FEATURE warn: {type(e).__name__}: {msg[:160]}")
         spark.sql(
             f"ALTER TABLE {fq} SET TBLPROPERTIES ("
