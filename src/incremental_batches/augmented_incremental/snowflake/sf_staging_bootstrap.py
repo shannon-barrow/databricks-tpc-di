@@ -435,6 +435,25 @@ def ensure_staging_environment(
 
     result = {"federation_setup": False, "native_setup": False}
 
+    # Always (re)apply UniForm on Databricks bronze sources before anything
+    # else. The `_has_uniform` skip makes this idempotent and cheap — but
+    # it catches the case where federation already exists from a prior run
+    # yet the underlying tables got regenerated as plain Delta by data_gen
+    # (regenerate_data=YES wipes tpcdi_incremental_staging_{sf}). Materialize
+    # bronze (step 4 in setup_sf_dt) reads through the federation, so the
+    # sources must be Iceberg-readable even when the Snowflake schemas look
+    # "complete" from a structural-existence standpoint.
+    if spark is None:
+        raise RuntimeError(
+            "spark session required to enable UniForm on Databricks sources. "
+            "Pass spark= to ensure_staging_environment() from the notebook."
+        )
+    enable_uniform_on_sources(
+        spark, databricks_catalog=databricks_catalog,
+        scale_factor=scale_factor,
+        tables=FEDERATED_TABLES,
+    )
+
     # State probe
     native_complete = False
     if _schema_exists(cur, catalog, native_schema):
@@ -461,22 +480,6 @@ def ensure_staging_environment(
 
     if native_complete and fed_complete:
         return result
-
-    # Always (re)apply UniForm on Databricks bronze sources before any
-    # cross-system read. The `_has_uniform` skip makes this idempotent
-    # and cheap — but it catches the case where federation already exists
-    # from a prior run yet the underlying tables got regenerated as plain
-    # Delta by data_gen (regenerate_data=YES wipes tpcdi_incremental_staging_{sf}).
-    if spark is None:
-        raise RuntimeError(
-            "spark session required to enable UniForm on Databricks sources. "
-            "Pass spark= to ensure_staging_environment() from the notebook."
-        )
-    enable_uniform_on_sources(
-        spark, databricks_catalog=databricks_catalog,
-        scale_factor=scale_factor,
-        tables=FEDERATED_TABLES,
-    )
 
     # Federation setup. Required before native CTAS can pull from it.
     if not fed_complete:
