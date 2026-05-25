@@ -164,12 +164,15 @@ def enable_uniform_on_sources(
     """
     src_schema = f"{databricks_catalog}.tpcdi_incremental_staging_{scale_factor}"
     tables = list(tables)
-    print(f"[uniform] enabling UniForm on {len(tables)} sources under {src_schema}")
+    print(f"[uniform] enabling UniForm (Iceberg V2) on {len(tables)} sources under {src_schema}")
     t0 = _time.time()
 
     def _has_uniform(fq: str) -> bool:
-        """True if the table already has `delta.universalFormat.enabledFormats`
-        including 'iceberg' (V2 or V3)."""
+        """True if `delta.universalFormat.enabledFormats` already includes
+        'iceberg' (V2 or V3). V3 is a one-way door — non-removable
+        feature, non-disable-able property — so we never try to downgrade
+        a V3 table. Snowflake's iceberg-rest federation reads both V2
+        and V3 sources, so accepting either is safe."""
         try:
             rows = spark.sql(f"SHOW TBLPROPERTIES {fq}").collect()
         except Exception:
@@ -183,47 +186,21 @@ def enable_uniform_on_sources(
         fq = f"{src_schema}.{tbl}"
         if _has_uniform(fq):
             continue
-        # IcebergCompatV2 rejects tables whose protocol declares the
-        # `deletionVectors` table-feature, even with
-        # delta.enableDeletionVectors=false. Idempotent sequence that
-        # also clears any V3 state left by prior failed attempts:
-        #   1. SET enableIcebergCompatV3=false (clear V3 if previously on —
-        #      VERSION_MUTUAL_EXCLUSIVE otherwise)
-        #   2. SET enableDeletionVectors=false (stop new DV writes)
-        #   3. DROP FEATURE deletionVectors TRUNCATE HISTORY (remove the
-        #      feature from the table protocol entirely)
-        #   4. SET enableIcebergCompatV2 + universalFormat
-        # Step 3 succeeds on freshly-created tables that never used DV.
-        # TRUNCATE HISTORY bypasses the default 24h retention requirement.
-        # V3 isn't a viable alternative: its enablement triggers an
-        # internal protocol manipulation that tries to drop `rowTracking`,
-        # which V3 itself depends on (DELTA_FEATURE_DROP_DEPENDENT_FEATURE).
-        # Use IcebergCompatV3 — Snowflake's iceberg-rest federation reads
-        # V3 sources without issue (verified directly against
-        # tpcdi_incremental_staging_20000.bronzedailymarket: federation
-        # CTAS returned all 5.3B rows). V3's enablement on a fresh Delta
-        # table sometimes surfaces a noisy "Cannot drop table feature
-        # rowTracking" error as Delta does internal protocol cleanup —
-        # but the table still ends up correctly in V3 state. We catch
-        # that specific error and verify post-hoc.
-        try:
-            spark.sql(
-                f"ALTER TABLE {fq} SET TBLPROPERTIES ("
-                f"  'delta.enableIcebergCompatV3'         = 'true',"
-                f"  'delta.universalFormat.enabledFormats'= 'iceberg'"
-                f")"
-            )
-        except Exception as e:
-            msg = str(e)
-            if "DELTA_FEATURE_DROP_DEPENDENT_FEATURE" in msg or "rowTracking" in msg:
-                # Noisy internal protocol-manipulation error. Verify the
-                # ALTER actually took effect; if so, proceed.
-                if not _has_uniform(fq):
-                    print(f"[uniform] {tbl} ALTER failed AND no UniForm post-state — re-raising")
-                    raise
-                # else: silently accept; table is in V3 state
-            else:
-                raise
+        # Two-step ALTER: turn DV off FIRST as its own transaction, then
+        # enable IcebergCompatV2 + UniForm in a second ALTER. Doing both
+        # in one ALTER fails — V2's validator checks the protocol state
+        # before the DV-disable has actually committed
+        # (DELTA_ICEBERG_COMPAT_VIOLATION.DELETION_VECTORS_SHOULD_BE_DISABLED).
+        # Tables created with `delta.enableDeletionVectors=false` at
+        # CREATE time never get the DV feature on the protocol, so the
+        # disable here is a no-op TBLPROPERTY write (no REORG needed).
+        spark.sql(f"ALTER TABLE {fq} SET TBLPROPERTIES ('delta.enableDeletionVectors' = 'false')")
+        spark.sql(
+            f"ALTER TABLE {fq} SET TBLPROPERTIES ("
+            f"  'delta.enableIcebergCompatV2'         = 'true',"
+            f"  'delta.universalFormat.enabledFormats'= 'iceberg'"
+            f")"
+        )
     print(f"[uniform] done in {_time.time() - t0:.1f}s")
 
 
