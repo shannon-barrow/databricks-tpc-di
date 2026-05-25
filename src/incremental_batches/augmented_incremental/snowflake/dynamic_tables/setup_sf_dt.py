@@ -29,7 +29,9 @@ dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000",
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
 dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
 dbutils.widgets.text("snowflake_warehouse", "BARROW_MED_GEN2",
-                     "WH used as the DT refresh warehouse (every DT runs on this)")
+                     "Steady-state DT refresh warehouse — what per-batch refreshes use")
+dbutils.widgets.text("backfill_warehouse", "",
+                     "Optional: bigger WH for one-time historical backfill (native staging CTAS + DT INITIALIZE). Empty = use snowflake_warehouse for everything.")
 dbutils.widgets.text("target_lag", "1 minute",
                      "TARGET_LAG for leaf gold DTs (intermediates use DOWNSTREAM)")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
@@ -44,6 +46,7 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 secret_scope     = dbutils.widgets.get("secret_scope")
 warehouse        = dbutils.widgets.get("snowflake_warehouse")
+backfill_warehouse = dbutils.widgets.get("backfill_warehouse").strip() or None
 target_lag       = dbutils.widgets.get("target_lag")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 dt_create_sql_path = dbutils.widgets.get("dt_create_sql_path")
@@ -105,6 +108,16 @@ def _new_conn():
         query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:ctas"},
     )
 
+def _new_backfill_conn():
+    """Connection on the (typically larger) backfill warehouse — used by the
+    one-time native-staging CTAS phase. Falls back to the steady-state
+    warehouse when backfill_warehouse is empty."""
+    return sf_connect(
+        database=catalog, secret_scope=secret_scope,
+        warehouse=backfill_warehouse or warehouse,
+        query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:backfill_ctas"},
+    )
+
 # Optional fresh PAT for refreshing the catalog integration's bearer token.
 # Only needed on first bootstrap or after PAT rotation (catalog integration
 # silently returns 403 once its embedded PAT expires).
@@ -129,6 +142,7 @@ boot = bootstrap.ensure_staging_environment(
     catalog_integration=catalog_integration,
     new_pat=_new_pat,
     new_connection=_new_conn,
+    backfill_connection=_new_backfill_conn if backfill_warehouse else None,
     parallel=8,
     spark=spark,
 )
@@ -205,11 +219,18 @@ with open(dt_create_sql_path, "r") as _f:
 import re
 _clean = re.sub(r"--[^\n]*\n", "\n", _ddl_template)
 
+# CREATE OR REPLACE DYNAMIC TABLE ... INITIALIZE = ON_CREATE blocks until
+# the DT's initial refresh completes on its WAREHOUSE attribute. At larger
+# SFs the initial materialization is heavy; we want it on the backfill WH
+# (e.g. 2X-Large). After all DTs are created + initialized, an ALTER pass
+# below moves the persistent WAREHOUSE attribute to the steady-state WH
+# so per-batch refreshes run on the smaller measurement-target warehouse.
+_create_warehouse = backfill_warehouse or warehouse
 _subs = {
     "{catalog}":        catalog,
     "{schema}":         target_schema,
     "{staging_schema}": staging_schema,
-    "{warehouse}":      warehouse,
+    "{warehouse}":      _create_warehouse,
     "{target_lag}":     f"'{target_lag}'",
 }
 for _k, _v in _subs.items():
@@ -276,7 +297,10 @@ for stmt in _non_dt_stmts:
 import concurrent.futures as _cf
 
 def _exec_one(name: str) -> tuple[str, float]:
-    _c = _new_conn()
+    # Use the backfill connection so the DDL's INITIALIZE = ON_CREATE
+    # initial refresh runs on the backfill warehouse. If no backfill is
+    # configured, falls back to the steady-state warehouse.
+    _c = _new_backfill_conn() if backfill_warehouse else _new_conn()
     try:
         _t0 = _time.time()
         with _c.cursor() as _cc:
@@ -301,6 +325,24 @@ for level_idx, level in enumerate(_levels, 1):
                 raise
     print(f"[ddl] level {level_idx} done in {_time.time() - _t_lvl:.1f}s")
 print(f"[ddl] all DDL applied in {_time.time() - _t_ddl:.1f}s")
+
+# COMMAND ----------
+
+# Backfill-WH-only post-step: now that all DTs are created and have done
+# their INITIALIZE = ON_CREATE refresh on the backfill warehouse, ALTER
+# each one to set its persistent WAREHOUSE to the steady-state warehouse.
+# This is the warehouse that subsequent per-batch refreshes will use —
+# the one we want to measure for the benchmark.
+if backfill_warehouse and backfill_warehouse != warehouse:
+    print(f"[wh-swap] moving {len(_dt_stmts)} DTs from backfill WH {backfill_warehouse!r} "
+          f"to steady-state WH {warehouse!r}")
+    _t_swap = _time.time()
+    for _name in sorted(_dt_stmts):
+        cur.execute(
+            f"ALTER DYNAMIC TABLE {catalog}.{target_schema}.{_name} "
+            f"SET WAREHOUSE = {warehouse}"
+        )
+    print(f"[wh-swap] done in {_time.time() - _t_swap:.1f}s")
 
 # COMMAND ----------
 

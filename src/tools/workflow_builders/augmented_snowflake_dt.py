@@ -266,6 +266,8 @@ def build_parent(
                 "{{job.parameters.catalog_integration}}",
             "dbx_pat_secret_key":
                 "{{job.parameters.dbx_pat_secret_key}}",
+            "backfill_warehouse":
+                "{{job.parameters.backfill_warehouse}}",
         },
         existing_cluster_id=interactive_cluster_id,
     )
@@ -350,6 +352,7 @@ def build_parent(
             {"name": "incremental_batches_to_run",  "default": "365"},
             {"name": "catalog_integration",         "default": "TPCDI_DBX_UC_SF10_INT"},
             {"name": "dbx_pat_secret_key",          "default": "dbx_pat_workspace"},
+            {"name": "backfill_warehouse",          "default": ""},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         "queue": {"enabled": True},
