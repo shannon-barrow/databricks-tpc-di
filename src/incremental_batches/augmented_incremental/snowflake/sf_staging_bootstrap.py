@@ -143,6 +143,20 @@ def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60)
             raise
 
 
+# Federated Iceberg table reads fail with "parquet file ... was inaccessible"
+# when the underlying Delta has been regenerated (data_gen wipe + rebuild)
+# since the federation's metadata snapshot was last refreshed. Snowflake
+# pins the iceberg-metadata file at CREATE / last REFRESH time, so a
+# stale Snowflake cursor can point at parquet that no longer exists.
+# Fix: ALTER ICEBERG TABLE ... REFRESH and retry. Catching only the read
+# path avoids the cost of refreshing every fed table on every run.
+_STALE_METADATA_MARKER = "was inaccessible"
+
+
+def _is_stale_metadata_error(exc: BaseException) -> bool:
+    return _STALE_METADATA_MARKER in str(exc)
+
+
 # ============================================================================
 # Enable UniForm on the Databricks-side bronze sources (one-time per SF)
 # ============================================================================
@@ -283,12 +297,24 @@ def setup_native_staging(
             owned = new_connection is not None
             try:
                 t0 = _time.time()
+                ctas_sql = (
+                    f"CREATE OR REPLACE TABLE {catalog}.{native_schema}.{tbl}"
+                    f"{cluster} AS "
+                    f"SELECT * FROM {catalog}.{dbx_schema}.{tbl}"
+                )
                 with c.cursor() as cc:
-                    cc.execute(
-                        f"CREATE OR REPLACE TABLE {catalog}.{native_schema}.{tbl}"
-                        f"{cluster} AS "
-                        f"SELECT * FROM {catalog}.{dbx_schema}.{tbl}"
-                    )
+                    try:
+                        cc.execute(ctas_sql)
+                    except Exception as e:
+                        if not _is_stale_metadata_error(e):
+                            raise
+                        print(f"[refresh] ctas {native_schema}.{tbl}: "
+                              f"stale Iceberg metadata; ALTER ICEBERG TABLE "
+                              f"{catalog}.{dbx_schema}.{tbl} REFRESH")
+                        cc.execute(
+                            f"ALTER ICEBERG TABLE {catalog}.{dbx_schema}.{tbl} REFRESH"
+                        )
+                        cc.execute(ctas_sql)
                     cc.execute(
                         f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
                         f"WHERE TABLE_SCHEMA = UPPER('{native_schema}') "
@@ -357,12 +383,24 @@ def materialize_bronze_into_schema(
             owned = new_connection is not None
             try:
                 t0 = _time.time()
+                ctas_sql = (
+                    f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
+                    f"CHANGE_TRACKING = TRUE AS "
+                    f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
+                )
                 with c.cursor() as cc:
-                    cc.execute(
-                        f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
-                        f"CHANGE_TRACKING = TRUE AS "
-                        f"SELECT * FROM {catalog}.{dbx_schema}.{name}"
-                    )
+                    try:
+                        cc.execute(ctas_sql)
+                    except Exception as e:
+                        if not _is_stale_metadata_error(e):
+                            raise
+                        print(f"[refresh] ctas {target_schema}.{name}: "
+                              f"stale Iceberg metadata; ALTER ICEBERG TABLE "
+                              f"{catalog}.{dbx_schema}.{name} REFRESH")
+                        cc.execute(
+                            f"ALTER ICEBERG TABLE {catalog}.{dbx_schema}.{name} REFRESH"
+                        )
+                        cc.execute(ctas_sql)
                     cc.execute(
                         f"SELECT ROW_COUNT FROM {catalog}.INFORMATION_SCHEMA.TABLES "
                         f"WHERE TABLE_SCHEMA = UPPER('{target_schema}') "
