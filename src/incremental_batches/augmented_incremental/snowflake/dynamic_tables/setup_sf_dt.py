@@ -86,13 +86,16 @@ print(f"[ok] bootstrap module loaded from {_snowflake_dir}")
 
 # COMMAND ----------
 
-# Single primary connection for the whole setup. The bootstrap module's
-# parallel CTAS needs to open its own connections (snowflake-connector is
-# not thread-safe across workers), so we pass it a factory closure.
+# ALL setup-notebook queries run on the setup warehouse: backfill_warehouse
+# if provided, else snowflake_warehouse. The steady-state snowflake_warehouse
+# only gets used as the WAREHOUSE attribute on DTs via the ALTER pass at
+# the end — that's what per-batch refreshes run on, not setup work.
+setup_warehouse = backfill_warehouse or warehouse
+
 conn = sf_connect(
     database=catalog,
     secret_scope=secret_scope,
-    warehouse=warehouse,
+    warehouse=setup_warehouse,
     query_tag={
         "wh_db":        wh_db,
         "scale_factor": scale_factor,
@@ -100,22 +103,15 @@ conn = sf_connect(
         "task":         "setup_sf_dt",
     },
 )
-print(f"[ok] connected to Snowflake; warehouse = {warehouse}")
+print(f"[ok] connected to Snowflake; setup warehouse = {setup_warehouse} "
+      f"(steady-state DT refresh warehouse = {warehouse})")
 
 def _new_conn():
+    """Worker connection on the setup warehouse. Used by every parallel
+    CTAS / ALTER / DDL — bootstrap, bronze materialization, dt_create.sql."""
     return sf_connect(
-        database=catalog, secret_scope=secret_scope, warehouse=warehouse,
-        query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:ctas"},
-    )
-
-def _new_backfill_conn():
-    """Connection on the (typically larger) backfill warehouse — used by the
-    one-time native-staging CTAS phase. Falls back to the steady-state
-    warehouse when backfill_warehouse is empty."""
-    return sf_connect(
-        database=catalog, secret_scope=secret_scope,
-        warehouse=backfill_warehouse or warehouse,
-        query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:backfill_ctas"},
+        database=catalog, secret_scope=secret_scope, warehouse=setup_warehouse,
+        query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:worker"},
     )
 
 # Optional fresh PAT for refreshing the catalog integration's bearer token.
@@ -142,7 +138,6 @@ boot = bootstrap.ensure_staging_environment(
     catalog_integration=catalog_integration,
     new_pat=_new_pat,
     new_connection=_new_conn,
-    backfill_connection=_new_backfill_conn if backfill_warehouse else None,
     parallel=8,
     spark=spark,
 )
@@ -300,7 +295,7 @@ def _exec_one(name: str) -> tuple[str, float]:
     # Use the backfill connection so the DDL's INITIALIZE = ON_CREATE
     # initial refresh runs on the backfill warehouse. If no backfill is
     # configured, falls back to the steady-state warehouse.
-    _c = _new_backfill_conn() if backfill_warehouse else _new_conn()
+    _c = _new_conn()
     try:
         _t0 = _time.time()
         with _c.cursor() as _cc:

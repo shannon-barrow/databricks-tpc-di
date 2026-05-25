@@ -407,7 +407,6 @@ def ensure_staging_environment(
     new_connection: Optional[Callable[[], object]] = None,
     parallel: int = 8,
     spark = None,
-    backfill_connection: Optional[Callable[[], object]] = None,
 ) -> dict:
     """Idempotent self-bootstrap. Returns a dict describing what was done.
 
@@ -486,15 +485,10 @@ def ensure_staging_environment(
 
     # Native staging setup — CTAS silver/gold/ref from the federation we
     # just (re)created. Skipped if native already has all 22 tables.
-    # `backfill_connection` overrides the per-worker factory so the heavy
-    # CTAS phase runs on a separate (typically larger) warehouse than the
-    # one used for steady-state setup. Falls back to `new_connection`
-    # when not provided.
     if not native_complete:
         setup_native_staging(
             conn, catalog=catalog, scale_factor=scale_factor,
-            new_connection=backfill_connection or new_connection,
-            parallel=parallel,
+            new_connection=new_connection, parallel=parallel,
         )
         result["native_setup"] = True
 
