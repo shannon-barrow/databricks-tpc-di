@@ -143,18 +143,39 @@ def _retry_on_vending(fn, *, label: str, attempts: int = 3, delay_sec: int = 60)
             raise
 
 
-# Federated Iceberg table reads fail with "parquet file ... was inaccessible"
-# when the underlying Delta has been regenerated (data_gen wipe + rebuild)
-# since the federation's metadata snapshot was last refreshed. Snowflake
-# pins the iceberg-metadata file at CREATE / last REFRESH time, so a
-# stale Snowflake cursor can point at parquet that no longer exists.
-# Fix: ALTER ICEBERG TABLE ... REFRESH and retry. Catching only the read
-# path avoids the cost of refreshing every fed table on every run.
-_STALE_METADATA_MARKER = "was inaccessible"
+# Federated Iceberg-table reads fail when data_gen regenerated the underlying
+# Delta source. Two distinct error shapes:
+#   1. "parquet file ... was inaccessible" — the federation's pinned metadata
+#      snapshot points at parquet files that no longer exist (Delta wrote new
+#      snapshot in a new dir).
+#   2. "UUID of Iceberg table ... does not match the table UUID in metadata
+#      file" — the underlying Delta was DROP-recreated and now has a brand-new
+#      UUID; the federation's stored UUID-binding is stale.
+# REFRESH only fixes (1); for (2), Snowflake refuses to re-read metadata under
+# a different UUID. CREATE OR REPLACE ICEBERG TABLE re-binds and fixes both.
+# Catch on the CTAS read path so we only pay this cost for drifted tables.
+_STALE_FED_MARKERS = ("was inaccessible", "does not match the table UUID")
 
 
 def _is_stale_metadata_error(exc: BaseException) -> bool:
-    return _STALE_METADATA_MARKER in str(exc)
+    msg = str(exc)
+    return any(m in msg for m in _STALE_FED_MARKERS)
+
+
+def _rebind_federated_iceberg(
+    cur, *, catalog: str, dbx_schema: str, table: str,
+    catalog_integration: str, namespace: str,
+) -> None:
+    """CREATE OR REPLACE the federated Iceberg table — re-binds it to the
+    current UUID + metadata snapshot of the underlying Delta source via the
+    catalog integration. Use after detecting a stale-federation error on a
+    CTAS read."""
+    cur.execute(
+        f"CREATE OR REPLACE ICEBERG TABLE {catalog}.{dbx_schema}.{table} "
+        f"CATALOG = '{catalog_integration}' "
+        f"CATALOG_TABLE_NAME = '{table}' "
+        f"CATALOG_NAMESPACE = '{namespace}'"
+    )
 
 
 # ============================================================================
@@ -274,6 +295,8 @@ def setup_native_staging(
     scale_factor: str,
     new_connection: Optional[Callable[[], object]] = None,
     parallel: int = 8,
+    catalog_integration: str = "TPCDI_DBX_UC_SF10_INT",
+    databricks_catalog_namespace: Optional[str] = None,
 ) -> None:
     """CTAS the 22 native staging tables from STAGING_SF{sf}_DBX into STAGING_SF{sf}.
 
@@ -284,6 +307,7 @@ def setup_native_staging(
     """
     dbx_schema = f"STAGING_SF{scale_factor}_DBX"
     native_schema = f"STAGING_SF{scale_factor}"
+    namespace = databricks_catalog_namespace or f"tpcdi_incremental_staging_{scale_factor}"
 
     cur = conn.cursor()
     cur.execute(f"CREATE SCHEMA IF NOT EXISTS {catalog}.{native_schema}")
@@ -308,11 +332,13 @@ def setup_native_staging(
                     except Exception as e:
                         if not _is_stale_metadata_error(e):
                             raise
-                        print(f"[refresh] ctas {native_schema}.{tbl}: "
-                              f"stale Iceberg metadata; ALTER ICEBERG TABLE "
-                              f"{catalog}.{dbx_schema}.{tbl} REFRESH")
-                        cc.execute(
-                            f"ALTER ICEBERG TABLE {catalog}.{dbx_schema}.{tbl} REFRESH"
+                        print(f"[rebind] ctas {native_schema}.{tbl}: stale "
+                              f"federation; CREATE OR REPLACE ICEBERG TABLE "
+                              f"{catalog}.{dbx_schema}.{tbl}")
+                        _rebind_federated_iceberg(
+                            cc, catalog=catalog, dbx_schema=dbx_schema,
+                            table=tbl, catalog_integration=catalog_integration,
+                            namespace=namespace,
                         )
                         cc.execute(ctas_sql)
                     cc.execute(
@@ -363,6 +389,8 @@ def materialize_bronze_into_schema(
     target_schema: str,
     new_connection: Optional[Callable[[], object]] = None,
     parallel: int = 7,
+    catalog_integration: str = "TPCDI_DBX_UC_SF10_INT",
+    databricks_catalog_namespace: Optional[str] = None,
 ) -> None:
     """Per-run CTAS — copy each of the 7 federated bronze Iceberg tables into
     `target_schema` (the per-benchmark schema, e.g. SHANNON_AUG_SF_DT_10).
@@ -376,6 +404,7 @@ def materialize_bronze_into_schema(
     """
     dbx_schema = f"STAGING_SF{scale_factor}_DBX"
     sources = list(BRONZE_FEDERATION_TABLES)
+    namespace = databricks_catalog_namespace or f"tpcdi_incremental_staging_{scale_factor}"
 
     def _ctas_one(name: str) -> tuple[str, float, int]:
         def _do():
@@ -394,11 +423,13 @@ def materialize_bronze_into_schema(
                     except Exception as e:
                         if not _is_stale_metadata_error(e):
                             raise
-                        print(f"[refresh] ctas {target_schema}.{name}: "
-                              f"stale Iceberg metadata; ALTER ICEBERG TABLE "
-                              f"{catalog}.{dbx_schema}.{name} REFRESH")
-                        cc.execute(
-                            f"ALTER ICEBERG TABLE {catalog}.{dbx_schema}.{name} REFRESH"
+                        print(f"[rebind] ctas {target_schema}.{name}: stale "
+                              f"federation; CREATE OR REPLACE ICEBERG TABLE "
+                              f"{catalog}.{dbx_schema}.{name}")
+                        _rebind_federated_iceberg(
+                            cc, catalog=catalog, dbx_schema=dbx_schema,
+                            table=name, catalog_integration=catalog_integration,
+                            namespace=namespace,
                         )
                         cc.execute(ctas_sql)
                     cc.execute(
@@ -535,6 +566,8 @@ def ensure_staging_environment(
         setup_native_staging(
             conn, catalog=catalog, scale_factor=scale_factor,
             new_connection=new_connection, parallel=parallel,
+            catalog_integration=catalog_integration,
+            databricks_catalog_namespace=databricks_catalog_namespace,
         )
         result["native_setup"] = True
 

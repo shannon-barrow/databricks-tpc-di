@@ -190,6 +190,7 @@ bootstrap.materialize_bronze_into_schema(
     target_schema=target_schema,
     new_connection=_new_conn,
     parallel=7,
+    catalog_integration=catalog_integration,
 )
 
 # COMMAND ----------
