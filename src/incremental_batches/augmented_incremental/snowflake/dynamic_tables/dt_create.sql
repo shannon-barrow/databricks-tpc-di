@@ -471,99 +471,96 @@ JOIN {catalog}.{schema}.dimtrade t
 -- ============================================================================
 -- GOLD — factmarkethistory
 --
--- dbt approach: per-batch new-day rows with 52-week low/high computed via
--- MIN_BY/MAX_BY(object_construct) over the prior-365-day window.
+-- Pattern: pack (value, date) into one sortable integer in the per-row
+-- projection, then plain MIN/MAX over a date-ordered sliding 52w window
+-- recovers BOTH the value and the tiebreak date in a single windowed pass.
+-- Decoded downstream.
 --
--- DT approach: must use REFRESH_MODE = FULL. Snowflake DT INCREMENTAL
--- mode rejects this DDL for two independent reasons:
---   1. MIN_BY/MAX_BY window functions don't support sliding frames
---      ("Sliding window frame unsupported for function MIN_BY")
---   2. Float-typed aggregates can't share a query block with a join
--- A self-join WHERE-filter variant would force FULL anyway because the
--- lower bound moves daily (rows age out of the 52-week window). FULL
--- is the honest answer for this pattern on Snowflake DTs today.
+-- Why the encoding: the natural form is MIN_BY/MAX_BY(struct(date,value), value)
+-- over a sliding window — which Snowflake's DT compiler rejects ("Sliding
+-- window frame unsupported for function MIN_BY"). Plain MIN/MAX over a
+-- sliding frame IS supported AND incrementalizable. The encoding maps the
+-- MIN_BY semantics onto plain MIN by making the sort order (value asc,
+-- date asc) representable as a single integer.
+--
+-- Encoding (value tiebroken by EARLIEST date per TPC-DI spec):
+--   value_as_int = ROUND(value * 100)  -- captures cents as int
+--   date_slot    = 5-digit DATEDIFF(day, '1900-01-01', dm_date)
+--                  (5 digits = 273-year span from epoch; future-proof)
+--   LOW:  pack = value_int * 100000 + date_slot
+--           MIN picks smallest value; ties → smallest date_slot = earliest.
+--   HIGH: pack = value_int * 100000 + (99999 - date_slot)
+--           MAX picks largest value; ties → largest (99999 - date_slot)
+--                                          = smallest date_slot = earliest.
+--
+-- REFRESH_MODE = INCREMENTAL forced. Snowflake AUTO conservatively chose
+-- FULL for the joined query, but empirical refresh on a 1-day insert at
+-- SF=10 shows 7,352 inserted / 0 deleted / 0 copied — true append-only.
+-- (See incremental_test/10_pattern_i_with_joins.sql for the test harness.)
 -- ============================================================================
 
 CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factmarkethistory
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
-  REFRESH_MODE = FULL
+  REFRESH_MODE = INCREMENTAL
 AS
 WITH per_day AS (
-  -- One row per (symbol, day) — the bronze daily market grain.
   SELECT
-    dm_s_symb,
-    dm_date,
-    dm_close,
-    dm_high,
-    dm_low,
-    dm_vol
+    dm_s_symb, dm_date, dm_close, dm_high, dm_low, dm_vol,
+    -- LOW: MIN picks smallest value; ties broken by smallest date offset (earliest).
+    ROUND(dm_low::number(38,2)  * 100)::number(38,0) * 100000
+      +             DATEDIFF(day, DATE '1900-01-01', dm_date)        AS low_packed,
+    -- HIGH: MAX picks largest value; ties broken by largest (99999 - offset)
+    -- = smallest offset = earliest.
+    ROUND(dm_high::number(38,2) * 100)::number(38,0) * 100000
+      + (99999 -    DATEDIFF(day, DATE '1900-01-01', dm_date))       AS high_packed
   FROM {catalog}.{schema}.bronzedailymarket
 ),
-windowed_vals AS (
-  -- 52-week rolling MIN/MAX values. Plain MIN/MAX support sliding window
-  -- frames (only MIN_BY/MAX_BY don't, per Snowflake's DT compiler).
+windowed AS (
   SELECT
-    dm_s_symb,
-    dm_date,
-    dm_close,
-    dm_high,
-    dm_low,
-    dm_vol,
-    MIN(dm_low)  OVER (
+    dm_s_symb, dm_date, dm_close, dm_high, dm_low, dm_vol,
+    MIN(low_packed) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-    ) AS fiftytwoweeklow,
-    MAX(dm_high) OVER (
+    ) AS low_packed_52w,
+    MAX(high_packed) OVER (
       PARTITION BY dm_s_symb ORDER BY dm_date
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
-    ) AS fiftytwoweekhigh
+    ) AS high_packed_52w
   FROM per_day
 ),
-windowed AS (
-  -- Recover the date on which each 52-week low/high occurred by self-joining
-  -- back to per_day on (symbol, value, date in window). Pick MAX(date) to
-  -- break ties toward the most recent matching day.
+unpacked AS (
   SELECT
-    w.dm_s_symb, w.dm_date, w.dm_close, w.dm_high, w.dm_low, w.dm_vol,
-    w.fiftytwoweeklow, w.fiftytwoweekhigh,
-    MAX(plow.dm_date)  AS fiftytwoweeklowdate,
-    MAX(phigh.dm_date) AS fiftytwoweekhighdate
-  FROM windowed_vals w
-  LEFT JOIN per_day plow
-    ON  plow.dm_s_symb = w.dm_s_symb
-    AND plow.dm_date BETWEEN DATEADD('day', -364, w.dm_date) AND w.dm_date
-    AND plow.dm_low = w.fiftytwoweeklow
-  LEFT JOIN per_day phigh
-    ON  phigh.dm_s_symb = w.dm_s_symb
-    AND phigh.dm_date BETWEEN DATEADD('day', -364, w.dm_date) AND w.dm_date
-    AND phigh.dm_high = w.fiftytwoweekhigh
-  GROUP BY w.dm_s_symb, w.dm_date, w.dm_close, w.dm_high, w.dm_low, w.dm_vol,
-           w.fiftytwoweeklow, w.fiftytwoweekhigh
+    dm_s_symb, dm_date, dm_close, dm_high, dm_low, dm_vol,
+    (FLOOR(low_packed_52w  / 100000) / 100)::number(15,2)              AS fiftytwoweeklow,
+    DATEADD(day,            MOD(low_packed_52w,  100000), DATE '1900-01-01') AS fiftytwoweeklowdate,
+    (FLOOR(high_packed_52w / 100000) / 100)::number(15,2)              AS fiftytwoweekhigh,
+    DATEADD(day, 99999 -    MOD(high_packed_52w, 100000), DATE '1900-01-01') AS fiftytwoweekhighdate
+  FROM windowed
 )
 SELECT
   s.sk_securityid,
   s.sk_companyid,
-  TO_CHAR(dm.dm_date, 'YYYYMMDD')::number             AS sk_dateid,
-  DIV0(dm.dm_close,  f.prev_year_basic_eps)            AS peratio,
-  DIV0(s.dividend,   dm.dm_close) / 100                AS yield,
-  dm.fiftytwoweekhigh                                      AS fiftytwoweekhigh,
+  TO_CHAR(dm.dm_date, 'YYYYMMDD')::number                  AS sk_dateid,
+  DIV0(dm.dm_close, f.prev_year_basic_eps)                 AS peratio,
+  DIV0(s.dividend,  dm.dm_close) / 100                     AS yield,
+  dm.fiftytwoweekhigh,
   TO_CHAR(dm.fiftytwoweekhighdate, 'YYYYMMDD')::number     AS sk_fiftytwoweekhighdate,
-  dm.fiftytwoweeklow                                       AS fiftytwoweeklow,
+  dm.fiftytwoweeklow,
   TO_CHAR(dm.fiftytwoweeklowdate,  'YYYYMMDD')::number     AS sk_fiftytwoweeklowdate,
-  dm.dm_close AS closeprice,
-  dm.dm_high  AS dayhigh,
-  dm.dm_low   AS daylow,
-  dm.dm_vol   AS volume
-FROM windowed dm
+  dm.dm_close                                              AS closeprice,
+  dm.dm_high                                               AS dayhigh,
+  dm.dm_low                                                AS daylow,
+  dm.dm_vol                                                AS volume
+FROM unpacked dm
 JOIN {catalog}.{schema}.dimsecurity s
-  ON s.symbol = dm.dm_s_symb
- AND dm.dm_date >= s.effectivedate
- AND dm.dm_date <  s.enddate
+  ON  s.symbol    = dm.dm_s_symb
+  AND dm.dm_date >= s.effectivedate
+  AND dm.dm_date <  s.enddate
 LEFT JOIN {catalog}.{schema}.companyyeareps f
-  ON f.sk_companyid = s.sk_companyid
- AND QUARTER(dm.dm_date) = QUARTER(f.qtr_start_date)
- AND YEAR(dm.dm_date)    = YEAR(f.qtr_start_date);
+  ON  f.sk_companyid     = s.sk_companyid
+  AND QUARTER(dm.dm_date) = QUARTER(f.qtr_start_date)
+  AND YEAR(dm.dm_date)    = YEAR(f.qtr_start_date);
 
 
 -- ============================================================================
