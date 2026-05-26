@@ -81,6 +81,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.account_updates_from_customer
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (accountid)
 AS
 WITH latest_account AS (
   SELECT
@@ -119,7 +120,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimcustomer
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
-  CLUSTER BY (enddate)
+  CLUSTER BY (customerid)
 AS
 WITH ranked AS (
   SELECT
@@ -199,7 +200,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimaccount
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
-  CLUSTER BY (enddate)
+  CLUSTER BY (accountid)
 AS
 WITH unioned AS (
   SELECT cdc_flag, accountid, brokerid, customerid, accountdesc, taxstatus,
@@ -264,7 +265,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimtrade
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
-  CLUSTER BY (sk_closedateid)
+  CLUSTER BY (tradeid)
 AS
 WITH rawtrade AS (
   SELECT
@@ -331,7 +332,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factwatches
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
-  CLUSTER BY (sk_dateid_dateremoved)
+  CLUSTER BY (sk_customerid, sk_securityid)
 AS
 WITH w AS (
   SELECT
@@ -376,6 +377,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.currentaccountbalances
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (accountid)
 AS
 -- Cast FLOAT → NUMBER inside SUM (outer cast doesn't satisfy the INCREMENTAL
 -- change-tracking planner — it inspects the aggregate's input type).
@@ -403,7 +405,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factcashbalances
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
-  CLUSTER BY (sk_dateid)
+  CLUSTER BY (sk_accountid)
 AS
 WITH per_day AS (
   -- Cast FLOAT → NUMBER inside SUM so the windowed running balance below

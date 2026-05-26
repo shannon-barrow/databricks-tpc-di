@@ -71,6 +71,7 @@ FEDERATED_TABLES: tuple[str, ...] = tuple(sorted(set(
 
 # Cluster keys mirror the Databricks-side Liquid layout. Setting CLUSTER BY
 # in the native CTAS lets subsequent CLONEs inherit the layout.
+# Used by setup_native_staging (silver/gold/ref CTAS from federation).
 CLUSTER_KEYS: dict[str, str] = {
     "dimcustomer":           "enddate",
     "dimaccount":            "enddate",
@@ -87,6 +88,24 @@ CLUSTER_KEYS: dict[str, str] = {
     "bronzeholdings":        "event_dt",
     "bronzetrade":           "event_dt",
     "bronzewatches":         "event_dt",
+}
+
+# Per-run bronze CTAS cluster keys — distinct from CLUSTER_KEYS because the
+# Snowflake-side per-run bronze tables are read ONLY by DT INCREMENTAL refresh,
+# which does key-based lookups (PARTITION BY / GROUP BY / JOIN ON the source
+# system key), not time-range scans. Cluster on the same key the consuming DT
+# uses for its windowed/aggregate operations so Snowflake can prune the lookup
+# during incremental refresh. The dbt/SDP/cluster variants' bronze tables stay
+# on date-based clustering (CLUSTER_KEYS above) for their own time-range
+# access patterns.
+BRONZE_DT_CTAS_CLUSTER_KEYS: dict[str, str] = {
+    "bronzeaccount":         "accountid",          # dimaccount + AUFC PARTITION BY accountid
+    "bronzecashtransaction": "accountid",          # currentaccountbalances + factcashbalances GROUP BY accountid
+    "bronzecustomer":        "customerid",         # dimcustomer LEAD OVER PARTITION BY customerid
+    "bronzedailymarket":     "(dm_s_symb, dm_date)",  # factmarkethistory PARTITION BY symbol ORDER BY date
+    "bronzeholdings":        "hh_h_t_id",          # factholdings JOIN ON tradeid (= hh_h_t_id)
+    "bronzetrade":           "tradeid",            # dimtrade QUALIFY ROW_NUMBER OVER PARTITION BY tradeid
+    "bronzewatches":         "(w_c_id, w_s_symb)", # factwatches GROUP BY (customerid, symbol)
 }
 
 
@@ -412,7 +431,12 @@ def materialize_bronze_into_schema(
             owned = new_connection is not None
             try:
                 t0 = _time.time()
-                cluster = f" CLUSTER BY ({CLUSTER_KEYS[name]})" if name in CLUSTER_KEYS else ""
+                # Use DT-aligned cluster keys (PARTITION BY / GROUP BY / JOIN
+                # column the consuming DT looks up by), not the date-based
+                # CLUSTER_KEYS used for setup_native_staging.
+                ck = BRONZE_DT_CTAS_CLUSTER_KEYS.get(name)
+                # If key is parenthesized already, use as-is; otherwise wrap.
+                cluster = f" CLUSTER BY {ck if ck and ck.startswith('(') else f'({ck})'}" if ck else ""
                 ctas_sql = (
                     f"CREATE OR REPLACE TABLE {catalog}.{target_schema}.{name} "
                     f"CHANGE_TRACKING = TRUE{cluster} AS "
