@@ -119,6 +119,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimcustomer
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (enddate)
 AS
 WITH ranked AS (
   SELECT
@@ -198,6 +199,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimaccount
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (enddate)
 AS
 WITH unioned AS (
   SELECT cdc_flag, accountid, brokerid, customerid, accountdesc, taxstatus,
@@ -262,6 +264,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.dimtrade
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (sk_closedateid)
 AS
 WITH rawtrade AS (
   SELECT
@@ -328,6 +331,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factwatches
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (sk_dateid_dateremoved)
 AS
 WITH w AS (
   SELECT
@@ -399,6 +403,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factcashbalances
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (sk_dateid)
 AS
 WITH per_day AS (
   -- Cast FLOAT → NUMBER inside SUM so the windowed running balance below
@@ -442,6 +447,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factholdings
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (sk_dateid)
 AS
 WITH events AS (
   SELECT
@@ -503,6 +509,7 @@ CREATE OR REPLACE DYNAMIC TABLE {catalog}.{schema}.factmarkethistory
   TARGET_LAG   = DOWNSTREAM
   WAREHOUSE    = {warehouse}
   REFRESH_MODE = INCREMENTAL
+  CLUSTER BY (sk_dateid)
 AS
 WITH per_day AS (
   SELECT
