@@ -38,3 +38,21 @@ sources:
           AS-OF-BATCH-START state of dimaccount, matching the Classic
           streaming foreachBatch semantics. The DAG remains acyclic:
           source -> bronzeaccount -> silver/dimaccount -> (next batch's source).
+
+  # BigQuery-only: the 7 wildcard external tables created by setup_bq.py.
+  # Each points at gs://.../_dailybatches/{wh_db}_{N}/*/{Dataset}.txt and is
+  # rescanned at query time, so the current batch's CSV is what bronze sees.
+  # Database (project) + dataset are fully qualified here because BQ resolves
+  # FROM identifiers against the project's catalog graph.
+  - name: csv
+    description: BQ external tables (CSV) for the per-batch file drops.
+    database: "{{ var('catalog') }}"
+    schema: "{{ var('wh_db') }}_{{ var('scale_factor') }}_bronze"
+    tables:
+      - name: Customer
+      - name: Account
+      - name: Trade
+      - name: CashTransaction
+      - name: HoldingHistory
+      - name: DailyMarket
+      - name: WatchHistory

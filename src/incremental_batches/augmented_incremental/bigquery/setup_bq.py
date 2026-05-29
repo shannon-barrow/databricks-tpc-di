@@ -3,7 +3,7 @@
 # BQ compute beyond zero-copy CLONEs + tiny DDL).
 #
 # Sequence:
-#   1. CREATE OR REPLACE BQ dataset {bq_project}.{wh_db}_sf{sf}
+#   1. CREATE OR REPLACE BQ dataset {bq_project}.{wh_db}_{sf}
 #   2. CLONE 22 historical/reference tables from
 #      {bq_project}.tpcdi_staging_sf{sf} (BigQuery CLONE TABLE — zero-copy,
 #      metadata-only)
@@ -28,7 +28,7 @@ dbutils.library.restartPython()
 # COMMAND ----------
 
 dbutils.widgets.text("catalog",        "databricks-sandbox-perfeng", "BigQuery project (treated as `catalog`)")
-dbutils.widgets.text("wh_db",          "", "wh_db prefix; final dataset = {wh_db}_sf{scale_factor}")
+dbutils.widgets.text("wh_db",          "", "wh_db prefix; final dataset = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
                      "UC external volume root the per-batch files land under")
@@ -52,7 +52,7 @@ incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 if not wh_db:
     raise ValueError("wh_db is required")
 
-target_dataset  = f"{wh_db}_sf{scale_factor}"
+target_dataset  = f"{wh_db}_{scale_factor}"
 staging_dataset = f"tpcdi_staging_sf{scale_factor}"
 print(f"target  = {bq_project}.{target_dataset}")
 print(f"staging = {bq_project}.{staging_dataset} (clone source — self-bootstrapped if missing)")

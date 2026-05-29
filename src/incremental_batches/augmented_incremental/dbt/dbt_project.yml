@@ -24,10 +24,10 @@ vars:
   # snowflake_models/bronze/* models. Override via --vars per invocation.
   snowflake_stage: 'tpcdi_stage'
 
-# Two parallel model trees — the active one is selected by target.type at
-# parse time via +enabled flags below. Same dbt_project.yml drives both
-# Databricks and Snowflake runs; CLI controls which engine via --target.
-model-paths: ["models/", "snowflake_models/"]
+# Three parallel model trees — the active one is selected by target.type at
+# parse time via +enabled flags below. Same dbt_project.yml drives Databricks,
+# Snowflake, and BigQuery runs; CLI controls which engine via --target.
+model-paths: ["models/", "snowflake_models/", "bigquery_models/"]
 macro-paths: ["macros/"]
 seed-paths: ["seeds/"]
 test-paths: ["tests/"]
@@ -89,3 +89,21 @@ models:
       +materialized: incremental
       +on_schema_change: ignore
       +transient: false
+
+    # BigQuery tree (bigquery_models/bq_{bronze,silver,gold}/) — active only
+    # when --target=bigquery. Same +enabled gating pattern as the Snowflake
+    # tree, with `bq_` prefix to keep config keys distinct.
+    bq_bronze:
+      +enabled: "{{ target.type == 'bigquery' }}"
+      +materialized: incremental
+      +incremental_strategy: append
+      +on_schema_change: ignore
+    bq_silver:
+      +enabled: "{{ target.type == 'bigquery' }}"
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: ignore
+    bq_gold:
+      +enabled: "{{ target.type == 'bigquery' }}"
+      +materialized: incremental
+      +on_schema_change: ignore

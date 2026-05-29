@@ -1,6 +1,6 @@
 # Databricks notebook source
 # Quick smoke check: SELECT COUNT(*) from each of the 7 external tables in
-# {wh_db}_sf{N}_bronze. Used to verify setup_bq.py's wildcard external table
+# {wh_db}_{N}_bronze. Used to verify setup_bq.py's wildcard external table
 # URIs actually resolve to the current batch's CSV files after
 # simulate_filedrops_bq has run.
 
@@ -26,7 +26,7 @@ scale_factor = dbutils.widgets.get("scale_factor")
 secret_scope = dbutils.widgets.get("secret_scope")
 bq_location  = dbutils.widgets.get("bq_location")
 
-bronze_dataset = f"{wh_db}_sf{scale_factor}_bronze"
+bronze_dataset = f"{wh_db}_{scale_factor}_bronze"
 print(f"checking {bq_project}.{bronze_dataset}")
 
 # COMMAND ----------

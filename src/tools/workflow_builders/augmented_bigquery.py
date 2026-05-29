@@ -103,11 +103,11 @@ def _description_child(*, scale_factor: int, catalog: str, wh_db: str,
         f"at SF={scale_factor}. Triggered once per simulated business day "
         f"by the parent job's for_each_task. Each run drops the day's "
         f"pre-staged files into "
-        f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_sf{scale_factor}/` "
+        f"`{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}/` "
         f"(UC external volume backed by GCS), refreshes 7 BQ external tables "
         f"pointing at that directory, then runs dbt against "
         f"`--target bigquery` for that batch date. Models land in "
-        f"`{catalog}.{wh_db}_sf{scale_factor}` on the BigQuery side."
+        f"`{catalog}.{wh_db}_{scale_factor}` on the BigQuery side."
     )
 
 
@@ -117,7 +117,7 @@ def _description_parent(*, scale_factor: int, catalog: str, wh_db: str,
         f"TPC-DI Augmented Incremental benchmark (BigQuery, **parent**) "
         f"at SF={scale_factor}. Sequence: (1) `setup_bq` runs on an "
         f"interactive cluster, dispatching SQL to BigQuery: CREATE the "
-        f"per-run BQ dataset `{catalog}.{wh_db}_sf{scale_factor}`, CLONE "
+        f"per-run BQ dataset `{catalog}.{wh_db}_{scale_factor}`, CLONE "
         f"the 22 reference + dimension tables from "
         f"`{catalog}.tpcdi_staging_sf{scale_factor}` (seeded once via "
         f"seed_staging_py — auto-bootstrapped on first run), pre-create "

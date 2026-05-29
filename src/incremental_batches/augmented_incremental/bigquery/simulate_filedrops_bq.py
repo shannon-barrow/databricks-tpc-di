@@ -6,7 +6,7 @@
 #
 # Adapter of the Snowflake-side `simulate_filedrops_sf.py`. Only difference:
 # the volume backs GCS (not S3) and the per-batch dir is named
-# `{wh_db}_sf{N}` instead of `{wh_db}_{N}` so dbt-bigquery's dataset naming
+# `{wh_db}_{N}` instead of `{wh_db}_{N}` so dbt-bigquery's dataset naming
 # (lowercase, `_sf{N}` suffix) lines up with the volume layout.
 
 import os
@@ -31,7 +31,7 @@ file_ext        = dbutils.widgets.get("file_ext").strip()
 
 read_file_ext = "csv" if file_ext == "txt" else file_ext
 
-batches_dir = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_sf{scale_factor}"
+batches_dir = f"{tpcdi_directory}augmented_incremental/_dailybatches/{wh_db}_{scale_factor}"
 staging_dir = f"{tpcdi_directory}augmented_incremental/_staging/sf={scale_factor}"
 
 DATASETS = [

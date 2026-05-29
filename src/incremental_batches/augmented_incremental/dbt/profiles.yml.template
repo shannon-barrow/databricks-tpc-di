@@ -1,6 +1,7 @@
 # Copy to ~/.dbt/profiles.yml (or set DBT_PROFILES_DIR to this directory) and fill in credentials.
 # `target` selects the engine. dbt_project.yml +enabled flags route models from
-# models/ when target=databricks and from snowflake_models/ when target=snowflake.
+# models/ when target=databricks, snowflake_models/ when target=snowflake, or
+# bigquery_models/ when target=bigquery.
 dbt_augmented_incremental:
   target: databricks
   outputs:
@@ -26,3 +27,15 @@ dbt_augmented_incremental:
       threads: 8
       # client_session_keep_alive: true                  # uncomment if dbt runs > 4h and you want to skip session expiry
       # authenticator: username_password_mfa             # for MFA-enabled accounts
+    bigquery:
+      # GCP project + service-account auth. The augmented_bigquery workflow
+      # writes profiles.yml inline from the `tpcdi_bigquery.sa_json` Databricks
+      # secret scope — this template is for manual ad-hoc runs.
+      type: bigquery
+      method: service-account
+      keyfile: /tmp/bq_sa/sa.json                        # path to a service-account JSON key
+      project: databricks-sandbox-perfeng                # BQ project
+      dataset: dbt_augmented_incremental                 # overridden per-model via generate_schema_name macro
+      location: us-central1                              # must match the GCS bucket region
+      threads: 8
+      priority: interactive

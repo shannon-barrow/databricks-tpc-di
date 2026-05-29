@@ -75,7 +75,7 @@ def _sanitize_label(v):
     s = str(v).lower()
     return "".join(c if c.isalnum() or c in "-_" else "-" for c in s)[:63]
 
-target_dataset = f"{wh_db}_sf{scale_factor}"
+target_dataset = f"{wh_db}_{scale_factor}"
 lines = [
     "dbt_augmented_incremental:",
     "  target: bigquery",
@@ -125,7 +125,7 @@ print(res.stderr, file=sys.stderr)
 
 # Persist dbt output to a volume file so we can inspect failures even when
 # the run-output API truncates the notebook stdout.
-log_dir = f"{tpcdi_directory}_dbt_run_logs/{wh_db}_sf{scale_factor}_bq"
+log_dir = f"{tpcdi_directory}_dbt_run_logs/{wh_db}_{scale_factor}_bq"
 log_path = f"{log_dir}/{batch_date}.log"
 try:
     dbutils.fs.mkdirs(log_dir)
