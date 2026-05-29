@@ -48,7 +48,7 @@ def upsertToDelta(microBatchOutputDF, batch_id):
       where dm_date > date_sub('{batch_date}', 365)
       group by all
     )
-    SELECT
+    SELECT /*+ BROADCAST(f) */
       s.sk_securityid,
       s.sk_companyid,
       bigint(date_format(dm.dm_date, 'yyyyMMdd')) sk_dateid,
