@@ -53,6 +53,129 @@ def is_already_generated(spark, table_fq: str, expected_min_rows: int = 1) -> bo
         return False
 
 
+# Names of the historical staging tables built by augmented_staging's Stage 1
+# SQL tasks. The benchmark workflows (augmented_classic / _sdp / _dbt) DEEP
+# CLONE these into the benchmark working schema before each run, so they ARE
+# the consumables. If all are present in tpcdi_incremental_staging_{sf}, the
+# historical portion of staging is complete.
+_AUG_STAGING_TABLES = frozenset({
+    # ingest_* outputs (small reference tables)
+    "dimdate", "dimtime", "industry", "statustype", "taxrate", "tradetype",
+    "batchdate",
+    # Silver static dims
+    "dimbroker", "dimcompany", "dimsecurity", "financial",
+    # SCD2 historical dims/facts
+    "dimcustomer", "dimaccount", "dimtrade",
+    "factcashbalances", "factholdings", "factwatches",
+    "companyyeareps", "currentaccountbalances",
+    "dailymarket", "factmarkethistory",
+})
+
+# The 7 augmented-mode datasets that stage_files writes as partitioned CSV
+# trees under {volume_path}/{Dataset}/_pdate=*/part-*.csv (with a _SUCCESS
+# marker at the dataset root). These feed simulate_filedrops in the daily
+# Stage 1 loop.
+_AUG_PARTITIONED_DATASETS = (
+    "Customer", "Account", "Prospect", "Trade", "WatchHistory",
+    "CashTransaction", "DailyMarket",
+)
+
+# Standard-mode (non-augmented) Batch1 files that the single-batch SQL
+# benchmark ingests. Both DIGen-style names (e.g. HR.csv, Customer.txt) and
+# Spark-split forms (HR_1.txt, Customer_1.txt, …) are accepted.
+_STD_BATCH1_FILES = (
+    "HR.csv", "Customer.txt", "Account.txt", "CustomerMgmt.xml",
+    "Prospect.csv", "DailyMarket.txt", "WatchHistory.txt", "Trade.txt",
+    "TradeHistory.txt", "CashTransaction.txt", "HoldingHistory.txt",
+    "BatchDate.txt",
+)
+
+
+def _path_exists(dbutils, path: str) -> bool:
+    try:
+        dbutils.fs.ls(path)
+        return True
+    except Exception:
+        return False
+
+
+def staging_complete_check(spark, dbutils, *, catalog: str, scale_factor,
+                           augmented_incremental: bool, volume_path: str) -> bool:
+    """True if all staging tables/files the benchmark consumes are intact.
+
+    Used by the entry-point data_gen task to decide whether to short-circuit
+    the rest of the workflow (via the `staging_check` condition_task gate).
+
+    What's checked depends on the mode:
+
+    - **augmented_incremental=True** — both halves of Stage 0's output:
+      1. Every historical staging table in
+         ``{catalog}.tpcdi_incremental_staging_{sf}`` is present (the
+         dim/fact tables the benchmark setup notebooks DEEP CLONE from).
+      2. A ``_SUCCESS`` marker exists under each of the 7 partitioned-CSV
+         dataset dirs at ``{volume_path}/{Dataset}/`` (the daily-loop
+         file source).
+
+    - **augmented_incremental=False** — every expected raw file is present
+      in ``{volume_path}/Batch1`` (either as the DIGen single-file name or
+      the Spark-split form ``{stem}_N.{ext}``).
+
+    Intentionally does NOT check the cross-task intermediates in
+    ``{wh_db}_{sf}_stage`` — those get dropped by ``cleanup_intermediates``
+    at the end of every successful run, so they'd always look "missing" on
+    a re-trigger even when nothing needs regeneration.
+    """
+    if augmented_incremental:
+        # 1. Historical staging tables
+        staging_schema = f"{catalog}.tpcdi_incremental_staging_{scale_factor}"
+        try:
+            present = {r["tableName"] for r in
+                       spark.sql(f"SHOW TABLES IN {staging_schema}").collect()}
+        except Exception as e:
+            print(f"[staging_check] {staging_schema} not queryable "
+                  f"({type(e).__name__}: {e}) — treating as incomplete")
+            return False
+        missing = _AUG_STAGING_TABLES - present
+        if missing:
+            print(f"[staging_check] {staging_schema} missing tables: "
+                  f"{sorted(missing)}")
+            return False
+        # 2. Partitioned CSV trees with _SUCCESS markers
+        for dataset in _AUG_PARTITIONED_DATASETS:
+            marker = f"{volume_path.rstrip('/')}/{dataset}/_SUCCESS"
+            if not _path_exists(dbutils, marker):
+                print(f"[staging_check] missing _SUCCESS marker: {marker}")
+                return False
+        print(f"[staging_check] augmented staging intact: "
+              f"{len(_AUG_STAGING_TABLES)} tables in {staging_schema}, "
+              f"{len(_AUG_PARTITIONED_DATASETS)} partitioned CSV trees")
+        return True
+    else:
+        # Standard mode: check Batch1 raw files (the single-batch SQL
+        # benchmark consumes from here). Accept either DIGen-style single
+        # filenames or Spark-split forms (Customer_1.txt, Customer_2.txt, …).
+        batch1 = f"{volume_path.rstrip('/')}/Batch1"
+        try:
+            existing = {f.name.rstrip("/") for f in dbutils.fs.ls(batch1)}
+        except Exception as e:
+            print(f"[staging_check] {batch1} not listable "
+                  f"({type(e).__name__}: {e}) — treating as incomplete")
+            return False
+        for filename in _STD_BATCH1_FILES:
+            stem, _, ext = filename.rpartition(".")
+            split_prefix = f"{stem}_"
+            if filename in existing or any(
+                f.startswith(split_prefix) and f.endswith(f".{ext}")
+                for f in existing
+            ):
+                continue
+            print(f"[staging_check] missing from {batch1}: {filename}")
+            return False
+        print(f"[staging_check] standard-mode Batch1 intact "
+              f"({len(_STD_BATCH1_FILES)} expected files)")
+        return True
+
+
 def write_intermediate_delta(df, *, catalog: str, wh_db: str, scale_factor,
                              name: str, partition_cols: list = None) -> str:
     """Write ``df`` as a Delta temp table in ``{wh_db}_{sf}_stage``.
