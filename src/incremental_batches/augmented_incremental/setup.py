@@ -59,8 +59,24 @@ display(spark.sql(f"ALTER SCHEMA {catalog}.{tgt_db} ENABLE PREDICTIVE OPTIMIZATI
 # COMMAND ----------
 
 def clone_table(table_name, clone_type):
-    """SHALLOW or DEEP clone from staging, then ANALYZE for stats."""
+    """SHALLOW or DEEP clone from staging, then ANALYZE for stats.
+
+    For DEEP CLONE: staging tables are Uniform-enabled (DV off, IcebergCompatV2
+    on) so Snowflake can federate via the UC Iceberg REST endpoint. DEEP CLONE
+    inherits TBLPROPERTIES, so the variant target would land with DV off — bad
+    for per-batch MERGE perf. Drop the Iceberg compat props and re-enable
+    deletion vectors. Shallow clones don't need this — they just share data
+    files with staging and DV state on a shallow clone is moot.
+    """
     spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} {clone_type} CLONE {catalog}.{staging_db}.{table_name}")
+    if clone_type == "DEEP":
+        spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
+            UNSET TBLPROPERTIES IF EXISTS (
+              'delta.universalFormat.enabledFormats',
+              'delta.enableIcebergCompatV2'
+            )""")
+        spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
+            SET TBLPROPERTIES ('delta.enableDeletionVectors' = 'true')""")
     spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # COMMAND ----------

@@ -42,7 +42,9 @@ CREATE OR REPLACE TABLE DimTrade (
 CLUSTER BY (sk_closedateid)  -- liquid: matches setup choice
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false'
 );
 
 -- COMMAND ----------

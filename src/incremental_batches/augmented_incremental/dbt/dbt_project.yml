@@ -19,8 +19,15 @@ vars:
   # DATABRICKS_SKIP_OPTIMIZE=true env var. We don't want dbt-launched
   # OPTIMIZE during the benchmark — it would skew per-batch timings.
   databricks_skip_optimize: true
+  # Snowflake-only — name of the external stage that points at the same
+  # _dailybatches S3 prefix the Databricks Volume reads. Used by the
+  # snowflake_models/bronze/* models. Override via --vars per invocation.
+  snowflake_stage: 'tpcdi_stage'
 
-model-paths: ["models/"]
+# Two parallel model trees — the active one is selected by target.type at
+# parse time via +enabled flags below. Same dbt_project.yml drives both
+# Databricks and Snowflake runs; CLI controls which engine via --target.
+model-paths: ["models/", "snowflake_models/"]
 macro-paths: ["macros/"]
 seed-paths: ["seeds/"]
 test-paths: ["tests/"]
@@ -42,14 +49,43 @@ models:
     # dbt's default `generate_schema_name` macro APPENDS `+schema` to the
     # connection schema as `{default}_{custom}`, which would produce a
     # doubled name like `wh_db_sf_wh_db_sf`.
+
+    # Databricks tree (models/) — active only when --target=databricks.
     bronze:
+      +enabled: "{{ target.type == 'databricks' }}"
       +materialized: incremental
       +incremental_strategy: append
       +on_schema_change: ignore
     silver:
+      +enabled: "{{ target.type == 'databricks' }}"
       +materialized: incremental
       +incremental_strategy: merge
       +on_schema_change: ignore
     gold:
+      +enabled: "{{ target.type == 'databricks' }}"
       +materialized: incremental
       +on_schema_change: ignore
+
+    # Snowflake tree (snowflake_models/sf_{bronze,silver,gold}/) — active
+    # only when --target=snowflake. Subdir names are prefixed `sf_` to
+    # avoid colliding with the Databricks tree's bronze/silver/gold config
+    # paths (dbt's config resolution is based on subdir name *inside*
+    # model-paths, not the model-path itself, so unprefixed names would
+    # double-apply the +enabled flag to both engines).
+    sf_bronze:
+      +enabled: "{{ target.type == 'snowflake' }}"
+      +materialized: incremental
+      +incremental_strategy: append
+      +on_schema_change: ignore
+      +transient: false
+    sf_silver:
+      +enabled: "{{ target.type == 'snowflake' }}"
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: ignore
+      +transient: false
+    sf_gold:
+      +enabled: "{{ target.type == 'snowflake' }}"
+      +materialized: incremental
+      +on_schema_change: ignore
+      +transient: false

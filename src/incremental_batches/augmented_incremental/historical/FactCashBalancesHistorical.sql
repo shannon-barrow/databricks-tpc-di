@@ -26,7 +26,9 @@ CREATE OR REPLACE TABLE cashtransactionhistorical (
 CLUSTER BY (event_dt)  -- liquid: per-batch ingest filter is on event_dt (matches bronze layout the Liquid variants use)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false'
 );
 -- Spark gen omits cdc_flag from the cashtransaction Delta (it's always
 -- 'I' for CashTransaction); stage_files/CashTransaction.py synthesizes
@@ -50,7 +52,9 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
 CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt pre-create + Liquid dbt model unique key)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false'
 );
 CREATE OR REPLACE TABLE currentaccountbalances (
   ct_date DATE NOT NULL COMMENT 'Date of the latest transactions',
@@ -64,7 +68,9 @@ CREATE OR REPLACE TABLE currentaccountbalances (
 -- (CREATE OR REPLACE TABLE AS SELECT) so any cluster_by would be wiped.
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false'
 );
 
 -- COMMAND ----------

@@ -1,4 +1,6 @@
 # Copy to ~/.dbt/profiles.yml (or set DBT_PROFILES_DIR to this directory) and fill in credentials.
+# `target` selects the engine. dbt_project.yml +enabled flags route models from
+# models/ when target=databricks and from snowflake_models/ when target=snowflake.
 dbt_augmented_incremental:
   target: databricks
   outputs:
@@ -9,15 +11,18 @@ dbt_augmented_incremental:
       token: {ENTER_PAT_HERE}                            # personal access token; or use OAuth via env vars
       http_path: /sql/1.0/warehouses/{ENTER_WAREHOUSE_ID_HERE}
       catalog: main
-      schema: dbt_augmented_incremental                  # overridden per-model via dbt_project.yml +schema
+      schema: dbt_augmented_incremental                  # overridden per-model via generate_schema_name macro
       threads: 8
     snowflake:
+      # account identifier — single locator (e.g. tla33105) or org-account (e.g. kponzso-bwa95870)
       type: snowflake
       account: {ENTER_ACCOUNT_HERE}
       user: {ENTER_USER_HERE}
-      password: {ENTER_PASSWORD_HERE}
-      role: {ENTER_ROLE_HERE}
-      warehouse: {ENTER_WAREHOUSE_HERE}
-      database: {ENTER_DATABASE_HERE}
-      schema: dbt_augmented_incremental
+      password: {ENTER_PASSWORD_HERE}                    # or use private_key_path for keypair auth
+      role: {ENTER_ROLE_HERE}                            # needs USAGE on warehouse/db + CREATE on schema
+      warehouse: {ENTER_WAREHOUSE_HERE}                  # e.g. BARROW_XS_GEN2
+      database: {ENTER_DATABASE_HERE}                    # catalog equivalent — schemas land under this
+      schema: dbt_augmented_incremental                  # overridden per-model via generate_schema_name macro
       threads: 8
+      # client_session_keep_alive: true                  # uncomment if dbt runs > 4h and you want to skip session expiry
+      # authenticator: username_password_mfa             # for MFA-enabled accounts

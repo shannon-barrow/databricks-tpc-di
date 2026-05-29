@@ -123,15 +123,20 @@ _NN = "NOT NULL"
 
 def _tprops() -> str:
     """Stable tbl_props for staging tables — autoCompact off (we'll do a
-    final OPTIMIZE later if needed), optimizeWrite on for fewer/larger files."""
+    final OPTIMIZE later if needed), optimizeWrite on for fewer/larger
+    files. Plain Delta — no UniForm/IcebergCompatV2, no DV setting.
+    UniForm + DV-disable are applied lazily by setup_sf*'s one-time
+    bootstrap ALTER."""
     return ("'delta.autoOptimize.autoCompact'=False, "
-            "'delta.autoOptimize.optimizeWrite'=True")
+            "'delta.autoOptimize.optimizeWrite'=True, "
+            "'delta.columnMapping.mode'='name'")
 
 
 def _finwire_tprops() -> str:
     return ("'delta.dataSkippingNumIndexedCols' = 0, "
             "'delta.autoOptimize.autoCompact'=False, "
-            "'delta.autoOptimize.optimizeWrite'=True")
+            "'delta.autoOptimize.optimizeWrite'=True, "
+            "'delta.columnMapping.mode'='name'")
 
 
 def build(*, job_name: str, scale_factor: int, catalog: str,
@@ -384,7 +389,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     tasks.append(_make_task(
         task_key="Silver_DimCompany",
         notebook_path=f"{repo_src_path}/single_batch/SQL/DimCompany",
-        depends_on=["ingest_FinWire", "ingest_industry"],
+        # ingest_StatusType: DimCompany SQL joins against statustype to
+        # resolve the status code. On serverless the StatusType ingest can
+        # lag the FinWire/Industry ones; without an explicit dep this races
+        # and DimCompany hits TABLE_OR_VIEW_NOT_FOUND.
+        depends_on=["ingest_FinWire", "ingest_industry", "ingest_StatusType"],
         base_params={
             "tgt_schema": f"sk_companyid BIGINT {_NN} COMMENT 'Surrogate key for CompanyID', companyid BIGINT COMMENT 'Company identifier (CIK number)', status STRING COMMENT 'Company status', name STRING COMMENT 'Company name', industry STRING COMMENT 'Company\u2019s industry', sprating STRING COMMENT 'Standard & Poor company\u2019s rating', islowgrade BOOLEAN COMMENT 'True if this company is low grade', ceo STRING COMMENT 'CEO name', addressline1 STRING COMMENT 'Address Line 1', addressline2 STRING COMMENT 'Address Line 2', postalcode STRING COMMENT 'Zip or postal code', city STRING COMMENT 'City', stateprov STRING COMMENT 'State or Province', country STRING COMMENT 'Country', description STRING COMMENT 'Company description', foundingdate DATE COMMENT 'Date the company was founded', iscurrent BOOLEAN COMMENT 'True if this is the current record', batchid INT COMMENT 'Batch ID when this record was inserted', effectivedate DATE COMMENT 'Beginning of date range when this record was the current record', enddate DATE COMMENT 'Ending of date range when this record was the current record. A record that is not expired will use the date 9999-12-31.'",
             "constraints": ", CONSTRAINT dimcompany_pk PRIMARY KEY(sk_companyid), CONSTRAINT dimcompany_status_fk FOREIGN KEY (status) REFERENCES StatusType(st_name), CONSTRAINT dimcompany_industry_fk FOREIGN KEY (industry) REFERENCES Industry(in_name)",
@@ -522,13 +531,98 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         ))
         stage_files_keys.append(key)
 
+    # ---------------- Stage 1c: bronze_staging (DT variant prereq) ----------
+    # Optional — only runs when job parameter generate_bronze_staging=YES.
+    # Materializes the 7 historical bronze events (stg_target='tables' partition
+    # of each per-dataset Delta) into Iceberg-UniForm tables at
+    # `{catalog}.tpcdi_incremental_staging_{sf}.bronze<dataset>` so the Snowflake
+    # DT variant can clone them into bronze*_raw and let the DT DAG backfill
+    # silver/gold from cumulative bronze (no anchor-table problem).
+    #
+    # Gated by a condition_task on the job parameter. When the parameter is
+    # NO (or unset), the gate evaluates false and all 7 bronze tasks are
+    # SKIPPED — same-as-zero overhead for regular runs. When YES, the gate
+    # passes and the 7 tasks run in parallel with the historical SCD2 builds
+    # (they read the same source Delta tables but project to bronze schema).
+    BRONZE_STAGING_GATE = "bronze_staging_gate"
+    tasks.append({
+        "task_key": BRONZE_STAGING_GATE,
+        "depends_on": [{"task_key": "data_gen"}],
+        "run_if": "ALL_SUCCESS",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{job.parameters.generate_bronze_staging}}",
+            "right": "YES",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "notification_settings": {
+            "no_alert_for_skipped_runs": False,
+            "no_alert_for_canceled_runs": False,
+            "alert_on_last_attempt": False,
+        },
+        "webhook_notifications": {},
+    })
+
+    bs_path = f"{repo_src_path}/incremental_batches/augmented_incremental/bronze_staging"
+    _bronze_deps = {
+        "customer":         ["gen_customer"],
+        "account":          ["gen_customer"],
+        "cashtransaction":  ["gen_cashtransaction"],
+        # dailymarket: NOT here — the existing DailyMarketHistorical SQL
+        # already produces main.tpcdi_incremental_staging_{sf}.bronzedailymarket
+        # with the exact same projection + Iceberg-UniForm TBLPROPERTIES.
+        # Adding our own bronze_staging_dailymarket would race the historical
+        # task (DELTA_METADATA_CHANGED on CREATE OR REPLACE TABLE).
+        "holdings":         ["gen_holdinghistory"],
+        "trade":            ["gen_trade", "gen_tradehistory"],
+        "watches":          ["gen_watch_history"],
+    }
+    bronze_staging_keys: list[str] = []
+    for ds, deps in _bronze_deps.items():
+        key = f"bronze_staging_{ds}"
+        bronze_staging_keys.append(key)
+        # depends_on = gate (gated to TRUE) + the gen task(s) producing the source Delta
+        gated_deps: list = [{"task_key": BRONZE_STAGING_GATE, "outcome": "true"}]
+        gated_deps.extend({"task_key": d} for d in deps)
+        tasks.append({
+            "task_key": key,
+            "depends_on": gated_deps,
+            "run_if": "ALL_SUCCESS",
+            "notebook_task": {
+                "notebook_path": f"{bs_path}/stage_bronze_to_iceberg",
+                "source": "WORKSPACE",
+                "base_parameters": {
+                    "dataset": ds,
+                    "scale_factor": "{{job.parameters.scale_factor}}",
+                    "catalog": "{{job.parameters.catalog}}",
+                    "staging_schema": _STAGING_WH_DB,
+                },
+            },
+            "timeout_seconds": 0,
+            "email_notifications": {},
+            "notification_settings": {
+                "no_alert_for_skipped_runs": False,
+                "no_alert_for_canceled_runs": False,
+                "alert_on_last_attempt": False,
+            },
+            "webhook_notifications": {},
+            "max_retries": 3,
+            "min_retry_interval_millis": 15000,
+            "retry_on_timeout": True,
+        })
+
     # ---------------- Cleanup: drop the 7 temp Delta tables ----------------
     # Depends on every leaf in both branches. ALL_SUCCESS (not ALL_DONE) so
     # any failed task can be repair-run from the same source data — the
     # temp Delta tables stay around until everything has succeeded. Not
     # gated by delete_tables_when_finished because the temp Delta tables
     # are unconditionally temporary once we're past this point.
-    cleanup_deps = stage_files_keys + [
+    #
+    # Bronze staging tasks added to deps too — when the gate is FALSE, those
+    # tasks are SKIPPED, and ALL_SUCCESS treats SKIPPED as success-equivalent
+    # so cleanup still runs.
+    cleanup_deps = stage_files_keys + bronze_staging_keys + [
         "DimAccountHistorical", "DimTradeHistorical",
         "FactCashBalancesHistorical", "FactHoldingsHistorical",
         "FactWatchesHistorical", "CompanyYearEPS",
@@ -569,6 +663,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
             # Default "tpcdi_raw_data" matches Azure. AWS overrides to a schema
             # the user owns when the canonical one belongs to someone else.
                         # tpcdi_directory and wh_db are NOT job-level params — they're hardcoded per-task via base_parameters since data_gen_type=augmented_incremental fully determines both. predictive_optimization is dropped (PO is not enabled on the shared staging schema).
+            # Optional — gates the 7 bronze_staging tasks. Default NO so
+            # standard runs are unaffected. Set to YES at run-now time to
+            # also produce historical bronze events for the Snowflake DT
+            # variant.
+            {"name": "generate_bronze_staging", "default": "NO"},
         ],
         "queue": {"enabled": True},
         "tasks": tasks,

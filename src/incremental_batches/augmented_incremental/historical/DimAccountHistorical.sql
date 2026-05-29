@@ -25,7 +25,9 @@ CREATE OR REPLACE TABLE DimAccount (
 CLUSTER BY (enddate)  -- liquid: matches setup / setup_dbt (current rows = enddate=9999-12-31 cluster together)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
-  'delta.autoOptimize.optimizeWrite' = 'true'
+  'delta.autoOptimize.optimizeWrite' = 'true',
+  'delta.columnMapping.mode' = 'name',
+  'delta.enableDeletionVectors' = 'false'
 );
 
 -- COMMAND ----------
