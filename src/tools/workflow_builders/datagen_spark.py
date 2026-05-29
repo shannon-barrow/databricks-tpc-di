@@ -324,11 +324,14 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
 
     # cleanup_intermediates: depends on every gen + copy + audit_emit so
     # disk_cache temps are still readable up to that point.
+    # NONE_FAILED (not ALL_SUCCESS) so cleanup still runs when upstream
+    # tasks were excluded via run-now UI or skipped via staging_check.
+    # Failed upstream still blocks (preserves repair-run state).
     tasks.append(_make_task(
         task_key="cleanup_intermediates",
         notebook_path=f"{_dgt}/cleanup_intermediates",
         depends_on=_gen_keys + _copy_keys + ["audit_emit"],
-        run_if="ALL_SUCCESS",
+        run_if="NONE_FAILED",
         base_params=_wh_only, job_cluster_key=job_cluster_key,
     ))
 

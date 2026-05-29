@@ -282,7 +282,12 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="cleanup_intermediates",
         notebook_path=f"{_dgt_path}/cleanup_intermediates",
         depends_on=_gen_keys + _copy_keys,
-        run_if="ALL_SUCCESS",
+        # NONE_FAILED (not ALL_SUCCESS) so the cleanup still runs when
+        # upstream tasks were skipped via the run-now UI (e.g., user
+        # excluded bronze_staging or some gen tasks) or when
+        # staging_check[outcome=false] cascade-skipped the gen DAG.
+        # Failed upstream still blocks (preserves repair-run state).
+        run_if="NONE_FAILED",
         base_params={**_wh_param},
     ))
 
@@ -651,7 +656,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         task_key="cleanup_stage0",
         notebook_path=f"{repo_src_path}/tools/augmented_staging/cleanup_stage0",
         depends_on=cleanup_deps,
-        run_if="ALL_SUCCESS",
+        # NONE_FAILED so bronze_staging_* being SKIPPED via the
+        # bronze_staging_gate (generate_bronze_staging=NO) or via run-now
+        # UI exclusion does not block stage-0 cleanup. Failed upstream
+        # still blocks (preserves the partial state for repair).
+        run_if="NONE_FAILED",
         base_params={},
     ))
 

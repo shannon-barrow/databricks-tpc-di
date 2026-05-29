@@ -510,8 +510,8 @@ def test_augmented_staging_dag():
     assert expected_gens.issubset(cleanup_deps), \
         f"cleanup_intermediates missing deps: {expected_gens - cleanup_deps}"
     _ok("cleanup_intermediates depends on all gens")
-    assert by_key["cleanup_intermediates"]["run_if"] == "ALL_SUCCESS"
-    _ok("cleanup_intermediates runs ALL_SUCCESS")
+    assert by_key["cleanup_intermediates"]["run_if"] == "NONE_FAILED"
+    _ok("cleanup_intermediates runs NONE_FAILED")
     # staging_check condition_task gates wave-1 gens so the whole DAG
     # short-circuits when data_gen reports staging_complete=true.
     assert "staging_check" in keys, "staging_check condition_task missing"
