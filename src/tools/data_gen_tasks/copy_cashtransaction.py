@@ -20,7 +20,9 @@ catalog               = dbutils.widgets.get("catalog").strip()
 wh_db                 = dbutils.widgets.get("wh_db").strip()
 tpcdi_directory       = dbutils.widgets.get("tpcdi_directory").strip()
 log_level             = dbutils.widgets.get("log_level").strip()
-augmented_incremental = dbutils.widgets.get("augmented_incremental").strip().lower() == "true"_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+augmented_incremental = dbutils.widgets.get("augmented_incremental").strip().lower() == "true"
+
+_nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
 workspace_src_path = f"/Workspace{_nb_path.split('/src')[0]}/src"
 if f"{workspace_src_path}/tools" not in sys.path:
     sys.path.insert(0, f"{workspace_src_path}/tools")
