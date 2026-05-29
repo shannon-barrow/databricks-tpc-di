@@ -63,6 +63,17 @@ def test_datagen_spark():
     _ok(f"tag = {out['tags']}")
     assert "_DataGen" not in out["name"], "old _DataGen suffix leaked"
     _ok("no _DataGen suffix")
+    # staging_check gate between data_gen and wave-1 gens.
+    by_key = {t["task_key"]: t for t in out["tasks"]}
+    assert "staging_check" in by_key, "staging_check condition_task missing"
+    sc = by_key["staging_check"]
+    assert sc["condition_task"]["left"] == "{{tasks.data_gen.values.staging_complete}}"
+    assert sc["condition_task"]["right"] == "false"
+    for _w1 in ("gen_reference", "gen_hr", "gen_finwire", "gen_prospect"):
+        deps = by_key[_w1]["depends_on"]
+        assert any(d.get("task_key") == "staging_check" and d.get("outcome") == "true"
+                   for d in deps), f"{_w1} should depend on staging_check[outcome=true]"
+    _ok("staging_check gates wave-1 gens")
 
 
 def test_datagen_native():
@@ -501,10 +512,21 @@ def test_augmented_staging_dag():
     _ok("cleanup_intermediates depends on all gens")
     assert by_key["cleanup_intermediates"]["run_if"] == "ALL_SUCCESS"
     _ok("cleanup_intermediates runs ALL_SUCCESS")
-    # staging_check is gone — Stage 1 tasks wire directly to gen/copy.
-    assert "staging_check" not in keys, \
-        "staging_check should be removed; Stage 1 tasks wire to gen/copy directly"
-    _ok("staging_check removed")
+    # staging_check condition_task gates wave-1 gens so the whole DAG
+    # short-circuits when data_gen reports staging_complete=true.
+    assert "staging_check" in keys, "staging_check condition_task missing"
+    sc = by_key["staging_check"]
+    assert sc.get("condition_task", {}).get("op") == "EQUAL_TO"
+    assert sc["condition_task"]["left"] == "{{tasks.data_gen.values.staging_complete}}"
+    assert sc["condition_task"]["right"] == "false"
+    sc_deps = {d["task_key"] for d in sc["depends_on"]}
+    assert sc_deps == {"data_gen"}, f"staging_check should depend on data_gen, got {sc_deps}"
+    for _w1 in ("gen_reference", "gen_hr", "gen_finwire"):
+        deps = by_key[_w1]["depends_on"]
+        assert any(d.get("task_key") == "staging_check" and d.get("outcome") == "true"
+                   for d in deps), \
+            f"{_w1} should depend on staging_check[outcome=true], got {deps}"
+    _ok("staging_check gates wave-1 gens on outcome=true")
     # Spot-check Stage 1 wiring: stage_files_DailyMarket → gen_daily_market.
     sf_dm_deps = {d["task_key"] for d in by_key["stage_files_DailyMarket"]["depends_on"]}
     assert sf_dm_deps == {"gen_daily_market"}, \

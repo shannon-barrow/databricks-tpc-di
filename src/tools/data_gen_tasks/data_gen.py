@@ -78,7 +78,7 @@ if data_gen_type == "native":
 
 # Spark / augmented_incremental branch: init the cross-task intermediates.
 # Downstream gen_* / copy_* / audit_emit / cleanup_intermediates do the rest.
-from data_gen_tasks._shared import bootstrap, stage_schema_fq
+from data_gen_tasks._shared import bootstrap, stage_schema_fq, staging_complete_check
 
 ctx = bootstrap(spark=spark, dbutils=dbutils, scale_factor=scale_factor,
                 catalog=catalog, wh_db=wh_db, tpcdi_directory=tpcdi_directory,
@@ -149,9 +149,32 @@ if augmented_incremental and generate_bronze_staging == "YES" and regenerate_dat
         print(f"[data_gen] generate_bronze_staging=YES and all 7 bronze tables "
               f"already exist in {_staging_schema} — honoring raw regenerate_data=NO")
 
-if regenerate_data == "YES":
-    # Wipe the volume's per-SF tree, drop intermediates and dataset Deltas.
-    print(f"[data_gen] regenerate_data=YES → wiping {cfg.volume_path}")
+# Compute whether the benchmark-consumable staging output (NOT the
+# intermediates) is already intact. The downstream `staging_check`
+# condition_task gate reads the `staging_complete` task value this sets
+# below to short-circuit the rest of the workflow when everything's ready.
+# We always recompute even on regenerate_data=YES so the wipe-and-rebuild
+# decision is logged uniformly.
+_staging_complete = staging_complete_check(
+    spark, dbutils,
+    catalog=catalog,
+    scale_factor=scale_factor,
+    augmented_incremental=augmented_incremental,
+    volume_path=cfg.volume_path,
+)
+
+# Regenerate when explicitly requested OR when staging is incomplete (a
+# half-failed prior run, or a brand-new SF). In either case we wipe everything
+# stale first so the rebuild starts from a known-clean state — leftover
+# UniForm-enabled tables otherwise block plain-Delta CREATE OR REPLACE.
+_should_regenerate = (regenerate_data == "YES") or (not _staging_complete)
+
+if _should_regenerate:
+    if regenerate_data == "YES":
+        print(f"[data_gen] regenerate_data=YES → wiping {cfg.volume_path}")
+    else:
+        print(f"[data_gen] staging incomplete → wiping {cfg.volume_path} "
+              f"before rebuild")
     try:
         dbutils.fs.rm(cfg.volume_path, recurse=True)
     except Exception as e:
@@ -192,8 +215,16 @@ if regenerate_data == "YES":
         except Exception as e:
             print(f"[data_gen] {incr_schema} not present or empty: {type(e).__name__}: {e}")
 else:
-    print(f"[data_gen] regenerate_data=NO → keeping prior state for "
-          f"per-task self-skip")
+    print(f"[data_gen] regenerate_data=NO and staging intact → "
+          f"signaling staging_check to skip downstream tasks")
+
+# Emit the task value the downstream `staging_check` condition_task reads.
+# String literal because dbutils.jobs.taskValues stringifies booleans as
+# "true"/"false" — explicit match keeps the condition unambiguous.
+dbutils.jobs.taskValues.set(
+    "staging_complete",
+    "true" if (not _should_regenerate) else "false",
+)
 
 # COMMAND ----------
 

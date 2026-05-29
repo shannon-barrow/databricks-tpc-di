@@ -188,12 +188,32 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         notebook_path=f"{_dgt_path}/data_gen",
         base_params=_dgt_params,
     ))
-    # Wave 1 — no upstream gen dependencies.
+    # staging_check: condition_task gate that short-circuits everything below
+    # when data_gen reports staging_complete=true. The check looks at the
+    # benchmark consumables (tpcdi_incremental_staging_{sf} tables + the
+    # partitioned-CSV _SUCCESS markers), NOT the cross-task intermediates
+    # (which get dropped by cleanup_intermediates at end of every clean run).
+    # Outcome=true means "staging is incomplete, run the gens"; outcome=false
+    # cascades skips through every downstream task via run_if=ALL_SUCCESS.
+    tasks.append({
+        "task_key": "staging_check",
+        "depends_on": [{"task_key": "data_gen"}],
+        "run_if": "ALL_SUCCESS",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{tasks.data_gen.values.staging_complete}}",
+            "right": "false",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "webhook_notifications": {},
+    })
+    # Wave 1 — no upstream gen dependencies. Gated by staging_check[true].
     for _name in ("gen_reference", "gen_hr", "gen_finwire"):
         tasks.append(_make_task(
             task_key=_name,
             notebook_path=f"{_dgt_path}/{_name}",
-            depends_on=["data_gen"],
+            depends_on=[{"task_key": "staging_check", "outcome": "true"}],
             base_params=_dgt_params,
         ))
     # Wave 2 — depends on a wave-1 producer.
@@ -266,11 +286,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         base_params={**_wh_param},
     ))
 
-    # No staging_check gate — each Stage 1 task wires directly to the
-    # specific gen / copy task that produces its source data, so they
-    # start as soon as their actual inputs are ready (no synthetic
-    # all-gens-done barrier). Per-task self-skip in each gen handles the
-    # repair-friendly short-circuit.
+    # Stage 1 raw_ingestion / silver / historical tasks below depend on
+    # specific upstream gens / copies (not on data_gen directly), so when
+    # staging_check[outcome=false] cascades skips through the gen DAG,
+    # those skips propagate naturally through every downstream task via
+    # run_if=ALL_SUCCESS.
 
     # ---------------- Stage 1a: raw_ingestion ----------------
     raw_ingest_path = f"{repo_src_path}/single_batch/SQL/raw_ingestion"

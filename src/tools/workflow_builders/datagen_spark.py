@@ -227,12 +227,29 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         base_params=_base,
         job_cluster_key=job_cluster_key,
     ))
-    # Wave 1 — no upstream gen.
+    # staging_check: condition_task gate that short-circuits the entire gen
+    # DAG when data_gen reports staging_complete=true. Outcome=true means
+    # "staging is incomplete, run the gens"; outcome=false cascades skips
+    # through every downstream task via run_if=ALL_SUCCESS.
+    tasks.append({
+        "task_key": "staging_check",
+        "depends_on": [{"task_key": "data_gen"}],
+        "run_if": "ALL_SUCCESS",
+        "condition_task": {
+            "op": "EQUAL_TO",
+            "left": "{{tasks.data_gen.values.staging_complete}}",
+            "right": "false",
+        },
+        "timeout_seconds": 0,
+        "email_notifications": {},
+        "webhook_notifications": {},
+    })
+    # Wave 1 — no upstream gen. Gated by staging_check[true].
     for _name in ("gen_reference", "gen_hr", "gen_finwire", "gen_prospect"):
         tasks.append(_make_task(
             task_key=_name,
             notebook_path=f"{_dgt}/{_name}",
-            depends_on=["data_gen"],
+            depends_on=[{"task_key": "staging_check", "outcome": "true"}],
             base_params=_base,
             job_cluster_key=job_cluster_key,
         ))
