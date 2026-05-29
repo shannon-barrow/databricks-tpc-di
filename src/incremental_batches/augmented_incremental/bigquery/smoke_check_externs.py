@@ -43,10 +43,14 @@ client = bq_connect(
 
 DATASETS = ["Customer", "Account", "Trade", "CashTransaction",
             "HoldingHistory", "DailyMarket", "WatchHistory"]
+summary = []
 for name in DATASETS:
     fq = f"`{bq_project}.{bronze_dataset}.{name}`"
     try:
         n = list(client.query(f"SELECT COUNT(*) AS n FROM {fq}").result())[0]["n"]
-        print(f"  {name:18s} rows = {n:,}")
+        line = f"  {name:18s} rows = {n:,}"
     except Exception as e:
-        print(f"  {name:18s} FAIL: {type(e).__name__}: {str(e)[:200]}")
+        line = f"  {name:18s} FAIL: {type(e).__name__}: {str(e)[:200]}"
+    print(line)
+    summary.append(line)
+dbutils.notebook.exit("\n".join(summary))
