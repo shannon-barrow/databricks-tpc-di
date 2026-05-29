@@ -16,6 +16,20 @@ import requests
 
 # COMMAND ----------
 
+# MAGIC %pip install --quiet google-cloud-bigquery
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
+import os
+import concurrent.futures
+import requests
+
+# COMMAND ----------
+
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("catalog",         "databricks-sandbox-perfeng",
