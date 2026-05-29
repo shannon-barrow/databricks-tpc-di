@@ -231,7 +231,101 @@ print(f"[ok] target tables ready under {bq_project}.{target_dataset}")
 
 # COMMAND ----------
 
-# 4. Emit batch_date_ls — match setup_dbt.py / setup_sf.py exactly:
+# 4. Create 7 BigQuery external tables (one per dataset) with wildcard URIs
+# pointing at the per-(wh_db, sf) dailybatches root. Each batch,
+# simulate_filedrops_bq clears the dailybatches dir and writes just the
+# current day's 7 .txt files, so the wildcard `.../*/Dataset.txt` resolves
+# to exactly one file at any time. BQ rescans URIs at query time — no
+# per-batch refresh needed. This is the BQ equivalent of Snowflake's
+# implicit `@stage/{wh_db}/{batch_date}/Dataset.txt` path pattern.
+bronze_dataset = f"{target_dataset}_bronze"
+client.create_dataset(
+    bigquery.Dataset(f"{bq_project}.{bronze_dataset}"), exists_ok=True
+)
+# Column schemas mirror the bronze model declarations on the Databricks +
+# Snowflake sides. Databricks→BQ type mapping: BIGINT/INT/TINYINT→INT64,
+# DOUBLE→FLOAT64; STRING/DATE/TIMESTAMP unchanged. Pipe-delimited CSV with
+# no header (matches spark datagen output).
+DATASET_SCHEMAS = {
+    "Customer": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("customerid", "INT64"),
+        ("taxid", "STRING"), ("status", "STRING"), ("lastname", "STRING"),
+        ("firstname", "STRING"), ("middleinitial", "STRING"), ("gender", "STRING"),
+        ("tier", "INT64"), ("dob", "DATE"),
+        ("addressline1", "STRING"), ("addressline2", "STRING"),
+        ("postalcode", "STRING"), ("city", "STRING"), ("stateprov", "STRING"),
+        ("country", "STRING"),
+        ("c_ctry_1", "STRING"), ("c_area_1", "STRING"), ("c_local_1", "STRING"), ("c_ext_1", "STRING"),
+        ("c_ctry_2", "STRING"), ("c_area_2", "STRING"), ("c_local_2", "STRING"), ("c_ext_2", "STRING"),
+        ("c_ctry_3", "STRING"), ("c_area_3", "STRING"), ("c_local_3", "STRING"), ("c_ext_3", "STRING"),
+        ("email1", "STRING"), ("email2", "STRING"),
+        ("lcl_tx_id", "STRING"), ("nat_tx_id", "STRING"),
+        ("update_dt", "DATE"),
+    ],
+    "Account": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("accountid", "INT64"),
+        ("brokerid", "INT64"), ("customerid", "INT64"),
+        ("accountdesc", "STRING"), ("taxstatus", "INT64"), ("status", "STRING"),
+        ("update_dt", "DATE"),
+    ],
+    "Trade": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("tradeid", "INT64"),
+        ("t_dts", "TIMESTAMP"), ("status", "STRING"), ("t_tt_id", "STRING"),
+        ("cashflag", "INT64"), ("t_s_symb", "STRING"), ("quantity", "INT64"),
+        ("bidprice", "FLOAT64"), ("t_ca_id", "INT64"), ("executedby", "STRING"),
+        ("tradeprice", "FLOAT64"), ("fee", "FLOAT64"), ("commission", "FLOAT64"),
+        ("tax", "FLOAT64"), ("event_dt", "DATE"),
+    ],
+    "CashTransaction": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("accountid", "INT64"),
+        ("ct_dts", "TIMESTAMP"), ("ct_amt", "FLOAT64"), ("ct_name", "STRING"),
+        ("event_dt", "DATE"),
+    ],
+    "HoldingHistory": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("hh_h_t_id", "INT64"),
+        ("hh_t_id", "INT64"), ("hh_before_qty", "INT64"), ("hh_after_qty", "INT64"),
+        ("event_dt", "DATE"),
+    ],
+    "DailyMarket": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("dm_date", "DATE"),
+        ("dm_s_symb", "STRING"), ("dm_close", "FLOAT64"), ("dm_high", "FLOAT64"),
+        ("dm_low", "FLOAT64"), ("dm_vol", "INT64"),
+    ],
+    "WatchHistory": [
+        ("cdc_flag", "STRING"), ("cdc_dsn", "INT64"), ("w_c_id", "INT64"),
+        ("w_s_symb", "STRING"), ("w_dts", "TIMESTAMP"), ("w_action", "STRING"),
+        ("event_dt", "DATE"),
+    ],
+}
+# Wildcard URI per dataset. Resolves to whatever {batch_date}/Dataset.txt
+# is currently present under the dailybatches dir (always exactly one,
+# because simulate_filedrops_bq clears the prior day's dir before writing).
+dailybatches_root_gcs = (
+    f"{gcs_volume_prefix.rstrip('/')}/augmented_incremental/_dailybatches/"
+    f"{target_dataset}/"
+)
+for name, cols in DATASET_SCHEMAS.items():
+    src_uri = f"{dailybatches_root_gcs}*/{name}.txt"
+    cols_ddl = ", ".join(f"{n} {t}" for n, t in cols)
+    sql = f"""
+    CREATE OR REPLACE EXTERNAL TABLE `{bq_project}.{bronze_dataset}.{name}` (
+      {cols_ddl}
+    )
+    OPTIONS (
+      format = 'CSV',
+      uris = ['{src_uri}'],
+      field_delimiter = '|',
+      skip_leading_rows = 0,
+      ignore_unknown_values = false
+    )
+    """
+    client.query(sql).result()
+    print(f"[external] {bq_project}.{bronze_dataset}.{name} → {src_uri}")
+print(f"[ok] 7 external tables created in {bq_project}.{bronze_dataset}")
+
+# COMMAND ----------
+
+# 5. Emit batch_date_ls — match setup_dbt.py / setup_sf.py exactly:
 # AUG_FILES_DATE_START is hardcoded to 2016-07-06.
 import datetime as dt
 incr_start = dt.date(2016, 7, 6)
