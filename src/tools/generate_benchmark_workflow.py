@@ -120,7 +120,7 @@ def _generate_augmented(*, variant: str, parent_job_name: str,
         # task type runs commands against it. Warehouse name follows the same
         # pattern as the rest of the augmented workflow.
         wh_name = f"{wh_target}-tpcdi-dbt"
-        wh_dag_args = {"name": wh_name, "size": _dbt_wh_size(scale_factor)}
+        wh_dag_args = {"wh_name": wh_name, "wh_size": _dbt_wh_size(scale_factor)}
         wh_id = _get_or_create_warehouse(wh_name, wh_dag_args, workspace_src_path, api_call)
         print(f"  warehouse:      {wh_name} ({wh_id})")
         print()
