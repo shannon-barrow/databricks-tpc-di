@@ -17,21 +17,21 @@
 # MAGIC
 # MAGIC Each cell prints a link to the created workflow when it finishes.
 # MAGIC
-# MAGIC ## Choosing a workflow — SKU × Batch Type
-# MAGIC The Driver splits the workflow choice into two widgets so the dropdown
-# MAGIC stays short. Pick a **SKU** (compute shape) and a **Batch Type** (how
-# MAGIC the TPC-DI data is fed in). Combinations the SKU doesn't support are
-# MAGIC hidden automatically.
+# MAGIC ## Choosing a workflow
+# MAGIC The **Workflow** dropdown lists every valid SKU × Batch Type (× SDP
+# MAGIC Edition) combination so you can't end up in an unsupported state.
 # MAGIC
 # MAGIC | SKU \\ Batch Type | Single Batch | Incremental | Augmented Incremental |
 # MAGIC |---|:-:|:-:|:-:|
 # MAGIC | **Cluster** (classic / serverless job cluster) | ✓ | ✓ | ✓ |
 # MAGIC | **DBSQL** (serverless SQL warehouse) | ✓ | ✓ | — |
-# MAGIC | **SDP** (Spark Declarative Pipelines) | ✓ + edition | — | ✓ |
+# MAGIC | **SDP** (Spark Declarative Pipelines) | ✓ × {CORE,PRO,ADVANCED} | — | ✓ |
+# MAGIC | **dbt** (dbt-databricks on DBSQL) | — | — | ✓ |
 # MAGIC
-# MAGIC When **SKU=SDP × Batch Type=Single Batch**, an **Edition** dropdown
-# MAGIC appears: CORE (declarative SDP pipeline), PRO (adds `APPLY CHANGES
-# MAGIC INTO` for SCD Type 1/2), ADVANCED (adds Data Quality constraints).
+# MAGIC **SDP Editions** (CORE / PRO / ADVANCED) live as their own dropdown
+# MAGIC entries for the Single Batch case: CORE (declarative SDP pipeline),
+# MAGIC PRO (adds `APPLY CHANGES INTO` for SCD Type 1/2), ADVANCED (adds Data
+# MAGIC Quality constraints).
 # MAGIC
 # MAGIC **Augmented Incremental** is a 730-day daily-streaming variant — see
 # MAGIC `src/incremental_batches/augmented_incremental/` and CLAUDE.md for
@@ -41,10 +41,10 @@
 # MAGIC SF=20000 is staged today.
 # MAGIC
 # MAGIC ## Widget reference
-# MAGIC - **SKU** — Cluster / DBSQL / SDP. Picks the compute shape.
-# MAGIC - **Batch Type** — Single Batch / Incremental / Augmented Incremental.
-# MAGIC   Options dynamically filter to what the SKU supports.
-# MAGIC - **SDP Edition** (only when SKU=SDP × Single Batch) — CORE / PRO / ADVANCED.
+# MAGIC - **Workflow** — single dropdown of every valid SKU × Batch Type
+# MAGIC   combination (SDP Single Batch is split into 3 entries for the
+# MAGIC   three editions). Picks the compute shape and ingestion mode in
+# MAGIC   one selection.
 # MAGIC - **Data Generator** (`data_gen_type` on the created job) — `spark` (default) or `native`.
 # MAGIC   - `spark` → distributed PySpark generator on serverless. Output goes to `…/tpcdi_volume/spark_datagen/sf={SF}/`.
 # MAGIC   - `native` → legacy single-threaded DIGen.jar wrapped in `tools/digen_runner`. Forces a non-serverless DBR 15.4 + Photon cluster (Java subprocess can't run on serverless). Output goes to `…/tpcdi_volume/sf={SF}/`. Worker count scales with SF: single-node up to SF=1000; +1 worker per 1000 of SF above that.
@@ -78,6 +78,7 @@
 #
 # One-shot reset of any stale widgets left over from prior versions of this notebook (the original unprefixed names AND the briefly-shipped `NN_*` prefixed names). Safe to keep — no-op once the workspace state is clean.
 for _legacy in ("workflow_type", "batched",
+                "sku", "batch_type", "edition",
                 "01_sku", "02_batch_type", "03_edition",
                 "04_scale_factor", "05_data_generator",
                 "06_catalog", "07_wh_target", "08_job_name",
@@ -86,32 +87,37 @@ for _legacy in ("workflow_type", "batched",
   try: dbutils.widgets.remove(_legacy)
   except Exception: pass
 
-# --- sku / batch_type / edition (What) ---
-# `batch_type` options are dynamically constrained to what each SKU actually supports: DBSQL has no Augmented Incremental, SDP has no per-day Incremental. `edition` only appears for SDP × Single Batch.
-dbutils.widgets.dropdown("sku", "Cluster", ["Cluster", "DBSQL", "SDP", "dbt"], "01 SKU")
-_sku_choice = dbutils.widgets.get("sku")
-
-if _sku_choice == "SDP":
-  _batch_options = ["Single Batch", "Augmented Incremental"]
-elif _sku_choice == "DBSQL":
-  _batch_options = ["Single Batch", "Incremental"]
-elif _sku_choice == "dbt":
-  # dbt-databricks is implemented for the augmented_incremental workload only.
-  _batch_options = ["Augmented Incremental"]
-else:  # Cluster
-  _batch_options = ["Single Batch", "Incremental", "Augmented Incremental"]
-dbutils.widgets.dropdown("batch_type", _batch_options[0], _batch_options, "02 Batch Type")
-batch_type = dbutils.widgets.get("batch_type")
-if batch_type not in _batch_options:
-  batch_type = _batch_options[0]
-
-if _sku_choice == "SDP" and batch_type == "Single Batch":
-  dbutils.widgets.dropdown("edition", "CORE", ["CORE", "PRO", "ADVANCED"], "03 SDP Edition")
-  _edition = dbutils.widgets.get("edition")
-else:
-  try: dbutils.widgets.remove("edition")
-  except Exception: pass
-  _edition = "CORE"  # placeholder — only consumed when SDP × Single Batch
+# --- workflow (What) ---
+# Single dropdown listing only valid SKU × Batch Type (× SDP Edition)
+# combinations. Eliminates the prior cascading state where a stale batch_type
+# selection could silently survive a SKU change. `_WORKFLOWS` is the single
+# source of truth: each key is what the user sees; the tuple value parses
+# out to the downstream variables (_sku_choice, batch_type, _edition).
+_WORKFLOWS = {
+  # Cluster: all three batch types supported.
+  "Cluster - Single Batch":            ("Cluster", "Single Batch",         "CORE"),
+  "Cluster - Incremental":             ("Cluster", "Incremental",          "CORE"),
+  "Cluster - Augmented Incremental":   ("Cluster", "Augmented Incremental","CORE"),
+  # DBSQL: no Augmented Incremental.
+  "DBSQL - Single Batch":              ("DBSQL",   "Single Batch",         "CORE"),
+  "DBSQL - Incremental":               ("DBSQL",   "Incremental",          "CORE"),
+  # SDP: no per-day Incremental; Edition splits Single Batch into 3 SKUs.
+  "SDP (CORE) - Single Batch":         ("SDP",     "Single Batch",         "CORE"),
+  "SDP (PRO) - Single Batch":          ("SDP",     "Single Batch",         "PRO"),
+  "SDP (ADVANCED) - Single Batch":     ("SDP",     "Single Batch",         "ADVANCED"),
+  "SDP - Augmented Incremental":       ("SDP",     "Augmented Incremental","CORE"),
+  # dbt-databricks: only Augmented Incremental is wired up today.
+  "dbt - Augmented Incremental":       ("dbt",     "Augmented Incremental","CORE"),
+}
+dbutils.widgets.dropdown("workflow", "Cluster - Single Batch",
+                         list(_WORKFLOWS.keys()), "01 Workflow")
+_workflow_choice = dbutils.widgets.get("workflow")
+if _workflow_choice not in _WORKFLOWS:
+  raise ValueError(
+    f"Unknown workflow '{_workflow_choice}'. "
+    f"Valid choices: {list(_WORKFLOWS.keys())}"
+  )
+_sku_choice, batch_type, _edition = _WORKFLOWS[_workflow_choice]
 
 # Compute wf_key in the format the dispatcher expects.
 if batch_type == "Augmented Incremental":
