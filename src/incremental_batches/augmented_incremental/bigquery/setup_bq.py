@@ -179,15 +179,29 @@ print(f"[parallel] clones done in {_time.time() - t_clone:.1f}s")
 # per batch via the bronze models that SELECT from BQ external tables).
 # Schemas mirror the snowflake side (NUMBER → INT64, FLOAT → FLOAT64,
 # STRING/TIMESTAMP/DATE unchanged).
+#
+# PARTITION BY is REQUIRED here, not optional: the dbt bronze models use
+# incremental_strategy='insert_overwrite' + partition_by <date_col> as the
+# BQ-idiomatic equivalent of SF/DBX's APPEND (metadata-only partition swap
+# via Copy Table API, same write-amp as append). dbt-bigquery's incremental
+# materialization assumes the target table's partition layout already
+# matches the model config — it does NOT drop+recreate on partition
+# mismatch. Without PARTITION BY here, the first batch fails with
+# "Cannot add storage to a non-partitioned table with a partition reference".
+# Date column per table mirrors the canonical CLUSTER_KEYS map in
+# sf_staging_bootstrap.py (update_dt for the customer/account family,
+# event_dt for the transaction/holdings/trade/watches family).
 BRONZE_DDLS = {
     "bronzeaccount": (
         "cdc_flag STRING, cdc_dsn INT64, accountid INT64, brokerid INT64, "
         "customerid INT64, accountdesc STRING, taxstatus INT64, status STRING, "
-        "update_dt DATE"
+        "update_dt DATE",
+        "update_dt",
     ),
     "bronzecashtransaction": (
         "cdc_flag STRING, cdc_dsn INT64, accountid INT64, ct_dts TIMESTAMP, "
-        "ct_amt FLOAT64, ct_name STRING, event_dt DATE"
+        "ct_amt FLOAT64, ct_name STRING, event_dt DATE",
+        "event_dt",
     ),
     "bronzecustomer": (
         "cdc_flag STRING, cdc_dsn INT64, customerid INT64, taxid STRING, "
@@ -198,35 +212,41 @@ BRONZE_DDLS = {
         "c_ext_1 STRING, c_ctry_2 STRING, c_area_2 STRING, c_local_2 STRING, "
         "c_ext_2 STRING, c_ctry_3 STRING, c_area_3 STRING, c_local_3 STRING, "
         "c_ext_3 STRING, email1 STRING, email2 STRING, lcl_tx_id STRING, "
-        "nat_tx_id STRING, update_dt DATE"
+        "nat_tx_id STRING, update_dt DATE",
+        "update_dt",
     ),
     "bronzeholdings": (
         "cdc_flag STRING, cdc_dsn INT64, hh_h_t_id INT64, hh_t_id INT64, "
-        "hh_before_qty INT64, hh_after_qty INT64, event_dt DATE"
+        "hh_before_qty INT64, hh_after_qty INT64, event_dt DATE",
+        "event_dt",
     ),
     "bronzetrade": (
         "cdc_flag STRING, cdc_dsn INT64, tradeid INT64, t_dts TIMESTAMP, "
         "status STRING, t_tt_id STRING, cashflag INT64, t_s_symb STRING, "
         "quantity INT64, bidprice FLOAT64, t_ca_id INT64, executedby STRING, "
         "tradeprice FLOAT64, fee FLOAT64, commission FLOAT64, tax FLOAT64, "
-        "event_dt DATE"
+        "event_dt DATE",
+        "event_dt",
     ),
     "bronzewatches": (
         "cdc_flag STRING, cdc_dsn INT64, w_c_id INT64, w_s_symb STRING, "
-        "w_dts TIMESTAMP, w_action STRING, event_dt DATE"
+        "w_dts TIMESTAMP, w_action STRING, event_dt DATE",
+        "event_dt",
     ),
     "account_updates_from_customer": (
         "cdc_flag STRING, cdc_dsn INT64, accountid INT64, brokerid INT64, "
         "customerid INT64, accountdesc STRING, taxstatus INT64, status STRING, "
-        "update_dt DATE"
+        "update_dt DATE",
+        "update_dt",
     ),
 }
-for name, schema_sql in BRONZE_DDLS.items():
+for name, (schema_sql, partition_col) in BRONZE_DDLS.items():
     client.query(
         f"CREATE OR REPLACE TABLE `{bq_project}.{target_dataset}.{name}` "
-        f"({schema_sql})"
+        f"({schema_sql}) "
+        f"PARTITION BY {partition_col}"
     ).result()
-    print(f"[ddl] {name}")
+    print(f"[ddl] {name:32s}  PARTITION BY {partition_col}")
 print(f"[ok] target tables ready under {bq_project}.{target_dataset}")
 
 # COMMAND ----------
