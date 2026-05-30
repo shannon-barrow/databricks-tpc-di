@@ -1,21 +1,10 @@
 {{
   config(
-    materialized = 'incremental',
-    incremental_strategy = 'append',
-    on_schema_change = 'ignore',
-  )
-}}
-
-{{
-  config(
-    materialized = 'incremental',
-    incremental_strategy = 'insert_overwrite',
     partition_by = {
       'field': 'dm_date',
       'data_type': 'date',
       'copy_partitions': true,
     },
-    on_schema_change = 'ignore',
   )
 }}
 
@@ -34,4 +23,3 @@
    insert_overwrite SQL template. #}
 
 select * from {{ source('csv', 'DailyMarket') }}
-{{ since_last_load('dm_date') }}

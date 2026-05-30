@@ -95,13 +95,15 @@ models:
     # tree, with `bq_` prefix to keep config keys distinct.
     bq_bronze:
       +enabled: "{{ target.type == 'bigquery' }}"
-      # dbt-bigquery has no 'append' strategy. Most bronze tables only need
-      # the current batch's data (silver filters by batch_date), so we just
-      # CREATE OR REPLACE per batch. bronzedailymarket overrides this to
-      # incremental insert_overwrite because factmarkethistory needs 365-day
-      # history. (Same shape Snowflake takes via APPEND + Databricks takes
-      # via Auto Loader append — just expressed in BQ-idiomatic strategies.)
-      +materialized: table
+      # dbt-bigquery has no 'append' strategy. We use insert_overwrite +
+      # partition_by on the batch date column (update_dt / event_dt / dm_date)
+      # with copy_partitions=true → BQ Copy-Table API does a metadata-only
+      # partition swap. Same write-amplification profile as SF/DBX append
+      # (constant per batch), preserves multi-batch correctness, and avoids
+      # the unfairness of CREATE OR REPLACE rewriting the full table each
+      # batch. Each model declares its own partition column.
+      +materialized: incremental
+      +incremental_strategy: insert_overwrite
       +on_schema_change: ignore
     bq_silver:
       +enabled: "{{ target.type == 'bigquery' }}"

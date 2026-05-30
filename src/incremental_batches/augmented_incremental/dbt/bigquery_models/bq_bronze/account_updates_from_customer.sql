@@ -1,3 +1,13 @@
+{{
+  config(
+    partition_by = {
+      'field': 'update_dt',
+      'data_type': 'date',
+      'copy_partitions': true,
+    },
+  )
+}}
+
 {# BQ variant — per-batch "cust_update" rows derived from bronzecustomer
    SCD2 events that touch an account. Pure SQL, no external stage read.
 

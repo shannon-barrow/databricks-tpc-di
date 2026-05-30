@@ -83,32 +83,43 @@ STAGING_TABLES = [
     "cashtransactionhistorical", "batchdate",
 ]
 
-# Per-table partition + cluster overrides applied at load time. Mirrors the
-# Snowflake CLUSTER BY layout and the Databricks Liquid clustering choices
-# (see CLUSTER_KEYS in src/incremental_batches/augmented_incremental/snowflake/).
-# Tables not listed here get whatever the parquet load defaults produce
-# (unpartitioned, unclustered) — fine for small reference tables.
+# Per-table partition + cluster overrides applied at load time. These mirror
+# the canonical CLUSTER_KEYS dict in sf_staging_bootstrap.py exactly (which
+# in turn mirrors the Databricks Liquid clustering layout). Two BQ-specific
+# divergences:
+#
+#   1. bronzedailymarket: SF/DBX cluster on dm_date. On BQ we PARTITION on
+#      dm_date (DATE) instead — the dbt model uses insert_overwrite with
+#      copy_partitions=true to do a metadata-only partition swap when
+#      appending each new batch date. The staging table must already be
+#      partitioned the same way so setup_bq.py's CLONE inherits the layout.
+#   2. factholdings: SF/DBX cluster on sk_dateid. On BQ we PARTITION on
+#      sk_dateid (INT64 range, capped under 10k buckets) — same reason:
+#      insert_overwrite-as-append needs partition_by.
+#
+# All other tables match CLUSTER_KEYS verbatim. Tables not listed here get
+# whatever the parquet load defaults produce (unpartitioned, unclustered)
+# — fine for small reference tables.
 TABLE_LAYOUTS = {
-    # bronzedailymarket: dbt insert_overwrite by dm_date needs the target to
-    # be partitioned by dm_date. cluster by dm_s_symb for fact joins.
+    # Append-via-partition-swap: PARTITION (no cluster).
     "bronzedailymarket": {
         "time_partitioning": bigquery.TimePartitioning(
             type_=bigquery.TimePartitioningType.DAY, field="dm_date"),
-        "clustering_fields": ["dm_s_symb"],
     },
-    # factmarkethistory: merge on (sk_securityid, sk_dateid). cluster on
-    # both for fast lookups in the merge phase.
-    "factmarkethistory": {
-        "clustering_fields": ["sk_dateid", "sk_securityid"],
+    "factholdings": {
+        "range_partitioning": bigquery.RangePartitioning(
+            field="sk_dateid",
+            range_=bigquery.PartitionRange(start=20160706, end=20170703, interval=1),
+        ),
     },
-    # factholdings, factwatches, factcashbalances: cluster on sk_dateid.
-    "factholdings":     {"clustering_fields": ["sk_dateid"]},
-    "factwatches":      {"clustering_fields": ["sk_dateid_dateremoved"]},
-    "factcashbalances": {"clustering_fields": ["sk_dateid"]},
-    # SCD2 dims: cluster on natural key for SCD2 merge prune.
-    "dimcustomer": {"clustering_fields": ["customerid"]},
-    "dimaccount":  {"clustering_fields": ["accountid"]},
-    "dimtrade":    {"clustering_fields": ["tradeid"]},
+    # Everything else: cluster_by per CLUSTER_KEYS.
+    "factmarkethistory":  {"clustering_fields": ["sk_dateid"]},
+    "factwatches":        {"clustering_fields": ["sk_dateid_dateremoved"]},
+    "factcashbalances":   {"clustering_fields": ["sk_dateid"]},
+    "dimcustomer":        {"clustering_fields": ["enddate"]},
+    "dimaccount":         {"clustering_fields": ["enddate"]},
+    "dimtrade":           {"clustering_fields": ["sk_closedateid"]},
+    "companyyeareps":     {"clustering_fields": ["qtr_start_date"]},
 }
 
 # COMMAND ----------
@@ -146,11 +157,15 @@ for table in STAGING_TABLES:
     layout = TABLE_LAYOUTS.get(table, {})
     if "time_partitioning" in layout:
         job_kwargs["time_partitioning"] = layout["time_partitioning"]
+        print(f"  layout: time_partition_by={layout['time_partitioning'].field}")
+    if "range_partitioning" in layout:
+        job_kwargs["range_partitioning"] = layout["range_partitioning"]
+        rp = layout["range_partitioning"]
+        print(f"  layout: range_partition_by={rp.field} "
+              f"({rp.range_.start}..{rp.range_.end}, step={rp.range_.interval})")
     if "clustering_fields" in layout:
         job_kwargs["clustering_fields"] = layout["clustering_fields"]
-        print(f"  layout: cluster_by={layout['clustering_fields']}"
-              + (f", partition_by={layout['time_partitioning'].field}"
-                 if 'time_partitioning' in layout else ""))
+        print(f"  layout: cluster_by={layout['clustering_fields']}")
 
     load_job = client.load_table_from_uri(
         gcs_uri, bq_table_id, job_config=bigquery.LoadJobConfig(**job_kwargs),
