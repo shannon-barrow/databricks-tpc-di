@@ -14,17 +14,27 @@
 # Vars passed through to dbt match what the bigquery_models dbt models
 # expect (see dbt_project.yml `vars:` block).
 
-# COMMAND ----------
-
-# MAGIC %pip install --quiet "dbt-core==1.9.*" "dbt-bigquery==1.9.*"
-
-# COMMAND ----------
-
-dbutils.library.restartPython()
-
-# COMMAND ----------
+# Install dbt + dbt-bigquery in an isolated venv. The cluster's bundled
+# pandas/numpy on /databricks/python/ have an ABI mismatch with what
+# dbt-bigquery brings in via pip; even `%pip install + restartPython()` can
+# leave the cluster bundle on sys.path first. A clean venv side-steps that
+# entire dependency tangle — dbt runs against its own self-consistent set.
 
 import os, subprocess, sys, json, tempfile
+
+VENV_DIR = "/local_disk0/dbt_bq_venv"
+VENV_PY  = f"{VENV_DIR}/bin/python"
+
+if not os.path.exists(VENV_PY):
+    print(f"[venv] creating clean venv at {VENV_DIR}")
+    subprocess.check_call([sys.executable, "-m", "venv", VENV_DIR])
+    subprocess.check_call([VENV_PY, "-m", "pip", "install", "--quiet",
+                           "--upgrade", "pip"])
+    subprocess.check_call([VENV_PY, "-m", "pip", "install", "--quiet",
+                           "dbt-core==1.9.*", "dbt-bigquery==1.9.*"])
+    print("[venv] installed dbt-core + dbt-bigquery")
+else:
+    print(f"[venv] reusing existing {VENV_DIR}")
 
 # COMMAND ----------
 
@@ -52,11 +62,17 @@ if not (wh_db and batch_date and dbt_project_dir):
 
 # COMMAND ----------
 
-# dbt-core + dbt-bigquery were %pip-installed at the top with a
-# restartPython() so the kernel starts fresh and pandas/numpy ABI match.
-import dbt.version  # noqa: F401
-import dbt.adapters.bigquery  # noqa: F401
-print(f"[ok] dbt-core {dbt.version.__version__} + dbt-bigquery loaded")
+# Sanity-import dbt + dbt-bigquery using the venv's Python so we fail fast
+# if the install is broken. The notebook kernel itself doesn't import dbt.
+sanity = subprocess.run(
+    [VENV_PY, "-c", "import dbt.version, dbt.adapters.bigquery; "
+                     "print(f'[ok] dbt-core {dbt.version.__version__} + dbt-bigquery loaded (venv)')"],
+    capture_output=True, text=True,
+)
+print(sanity.stdout)
+if sanity.returncode != 0:
+    print(sanity.stderr, file=sys.stderr)
+    raise RuntimeError("venv import sanity check failed; see stderr")
 
 # COMMAND ----------
 
@@ -114,7 +130,7 @@ vars_payload = {
     "tpcdi_directory": tpcdi_directory,
 }
 cmd = [
-    sys.executable, "-m", "dbt.cli.main", "run",
+    VENV_PY, "-m", "dbt.cli.main", "run",
     "--target", "bigquery",
     "--profiles-dir", profiles_dir,
     "--project-dir", dbt_project_dir,
