@@ -16,21 +16,54 @@
 
 # COMMAND ----------
 
-# Cluster's bundled pandas at /databricks/python/ was compiled against
-# numpy>=2.0 (expects 96-byte PyArray_Descr) but the cluster ships with
-# numpy<2.0 (88-byte). dbt-bigquery imports google-cloud-bigquery which
-# imports pandas, which then fails the ABI check. Upgrade numpy along
-# with dbt to keep them aligned. Pin numpy>=2.0 because that's what the
-# bundled pandas was built against.
-# MAGIC %pip install --quiet --force-reinstall --upgrade "dbt-core==1.9.*" "dbt-bigquery==1.9.*" "pandas>=2.2" "numpy>=2.0"
-
-# COMMAND ----------
-
-dbutils.library.restartPython()
-
-# COMMAND ----------
+# The cluster's bundled pandas at /databricks/python/ has a numpy ABI
+# mismatch and is searched on sys.path BEFORE any %pip install — so we
+# can't beat it from within the notebook kernel. Workaround: create a
+# venv from /usr/bin/python3 (system Python — clean path, no cluster
+# bundle) and run dbt through it with a sanitized environment.
 
 import os, subprocess, sys, json, tempfile
+
+VENV_DIR  = "/local_disk0/dbt_bq_venv"
+VENV_PY   = f"{VENV_DIR}/bin/python"
+BASE_PY   = "/usr/bin/python3"
+CLEAN_ENV = {
+    "PATH":   f"{VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin",
+    "HOME":   os.environ.get("HOME", "/tmp"),
+    "VIRTUAL_ENV": VENV_DIR,
+    # explicitly drop PYTHONPATH / PYTHONHOME so /databricks/python/ doesn't leak
+}
+
+if not os.path.exists(VENV_PY):
+    print(f"[venv] creating clean venv at {VENV_DIR} from {BASE_PY}")
+    subprocess.check_call([BASE_PY, "-m", "venv", VENV_DIR])
+    subprocess.check_call(
+        [VENV_PY, "-m", "pip", "install", "--quiet", "--upgrade", "pip"],
+        env=CLEAN_ENV,
+    )
+    subprocess.check_call(
+        [VENV_PY, "-m", "pip", "install", "--quiet",
+         "dbt-core==1.9.*", "dbt-bigquery==1.9.*"],
+        env=CLEAN_ENV,
+    )
+    print("[venv] installed dbt-core + dbt-bigquery")
+else:
+    print(f"[venv] reusing existing {VENV_DIR}")
+
+# Quick diagnostic — confirm where pandas/numpy resolve from inside the venv.
+diag = subprocess.run(
+    [VENV_PY, "-c",
+     "import sys, numpy, pandas, dbt.version; "
+     "print(f'python={sys.executable}'); "
+     "print(f'numpy={numpy.__version__} @ {numpy.__file__}'); "
+     "print(f'pandas={pandas.__version__} @ {pandas.__file__}'); "
+     "print(f'dbt={dbt.version.__version__}')"],
+    capture_output=True, text=True, env=CLEAN_ENV,
+)
+print(diag.stdout)
+if diag.returncode != 0:
+    print(diag.stderr, file=sys.stderr)
+    raise RuntimeError("venv sanity check failed; see stderr")
 
 # COMMAND ----------
 
@@ -55,15 +88,6 @@ dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 
 if not (wh_db and batch_date and dbt_project_dir):
     raise ValueError("wh_db, batch_date, and dbt_project_dir are required")
-
-# COMMAND ----------
-
-import numpy, pandas
-import dbt.version  # noqa: F401
-import dbt.adapters.bigquery  # noqa: F401
-print(f"[diag] numpy {numpy.__version__} @ {numpy.__file__}")
-print(f"[diag] pandas {pandas.__version__} @ {pandas.__file__}")
-print(f"[ok] dbt-core {dbt.version.__version__} + dbt-bigquery loaded")
 
 # COMMAND ----------
 
@@ -121,7 +145,7 @@ vars_payload = {
     "tpcdi_directory": tpcdi_directory,
 }
 cmd = [
-    sys.executable, "-m", "dbt.cli.main", "run",
+    VENV_PY, "-m", "dbt.cli.main", "run",
     "--target", "bigquery",
     "--profiles-dir", profiles_dir,
     "--project-dir", dbt_project_dir,
@@ -129,7 +153,7 @@ cmd = [
     "--no-version-check",
 ]
 print("dbt cmd:", " ".join(cmd))
-res = subprocess.run(cmd, capture_output=True, text=True)
+res = subprocess.run(cmd, capture_output=True, text=True, env=CLEAN_ENV)
 print(res.stdout)
 print(res.stderr, file=sys.stderr)
 
