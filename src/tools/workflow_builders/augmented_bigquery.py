@@ -284,9 +284,12 @@ def build_parent(
         "notification_settings": dict(_DEFAULT_NOTIF),
         "webhook_notifications": {},
     }
+    # BQ-specific teardown: drops BQ datasets via the bq client, not via
+    # spark.sql DROP SCHEMA (which doesn't reach BQ). Mirrors what
+    # ../teardown.py does for the Databricks variant.
     cleanup_task = _make_task(
         task_key="cleanup",
-        notebook_path=f"{aug}/teardown",
+        notebook_path=f"{aug}/bigquery/teardown_bq",
         base_params=_COMMON_PARAMS,
         existing_cluster_id=interactive_cluster_id,
     )
