@@ -110,6 +110,7 @@ _boot = bootstrap.ensure_staging_environment(
     volume_root=volume_root,
     gcs_volume_prefix=gcs_volume_prefix.rstrip("/") + "/",
     spark=spark,
+    dbutils=dbutils,
     parallel=6,
 )
 print(f"[bootstrap] {_boot}")

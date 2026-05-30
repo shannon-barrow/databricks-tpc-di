@@ -81,7 +81,7 @@ def _build_layouts():
 
 def _seed_one(table, *, client, bq_project, bq_dataset, bq_location,
               src_catalog, src_schema, parquet_root, volume_root,
-              gcs_volume_prefix, spark, layouts):
+              gcs_volume_prefix, spark, dbutils, layouts):
     """Seed one table. Raises on any failure — caller catches and aggregates."""
     from google.cloud import bigquery
     src_fq       = f"{src_catalog}.{src_schema}.{table}"
@@ -89,6 +89,17 @@ def _seed_one(table, *, client, bq_project, bq_dataset, bq_location,
     bq_table_id  = f"{bq_project}.{bq_dataset}.{table}"
     log          = [f"[{table}] starting"]
     t0           = _time.time()
+
+    # Defensive cleanup before staging — guards against stale artifacts
+    # from a previous cancelled/failed run that could survive Spark's
+    # write.mode("overwrite") (zombie part-files) and feed bq_load extras.
+    # Without these wipes, dimtrade at SF=20k once loaded 2.94B rows
+    # from a Delta source of 2.10B because bq_load globbed leftover files.
+    try:
+        dbutils.fs.rm(parquet_path, recurse=True)
+    except Exception:
+        pass  # no-op if dir doesn't exist
+    client.delete_table(bq_table_id, not_found_ok=True)
 
     delta_rows = spark.read.table(src_fq).count()
     log.append(f"[{table}] delta_rows={delta_rows:,}, writing parquet → {parquet_path}")
@@ -142,6 +153,7 @@ def ensure_staging_environment(client, *,
                                 volume_root: str,
                                 gcs_volume_prefix: str,
                                 spark,
+                                dbutils,
                                 parallel: int = 6) -> dict:
     """Idempotent BQ staging bootstrap. Mirrors
     sf_staging_bootstrap.ensure_staging_environment.
@@ -206,6 +218,7 @@ def ensure_staging_environment(client, *,
                 volume_root=volume_root,
                 gcs_volume_prefix=gcs_volume_prefix,
                 spark=spark,
+                dbutils=dbutils,
                 layouts=layouts,
             ): t for t in missing
         }
