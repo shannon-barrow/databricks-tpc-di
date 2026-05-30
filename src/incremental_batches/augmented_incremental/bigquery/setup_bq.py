@@ -151,9 +151,9 @@ def _clone_one(table_name: str) -> tuple[str, float]:
     return (table_name, _time.time() - t0)
 
 t_clone = _time.time()
-print(f"[parallel] cloning {len(STAGING_TABLES)} tables (8 concurrent)...")
+print(f"[parallel] cloning {len(bootstrap.STAGING_TABLES)} tables (8 concurrent)...")
 with _cf.ThreadPoolExecutor(max_workers=8) as ex:
-    futures = {ex.submit(_clone_one, t): t for t in STAGING_TABLES}
+    futures = {ex.submit(_clone_one, t): t for t in bootstrap.STAGING_TABLES}
     for f in _cf.as_completed(futures):
         try:
             name, wall = f.result()
