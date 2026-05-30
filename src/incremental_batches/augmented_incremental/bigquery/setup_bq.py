@@ -1,4 +1,11 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# dependencies = [
+#   "google-cloud-bigquery",
+# ]
+# ///
 # Per-run BigQuery setup. Dispatches SQL to BQ from a Databricks task (no
 # BQ compute beyond zero-copy CLONEs + tiny DDL).
 #

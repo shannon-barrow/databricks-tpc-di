@@ -1,4 +1,11 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# dependencies = [
+#   "google-cloud-bigquery",
+# ]
+# ///
 # MAGIC %md
 # MAGIC # TPC-DI Augmented Incremental Teardown — BigQuery variant
 # MAGIC

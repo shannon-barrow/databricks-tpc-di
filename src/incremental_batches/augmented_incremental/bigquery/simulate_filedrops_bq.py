@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-batch task: copies the day's pre-staged .txt files from `_staging/sf=N/`
 # to the per-(wh_db, sf, batch_date) directory under the UC external volume
 # (which maps 1:1 to GCS). BigQuery reads the same bytes via external tables

@@ -1,4 +1,13 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# dependencies = [
+#   "dbt-core==1.9.*",
+#   "dbt-bigquery==1.9.*",
+#   "google-cloud-bigquery",
+# ]
+# ///
 # Per-batch dbt task. Runs `dbt run --target bigquery` for one batch_date.
 # Pinned to the same interactive cluster simulate_filedrops_bq runs on.
 #
