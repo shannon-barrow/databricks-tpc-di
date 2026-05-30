@@ -18,7 +18,7 @@ Pre-requisites (one-time, manual, out-of-band):
 - Phase B already run for this SF (seeds `tpcdi_staging_sf{N}`), OR
   set up to self-bootstrap from setup_bq.py (it falls back to
   seed_staging_py if the staging dataset is missing/incomplete)
-- Interactive cluster with `dbt-bigquery==1.9.*` + `dbt-core==1.9.*`
+- Interactive cluster with `dbt-bigquery==1.11.1` (pulls dbt-core)
   pre-installed as libraries (defensive pip-install in run_dbt.py as backup)
 
 Two builders here:

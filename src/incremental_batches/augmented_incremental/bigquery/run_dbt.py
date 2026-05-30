@@ -3,8 +3,7 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # dependencies = [
-#   "dbt-core==1.9.*",
-#   "dbt-bigquery==1.9.*",
+#   "dbt-bigquery==1.11.1",
 #   "google-cloud-bigquery",
 # ]
 # ///
@@ -55,7 +54,7 @@ if not (wh_db and batch_date and dbt_project_dir):
 # COMMAND ----------
 
 # Defensive install — no-op if cluster library is already there.
-# Cluster libs SHOULD already pin dbt-core==1.9.* + dbt-bigquery==1.9.*.
+# Cluster libs SHOULD already pin dbt-bigquery==1.11.1 (which pulls dbt-core).
 try:
     import dbt.version  # noqa: F401
     import dbt.adapters.bigquery  # noqa: F401
@@ -64,7 +63,7 @@ except ImportError:
     print("[install] dbt-core + dbt-bigquery not found, pip-installing...")
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "--quiet",
-         "dbt-core==1.9.*", "dbt-bigquery==1.9.*"]
+         "dbt-bigquery==1.11.1"]
     )
 
 # COMMAND ----------
