@@ -73,7 +73,16 @@ def _make_task(
     base_params: dict | None = None,
     run_if: str = "ALL_SUCCESS",
     existing_cluster_id: str | None = None,
+    environment_key: str | None = None,
 ) -> dict:
+    """Build a notebook task. Pass EXACTLY ONE of existing_cluster_id (pin to
+    a classic cluster) or environment_key (run on serverless against a
+    job-level `environments` entry). Setup/teardown notebooks belong on
+    serverless because all the heavy work is dispatched to BigQuery —
+    the Spark driver only orchestrates. The dbt + simulate_filedrops tasks
+    need a classic cluster (dbt-bigquery's google.cloud.bigquery imports
+    pandas unconditionally, which hits the numpy ABI mismatch baked into
+    serverless DBR's bundled pandas)."""
     nb: dict[str, Any] = {
         "notebook_path": notebook_path,
         "source": "WORKSPACE",
@@ -86,8 +95,14 @@ def _make_task(
         task["depends_on"] = [{"task_key": d} for d in depends_on]
     task["run_if"] = run_if
     task["notebook_task"] = nb
+    if existing_cluster_id and environment_key:
+        raise ValueError(
+            f"task {task_key}: pass existing_cluster_id OR environment_key, not both"
+        )
     if existing_cluster_id:
         task["existing_cluster_id"] = existing_cluster_id
+    elif environment_key:
+        task["environment_key"] = environment_key
     task["timeout_seconds"] = 0
     task["email_notifications"] = {}
     task["notification_settings"] = dict(_DEFAULT_NOTIF)
@@ -232,7 +247,7 @@ def build_parent(
             "incremental_batches_to_run":
                 "{{job.parameters.incremental_batches_to_run}}",
         },
-        existing_cluster_id=interactive_cluster_id,
+        environment_key="serverless_bq",
     )
 
     loop_task: dict[str, Any] = {
@@ -291,7 +306,7 @@ def build_parent(
         task_key="cleanup",
         notebook_path=f"{aug}/bigquery/teardown_bq",
         base_params=_COMMON_PARAMS,
-        existing_cluster_id=interactive_cluster_id,
+        environment_key="serverless_bq",
     )
     cleanup_task["depends_on"] = [{"task_key": GATE, "outcome": "true"}]
 
@@ -319,5 +334,14 @@ def build_parent(
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
+        # Serverless env for setup_bq + cleanup. The BQ Python client is the
+        # only runtime dep — both notebooks dispatch all heavy work to
+        # BigQuery; the Spark driver only orchestrates. dbt + simulate_filedrops
+        # CANNOT use serverless (numpy ABI mismatch with serverless DBR's
+        # pandas) so those remain on the interactive cluster via build_child.
+        "environments": [{
+            "environment_key": "serverless_bq",
+            "spec": {"client": "3", "dependencies": ["google-cloud-bigquery"]},
+        }],
         "queue": {"enabled": True},
     }
