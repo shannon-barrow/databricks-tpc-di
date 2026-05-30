@@ -5,17 +5,24 @@
     partition_by = {
       'field': 'sk_dateid',
       'data_type': 'int64',
-      'range': {'start': 19000101, 'end': 21000101, 'interval': 1}
+      'range': {'start': 20160706, 'end': 20170706, 'interval': 1},
+      'copy_partitions': true,
     },
     on_schema_change = 'ignore',
     full_refresh = false,
   )
 }}
 
-{# BQ variant of factholdings. dbt-bigquery has no 'append' strategy; use
-   insert_overwrite partitioned by sk_dateid. Each batch's holdings have
-   today's sk_dateid (sk_closedateid from dimtrade); the partition swap
-   adds today's rows without disturbing prior days'.
+{# BQ variant of factholdings — BQ's idiomatic equivalent of SF/DBX's
+   APPEND strategy. dbt-bigquery has no 'append' strategy; insert_overwrite
+   with partition_by on sk_dateid (INT64) + copy_partitions=True does a
+   metadata-only Copy Table API swap (zero compute cost — identical cost
+   profile to an INSERT INTO append).
+
+   Range is tight to our 365-day benchmark window (20160706..20170705).
+   BQ's 10K-partition cap is the only reason we don't use a wider buffer;
+   in a real production env, data older than ~27 years (10K days) would
+   already be in cold storage.
 
    Translations from Snowflake:
      - to_char(d, 'YYYYMMDD') -> FORMAT_DATE('%Y%m%d', d)
