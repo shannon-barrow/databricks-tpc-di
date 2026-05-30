@@ -83,6 +83,34 @@ STAGING_TABLES = [
     "cashtransactionhistorical", "batchdate",
 ]
 
+# Per-table partition + cluster overrides applied at load time. Mirrors the
+# Snowflake CLUSTER BY layout and the Databricks Liquid clustering choices
+# (see CLUSTER_KEYS in src/incremental_batches/augmented_incremental/snowflake/).
+# Tables not listed here get whatever the parquet load defaults produce
+# (unpartitioned, unclustered) — fine for small reference tables.
+TABLE_LAYOUTS = {
+    # bronzedailymarket: dbt insert_overwrite by dm_date needs the target to
+    # be partitioned by dm_date. cluster by dm_s_symb for fact joins.
+    "bronzedailymarket": {
+        "time_partitioning": bigquery.TimePartitioning(
+            type_=bigquery.TimePartitioningType.DAY, field="dm_date"),
+        "clustering_fields": ["dm_s_symb"],
+    },
+    # factmarkethistory: merge on (sk_securityid, sk_dateid). cluster on
+    # both for fast lookups in the merge phase.
+    "factmarkethistory": {
+        "clustering_fields": ["sk_dateid", "sk_securityid"],
+    },
+    # factholdings, factwatches, factcashbalances: cluster on sk_dateid.
+    "factholdings":     {"clustering_fields": ["sk_dateid"]},
+    "factwatches":      {"clustering_fields": ["sk_dateid_dateremoved"]},
+    "factcashbalances": {"clustering_fields": ["sk_dateid"]},
+    # SCD2 dims: cluster on natural key for SCD2 merge prune.
+    "dimcustomer": {"clustering_fields": ["customerid"]},
+    "dimaccount":  {"clustering_fields": ["accountid"]},
+    "dimtrade":    {"clustering_fields": ["tradeid"]},
+}
+
 # COMMAND ----------
 
 import time
@@ -110,14 +138,22 @@ for table in STAGING_TABLES:
     gcs_uri = parquet_path.replace(volume_root, gcs_volume_prefix) + "/*.parquet"
     print(f"  loading parquet → BigQuery {bq_table_id} from {gcs_uri}")
 
+    job_kwargs = dict(
+        source_format=bigquery.SourceFormat.PARQUET,
+        write_disposition="WRITE_TRUNCATE",
+        autodetect=True,
+    )
+    layout = TABLE_LAYOUTS.get(table, {})
+    if "time_partitioning" in layout:
+        job_kwargs["time_partitioning"] = layout["time_partitioning"]
+    if "clustering_fields" in layout:
+        job_kwargs["clustering_fields"] = layout["clustering_fields"]
+        print(f"  layout: cluster_by={layout['clustering_fields']}"
+              + (f", partition_by={layout['time_partitioning'].field}"
+                 if 'time_partitioning' in layout else ""))
+
     load_job = client.load_table_from_uri(
-        gcs_uri,
-        bq_table_id,
-        job_config=bigquery.LoadJobConfig(
-            source_format=bigquery.SourceFormat.PARQUET,
-            write_disposition="WRITE_TRUNCATE",
-            autodetect=True,
-        ),
+        gcs_uri, bq_table_id, job_config=bigquery.LoadJobConfig(**job_kwargs),
     )
     load_job.result()  # blocking wait
 
