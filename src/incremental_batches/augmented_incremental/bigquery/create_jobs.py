@@ -88,5 +88,6 @@ def create(scale_factor: int, *,
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        sys.exit("usage: create_jobs.py <scale_factor>")
-    create(int(sys.argv[1]))
+        sys.exit("usage: create_jobs.py <scale_factor> [interactive_cluster_id]")
+    cluster_id = sys.argv[2] if len(sys.argv) > 2 else None
+    create(int(sys.argv[1]), interactive_cluster_id=cluster_id)
