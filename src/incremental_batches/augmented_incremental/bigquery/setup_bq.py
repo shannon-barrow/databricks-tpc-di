@@ -79,9 +79,12 @@ print(f"[ok] connected to BigQuery project={bq_project} location={bq_location}")
 
 # COMMAND ----------
 
-# Self-bootstrap: ensure tpcdi_staging_sf{sf} exists with all expected
-# tables. No-op if already complete. The check is conservative — if any of
-# the 22 expected tables is missing, re-run the seed via dbutils.notebook.run.
+# Sanity check: by the time setup_bq runs, the upstream `seed_staging` task
+# (a separate task in the parent workflow — see augmented_bigquery.py) should
+# have populated tpcdi_staging_sf{sf} with all 22 expected tables. We don't
+# bootstrap-in-place here anymore (no dbutils.notebook.run) — chained
+# notebook calls inherit the caller's compute and hide work from the job
+# DAG. Fail fast with a clear message if upstream missed something.
 STAGING_TABLES = [
     "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
     "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
@@ -91,38 +94,23 @@ STAGING_TABLES = [
     "cashtransactionhistorical", "batchdate",
 ]
 
-def _staging_complete() -> bool:
-    try:
-        rows = client.query(
-            f"SELECT table_name FROM `{bq_project}.{staging_dataset}.INFORMATION_SCHEMA.TABLES`"
-        ).result()
-        present = {r["table_name"] for r in rows}
-    except Exception as e:
-        print(f"[bootstrap] staging dataset missing or unqueryable ({type(e).__name__}: {e})")
-        return False
-    missing = set(STAGING_TABLES) - present
-    if missing:
-        print(f"[bootstrap] staging missing {len(missing)} tables: {sorted(missing)}")
-        return False
-    return True
-
-if not _staging_complete():
-    print(f"[bootstrap] seeding {bq_project}.{staging_dataset} via seed_staging_py...")
-    dbutils.notebook.run(
-        "./seed_staging_py",
-        timeout_seconds=0,
-        arguments={
-            "catalog":           databricks_catalog,
-            "scale_factor":      scale_factor,
-            "bq_project":        bq_project,
-            "bq_location":       bq_location,
-            "secret_scope":      secret_scope,
-            "gcs_volume_prefix": gcs_volume_prefix,
-        },
+try:
+    rows = client.query(
+        f"SELECT table_name FROM `{bq_project}.{staging_dataset}.INFORMATION_SCHEMA.TABLES`"
+    ).result()
+    present = {r["table_name"] for r in rows}
+except Exception as e:
+    raise RuntimeError(
+        f"Staging dataset {bq_project}.{staging_dataset} is unreachable "
+        f"({type(e).__name__}: {e}). Run the upstream seed_staging task first."
     )
-    if not _staging_complete():
-        raise RuntimeError("seed_staging_py finished but staging still incomplete")
-print(f"[ok] staging dataset {bq_project}.{staging_dataset} is intact")
+missing = set(STAGING_TABLES) - present
+if missing:
+    raise RuntimeError(
+        f"Staging dataset {bq_project}.{staging_dataset} is missing "
+        f"{len(missing)} tables: {sorted(missing)}. Run the upstream seed_staging task."
+    )
+print(f"[ok] staging dataset {bq_project}.{staging_dataset} is intact ({len(present)} tables)")
 
 # COMMAND ----------
 

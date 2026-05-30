@@ -131,6 +131,26 @@ TABLE_LAYOUTS = {
 
 # COMMAND ----------
 
+# Self-skip: if all 22 expected tables already exist in this staging
+# dataset, exit early. Makes the seed task idempotent + cheap to re-run
+# in the parent workflow (the seed_staging task always runs but is a
+# sub-second no-op when staging is intact).
+try:
+    rows = client.query(
+        f"SELECT table_name FROM `{bq_project}.{bq_dataset}.INFORMATION_SCHEMA.TABLES`"
+    ).result()
+    _present = {r["table_name"] for r in rows}
+except Exception:
+    _present = set()
+_missing = set(STAGING_TABLES) - _present
+if not _missing:
+    msg = f"[skip] {bq_project}.{bq_dataset} already has all {len(STAGING_TABLES)} staging tables"
+    print(msg)
+    dbutils.notebook.exit(msg)
+print(f"[seed] {len(_missing)} of {len(STAGING_TABLES)} staging tables missing: {sorted(_missing)}")
+
+# COMMAND ----------
+
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
