@@ -121,20 +121,32 @@ vars_payload = {
     "batch_date":      batch_date,
     "tpcdi_directory": tpcdi_directory,
 }
-# Use the `dbt` console script (installed next to sys.executable by pip)
-# rather than `python -m dbt.cli.main` — the latter triggers a noisy
-# RuntimeWarning when runpy detects dbt.cli.main already imported during
-# package init. The console script is the same code path without the
-# double-import dance.
-dbt_bin = os.path.join(os.path.dirname(sys.executable), "dbt")
-cmd = [
-    dbt_bin, "run",
-    "--target", "bigquery",
-    "--profiles-dir", profiles_dir,
-    "--project-dir", dbt_project_dir,
-    "--vars", json.dumps(vars_payload),
-    "--no-version-check",
-]
+# Prefer the `dbt` console script on PATH (clean output). On Databricks
+# classic clusters cluster-libs land in /databricks/python3/bin/ which is
+# on PATH; on serverless / ephemeral envs it may not be available, in
+# which case fall back to `python -m dbt.cli.main` with -W ignore to
+# suppress the noisy runpy double-import RuntimeWarning.
+import shutil
+dbt_bin = shutil.which("dbt")
+if dbt_bin:
+    cmd = [
+        dbt_bin, "run",
+        "--target", "bigquery",
+        "--profiles-dir", profiles_dir,
+        "--project-dir", dbt_project_dir,
+        "--vars", json.dumps(vars_payload),
+        "--no-version-check",
+    ]
+else:
+    cmd = [
+        sys.executable, "-W", "ignore::RuntimeWarning",
+        "-m", "dbt.cli.main", "run",
+        "--target", "bigquery",
+        "--profiles-dir", profiles_dir,
+        "--project-dir", dbt_project_dir,
+        "--vars", json.dumps(vars_payload),
+        "--no-version-check",
+    ]
 print("dbt cmd:", " ".join(cmd))
 res = subprocess.run(cmd, capture_output=True, text=True)
 print(res.stdout)
