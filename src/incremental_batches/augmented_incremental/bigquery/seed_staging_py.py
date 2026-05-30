@@ -71,16 +71,23 @@ print(f"[ok] BQ dataset ready: {bq_project}.{bq_dataset} in {bq_location}")
 # COMMAND ----------
 
 STAGING_TABLES = [
-    # reference + dim tables (pure seed)
-    "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
-    "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
-    "companyyeareps", "currentaccountbalances", "dimaccount",
-    # historical SCD2 dims + facts (the dbt incremental models MERGE/APPEND
-    # new rows on top of these — they MUST be pre-loaded for joins like
-    # factwatches → dimcustomer to find historical-period customers).
-    "dimcustomer", "dimtrade", "factwatches", "factcashbalances",
-    "factholdings", "factmarkethistory", "bronzedailymarket",
-    "cashtransactionhistorical", "batchdate",
+    # Biggest-first so the ThreadPoolExecutor below kicks off the long-pole
+    # tables on its first workers; the dozens of tiny ref tables backfill
+    # the pool as the big ones finish. Sequential SF=20k seed took ~75 min
+    # because financial (99 GB) alone blocked the queue for 5 min and
+    # bronzedailymarket / factmarkethistory (~250 GB each) for 15+ min apiece.
+    "bronzedailymarket", "factmarkethistory",        # ~5.35B rows (heaviest)
+    "factwatches",                                    # ~2.85B
+    "dimtrade",                                       # ~2.10B
+    "factholdings", "factcashbalances",               # ~1.94B
+    "cashtransactionhistorical",                      # ~1.94B
+    "financial", "companyyeareps",                    # ~950M
+    "dimaccount", "dimcustomer",                      # 102M, 39M
+    "currentaccountbalances", "dimbroker",            # ~30M
+    "dimsecurity", "dimcompany",                      # 16M, 10M
+    "dimtime", "dimdate",                             # 86K, 26K
+    "taxrate", "industry", "tradetype",               # <500
+    "statustype", "batchdate",                        # tiny
 ]
 
 # Per-table partition + cluster overrides applied at load time. These mirror
@@ -125,29 +132,47 @@ TABLE_LAYOUTS = {
 # COMMAND ----------
 
 import time
-results = []
-for table in STAGING_TABLES:
-    src_fq        = f"{src_catalog}.{src_schema}.{table}"
-    parquet_path  = f"{parquet_root}/{table}"
-    bq_table_id   = f"{bq_project}.{bq_dataset}.{table}"
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    print(f"\n[{table}]")
+# Parallel pool size. Each worker independently runs:
+#   Delta read → write parquet → BQ load → row-count parity check
+# Both bigquery.Client (Google docs) and the SparkSession are thread-safe;
+# Spark dispatches the per-worker .write.parquet() as independent jobs.
+# 6 is enough to keep both the cluster's write bandwidth and BQ's load
+# slots saturated without driver memory pressure. Bump for very large
+# SFs if the cluster has headroom.
+MAX_PARALLEL_TABLES = 6
+
+# FAIR scheduling so concurrent Spark jobs don't serialize behind each other.
+spark.sparkContext.setLocalProperty("spark.scheduler.mode", "FAIR")
+
+def _seed_one(table: str) -> dict:
+    """Per-table pipeline. Returns a result dict (never raises — failures
+    are captured in result['error'] so other tables can still proceed)."""
+    src_fq       = f"{src_catalog}.{src_schema}.{table}"
+    parquet_path = f"{parquet_root}/{table}"
+    bq_table_id  = f"{bq_project}.{bq_dataset}.{table}"
+    log_lines    = [f"[{table}] starting"]
+    t0           = time.time()
     try:
         delta_rows = spark.read.table(src_fq).count()
     except Exception as e:
-        print(f"  [skip] {src_fq} not found ({type(e).__name__})")
-        continue
-    print(f"  delta rows = {delta_rows:,}")
-
-    print(f"  exporting Delta → parquet at {parquet_path}")
-    (spark.read.table(src_fq)
-        .write.mode("overwrite").parquet(parquet_path))
+        return {"table": table, "skipped": True,
+                "error": f"{type(e).__name__}: {e}",
+                "elapsed": time.time() - t0}
+    log_lines.append(f"[{table}] delta_rows={delta_rows:,}, writing parquet → {parquet_path}")
+    try:
+        (spark.read.table(src_fq)
+            .write.mode("overwrite").parquet(parquet_path))
+    except Exception as e:
+        return {"table": table, "error": f"parquet write failed: {type(e).__name__}: {e}",
+                "elapsed": time.time() - t0, "log": "\n".join(log_lines)}
 
     # Resolve volume path → gs:// URI. The UC external volume at
     # /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/ maps 1:1 to the
     # gcs_volume_prefix bucket+prefix.
     gcs_uri = parquet_path.replace(volume_root, gcs_volume_prefix) + "/*.parquet"
-    print(f"  loading parquet → BigQuery {bq_table_id} from {gcs_uri}")
+    log_lines.append(f"[{table}] loading {gcs_uri} → {bq_table_id}")
 
     job_kwargs = dict(
         source_format=bigquery.SourceFormat.PARQUET,
@@ -157,33 +182,71 @@ for table in STAGING_TABLES:
     layout = TABLE_LAYOUTS.get(table, {})
     if "time_partitioning" in layout:
         job_kwargs["time_partitioning"] = layout["time_partitioning"]
-        print(f"  layout: time_partition_by={layout['time_partitioning'].field}")
+        log_lines.append(f"[{table}] layout: time_partition={layout['time_partitioning'].field}")
     if "range_partitioning" in layout:
-        job_kwargs["range_partitioning"] = layout["range_partitioning"]
         rp = layout["range_partitioning"]
-        print(f"  layout: range_partition_by={rp.field} "
-              f"({rp.range_.start}..{rp.range_.end}, step={rp.range_.interval})")
+        job_kwargs["range_partitioning"] = rp
+        log_lines.append(f"[{table}] layout: range_partition={rp.field} "
+                         f"({rp.range_.start}..{rp.range_.end}, step={rp.range_.interval})")
     if "clustering_fields" in layout:
         job_kwargs["clustering_fields"] = layout["clustering_fields"]
-        print(f"  layout: cluster_by={layout['clustering_fields']}")
+        log_lines.append(f"[{table}] layout: cluster_by={layout['clustering_fields']}")
 
-    load_job = client.load_table_from_uri(
-        gcs_uri, bq_table_id, job_config=bigquery.LoadJobConfig(**job_kwargs),
-    )
-    load_job.result()  # blocking wait
+    try:
+        load_job = client.load_table_from_uri(
+            gcs_uri, bq_table_id, job_config=bigquery.LoadJobConfig(**job_kwargs),
+        )
+        load_job.result()
+    except Exception as e:
+        return {"table": table, "error": f"bq_load failed: {type(e).__name__}: {e}",
+                "elapsed": time.time() - t0, "log": "\n".join(log_lines)}
 
     bq_rows = client.get_table(bq_table_id).num_rows
     parity = "OK" if bq_rows == delta_rows else f"MISMATCH (delta={delta_rows}, bq={bq_rows})"
-    print(f"  loaded {bq_rows:,} rows  ({parity})")
-    results.append((table, delta_rows, bq_rows, parity))
+    elapsed = time.time() - t0
+    log_lines.append(f"[{table}] done in {elapsed:.1f}s — {bq_rows:,} rows  ({parity})")
+    return {"table": table, "delta_rows": delta_rows, "bq_rows": bq_rows,
+            "parity": parity, "elapsed": elapsed, "log": "\n".join(log_lines)}
+
+results = []
+t_start = time.time()
+print(f"[parallel] seeding {len(STAGING_TABLES)} tables with {MAX_PARALLEL_TABLES} workers...")
+with ThreadPoolExecutor(max_workers=MAX_PARALLEL_TABLES) as ex:
+    futures = {ex.submit(_seed_one, t): t for t in STAGING_TABLES}
+    for fut in as_completed(futures):
+        r = fut.result()
+        # Print each table's full log atomically so the per-table trace
+        # stays grouped despite interleaved completion order.
+        if "log" in r:
+            print(r["log"])
+        if r.get("skipped"):
+            print(f"[{r['table']}] [skip] {r['error']}")
+        elif r.get("error"):
+            print(f"[{r['table']}] [FAIL] {r['error']}")
+        results.append(r)
+print(f"\n[parallel] all tables done in {time.time() - t_start:.1f}s")
 
 # COMMAND ----------
 
-print("\n[summary]")
-for table, delta_rows, bq_rows, parity in results:
-    print(f"  {table:<35s}  delta={delta_rows:>12,}  bq={bq_rows:>12,}  {parity}")
+print("\n[summary] (sorted by elapsed seconds, biggest first)")
+results_sorted = sorted(results, key=lambda r: r.get("elapsed", 0), reverse=True)
+for r in results_sorted:
+    table = r["table"]
+    if r.get("skipped") or r.get("error"):
+        status = r.get("error", "skipped")
+        print(f"  {table:<32s}  {r.get('elapsed', 0):>6.1f}s  {status}")
+        continue
+    print(f"  {table:<32s}  {r['elapsed']:>6.1f}s  "
+          f"delta={r['delta_rows']:>12,}  bq={r['bq_rows']:>12,}  {r['parity']}")
 
-mismatches = [r for r in results if r[3] != "OK"]
-if mismatches:
-    raise RuntimeError(f"Row-count parity failures: {[r[0] for r in mismatches]}")
-print(f"\n[done] {bq_project}.{bq_dataset} seeded with {len(results)} tables.")
+failures = [r for r in results
+            if not r.get("skipped") and (r.get("error") or r.get("parity") != "OK")]
+if failures:
+    raise RuntimeError(
+        "Seed failures: " + ", ".join(
+            f"{r['table']}({r.get('error') or r.get('parity')})"
+            for r in failures
+        )
+    )
+seeded = sum(1 for r in results if not r.get("skipped") and not r.get("error"))
+print(f"\n[done] {bq_project}.{bq_dataset} seeded with {seeded} tables.")
