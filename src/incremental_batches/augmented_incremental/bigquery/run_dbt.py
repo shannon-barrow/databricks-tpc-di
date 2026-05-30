@@ -42,33 +42,18 @@ if not (wh_db and batch_date and dbt_project_dir):
 
 # COMMAND ----------
 
-# dbt-bigquery install. Also install pandas+numpy explicitly so the ephemeral
-# env has consistent versions — the cluster's bundled pandas 1.5.3 at
-# /databricks/python/ was compiled against numpy>=2.0 but the bundled numpy
-# is 1.23.5, so an `import pandas` against the cluster bundle dies on a C-ext
-# ABI check. Stripping the cluster path from the dbt subprocess (see wrapper
-# below) sidesteps that; explicit pandas+numpy here guarantees the ephemeral
-# env has working copies for the subprocess to fall back on.
-subprocess.check_call(
-    [sys.executable, "-m", "pip", "install", "--quiet",
-     "dbt-core==1.9.*", "dbt-bigquery==1.9.*", "pandas", "numpy"]
-)
-print("[ok] dbt-core + dbt-bigquery + pandas/numpy installed")
-
-# Write a tiny wrapper script the dbt subprocess executes. It strips
-# /databricks/python/lib/... from sys.path before importing anything, so the
-# broken bundled pandas/numpy + outdated google-auth never get loaded. The
-# ephemeral env's pip-installed copies win.
-_DBT_WRAPPER = tempfile.mktemp(prefix="dbt_run_wrapper_", suffix=".py")
-with open(_DBT_WRAPPER, "w") as f:
-    f.write(
-        "import sys\n"
-        "sys.path = [p for p in sys.path if not p.startswith('/databricks/python/lib')]\n"
-        "import runpy\n"
-        "sys.argv = ['dbt'] + sys.argv[1:]\n"
-        "runpy.run_module('dbt.cli.main', run_name='__main__')\n"
+# Defensive install — no-op if cluster library is already there.
+# Cluster libs SHOULD already pin dbt-core==1.9.* + dbt-bigquery==1.9.*.
+try:
+    import dbt.version  # noqa: F401
+    import dbt.adapters.bigquery  # noqa: F401
+    print("[ok] dbt-core + dbt-bigquery already installed on cluster")
+except ImportError:
+    print("[install] dbt-core + dbt-bigquery not found, pip-installing...")
+    subprocess.check_call(
+        [sys.executable, "-m", "pip", "install", "--quiet",
+         "dbt-core==1.9.*", "dbt-bigquery==1.9.*"]
     )
-print(f"[ok] dbt wrapper written to {_DBT_WRAPPER}")
 
 # COMMAND ----------
 
@@ -126,7 +111,7 @@ vars_payload = {
     "tpcdi_directory": tpcdi_directory,
 }
 cmd = [
-    sys.executable, _DBT_WRAPPER, "run",
+    sys.executable, "-m", "dbt.cli.main", "run",
     "--target", "bigquery",
     "--profiles-dir", profiles_dir,
     "--project-dir", dbt_project_dir,
