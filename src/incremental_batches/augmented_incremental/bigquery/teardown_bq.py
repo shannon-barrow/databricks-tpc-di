@@ -24,14 +24,6 @@
 
 # COMMAND ----------
 
-# MAGIC %pip install --quiet google-cloud-bigquery
-
-# COMMAND ----------
-
-dbutils.library.restartPython()
-
-# COMMAND ----------
-
 dbutils.widgets.text("catalog",          "databricks-sandbox-perfeng", "BigQuery project")
 dbutils.widgets.text("wh_db",            "",                            "wh_db prefix")
 dbutils.widgets.dropdown("scale_factor", "10",
