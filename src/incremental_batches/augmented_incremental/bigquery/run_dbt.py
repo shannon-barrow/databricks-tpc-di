@@ -121,8 +121,14 @@ vars_payload = {
     "batch_date":      batch_date,
     "tpcdi_directory": tpcdi_directory,
 }
+# Use the `dbt` console script (installed next to sys.executable by pip)
+# rather than `python -m dbt.cli.main` — the latter triggers a noisy
+# RuntimeWarning when runpy detects dbt.cli.main already imported during
+# package init. The console script is the same code path without the
+# double-import dance.
+dbt_bin = os.path.join(os.path.dirname(sys.executable), "dbt")
 cmd = [
-    sys.executable, "-m", "dbt.cli.main", "run",
+    dbt_bin, "run",
     "--target", "bigquery",
     "--profiles-dir", profiles_dir,
     "--project-dir", dbt_project_dir,
