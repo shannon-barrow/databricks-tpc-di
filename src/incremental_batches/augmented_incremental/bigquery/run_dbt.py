@@ -22,7 +22,7 @@
 # imports pandas, which then fails the ABI check. Upgrade numpy along
 # with dbt to keep them aligned. Pin numpy>=2.0 because that's what the
 # bundled pandas was built against.
-# MAGIC %pip install --quiet --upgrade "dbt-core==1.9.*" "dbt-bigquery==1.9.*" "numpy>=2.0"
+# MAGIC %pip install --quiet --force-reinstall --upgrade "dbt-core==1.9.*" "dbt-bigquery==1.9.*" "pandas>=2.2" "numpy>=2.0"
 
 # COMMAND ----------
 
@@ -58,8 +58,11 @@ if not (wh_db and batch_date and dbt_project_dir):
 
 # COMMAND ----------
 
+import numpy, pandas
 import dbt.version  # noqa: F401
 import dbt.adapters.bigquery  # noqa: F401
+print(f"[diag] numpy {numpy.__version__} @ {numpy.__file__}")
+print(f"[diag] pandas {pandas.__version__} @ {pandas.__file__}")
 print(f"[ok] dbt-core {dbt.version.__version__} + dbt-bigquery loaded")
 
 # COMMAND ----------
