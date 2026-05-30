@@ -14,6 +14,16 @@
 # Vars passed through to dbt match what the bigquery_models dbt models
 # expect (see dbt_project.yml `vars:` block).
 
+# COMMAND ----------
+
+# MAGIC %pip install --quiet "dbt-core==1.9.*" "dbt-bigquery==1.9.*"
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
+
 import os, subprocess, sys, json, tempfile
 
 # COMMAND ----------
@@ -42,18 +52,11 @@ if not (wh_db and batch_date and dbt_project_dir):
 
 # COMMAND ----------
 
-# Defensive install — no-op if cluster library is already there.
-# Cluster libs SHOULD already pin dbt-core==1.9.* + dbt-bigquery==1.9.*.
-try:
-    import dbt.version  # noqa: F401
-    import dbt.adapters.bigquery  # noqa: F401
-    print("[ok] dbt-core + dbt-bigquery already installed on cluster")
-except ImportError:
-    print("[install] dbt-core + dbt-bigquery not found, pip-installing...")
-    subprocess.check_call(
-        [sys.executable, "-m", "pip", "install", "--quiet",
-         "dbt-core==1.9.*", "dbt-bigquery==1.9.*"]
-    )
+# dbt-core + dbt-bigquery were %pip-installed at the top with a
+# restartPython() so the kernel starts fresh and pandas/numpy ABI match.
+import dbt.version  # noqa: F401
+import dbt.adapters.bigquery  # noqa: F401
+print(f"[ok] dbt-core {dbt.version.__version__} + dbt-bigquery loaded")
 
 # COMMAND ----------
 
@@ -141,9 +144,12 @@ except Exception as e:
     print(f"[log] failed to persist dbt output: {e}")
 
 if res.returncode != 0:
+    # Raise so the task FAILS (dbutils.notebook.exit() always reports
+    # success — bad UX for catching dbt failures upstream in the workflow).
     tail = (res.stdout + res.stderr)[-3000:]
-    dbutils.notebook.exit(
-        f"FAILED exit={res.returncode}\nlog={log_path}\n---tail---\n{tail}"
+    raise RuntimeError(
+        f"dbt run failed (exit={res.returncode}); log={log_path}\n"
+        f"---tail---\n{tail}"
     )
 
 print(f"[done] dbt run --target bigquery batch_date={batch_date} complete.")
