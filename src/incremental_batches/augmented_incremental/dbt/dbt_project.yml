@@ -95,8 +95,13 @@ models:
     # tree, with `bq_` prefix to keep config keys distinct.
     bq_bronze:
       +enabled: "{{ target.type == 'bigquery' }}"
-      +materialized: incremental
-      +incremental_strategy: append
+      # dbt-bigquery has no 'append' strategy. Most bronze tables only need
+      # the current batch's data (silver filters by batch_date), so we just
+      # CREATE OR REPLACE per batch. bronzedailymarket overrides this to
+      # incremental insert_overwrite because factmarkethistory needs 365-day
+      # history. (Same shape Snowflake takes via APPEND + Databricks takes
+      # via Auto Loader append — just expressed in BQ-idiomatic strategies.)
+      +materialized: table
       +on_schema_change: ignore
     bq_silver:
       +enabled: "{{ target.type == 'bigquery' }}"

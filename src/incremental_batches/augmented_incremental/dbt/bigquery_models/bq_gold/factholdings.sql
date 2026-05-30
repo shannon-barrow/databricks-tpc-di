@@ -1,14 +1,21 @@
 {{
   config(
     materialized = 'incremental',
-    incremental_strategy = 'append',
+    incremental_strategy = 'insert_overwrite',
+    partition_by = {
+      'field': 'sk_dateid',
+      'data_type': 'int64',
+      'range': {'start': 19000101, 'end': 21000101, 'interval': 1}
+    },
     on_schema_change = 'ignore',
     full_refresh = false,
   )
 }}
 
-{# BQ variant of factholdings. Append-only fact, one row per holding-history
-   event whose trade just closed today.
+{# BQ variant of factholdings. dbt-bigquery has no 'append' strategy; use
+   insert_overwrite partitioned by sk_dateid. Each batch's holdings have
+   today's sk_dateid (sk_closedateid from dimtrade); the partition swap
+   adds today's rows without disturbing prior days'.
 
    Translations from Snowflake:
      - to_char(d, 'YYYYMMDD') -> FORMAT_DATE('%Y%m%d', d)

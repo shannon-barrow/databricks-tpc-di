@@ -1,11 +1,3 @@
-{{
-  config(
-    materialized = 'incremental',
-    incremental_strategy = 'append',
-    on_schema_change = 'ignore',
-  )
-}}
-
 {# BQ variant — per-batch "cust_update" rows derived from bronzecustomer
    SCD2 events that touch an account. Pure SQL, no external stage read.
 
