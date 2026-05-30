@@ -163,14 +163,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # SFs if the cluster has headroom.
 MAX_PARALLEL_TABLES = 6
 
-# NOTE: cannot set spark.scheduler.mode=FAIR via sparkContext on serverless
-# (sparkContext attribute not exposed). Without FAIR, concurrent Spark write
-# jobs from the thread pool may queue behind each other on Spark's FIFO
-# scheduler. The bq_load + load_job.result() phases are non-Spark BigQuery
-# API calls though, so workers still overlap effectively during those phases
-# even with FIFO Spark scheduling. Net: ~2x speedup vs fully sequential
-# (rather than ~3x with FAIR), but still a big win.
-
 def _seed_one(table: str) -> dict:
     """Per-table pipeline. Returns a result dict (never raises — failures
     are captured in result['error'] so other tables can still proceed)."""
