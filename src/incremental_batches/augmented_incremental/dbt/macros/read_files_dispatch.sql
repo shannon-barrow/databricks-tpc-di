@@ -8,6 +8,7 @@
    - Databricks: read_files() with the declared schema (FAILFAST mode so a
      malformed CSV produces an obvious error rather than silent NULLs).
    - Snowflake:  staged file read via positional $1::T projection.
+   - BigQuery:   pre-built wildcard external table from setup_bq.py.
 #}
 {% macro read_daily_csv(filename, schema_str) %}
   {{ return(adapter.dispatch('read_daily_csv', 'dbt_augmented_incremental')(filename, schema_str)) }}
@@ -22,6 +23,22 @@
     header => false,
     mode => 'FAILFAST'
   )
+{%- endmacro %}
+
+{% macro bigquery__read_daily_csv(filename, schema_str) %}
+  {# BigQuery: SELECT from the pre-built wildcard external table that
+     setup_bq.py creates under `{wh_db}_{sf}_bronze`. One external table
+     per dataset, URI pattern `gs://.../_dailybatches/{wh_db}_{sf}/*/{Dataset}.txt`
+     — the wildcard always resolves to the current batch's file because
+     simulate_filedrops_bq clears the prior batch's dir before writing the
+     new one. Reads are zero-copy + cheap: BQ scans the day's CSV directly.
+
+     `schema_str` is intentionally ignored here — the external table's
+     column types are declared at create time (see DATASET_SCHEMAS in
+     setup_bq.py). `filename` is `Customer.txt` / `DailyMarket.txt` / etc.;
+     the BQ external table is named just the stem (`Customer`). #}
+  {%- set table_name = filename.rsplit('.', 1)[0] -%}
+  (select * from `{{ var('catalog') }}.{{ tgt_db() }}_bronze.{{ table_name }}`)
 {%- endmacro %}
 
 {% macro snowflake__read_daily_csv(filename, schema_str) %}
