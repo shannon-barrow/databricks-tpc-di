@@ -79,38 +79,41 @@ print(f"[ok] connected to BigQuery project={bq_project} location={bq_location}")
 
 # COMMAND ----------
 
-# Sanity check: by the time setup_bq runs, the upstream `seed_staging` task
-# (a separate task in the parent workflow — see augmented_bigquery.py) should
-# have populated tpcdi_staging_sf{sf} with all 22 expected tables. We don't
-# bootstrap-in-place here anymore (no dbutils.notebook.run) — chained
-# notebook calls inherit the caller's compute and hide work from the job
-# DAG. Fail fast with a clear message if upstream missed something.
-STAGING_TABLES = [
-    "taxrate", "dimdate", "industry", "tradetype", "dimbroker",
-    "dimsecurity", "statustype", "dimcompany", "dimtime", "financial",
-    "companyyeareps", "currentaccountbalances", "dimaccount",
-    "dimcustomer", "dimtrade", "factwatches", "factcashbalances",
-    "factholdings", "factmarkethistory", "bronzedailymarket",
-    "cashtransactionhistorical", "batchdate",
-]
-
+# One-time staging bootstrap (idempotent if/else). Mirrors the SF pattern in
+# setup_sf.py: import a Python module sitting next to this notebook, call
+# `ensure_staging_environment(...)`. The function self-skips when all 22
+# staging tables already exist; otherwise it does the parallel
+# Delta → parquet → bq_load seed for whatever's missing. No dbutils.notebook.run,
+# no separate workflow task — single setup notebook handles everything.
+import sys, os
 try:
-    rows = client.query(
-        f"SELECT table_name FROM `{bq_project}.{staging_dataset}.INFORMATION_SCHEMA.TABLES`"
-    ).result()
-    present = {r["table_name"] for r in rows}
-except Exception as e:
-    raise RuntimeError(
-        f"Staging dataset {bq_project}.{staging_dataset} is unreachable "
-        f"({type(e).__name__}: {e}). Run the upstream seed_staging task first."
-    )
-missing = set(STAGING_TABLES) - present
-if missing:
-    raise RuntimeError(
-        f"Staging dataset {bq_project}.{staging_dataset} is missing "
-        f"{len(missing)} tables: {sorted(missing)}. Run the upstream seed_staging task."
-    )
-print(f"[ok] staging dataset {bq_project}.{staging_dataset} is intact ({len(present)} tables)")
+    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().getOrElse(None)
+    if _nb_path and not _nb_path.startswith("/Workspace"):
+        _nb_path = "/Workspace" + _nb_path
+    _module_dir = os.path.dirname(_nb_path) if _nb_path else os.getcwd()
+except Exception:
+    _module_dir = os.getcwd()
+if _module_dir not in sys.path:
+    sys.path.insert(0, _module_dir)
+import bq_staging_bootstrap as bootstrap
+
+parquet_root = f"/Volumes/{databricks_catalog}/tpcdi_raw_data/tpcdi_volume/staging_parquet/sf={scale_factor}"
+volume_root  = f"/Volumes/{databricks_catalog}/tpcdi_raw_data/tpcdi_volume/"
+
+_boot = bootstrap.ensure_staging_environment(
+    client,
+    bq_project=bq_project,
+    bq_dataset=staging_dataset,
+    bq_location=bq_location,
+    src_catalog=databricks_catalog,
+    src_schema=f"tpcdi_incremental_staging_{scale_factor}",
+    parquet_root=parquet_root,
+    volume_root=volume_root,
+    gcs_volume_prefix=gcs_volume_prefix.rstrip("/") + "/",
+    spark=spark,
+    parallel=6,
+)
+print(f"[bootstrap] {_boot}")
 
 # COMMAND ----------
 

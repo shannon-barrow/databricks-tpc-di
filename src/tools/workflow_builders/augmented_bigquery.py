@@ -237,36 +237,14 @@ def build_parent(
     """
     aug = f"{repo_src_path}/{_AUG_PATH}"
 
-    # seed_staging task: one-time per SF; idempotently populates the BQ
-    # staging dataset (tpcdi_staging_sf{N}) from the Databricks Delta
-    # staging schema. Self-skips in <1s when staging is already complete.
-    # MUST be a separate task, NOT a dbutils.notebook.run from setup_bq,
-    # so its compute is independent of the orchestrator and it gets its
-    # own retry policy + observability.
-    # NOTE on widget name mapping: seed_staging_py's `catalog` widget is
-    # the DATABRICKS source catalog ("main") and its `bq_project` widget
-    # is the BQ project. The parent job's `catalog` parameter is the BQ
-    # project (it's reused across the workflow), so we plumb the parent's
-    # `databricks_catalog` into seed_staging_py's `catalog`, and the
-    # parent's `catalog` into seed_staging_py's `bq_project`.
-    seed_staging_task = _make_task(
-        task_key="seed_staging",
-        notebook_path=f"{aug}/bigquery/seed_staging_py",
-        base_params={
-            "catalog":           "{{job.parameters.databricks_catalog}}",
-            "scale_factor":      "{{job.parameters.scale_factor}}",
-            "bq_project":        "{{job.parameters.catalog}}",
-            "bq_location":       "{{job.parameters.bq_location}}",
-            "secret_scope":      "{{job.parameters.secret_scope}}",
-            "gcs_volume_prefix": "{{job.parameters.gcs_volume_prefix}}",
-        },
-        environment_key="serverless_bq",
-    )
-
+    # Single setup task: mirrors SF pattern (setup_sf calls
+    # sf_staging_bootstrap.ensure_staging_environment inline via an if/else
+    # — no separate workflow task for seed). setup_bq imports
+    # bq_staging_bootstrap and runs the same idempotent bootstrap
+    # in-process before creating the per-run target dataset.
     setup_task = _make_task(
         task_key="setup_bq",
         notebook_path=f"{aug}/bigquery/setup_bq",
-        depends_on=["seed_staging"],
         base_params={
             **_COMMON_PARAMS,
             "databricks_catalog":
@@ -360,7 +338,7 @@ def build_parent(
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],
-        "tasks": [seed_staging_task, setup_task, loop_task, gate_task, cleanup_task],
+        "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         # Serverless env for setup_bq + cleanup. The BQ Python client is the
         # only runtime dep — both notebooks dispatch all heavy work to
         # BigQuery; the Spark driver only orchestrates. dbt + simulate_filedrops
