@@ -26,7 +26,7 @@ select
   c.update_dt
 from {{ ref('bronzecustomer') }} c
 join {{ source('run_schema', 'dimaccount') }} a
-  on CAST(c.customerid AS VARCHAR(MAX)) = SUBSTR(CAST(a.sk_customerid AS VARCHAR(MAX)), 9)
+  on CAST(c.customerid AS VARCHAR(MAX)) = SUBSTRING(CAST(a.sk_customerid AS VARCHAR(MAX)), 9)
  and a.iscurrent
  and c.update_dt > a.effectivedate
 where c.cdc_flag = 'U'

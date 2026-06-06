@@ -109,7 +109,12 @@ lines = [
     f"      user: {rs_user}",
     f"      password: {rs_password}",
     "      threads: 8",
-    "      connect_timeout: 30",
+    # connect_timeout in dbt-redshift is passed as the underlying socket
+    # timeout for redshift_connector. Default 30s killed SF=10 bronzes
+    # at 30-36s (XS workgroup cold-start latency). Larger SFs have
+    # individual queries that legitimately take 10-20 min, so 3600 (1 hr)
+    # gives headroom without hiding real hangs.
+    "      connect_timeout: 3600",
     "      sslmode: require",
 ]
 

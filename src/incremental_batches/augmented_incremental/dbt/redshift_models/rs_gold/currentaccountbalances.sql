@@ -57,6 +57,6 @@ select
   MAX(ct_date) as ct_date,
   accountid,
   CAST(SUM(ct_amt) AS NUMERIC(38, 9)) as current_account_cash,
-  MAX(latest_batch)            as latest_batch
+  BOOL_OR(latest_batch)        as latest_batch    {# Redshift has no MAX(boolean); BOOL_OR is the analog #}
 from unioned
 group by accountid
