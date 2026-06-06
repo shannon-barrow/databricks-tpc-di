@@ -146,6 +146,14 @@ print(f"[ok] schema {database}.{target_schema} ready")
 #   sortkey_cols: tuple of column names for compound SORTKEY (Redshift's
 #                 default); empty tuple = no sort key
 TABLE_LAYOUTS = {
+    # Bronze CDC-history tables (per-batch dbt pre_hook appends rows here).
+    "bronzecustomer":             ("KEY(customerid)",    ("update_dt",)),
+    "bronzeaccount":              ("KEY(accountid)",     ("update_dt",)),
+    "bronzetrade":                ("KEY(tradeid)",       ("event_dt",)),
+    "bronzecashtransaction":      ("KEY(accountid)",     ("event_dt",)),
+    "bronzeholdings":             ("KEY(hh_t_id)",       ("event_dt",)),
+    "bronzewatches":              ("KEY(w_c_id)",        ("event_dt",)),
+
     # Facts (large) — DISTKEY on join column, SORTKEY on date(s) for prune
     "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
     "factwatches":                ("KEY(sk_customerid)", ("sk_dateid_dateremoved", "sk_customerid", "sk_securityid")),
@@ -186,6 +194,11 @@ TABLE_LAYOUTS = {
 # Verify completeness against the canonical 22 STAGING_TABLES set used on
 # the SF / BQ sides. Update this list if the canonical set ever changes.
 STAGING_TABLES_EXPECTED = {
+    # 6 bronze CDC-history tables (carry pre-2016-07-06 SCD2 history;
+    # dbt bronze pre_hook appends new daily batches on top).
+    "bronzecustomer", "bronzeaccount", "bronzetrade",
+    "bronzecashtransaction", "bronzeholdings", "bronzewatches",
+    # 22 reference + fact + dim staging tables.
     "bronzedailymarket", "factmarkethistory", "factwatches", "dimtrade",
     "factholdings", "factcashbalances", "cashtransactionhistorical",
     "financial", "companyyeareps", "dimaccount", "dimcustomer",
