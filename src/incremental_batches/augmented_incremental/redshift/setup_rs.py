@@ -80,23 +80,6 @@ print(f"staging = {database}.{staging_schema} (CTAS source; must exist)")
 
 # COMMAND ----------
 
-conn = rs_connect(
-    database=database,
-    secret_scope=secret_scope,
-    query_group={
-        "wh_db":        wh_db,
-        "scale_factor": scale_factor,
-        "task":         "setup_rs",
-    },
-)
-print(f"[ok] connected to Redshift {database}")
-
-# COMMAND ----------
-
-# 0. Self-bootstrap the staging schema if needed. Mirrors setup_bq.py /
-#    setup_sf.py pattern: import the bootstrap module from the notebook
-#    directory and call ensure_staging_environment() inline.
-#    Idempotent — no-op when all 22 staging tables already present.
 import sys, os
 try:
     _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().getOrElse(None)
@@ -112,57 +95,60 @@ import rs_staging_bootstrap as bootstrap
 parquet_root = f"{tpcdi_directory}staging_parquet_rs/sf={scale_factor}"
 iam_role     = rs_iam_role(secret_scope=secret_scope)
 
-_boot = bootstrap.ensure_staging_environment(
-    conn,
-    database=database,
-    target_schema=staging_schema,
-    src_catalog=databricks_catalog,
-    src_schema=f"tpcdi_incremental_staging_{scale_factor}",
-    parquet_root=parquet_root,
-    volume_root=tpcdi_directory,
-    s3_volume_prefix=s3_volume_prefix,
-    iam_role=iam_role,
-    aws_region=aws_region,
-    spark=spark,
-    dbutils=dbutils,
-    secret_scope=secret_scope,
-    # parallel=8 matches sf_staging_bootstrap. Each worker does
-    # spark.read → write parquet (UC volume) → COPY FROM PARQUET.
-    # At SF=20k, big tables (factmarkethistory ~6B rows, dimtrade ~2B,
-    # dimsecurity ~16M) dominate; with parallel=4 the long-pole sets a
-    # ~30-40 min floor on bootstrap wall.
-    parallel=8,
-)
-print(f"[bootstrap] {_boot}")
+# COMMAND ----------
 
-# CRITICAL: the `conn` opened above has been idle for the bootstrap
-# duration (30-80 min at SF=20k). Redshift's SSL connection times out
-# long before that; the next use of `conn` (cell 6's DROP SCHEMA) would
-# raise "SSL connection has been closed unexpectedly". Close + reopen.
-conn.close()
-conn = rs_connect(
-    database=database,
-    secret_scope=secret_scope,
-    query_group={"wh_db": wh_db, "scale_factor": scale_factor, "task": "setup_rs", "phase": "post_bootstrap"},
-)
-print("[ok] re-opened conn after bootstrap")
+# 0. Self-bootstrap the staging schema if needed. Mirrors setup_bq.py /
+#    setup_sf.py pattern. Idempotent — no-op when all 22 staging tables
+#    already present with row counts matching their COMMENT markers.
+#
+# CONNECTION DISCIPLINE: every cell opens its own short-lived conn at the
+# top and closes it at the bottom. No long-lived conn carries state across
+# cells. Reason: at SF=20k a phase can take >1hr, and Redshift Serverless
+# SSL sockets idle-close (see today's post-mortem in commit 7129e9e). TCP
+# keepalives in rs_connect provide belt-and-suspenders.
+_conn = rs_connect(database=database, secret_scope=secret_scope,
+                   query_group={"wh_db": wh_db, "scale_factor": scale_factor,
+                                "task": "setup_rs", "phase": "bootstrap"})
+try:
+    _boot = bootstrap.ensure_staging_environment(
+        _conn,
+        database=database,
+        target_schema=staging_schema,
+        src_catalog=databricks_catalog,
+        src_schema=f"tpcdi_incremental_staging_{scale_factor}",
+        parquet_root=parquet_root,
+        volume_root=tpcdi_directory,
+        s3_volume_prefix=s3_volume_prefix,
+        iam_role=iam_role,
+        aws_region=aws_region,
+        spark=spark,
+        dbutils=dbutils,
+        secret_scope=secret_scope,
+        parallel=8,
+    )
+    print(f"[bootstrap] {_boot}")
+finally:
+    _conn.close()
 
 # COMMAND ----------
 
 # 1. Ensure the per-run schema exists. Two modes:
 #    - force_reset=YES → DROP CASCADE + CREATE (slow at SF=20k: throws away
 #      every CTAS'd table; the next cell re-does all 22)
-#    - default (idempotent) → CREATE IF NOT EXISTS; leave existing tables
-#      in place so the per-table CTAS step below can skip work that's
-#      already done with the right row counts. This is what saves wall
-#      time on a re-run after a partial failure (cancel mid-CTAS,
-#      transient SSL drop, etc.).
-with conn.cursor() as cur:
-    if force_reset:
-        cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
-        print(f"[reset] dropped {database}.{target_schema} (force_reset=YES)")
-    cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
-print(f"[ok] schema {database}.{target_schema} ready (force_reset={force_reset})")
+#    - default (idempotent) → CREATE IF NOT EXISTS; existing tables stay
+#      and cell 8 skips per-table CTAS where staging row counts match.
+_conn = rs_connect(database=database, secret_scope=secret_scope,
+                   query_group={"wh_db": wh_db, "scale_factor": scale_factor,
+                                "task": "setup_rs", "phase": "schema_init"})
+try:
+    with _conn.cursor() as cur:
+        if force_reset:
+            cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
+            print(f"[reset] dropped {database}.{target_schema} (force_reset=YES)")
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
+    print(f"[ok] schema {database}.{target_schema} ready (force_reset={force_reset})")
+finally:
+    _conn.close()
 
 # COMMAND ----------
 
@@ -468,32 +454,29 @@ def _dist_clause(spec: str) -> str:
         return f"DISTKEY({col})"
     raise ValueError(f"unknown distribution_spec: {spec}")
 
-# CTAS step above may have taken hours; reopen conn so bronze DDL doesn't
-# inherit a stale SSL socket.
-conn.close()
-conn = rs_connect(
-    database=database, secret_scope=secret_scope,
-    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
-                 "task": "setup_rs", "phase": "post_ctas"},
-)
-print("[ok] re-opened conn after CTAS")
-
-with conn.cursor() as cur:
-    for tbl, cols_sql in BRONZE_DDLS.items():
-        dist_spec, sortkey_cols = BRONZE_LAYOUTS[tbl]
-        sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
-        # IF NOT EXISTS: idempotent. dbt may have already populated bronze
-        # tables on a prior partial run; preserve their data on re-run.
-        # If schema needs to change, use force_reset=YES at the top.
-        ddl = f'''
-            CREATE TABLE IF NOT EXISTS "{target_schema}"."{tbl}" (
-              {cols_sql.strip().rstrip(",")}
-            )
-            {_dist_clause(dist_spec)}
-            {sort_sql}
-        '''.strip()
-        cur.execute(ddl)
-        print(f"[bronze-ddl] {tbl:32s} OK")
+# Fresh conn for bronze DDLs (CTAS above can take hours).
+_conn = rs_connect(database=database, secret_scope=secret_scope,
+                   query_group={"wh_db": wh_db, "scale_factor": scale_factor,
+                                "task": "setup_rs", "phase": "bronze_ddls"})
+try:
+    with _conn.cursor() as cur:
+        for tbl, cols_sql in BRONZE_DDLS.items():
+            dist_spec, sortkey_cols = BRONZE_LAYOUTS[tbl]
+            sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
+            # IF NOT EXISTS: idempotent. dbt may have already populated bronze
+            # tables on a prior partial run; preserve their data on re-run.
+            # If schema needs to change, use force_reset=YES at the top.
+            ddl = f'''
+                CREATE TABLE IF NOT EXISTS "{target_schema}"."{tbl}" (
+                  {cols_sql.strip().rstrip(",")}
+                )
+                {_dist_clause(dist_spec)}
+                {sort_sql}
+            '''.strip()
+            cur.execute(ddl)
+            print(f"[bronze-ddl] {tbl:32s} OK")
+finally:
+    _conn.close()
 
 # COMMAND ----------
 
@@ -508,5 +491,4 @@ print(f"emitted batch_date_ls: {len(batches)} dates, first={batches[0]}, last={b
 
 # COMMAND ----------
 
-conn.close()
 print("[done] Redshift setup complete.")

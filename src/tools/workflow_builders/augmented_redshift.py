@@ -46,10 +46,14 @@ _DEFAULT_NOTIF = {
     "alert_on_last_attempt": False,
 }
 
+# NO automatic retries. A failure in setup_rs / dbt_run / etc. should
+# surface to the user, not silently re-run on top of half-cooked state.
+# After fixing whatever caused the failure, the user manually triggers
+# 'Repair run' (which is idempotent now per the setup_rs hardenings).
 _RETRY_POLICY = {
-    "max_retries": 3,
-    "min_retry_interval_millis": 15000,
-    "retry_on_timeout": True,
+    "max_retries": 0,
+    "min_retry_interval_millis": 0,
+    "retry_on_timeout": False,
 }
 
 _AUG_PATH = "incremental_batches/augmented_incremental"
