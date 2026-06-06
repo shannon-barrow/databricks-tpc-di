@@ -138,14 +138,32 @@ vars_payload = {
     "aws_region":       aws_region,
     "file_ext":         file_ext,
 }
-cmd = [
-    sys.executable, "-m", "dbt.cli.main", "run",
-    "--target", "redshift",
-    "--profiles-dir", profiles_dir,
-    "--project-dir", dbt_project_dir,
-    "--vars", json.dumps(vars_payload),
-    "--no-version-check",
-]
+# On serverless DBR, `python -m dbt.cli.main` fails with
+# "No module named 'dbt.cli'" even though dbt-redshift is installed —
+# the entrypoint packaging is awkward on env_version=5. The `dbt`
+# executable from the env's bin/ is the reliable invocation path.
+import shutil
+dbt_exe = shutil.which("dbt")
+if dbt_exe:
+    cmd = [
+        dbt_exe, "run",
+        "--target", "redshift",
+        "--profiles-dir", profiles_dir,
+        "--project-dir", dbt_project_dir,
+        "--vars", json.dumps(vars_payload),
+        "--no-version-check",
+    ]
+else:
+    # Last resort — try the python -m form. If dbt.cli is missing this
+    # will also fail, but at least the error path is loud.
+    cmd = [
+        sys.executable, "-m", "dbt", "run",
+        "--target", "redshift",
+        "--profiles-dir", profiles_dir,
+        "--project-dir", dbt_project_dir,
+        "--vars", json.dumps(vars_payload),
+        "--no-version-check",
+    ]
 print("dbt cmd:", " ".join(cmd))
 res = subprocess.run(cmd, capture_output=True, text=True)
 print(res.stdout)
