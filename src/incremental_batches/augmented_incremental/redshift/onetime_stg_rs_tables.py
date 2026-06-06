@@ -144,16 +144,20 @@ def _create_table_ddl(table: str, sample_df) -> str:
     """Generate a Redshift CREATE TABLE DDL from a Spark DataFrame schema +
     the per-table layout. Type mapping mirrors what dbt-redshift uses."""
     dist_spec, sortkey_cols = TABLE_LAYOUTS[table]
+    # IMPORTANT: Redshift COPY FROM PARQUET requires EXACT type match between
+    # the target column and the parquet schema. parquet FLOAT (32-bit) must
+    # map to REAL on Redshift, NOT DOUBLE PRECISION (64-bit). Same for short/byte.
     type_map = {
         "boolean":    "BOOLEAN",
-        "byte":       "SMALLINT",
+        "byte":       "SMALLINT",   # Redshift has no TINYINT — SMALLINT is the 16-bit equivalent
         "short":      "SMALLINT",
         "integer":    "INTEGER",
         "long":       "BIGINT",
-        "float":      "DOUBLE PRECISION",   # Redshift has REAL too but DBL is safer
-        "double":     "DOUBLE PRECISION",
+        "float":      "REAL",                # parquet FLOAT (32-bit) → Redshift REAL/FLOAT4
+        "double":     "DOUBLE PRECISION",    # parquet DOUBLE (64-bit) → Redshift DOUBLE PRECISION/FLOAT8
         "date":       "DATE",
         "timestamp":  "TIMESTAMP",
+        "binary":     "VARBYTE",
     }
     cols = []
     for f in sample_df.schema.fields:
@@ -190,9 +194,24 @@ def _seed_one(table: str) -> tuple[str, dict]:
     log.append(f"[{table}] delta_rows={delta_rows:,}, writing parquet")
     df.write.mode("overwrite").parquet(pq_path)
 
-    # Redshift COPY needs an S3 URI. The UC volume path maps 1:1 to the S3
-    # backing prefix.
-    s3_uri = pq_path.replace(tpcdi_directory, s3_prefix.rstrip("/") + "/") + "/"
+    # Databricks's Spark writer leaves `_committed_*` and `_SUCCESS` markers
+    # in the output dir. Redshift COPY treats the source URI as a prefix and
+    # tries to read ALL files matching it — the metadata markers cause a
+    # Spectrum Scan Error ("invalid version number"). Two defenses:
+    #   1. Delete the marker files after write so the dir holds only parquet
+    #   2. Use a COPY URI ending in `/part-` so even if a marker survives,
+    #      Redshift only matches part-NNNN-*.parquet files
+    try:
+        for entry in dbutils.fs.ls(pq_path):
+            n = entry.name.rstrip("/")
+            if n.startswith("_"):
+                dbutils.fs.rm(entry.path, recurse=True)
+    except Exception as _e:
+        log.append(f"[{table}] WARN: cleanup of _* markers failed: {_e}")
+
+    # Redshift COPY URI uses /part- prefix to be defensive about any
+    # post-cleanup leftover non-parquet artifacts.
+    s3_uri = pq_path.replace(tpcdi_directory, s3_prefix.rstrip("/") + "/") + "/part-"
 
     # Per-thread connection (psycopg2 not safe for concurrent cursors).
     local_conn = rs_connect(database=database, secret_scope=secret_scope,
