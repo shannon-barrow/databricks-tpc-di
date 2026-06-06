@@ -28,20 +28,31 @@ conn = psycopg2.connect(
 conn.autocommit = True
 
 output_lines = []
+tables = ["currentaccountbalances", "factcashbalances", "factmarkethistory",
+          "factwatches", "factholdings", "dimcustomer", "dimaccount", "dimtrade",
+          "bronzecashtransaction", "bronzecustomer", "bronzeaccount", "bronzeholdings",
+          "bronzetrade", "bronzewatches", "bronzedailymarket",
+          "account_updates_from_customer"]
 with conn.cursor() as cur:
-    for t in ["dimsecurity", "dimcustomer", "dimaccount", "dimtrade",
-              "factmarkethistory", "factwatches", "factholdings", "factcashbalances",
-              "bronzeaccount", "account_updates_from_customer", "bronzecustomer"]:
-        cur.execute("""
-            SELECT column_name, data_type, character_maximum_length, numeric_precision
-            FROM information_schema.columns
-            WHERE table_schema = %s AND table_name = %s
-            ORDER BY ordinal_position
-        """, (target_schema, t))
-        rows = cur.fetchall()
-        output_lines.append(f"\n=== RS {target_schema}.{t} ===")
-        for r in rows:
-            output_lines.append(f"  {r[0]:30s} {r[1]:20s} len={r[2]}")
+    output_lines.append("\n=== ROW COUNTS ===")
+    for t in tables:
+        try:
+            cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{t}"')
+            n = cur.fetchone()[0]
+            output_lines.append(f"  {t:35s} {n:>12,}")
+        except Exception as e:
+            output_lines.append(f"  {t:35s} ERROR: {e}")
+    # Sanity: currentaccountbalances latest_batch=true count should equal
+    # factcashbalances per-batch insertions.
+    cur.execute(f'SELECT COUNT(*) FROM "{target_schema}".currentaccountbalances WHERE latest_batch = true')
+    output_lines.append(f"\n  currentaccountbalances WHERE latest_batch=true: {cur.fetchone()[0]:,}")
+    cur.execute(f'SELECT COUNT(*) FROM "{target_schema}".currentaccountbalances WHERE latest_batch = false')
+    output_lines.append(f"  currentaccountbalances WHERE latest_batch=false: {cur.fetchone()[0]:,}")
+    cur.execute(f'SELECT MIN(ct_date), MAX(ct_date) FROM "{target_schema}".currentaccountbalances')
+    output_lines.append(f"  currentaccountbalances ct_date range: {cur.fetchone()}")
+    # Compare to what staging had
+    cur.execute(f'SELECT COUNT(*) FROM "tpcdi_staging_sf{sf}".currentaccountbalances')
+    output_lines.append(f"  staging.currentaccountbalances count: {cur.fetchone()[0]:,}")
 
 conn.close()
 report = "\n".join(output_lines)
