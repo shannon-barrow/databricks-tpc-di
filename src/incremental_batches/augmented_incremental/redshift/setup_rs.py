@@ -334,17 +334,18 @@ BRONZE_DDLS = {
         status      VARCHAR(10),
         update_dt   DATE
     """,
-    "account_updates_from_customer": """
-        cdc_flag    VARCHAR(1),
-        cdc_dsn     BIGINT,
-        accountid   BIGINT,
-        brokerid    BIGINT,
-        customerid  BIGINT,
-        accountdesc VARCHAR(80),
-        taxstatus   SMALLINT,
-        status      VARCHAR(10),
-        update_dt   DATE
-    """,
+    # NOTE: account_updates_from_customer is intentionally NOT pre-created.
+    # Its rs_bronze model has no pre_hook (no S3 source — body is a pure
+    # SELECT joining bronzecustomer + dimaccount). With incremental_strategy
+    # = 'append' on a non-existent target, dbt does CREATE TABLE AS SELECT
+    # the first time, inferring column types from the SELECT (a.accountdesc
+    # widens to VARCHAR(65535) from dimaccount's source).
+    #
+    # If we pre-create it like bronzeaccount, dbt detects the schema differs
+    # from its SELECT and rewrites the table — but the rewrite reorders
+    # columns (varchars to the end), which breaks dimaccount's
+    # `select * ... union all select * ...` by-position type matching
+    # against bronzeaccount.
     "bronzecashtransaction": """
         cdc_flag VARCHAR(1),
         cdc_dsn  BIGINT,
@@ -398,7 +399,6 @@ BRONZE_DDLS = {
 BRONZE_LAYOUTS = {
     "bronzecustomer":                ("KEY(customerid)", ("update_dt",)),
     "bronzeaccount":                 ("KEY(accountid)",  ("update_dt",)),
-    "account_updates_from_customer": ("KEY(accountid)",  ("update_dt",)),
     "bronzecashtransaction":         ("KEY(accountid)",  ("event_dt",)),
     "bronzeholdings":                ("KEY(hh_t_id)",    ("event_dt",)),
     "bronzetrade":                   ("KEY(tradeid)",    ("event_dt",)),
