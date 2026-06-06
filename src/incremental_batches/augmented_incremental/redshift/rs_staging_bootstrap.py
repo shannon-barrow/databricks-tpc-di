@@ -131,16 +131,15 @@ def _seed_one(table: str, *, database: str, target_schema: str,
               spark, dbutils, secret_scope: str) -> dict:
     """Seed one staging table: Delta → parquet → COPY → row-count check.
 
-    Each call opens its own psycopg2 connection (thread-safe). Raises on
-    any failure — caller catches and aggregates.
+    Each call opens its own psycopg2 connection (psycopg2 connections are
+    NOT thread-safe to share, so per-thread is the rule). Raises on any
+    failure — caller catches and aggregates.
+
+    NOTE: do NOT do relative imports here. This module is loaded via
+    sys.path insertion (not as a package), so `from . import X` fails
+    immediately with "attempted relative import with no known parent
+    package". Use absolute imports only.
     """
-    from . import _rs_conn  # noqa: F401  (relative import optional)
-    # Threads inside notebooks don't always pick up relative imports; do it
-    # the hard way — re-create the helper inline. This module is small.
-    import json as _json
-    # Use the helper that's already loaded in the calling notebook's globals.
-    # The caller passes us a `dbutils` and we have access to `secret_scope`,
-    # so just open a psycopg2 connection ourselves.
     import psycopg2
 
     def _get(key, default=None):
