@@ -333,7 +333,7 @@ Same five clusters as BQ, plus Redshift-specific overhead:
 
 Translated from the SF / BQ pattern but with CTAS instead of CLONE:
 
-- `onetime_stg_rs_tables.py` — one-time per SF: load Databricks staging
+- `rs_staging_bootstrap.py` — pure Python module imported inline by setup_rs.py; one-time per SF load of Databricks staging
   → S3 (UNLOAD-shape via Spark), then COPY into
   `tpcdi_staging_sf{sf}.<table>` with DISTKEY/SORTKEY declared at
   CREATE. ~10-20 min at SF=20k (~150 GB of staging data).
@@ -397,7 +397,7 @@ src/incremental_batches/augmented_incremental/redshift/
   PORT_NOTES.md                   (this file)
   _rs_conn.py                     (psycopg2 / jaydebeapi factory; reads tpcdi_redshift secret scope)
   setup_rs.py                     (per-parent: CTAS 22 tables from tpcdi_staging_sf{sf} → {wh_db}_{sf})
-  onetime_stg_rs_tables.py        (one-time per SF: load Databricks staging → tpcdi_staging_sf{sf})
+  rs_staging_bootstrap.py         (pure Python module imported inline by setup_rs; self-bootstraps tpcdi_staging_sf{sf})
   simulate_filedrops_rs.py        (per-batch: cp files into _staging/sf={sf}/{batch_date}/)
   load_bronze_rs.py               (per-batch: 7 COPYs from _staging into bronze*)
   run_dbt.py                      (per-batch: shells dbt run --target redshift)

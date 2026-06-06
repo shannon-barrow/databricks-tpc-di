@@ -18,10 +18,11 @@
 #      tables that dbt populates per batch (via COPY in load_bronze_rs.py)
 #   4. Emit batch_date_ls task value for the parent's for_each loop
 #
-# Prerequisites: {database}.tpcdi_staging_sf{sf} must already exist with all
-# 22 staging tables loaded via the one-time onetime_stg_rs_tables.py script.
-# We do NOT bootstrap the staging schema here — it's a manual, per-SF, paid-once
-# operation that lives in its own notebook.
+# Self-bootstrapping: if {database}.tpcdi_staging_sf{sf} doesn't exist yet
+# for this scale factor, this notebook imports `rs_staging_bootstrap` and
+# seeds it inline (Delta → parquet → Redshift COPY). Idempotent — no-op
+# when all 22 staging tables are already present. No separate workflow
+# task; mirrors setup_bq.py's bootstrap pattern.
 #
 # Auth: reads connection creds from `tpcdi_redshift` secret scope (see _rs_conn).
 
@@ -33,12 +34,23 @@ dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000",
 dbutils.widgets.text("secret_scope",    "tpcdi_redshift", "Databricks secret scope")
 dbutils.widgets.text("incremental_batches_to_run", "365",
                      "Number of batches the for_each loop runs")
+dbutils.widgets.text("databricks_catalog", "main",
+                     "Databricks UC catalog where tpcdi_incremental_staging_{sf} lives")
+dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
+                     "UC external volume root")
+dbutils.widgets.text("s3_volume_prefix", "s3://tpcds-datasets/shannon_tpcdi/",
+                     "S3 prefix matching the UC volume backing")
+dbutils.widgets.text("aws_region",      "us-west-2", "Region for COPY")
 
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 secret_scope     = dbutils.widgets.get("secret_scope")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
+databricks_catalog = dbutils.widgets.get("databricks_catalog")
+tpcdi_directory  = dbutils.widgets.get("tpcdi_directory").rstrip("/") + "/"
+s3_volume_prefix = dbutils.widgets.get("s3_volume_prefix")
+aws_region       = dbutils.widgets.get("aws_region")
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -69,20 +81,42 @@ print(f"[ok] connected to Redshift {database}")
 
 # COMMAND ----------
 
-# 0. Validate the staging schema is present. Fail loudly if not — bootstrapping
-#    is a separate, paid-once operation (see onetime_stg_rs_tables.py).
-with conn.cursor() as cur:
-    cur.execute(
-        "SELECT count(*) FROM information_schema.schemata WHERE schema_name = %s",
-        (staging_schema,),
-    )
-    n = cur.fetchone()[0]
-if n == 0:
-    raise RuntimeError(
-        f"Staging schema '{staging_schema}' not found in database '{database}'. "
-        f"Run onetime_stg_rs_tables.py once per scale_factor to populate it."
-    )
-print(f"[ok] staging schema {database}.{staging_schema} present")
+# 0. Self-bootstrap the staging schema if needed. Mirrors setup_bq.py /
+#    setup_sf.py pattern: import the bootstrap module from the notebook
+#    directory and call ensure_staging_environment() inline.
+#    Idempotent — no-op when all 22 staging tables already present.
+import sys, os
+try:
+    _nb_path = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().getOrElse(None)
+    if _nb_path and not _nb_path.startswith("/Workspace"):
+        _nb_path = "/Workspace" + _nb_path
+    _module_dir = os.path.dirname(_nb_path) if _nb_path else os.getcwd()
+except Exception:
+    _module_dir = os.getcwd()
+if _module_dir not in sys.path:
+    sys.path.insert(0, _module_dir)
+import rs_staging_bootstrap as bootstrap
+
+parquet_root = f"{tpcdi_directory}staging_parquet_rs/sf={scale_factor}"
+iam_role     = rs_iam_role(secret_scope=secret_scope)
+
+_boot = bootstrap.ensure_staging_environment(
+    conn,
+    database=database,
+    target_schema=staging_schema,
+    src_catalog=databricks_catalog,
+    src_schema=f"tpcdi_incremental_staging_{scale_factor}",
+    parquet_root=parquet_root,
+    volume_root=tpcdi_directory,
+    s3_volume_prefix=s3_volume_prefix,
+    iam_role=iam_role,
+    aws_region=aws_region,
+    spark=spark,
+    dbutils=dbutils,
+    secret_scope=secret_scope,
+    parallel=4,
+)
+print(f"[bootstrap] {_boot}")
 
 # COMMAND ----------
 
