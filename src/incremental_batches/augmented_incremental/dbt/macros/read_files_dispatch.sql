@@ -48,16 +48,19 @@
      `* FROM <stg>`. See `dbt/macros/rs_bronze_copy_prehook.sql`.
 
      This stub exists only so dbt's `adapter.dispatch('read_daily_csv', ...)`
-     can resolve when the manifest is parsed against target.type='redshift'
-     — the Databricks-tree bronze models (which ARE the callers of
-     `read_daily_csv`) are gated by `+enabled: target.type == 'databricks'`,
-     so this body should never actually execute. If it does, surface a
-     clear error rather than silently producing wrong SQL. #}
-  {{ exceptions.raise_compiler_error(
-       "read_daily_csv() was called with target=redshift. This macro is "
-       "Databricks-only — Redshift bronze ingestion uses pre_hook COPY in "
-       "`redshift_models/rs_bronze/*.sql` (see dbt/macros/rs_bronze_copy_prehook.sql)."
-  ) }}
+     resolves when the manifest is COMPILED against target.type='redshift'.
+     The Databricks-tree bronze models (the callers) are gated by
+     `+enabled: target.type == 'databricks'`, so this body should never
+     execute on a Redshift run. But dbt still Jinja-compiles disabled
+     models during parse, so the macro must emit valid SQL (not raise) —
+     otherwise the parse phase fails before dbt ever decides what to skip.
+
+     Emits a no-op `select` that's syntactically valid but returns zero
+     rows. If a Databricks-only bronze model accidentally executes here
+     it'll silently produce nothing; that's surfaced downstream as
+     "silver got no rows from bronzeX" — clearer than a compile-time
+     dead-end. #}
+  (select null::varchar(1) as not_a_real_bronze_row where 1=0)
 {%- endmacro %}
 
 {% macro snowflake__read_daily_csv(filename, schema_str) %}
