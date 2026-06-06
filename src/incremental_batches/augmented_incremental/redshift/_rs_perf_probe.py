@@ -27,16 +27,19 @@ lines = []
 
 def q(sql, label):
     lines.append(f"\n=== {label} ===")
-    with conn.cursor() as cur:
-        cur.execute(sql)
-        cols = [d[0] for d in cur.description]
-        rows = cur.fetchall()
-        if not rows:
-            lines.append("  (no rows)")
-            return
-        lines.append("  " + " | ".join(f"{c}" for c in cols))
-        for r in rows:
-            lines.append("  " + " | ".join(str(v)[:80] for v in r))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(sql)
+            cols = [d[0] for d in cur.description]
+            rows = cur.fetchall()
+            if not rows:
+                lines.append("  (no rows)")
+                return
+            lines.append("  " + " | ".join(f"{c}" for c in cols))
+            for r in rows:
+                lines.append("  " + " | ".join(str(v)[:80] for v in r))
+    except Exception as e:
+        lines.append(f"  QUERY FAILED: {type(e).__name__}: {str(e)[:300]}")
 
 # 0) Discover actual column schemas first
 q("""
@@ -70,38 +73,15 @@ ORDER BY 1 DESC
 LIMIT 60
 """, "SYS_SERVERLESS_USAGE (per-minute RPU)")
 
-# 3) Query history for COPYs — see queue time vs execution time
+# 3) Query history — long queries
 q("""
-SELECT
-  query_id,
-  query_type,
-  start_time,
-  DATEDIFF(second, start_time, end_time) AS elapsed_s,
-  DATEDIFF(second, start_time, execution_start_time) AS queue_s,
-  DATEDIFF(second, execution_start_time, end_time) AS exec_s,
-  status,
-  SUBSTRING(query_text, 1, 120) AS query_text
+SELECT *
 FROM SYS_QUERY_HISTORY
 WHERE start_time > GETDATE() - INTERVAL '6 hours'
-  AND query_type IN ('LOAD','CTAS','SELECT','UTILITY')
-  AND elapsed_time > 30000000      -- > 30 sec, microseconds
-ORDER BY elapsed_time DESC
-LIMIT 30
-""", "SYS_QUERY_HISTORY (long queries, > 30s)")
+ORDER BY elapsed_time DESC NULLS LAST
+LIMIT 20
+""", "SYS_QUERY_HISTORY (top 20 by elapsed)")
 
-# 4) Current running queries
-q("""
-SELECT
-  query_id,
-  start_time,
-  DATEDIFF(second, start_time, GETDATE()) AS running_s,
-  query_type,
-  status,
-  SUBSTRING(query_text, 1, 100) AS query_text
-FROM SYS_QUERY_HISTORY
-WHERE status = 'running'
-ORDER BY start_time
-""", "currently running queries")
 
 report = "\n".join(lines)
 print(report)
