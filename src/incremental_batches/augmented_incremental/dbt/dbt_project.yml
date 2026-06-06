@@ -114,3 +114,26 @@ models:
       +enabled: "{{ target.type == 'bigquery' }}"
       +materialized: incremental
       +on_schema_change: ignore
+
+    # Redshift tree (redshift_models/rs_{bronze,silver,gold}/) — active only
+    # when --target=redshift. Same +enabled gating + `rs_` prefix discipline.
+    #
+    # Bronze layer note: the COPY target tables are populated by the
+    # load_bronze_rs.py task BEFORE dbt runs. So the dbt bronze models here
+    # are trivial pass-through views over those source tables — preserving the
+    # bronze→silver→gold dbt DAG shape, but adding no compute of their own.
+    # `+materialized: view` keeps dbt aware of the lineage while incurring
+    # zero write amplification.
+    rs_bronze:
+      +enabled: "{{ target.type == 'redshift' }}"
+      +materialized: view
+      +on_schema_change: ignore
+    rs_silver:
+      +enabled: "{{ target.type == 'redshift' }}"
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: ignore
+    rs_gold:
+      +enabled: "{{ target.type == 'redshift' }}"
+      +materialized: incremental
+      +on_schema_change: ignore

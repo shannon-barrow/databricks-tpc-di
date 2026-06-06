@@ -1,0 +1,321 @@
+# Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# dependencies = [
+#   "psycopg2-binary",
+# ]
+# ///
+# Per-run Redshift setup. Dispatches DDL/CTAS to Redshift from a Databricks
+# task. No Spark compute needed beyond the JDBC client.
+#
+# Sequence:
+#   1. DROP+CREATE the per-run Redshift schema {database}.{wh_db}_{sf}
+#   2. CTAS 22 historical/reference tables from {database}.tpcdi_staging_sf{sf}
+#      (zero-copy clone isn't available in Redshift; CTAS is the lightweight
+#      alternative, ~1-3 min at SF=20k for the 22 tables together)
+#   3. Pre-create the 7 empty bronze + account_updates_from_customer target
+#      tables that dbt populates per batch (via COPY in load_bronze_rs.py)
+#   4. Emit batch_date_ls task value for the parent's for_each loop
+#
+# Prerequisites: {database}.tpcdi_staging_sf{sf} must already exist with all
+# 22 staging tables loaded via the one-time onetime_stg_rs_tables.py script.
+# We do NOT bootstrap the staging schema here — it's a manual, per-SF, paid-once
+# operation that lives in its own notebook.
+#
+# Auth: reads connection creds from `tpcdi_redshift` secret scope (see _rs_conn).
+
+# COMMAND ----------
+
+dbutils.widgets.text("database",        "dev", "Redshift database (default 'dev')")
+dbutils.widgets.text("wh_db",           "", "wh_db prefix; final schema = {wh_db}_{scale_factor}")
+dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
+dbutils.widgets.text("secret_scope",    "tpcdi_redshift", "Databricks secret scope")
+dbutils.widgets.text("incremental_batches_to_run", "365",
+                     "Number of batches the for_each loop runs")
+
+database         = dbutils.widgets.get("database")
+wh_db            = dbutils.widgets.get("wh_db")
+scale_factor     = dbutils.widgets.get("scale_factor")
+secret_scope     = dbutils.widgets.get("secret_scope")
+incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
+
+if not wh_db:
+    raise ValueError("wh_db is required")
+
+target_schema  = f"{wh_db}_{scale_factor}".lower()    # Redshift identifiers are lowercase by default
+bronze_schema  = f"{target_schema}_bronze"            # Separate schema for COPY landing tables
+staging_schema = f"tpcdi_staging_sf{scale_factor}".lower()
+print(f"target  = {database}.{target_schema}")
+print(f"bronze  = {database}.{bronze_schema} (COPY landing zone)")
+print(f"staging = {database}.{staging_schema} (CTAS source; must exist)")
+
+# COMMAND ----------
+
+# MAGIC %run ./_rs_conn
+
+# COMMAND ----------
+
+conn = rs_connect(
+    database=database,
+    secret_scope=secret_scope,
+    query_group={
+        "wh_db":        wh_db,
+        "scale_factor": scale_factor,
+        "task":         "setup_rs",
+    },
+)
+print(f"[ok] connected to Redshift {database}")
+
+# COMMAND ----------
+
+# 0. Validate the staging schema is present. Fail loudly if not — bootstrapping
+#    is a separate, paid-once operation (see onetime_stg_rs_tables.py).
+with conn.cursor() as cur:
+    cur.execute(
+        "SELECT count(*) FROM information_schema.schemata WHERE schema_name = %s",
+        (staging_schema,),
+    )
+    n = cur.fetchone()[0]
+if n == 0:
+    raise RuntimeError(
+        f"Staging schema '{staging_schema}' not found in database '{database}'. "
+        f"Run onetime_stg_rs_tables.py once per scale_factor to populate it."
+    )
+print(f"[ok] staging schema {database}.{staging_schema} present")
+
+# COMMAND ----------
+
+# 1. DROP+CREATE both per-run schemas. Redshift has no CREATE OR REPLACE SCHEMA;
+#    DROP CASCADE then CREATE is the clean-slate equivalent.
+with conn.cursor() as cur:
+    cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
+    cur.execute(f'CREATE SCHEMA "{target_schema}"')
+    cur.execute(f'DROP SCHEMA IF EXISTS "{bronze_schema}" CASCADE')
+    cur.execute(f'CREATE SCHEMA "{bronze_schema}"')
+print(f"[ok] schemas {database}.{target_schema} + {database}.{bronze_schema} ready")
+
+# COMMAND ----------
+
+# 2. CTAS 22 staging tables into the per-run schema with explicit
+#    DISTKEY/SORTKEY/DISTSTYLE declarations.
+#
+# Per Redshift semantics: DISTKEY/SORTKEY/DISTSTYLE are immutable once a table
+# exists — must be declared at CREATE time. Setup owns the layout; dbt models
+# declare nothing about distribution.
+#
+# Layout strategy decisions are documented in PORT_NOTES.md "DISTKEY / SORTKEY
+# strategy" section. Small reference tables (under ~5M rows) get DISTSTYLE ALL
+# so every node has a copy and joins stay local. Large facts use DISTKEY on
+# the most-frequent join column.
+#
+# Format below: (table_name, distribution_spec, sortkey_cols)
+#   distribution_spec: "ALL" | f"KEY({col})" | "EVEN"
+#   sortkey_cols: tuple of column names for compound SORTKEY (Redshift's
+#                 default); empty tuple = no sort key
+TABLE_LAYOUTS = {
+    # Facts (large) — DISTKEY on join column, SORTKEY on date(s) for prune
+    "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
+    "factwatches":                ("KEY(sk_customerid)", ("sk_dateid_dateremoved", "sk_customerid", "sk_securityid")),
+    "factholdings":               ("KEY(sk_customerid)", ("sk_dateid", "sk_customerid", "sk_securityid")),
+    "factcashbalances":           ("KEY(sk_customerid)", ("sk_dateid", "sk_customerid")),
+
+    # Dims (medium-large) — DISTKEY on natural key, SORTKEY on enddate for SCD2 prune
+    "dimtrade":                   ("KEY(sk_securityid)", ("sk_closedateid", "sk_brokerid", "sk_securityid")),
+    "dimcustomer":                ("KEY(customerid)",    ("enddate", "customerid")),
+    "dimaccount":                 ("KEY(accountid)",     ("enddate", "accountid")),
+
+    # Small dims / snapshot tables — DISTSTYLE ALL
+    "currentaccountbalances":     ("ALL", ("customerid",)),
+    "dimbroker":                  ("ALL", ("brokerid",)),
+    "dimsecurity":                ("ALL", ("symbol",)),    # ~16M, big-ish but heavily joined
+    "dimcompany":                 ("ALL", ("companyid",)),
+    "dimdate":                    ("ALL", ("sk_dateid",)),
+    "dimtime":                    ("ALL", ("sk_timeid",)),
+
+    # Tiny reference — DISTSTYLE ALL
+    "taxrate":                    ("ALL", ()),
+    "industry":                   ("ALL", ()),
+    "tradetype":                  ("ALL", ()),
+    "statustype":                 ("ALL", ()),
+    "batchdate":                  ("ALL", ()),
+
+    # Bronze staging (event-time-clustered)
+    "bronzedailymarket":          ("KEY(dm_s_symb)",     ("dm_date",)),
+
+    # Quarterly financial data
+    "financial":                  ("KEY(sk_companyid)",  ("fi_year", "fi_qtr")),
+    "companyyeareps":             ("KEY(sk_companyid)",  ("fi_year",)),
+
+    # Cash transaction history — large, time-ordered
+    "cashtransactionhistorical":  ("KEY(accountid)",     ("event_dt", "ct_dts")),
+}
+
+# Verify completeness against the canonical 22 STAGING_TABLES set used on
+# the SF / BQ sides. Update this list if the canonical set ever changes.
+STAGING_TABLES_EXPECTED = {
+    "bronzedailymarket", "factmarkethistory", "factwatches", "dimtrade",
+    "factholdings", "factcashbalances", "cashtransactionhistorical",
+    "financial", "companyyeareps", "dimaccount", "dimcustomer",
+    "currentaccountbalances", "dimbroker", "dimsecurity", "dimcompany",
+    "dimtime", "dimdate", "taxrate", "industry", "tradetype",
+    "statustype", "batchdate",
+}
+_missing_layouts = STAGING_TABLES_EXPECTED - set(TABLE_LAYOUTS)
+if _missing_layouts:
+    raise RuntimeError(
+        f"TABLE_LAYOUTS is missing layout decisions for: {sorted(_missing_layouts)}"
+    )
+
+# COMMAND ----------
+
+# Run the 22 CTAS statements in parallel. Independent table writes — Redshift's
+# psql wire protocol supports concurrent statements (each cursor on its own
+# implicit transaction).
+import concurrent.futures as _cf
+import time as _time
+
+def _ctas_one(table_name: str) -> tuple[str, float]:
+    dist_spec, sortkey_cols = TABLE_LAYOUTS[table_name]
+
+    # Build the layout clauses
+    if dist_spec == "ALL":
+        dist_sql = "DISTSTYLE ALL"
+    elif dist_spec == "EVEN":
+        dist_sql = "DISTSTYLE EVEN"
+    elif dist_spec.startswith("KEY("):
+        dist_sql = f"DISTSTYLE KEY {dist_spec}"   # "DISTSTYLE KEY DISTKEY(col)"
+    else:
+        raise ValueError(f"Unknown distribution_spec for {table_name}: {dist_spec}")
+
+    sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
+
+    sql = f'''
+        CREATE TABLE "{target_schema}"."{table_name}"
+            {dist_sql}
+            {sort_sql}
+        AS
+        SELECT * FROM "{staging_schema}"."{table_name}"
+    '''.strip()
+
+    t0 = _time.time()
+    # Each thread needs its own connection — psycopg2 connections aren't safe
+    # for concurrent use across threads.
+    local_conn = rs_connect(
+        database=database, secret_scope=secret_scope,
+        query_group={"task": "setup_rs", "phase": "ctas", "table": table_name,
+                     "wh_db": wh_db, "scale_factor": scale_factor},
+    )
+    try:
+        with local_conn.cursor() as cur:
+            cur.execute(sql)
+    finally:
+        local_conn.close()
+    return (table_name, _time.time() - t0)
+
+
+t_clone = _time.time()
+print(f"[parallel] CTAS {len(STAGING_TABLES_EXPECTED)} tables (8 concurrent)...")
+with _cf.ThreadPoolExecutor(max_workers=8) as ex:
+    futures = {ex.submit(_ctas_one, t): t for t in sorted(STAGING_TABLES_EXPECTED)}
+    for f in _cf.as_completed(futures):
+        try:
+            name, wall = f.result()
+            print(f"[ctas] {name:32s} {wall:5.2f}s")
+        except Exception as e:
+            name = futures[f]
+            print(f"[FAIL] {name:32s}  {type(e).__name__}: {e}")
+            raise
+print(f"[parallel] CTAS done in {_time.time() - t_clone:.1f}s")
+
+# COMMAND ----------
+
+# 3. Pre-create the 8 COPY landing tables in the `_bronze` schema (empty;
+#    load_bronze_rs.py populates them per batch via COPY from S3). dbt
+#    rs_bronze models then declare these as `sources` and emit
+#    `materialized: view` wrappers in the main schema with the canonical
+#    bronze table names — same naming as BQ/SF bronze layer, just split
+#    across two schemas to keep COPY targets distinct from dbt-managed
+#    bronze views.
+#
+# Schema mapping (Databricks → Redshift): BIGINT/INT/TINYINT → BIGINT,
+# DOUBLE → DOUBLE PRECISION, STRING → VARCHAR(MAX), DATE/TIMESTAMP unchanged.
+# DISTKEY/SORTKEY chosen to support the date-bounded SELECT pattern dbt uses.
+BRONZE_DDLS = {
+    "bronzeaccount": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT,
+        customerid BIGINT, accountdesc VARCHAR(64), taxstatus SMALLINT,
+        status VARCHAR(16), update_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(update_dt)"),
+
+    "bronzecashtransaction": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP,
+        ct_amt DOUBLE PRECISION, ct_name VARCHAR(128), event_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(event_dt)"),
+
+    "bronzecustomer": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, customerid BIGINT, taxid VARCHAR(20),
+        status VARCHAR(16), lastname VARCHAR(64), firstname VARCHAR(64),
+        middleinitial VARCHAR(4), gender VARCHAR(2), tier SMALLINT, dob DATE,
+        addressline1 VARCHAR(128), addressline2 VARCHAR(128), postalcode VARCHAR(16),
+        city VARCHAR(64), stateprov VARCHAR(64), country VARCHAR(64),
+        c_ctry_1 VARCHAR(8), c_area_1 VARCHAR(8), c_local_1 VARCHAR(16), c_ext_1 VARCHAR(8),
+        c_ctry_2 VARCHAR(8), c_area_2 VARCHAR(8), c_local_2 VARCHAR(16), c_ext_2 VARCHAR(8),
+        c_ctry_3 VARCHAR(8), c_area_3 VARCHAR(8), c_local_3 VARCHAR(16), c_ext_3 VARCHAR(8),
+        email1 VARCHAR(128), email2 VARCHAR(128),
+        lcl_tx_id VARCHAR(16), nat_tx_id VARCHAR(16), update_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(customerid)", "SORTKEY(update_dt)"),
+
+    "bronzeholdings": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT,
+        hh_before_qty BIGINT, hh_after_qty BIGINT, event_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(hh_t_id)", "SORTKEY(event_dt)"),
+
+    "bronzetrade": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP,
+        status VARCHAR(16), t_tt_id VARCHAR(8), cashflag SMALLINT,
+        t_s_symb VARCHAR(16), quantity BIGINT, bidprice DOUBLE PRECISION,
+        t_ca_id BIGINT, executedby VARCHAR(64), tradeprice DOUBLE PRECISION,
+        fee DOUBLE PRECISION, commission DOUBLE PRECISION, tax DOUBLE PRECISION,
+        event_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(tradeid)", "SORTKEY(event_dt)"),
+
+    "bronzewatches": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb VARCHAR(16),
+        w_dts TIMESTAMP, w_action VARCHAR(8), event_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(w_c_id)", "SORTKEY(event_dt)"),
+
+    "account_updates_from_customer": ("""
+        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT,
+        customerid BIGINT, accountdesc VARCHAR(64), taxstatus SMALLINT,
+        status VARCHAR(16), update_dt DATE
+    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(update_dt)"),
+}
+
+with conn.cursor() as cur:
+    for name, (cols_sql, dist_clause, sort_clause) in BRONZE_DDLS.items():
+        cur.execute(f'''
+            CREATE TABLE "{bronze_schema}"."{name}" (
+                {cols_sql}
+            )
+            {dist_clause}
+            {sort_clause}
+        ''')
+        print(f"[ddl] {name:32s}  {dist_clause}  {sort_clause}")
+print(f"[ok] 8 COPY landing tables ready under {database}.{bronze_schema}")
+
+# COMMAND ----------
+
+# 4. Emit batch_date_ls — match setup_dbt.py / setup_sf.py / setup_bq.py exactly:
+#    AUG_FILES_DATE_START is hardcoded to 2016-07-06.
+import datetime as dt
+incr_start = dt.date(2016, 7, 6)
+batches = [(incr_start + dt.timedelta(days=i)).isoformat()
+           for i in range(incremental_n)]
+dbutils.jobs.taskValues.set("batch_date_ls", batches)
+print(f"emitted batch_date_ls: {len(batches)} dates, first={batches[0]}, last={batches[-1]}")
+
+# COMMAND ----------
+
+conn.close()
+print("[done] Redshift setup complete.")
