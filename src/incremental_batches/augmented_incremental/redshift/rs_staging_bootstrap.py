@@ -31,15 +31,6 @@ import time as _time
 # Canonical 22 staging tables (same set as bq_staging_bootstrap.STAGING_TABLES,
 # sorted biggest-first so the ThreadPoolExecutor kicks off long-pole tables first).
 STAGING_TABLES: tuple[str, ...] = (
-    # 6 bronze CDC-history tables (Redshift-specific addition — these carry
-    # pre-2016-07-06 SCD2 history that the dbt bronze pre_hook models
-    # incrementally append to. Delta source has them as Stage-0 output;
-    # BQ relies on BRONZE_DDLS for empty pre-creates instead, but our
-    # pre_hook needs LIKE {{ this }} to find an existing schema, so we
-    # CTAS them from Delta — gets the historical rows for free.)
-    "bronzecustomer", "bronzeaccount", "bronzetrade",
-    "bronzecashtransaction", "bronzeholdings", "bronzewatches",
-    # Original 22 staging tables (matches bq_staging_bootstrap.STAGING_TABLES).
     "bronzedailymarket", "factmarkethistory",
     "factwatches",
     "dimtrade",
@@ -59,15 +50,6 @@ STAGING_TABLES: tuple[str, ...] = (
 # Keep in sync with setup_rs.py's TABLE_LAYOUTS — both point at the same
 # physical tables (staging is the CTAS source for the per-run schema).
 TABLE_LAYOUTS: dict[str, tuple[str, tuple[str, ...]]] = {
-    # Bronze CDC-history tables (per-batch dbt pre_hook appends rows here).
-    # DISTKEY on the natural ID column for join co-location with silver dims;
-    # SORTKEY on the batch-date column for time-range prunes.
-    "bronzecustomer":             ("KEY(customerid)",    ("update_dt",)),
-    "bronzeaccount":              ("KEY(accountid)",     ("update_dt",)),
-    "bronzetrade":                ("KEY(tradeid)",       ("event_dt",)),
-    "bronzecashtransaction":      ("KEY(accountid)",     ("event_dt",)),
-    "bronzeholdings":             ("KEY(hh_t_id)",       ("event_dt",)),
-    "bronzewatches":              ("KEY(w_c_id)",        ("event_dt",)),
     "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
     "factwatches":                ("KEY(sk_customerid)", ("sk_dateid_dateremoved", "sk_customerid", "sk_securityid")),
     "factholdings":               ("KEY(sk_customerid)", ("sk_dateid", "sk_customerid", "sk_securityid")),

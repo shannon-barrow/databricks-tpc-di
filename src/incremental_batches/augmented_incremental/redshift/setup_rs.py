@@ -13,9 +13,14 @@
 #   1. DROP+CREATE the per-run Redshift schema {database}.{wh_db}_{sf}
 #   2. CTAS 22 historical/reference tables from {database}.tpcdi_staging_sf{sf}
 #      (zero-copy clone isn't available in Redshift; CTAS is the lightweight
-#      alternative, ~1-3 min at SF=20k for the 22 tables together)
-#   3. Pre-create the 7 empty bronze + account_updates_from_customer target
-#      tables that dbt populates per batch (via COPY in load_bronze_rs.py)
+#      alternative, ~1-3 min at SF=20k for the 22 tables together).
+#      Includes bronzedailymarket — its 1-year history is needed for the
+#      FactMarketHistory MIN/MAX lookback.
+#   3. Pre-create 7 EMPTY tables (6 streaming bronze + account_updates_from_customer)
+#      with DISTKEY/SORTKEY but no data — dbt populates per-batch via the
+#      rs_bronze_copy_prehook macro (CREATE TEMP TABLE LIKE this + COPY +
+#      INSERT INTO this). Mirrors the empty-CREATE-TABLE pattern in setup_dbt.py
+#      lines 132-251 for the equivalent Databricks bronze layer.
 #   4. Emit batch_date_ls task value for the parent's for_each loop
 #
 # Self-bootstrapping: if {database}.tpcdi_staging_sf{sf} doesn't exist yet
@@ -146,14 +151,6 @@ print(f"[ok] schema {database}.{target_schema} ready")
 #   sortkey_cols: tuple of column names for compound SORTKEY (Redshift's
 #                 default); empty tuple = no sort key
 TABLE_LAYOUTS = {
-    # Bronze CDC-history tables (per-batch dbt pre_hook appends rows here).
-    "bronzecustomer":             ("KEY(customerid)",    ("update_dt",)),
-    "bronzeaccount":              ("KEY(accountid)",     ("update_dt",)),
-    "bronzetrade":                ("KEY(tradeid)",       ("event_dt",)),
-    "bronzecashtransaction":      ("KEY(accountid)",     ("event_dt",)),
-    "bronzeholdings":             ("KEY(hh_t_id)",       ("event_dt",)),
-    "bronzewatches":              ("KEY(w_c_id)",        ("event_dt",)),
-
     # Facts (large) — DISTKEY on join column, SORTKEY on date(s) for prune
     "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
     "factwatches":                ("KEY(sk_customerid)", ("sk_dateid_dateremoved", "sk_customerid", "sk_securityid")),
@@ -194,11 +191,6 @@ TABLE_LAYOUTS = {
 # Verify completeness against the canonical 22 STAGING_TABLES set used on
 # the SF / BQ sides. Update this list if the canonical set ever changes.
 STAGING_TABLES_EXPECTED = {
-    # 6 bronze CDC-history tables (carry pre-2016-07-06 SCD2 history;
-    # dbt bronze pre_hook appends new daily batches on top).
-    "bronzecustomer", "bronzeaccount", "bronzetrade",
-    "bronzecashtransaction", "bronzeholdings", "bronzewatches",
-    # 22 reference + fact + dim staging tables.
     "bronzedailymarket", "factmarkethistory", "factwatches", "dimtrade",
     "factholdings", "factcashbalances", "cashtransactionhistorical",
     "financial", "companyyeareps", "dimaccount", "dimcustomer",
@@ -276,19 +268,164 @@ print(f"[parallel] CTAS done in {_time.time() - t_clone:.1f}s")
 
 # COMMAND ----------
 
-# 3. Bronze layer setup: the CTAS step above already created all 22 staging
-#    tables in the main schema, INCLUDING bronzedailymarket / bronzecustomer
-#    / bronzeaccount / etc. (which are part of STAGING_TABLES). dbt's rs_bronze
-#    models use these as their incremental `{{ this }}` target — the pre_hook
-#    `CREATE TEMP TABLE foo_stg (LIKE foo)` clause inherits the schema from
-#    these CTAS'd tables, and each per-batch INSERT … SELECT FROM stg appends
-#    the day's rows.
+# 3. Pre-create 7 EMPTY bronze + account_updates_from_customer tables with
+#    DISTKEY/SORTKEY. These tables have NO staging source — dbt populates
+#    them per batch via the rs_bronze_copy_prehook macro:
+#      (a) CREATE TEMP TABLE foo_stg (LIKE foo)  -- needs foo to exist!
+#      (b) COPY foo_stg FROM 's3://...' FORMAT AS CSV ...
+#      (c) INSERT INTO foo SELECT * FROM foo_stg  -- dbt's append strategy
 #
-#    No separate `_bronze` landing schema, no pre-created empty bronze
-#    tables. Bronze ingestion lives entirely inside the dbt run (pre_hook
-#    COPYs from S3 on the same compute that runs silver+gold) — same
-#    compute attribution as the SF/BQ variants. See
-#    `dbt/macros/rs_bronze_copy_prehook.sql` for the COPY incantation.
+#    Column schemas mirror setup_dbt.py lines 132-251 (the Databricks
+#    equivalent of these tables). Redshift type swaps: STRING→VARCHAR(N),
+#    TINYINT→SMALLINT, DOUBLE→DOUBLE PRECISION. The VARCHAR widths are
+#    upper bounds for the CSV columns; over-allocating costs no on-disk
+#    bytes in Redshift (length is stored, not padded).
+#
+#    `account_updates_from_customer` mirrors bronzeaccount's schema — it's
+#    a dbt-managed staging table derived from bronzecustomer 'U' events
+#    for dimaccount to UNION with the day's bronzeaccount file drops.
+#    Its rs_bronze model has no pre_hook (no S3 source); it INSERTs from
+#    a SELECT, so the pre-creation gives the model a valid {{ this }}.
+BRONZE_DDLS = {
+    "bronzecustomer": """
+        cdc_flag        VARCHAR(1),
+        cdc_dsn         BIGINT,
+        customerid      BIGINT,
+        taxid           VARCHAR(20),
+        status          VARCHAR(10),
+        lastname        VARCHAR(40),
+        firstname       VARCHAR(40),
+        middleinitial   VARCHAR(1),
+        gender          VARCHAR(1),
+        tier            SMALLINT,
+        dob             DATE,
+        addressline1    VARCHAR(80),
+        addressline2    VARCHAR(80),
+        postalcode      VARCHAR(20),
+        city            VARCHAR(40),
+        stateprov       VARCHAR(20),
+        country         VARCHAR(30),
+        c_ctry_1        VARCHAR(10),
+        c_area_1        VARCHAR(10),
+        c_local_1       VARCHAR(15),
+        c_ext_1         VARCHAR(10),
+        c_ctry_2        VARCHAR(10),
+        c_area_2        VARCHAR(10),
+        c_local_2       VARCHAR(15),
+        c_ext_2         VARCHAR(10),
+        c_ctry_3        VARCHAR(10),
+        c_area_3        VARCHAR(10),
+        c_local_3       VARCHAR(15),
+        c_ext_3         VARCHAR(10),
+        email1          VARCHAR(80),
+        email2          VARCHAR(80),
+        lcl_tx_id       VARCHAR(20),
+        nat_tx_id       VARCHAR(20),
+        update_dt       DATE
+    """,
+    "bronzeaccount": """
+        cdc_flag    VARCHAR(1),
+        cdc_dsn     BIGINT,
+        accountid   BIGINT,
+        brokerid    BIGINT,
+        customerid  BIGINT,
+        accountdesc VARCHAR(80),
+        taxstatus   SMALLINT,
+        status      VARCHAR(10),
+        update_dt   DATE
+    """,
+    "account_updates_from_customer": """
+        cdc_flag    VARCHAR(1),
+        cdc_dsn     BIGINT,
+        accountid   BIGINT,
+        brokerid    BIGINT,
+        customerid  BIGINT,
+        accountdesc VARCHAR(80),
+        taxstatus   SMALLINT,
+        status      VARCHAR(10),
+        update_dt   DATE
+    """,
+    "bronzecashtransaction": """
+        cdc_flag VARCHAR(1),
+        cdc_dsn  BIGINT,
+        accountid BIGINT,
+        ct_dts   TIMESTAMP,
+        ct_amt   DOUBLE PRECISION,
+        ct_name  VARCHAR(100),
+        event_dt DATE
+    """,
+    "bronzeholdings": """
+        cdc_flag       VARCHAR(1),
+        cdc_dsn        BIGINT,
+        hh_h_t_id      BIGINT,
+        hh_t_id        BIGINT,
+        hh_before_qty  INTEGER,
+        hh_after_qty   INTEGER,
+        event_dt       DATE
+    """,
+    "bronzetrade": """
+        cdc_flag    VARCHAR(1),
+        cdc_dsn     BIGINT,
+        tradeid     BIGINT,
+        t_dts       TIMESTAMP,
+        status      VARCHAR(10),
+        t_tt_id     VARCHAR(10),
+        cashflag    SMALLINT,
+        t_s_symb    VARCHAR(20),
+        quantity    INTEGER,
+        bidprice    DOUBLE PRECISION,
+        t_ca_id     BIGINT,
+        executedby  VARCHAR(80),
+        tradeprice  DOUBLE PRECISION,
+        fee         DOUBLE PRECISION,
+        commission  DOUBLE PRECISION,
+        tax         DOUBLE PRECISION,
+        event_dt    DATE
+    """,
+    "bronzewatches": """
+        cdc_flag VARCHAR(1),
+        cdc_dsn  BIGINT,
+        w_c_id   BIGINT,
+        w_s_symb VARCHAR(20),
+        w_dts    TIMESTAMP,
+        w_action VARCHAR(10),
+        event_dt DATE
+    """,
+}
+
+# Layouts (DISTKEY + SORTKEY) for the 7 empty bronze tables. Mirrors the
+# CLUSTER BY column in setup_dbt.py: dist on natural ID, sort on batch-date.
+BRONZE_LAYOUTS = {
+    "bronzecustomer":                ("KEY(customerid)", ("update_dt",)),
+    "bronzeaccount":                 ("KEY(accountid)",  ("update_dt",)),
+    "account_updates_from_customer": ("KEY(accountid)",  ("update_dt",)),
+    "bronzecashtransaction":         ("KEY(accountid)",  ("event_dt",)),
+    "bronzeholdings":                ("KEY(hh_t_id)",    ("event_dt",)),
+    "bronzetrade":                   ("KEY(tradeid)",    ("event_dt",)),
+    "bronzewatches":                 ("KEY(w_c_id)",     ("event_dt",)),
+}
+
+def _dist_clause(spec: str) -> str:
+    if spec == "ALL":  return "DISTSTYLE ALL"
+    if spec == "EVEN": return "DISTSTYLE EVEN"
+    if spec.startswith("KEY("):
+        col = spec[len("KEY("):-1]
+        return f"DISTKEY({col})"
+    raise ValueError(f"unknown distribution_spec: {spec}")
+
+with conn.cursor() as cur:
+    for tbl, cols_sql in BRONZE_DDLS.items():
+        dist_spec, sortkey_cols = BRONZE_LAYOUTS[tbl]
+        sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
+        ddl = f'''
+            CREATE TABLE "{target_schema}"."{tbl}" (
+              {cols_sql.strip().rstrip(",")}
+            )
+            {_dist_clause(dist_spec)}
+            {sort_sql}
+        '''.strip()
+        cur.execute(ddl)
+        print(f"[bronze-ddl] {tbl:32s} OK")
 
 # COMMAND ----------
 

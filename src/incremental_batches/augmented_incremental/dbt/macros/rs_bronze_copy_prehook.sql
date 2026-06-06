@@ -15,9 +15,12 @@
    `incremental_strategy='append'`, each batch INSERTs the day's rows into
    the persistent bronze table.
 
-   On the first run the bronze table is created by setup_rs.py's CTAS
-   step (staging → main schema) so the target has the right schema for
-   `CREATE TEMP TABLE foo_stg (LIKE foo)`.
+   The bronze target table is pre-created EMPTY by setup_rs.py's
+   BRONZE_DDLS step (mirrors setup_dbt.py's CREATE TABLE ... CLUSTER BY
+   pattern for Databricks) — gives the pre_hook a valid template for
+   `CREATE TEMP TABLE foo_stg (LIKE foo)`. bronzedailymarket is the
+   exception: setup_rs CTASes it from staging (1 year of history) for
+   the FMH MIN/MAX lookback.
 
    Required vars (passed via `dbt run --vars` from run_dbt.py):
      - s3_volume_prefix (e.g. s3://tpcds-datasets/shannon_tpcdi/)

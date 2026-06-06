@@ -118,15 +118,18 @@ models:
     # Redshift tree (redshift_models/rs_{bronze,silver,gold}/) — active only
     # when --target=redshift. Same +enabled gating + `rs_` prefix discipline.
     #
-    # Bronze layer note: the COPY target tables are populated by the
-    # load_bronze_rs.py task BEFORE dbt runs. So the dbt bronze models here
-    # are trivial pass-through views over those source tables — preserving the
-    # bronze→silver→gold dbt DAG shape, but adding no compute of their own.
-    # `+materialized: view` keeps dbt aware of the lineage while incurring
-    # zero write amplification.
+    # Bronze layer note: each rs_bronze model has a pre_hook that COPYs the
+    # day's CSV from S3 into a TEMP staging table, then the model body
+    # appends those rows into the persistent bronze table. The 7 bronze
+    # tables (6 streaming bronze + account_updates_from_customer) are
+    # pre-created EMPTY by setup_rs.py with proper DISTKEY/SORTKEY so the
+    # pre_hook's `CREATE TEMP TABLE foo_stg (LIKE foo)` has a valid template.
+    # bronzedailymarket is the lone exception: setup_rs CTASes it from
+    # staging (1 year of history) for the FMH MIN/MAX lookback.
     rs_bronze:
       +enabled: "{{ target.type == 'redshift' }}"
-      +materialized: view
+      +materialized: incremental
+      +incremental_strategy: append
       +on_schema_change: ignore
     rs_silver:
       +enabled: "{{ target.type == 'redshift' }}"
