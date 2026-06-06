@@ -145,14 +145,17 @@ def _create_table_ddl(table: str, sample_df) -> str:
     the per-table layout. Type mapping mirrors what dbt-redshift uses."""
     dist_spec, sortkey_cols = TABLE_LAYOUTS[table]
     # IMPORTANT: Redshift COPY FROM PARQUET requires EXACT type match between
-    # the target column and the parquet schema. parquet FLOAT (32-bit) must
-    # map to REAL on Redshift, NOT DOUBLE PRECISION (64-bit). Same for short/byte.
+    # the target column and the parquet schema. Map keys MUST match
+    # Spark's `DataType.simpleString()` output, which uses SQL-flavored names
+    # (bigint/smallint/tinyint/int), NOT the Python type names
+    # (long/short/byte/integer). Mismatch → all int/long columns silently
+    # fall through to VARCHAR(MAX) → COPY fails on parquet schema mismatch.
     type_map = {
         "boolean":    "BOOLEAN",
-        "byte":       "SMALLINT",   # Redshift has no TINYINT — SMALLINT is the 16-bit equivalent
-        "short":      "SMALLINT",
-        "integer":    "INTEGER",
-        "long":       "BIGINT",
+        "tinyint":    "SMALLINT",            # Redshift has no TINYINT — SMALLINT is the smallest int
+        "smallint":   "SMALLINT",
+        "int":        "INTEGER",
+        "bigint":     "BIGINT",
         "float":      "REAL",                # parquet FLOAT (32-bit) → Redshift REAL/FLOAT4
         "double":     "DOUBLE PRECISION",    # parquet DOUBLE (64-bit) → Redshift DOUBLE PRECISION/FLOAT8
         "date":       "DATE",
