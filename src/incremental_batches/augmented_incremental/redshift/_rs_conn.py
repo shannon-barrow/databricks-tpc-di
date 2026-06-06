@@ -86,6 +86,14 @@ def rs_connect(*, database: str | None = None,
     conn = psycopg2.connect(
         host=host, port=port, user=user, password=password,
         dbname=dbname, sslmode="require", connect_timeout=30,
+        # TCP keepalives: OS sends probes so an idle SSL socket doesn't
+        # silently close mid-pipeline. We hit "SSL connection has been
+        # closed unexpectedly" on the SF=20k bootstrap (80 min idle on
+        # conn while parallel workers seeded big tables on their own
+        # connections). Probes start after 30s idle, retry 3x at 10s
+        # spacing.
+        keepalives=1, keepalives_idle=30,
+        keepalives_interval=10, keepalives_count=3,
     )
     conn.autocommit = autocommit
 

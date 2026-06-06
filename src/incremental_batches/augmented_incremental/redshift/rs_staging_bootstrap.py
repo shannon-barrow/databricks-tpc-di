@@ -184,6 +184,8 @@ def _seed_one(table: str, *, database: str, target_schema: str,
         host=_get("host"), port=int(_get("port", "5439")),
         user=_get("user"), password=_get("password"),
         dbname=database, sslmode="require", connect_timeout=30,
+        keepalives=1, keepalives_idle=30,
+        keepalives_interval=10, keepalives_count=3,
     )
     conn.autocommit = True
     try:
@@ -199,6 +201,12 @@ def _seed_one(table: str, *, database: str, target_schema: str,
             """)
             cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{table}"')
             rs_rows = cur.fetchone()[0]
+            # Record expected row count in a TABLE COMMENT so future setup_rs
+            # runs can detect partial seeds without re-counting Delta.
+            cur.execute(
+                f"COMMENT ON TABLE \"{target_schema}\".\"{table}\" "
+                f"IS 'tpcdi_staging_seed: rows={rs_rows}'"
+            )
     finally:
         conn.close()
 
@@ -244,7 +252,7 @@ def ensure_staging_environment(conn, *,
         spark: SparkSession.
         dbutils: notebook dbutils for fs.ls/fs.rm/secrets.
         secret_scope: scope name to load psycopg2 creds in worker threads.
-        parallel: ThreadPoolExecutor max_workers (default 4).
+        parallel: ThreadPoolExecutor max_workers (default 8 — matches sf).
 
     Returns:
         dict: {skipped: bool, n_seeded: int, elapsed_s: float, missing: list}.
@@ -270,17 +278,49 @@ def ensure_staging_environment(conn, *,
             (target_schema,),
         )
         present = {r[0].lower() for r in cur.fetchall()}
-    # Verify row count > 0 on each "present" table. Any STAGING_TABLE with
-    # zero rows is treated as "missing" so the worker re-DROPs + re-seeds it.
+    # Verify row count parity for each "present" table. _seed_one records the
+    # expected row count as a TABLE COMMENT on successful seed; we read it
+    # back here and compare to the actual count.
+    #
+    # Failure modes we catch:
+    #   1. Present but empty (CREATE TABLE ran, COPY never did — what we
+    #      observed after the SF=20k cancel). Caught by `actual > 0`.
+    #   2. Present but partial (theoretical — Redshift COPY is autocommit so
+    #      rollback should be all-or-nothing). Caught by `actual == expected`.
+    #   3. Present but mutated externally (DELETE, INSERT). Caught by `==`.
+    #
+    # Tables without a COMMENT (legacy seed before this hardening landed)
+    # fall through to the `actual > 0` check.
+    import re as _re
     nonempty = set()
     with conn.cursor() as cur:
         for t in [s for s in STAGING_TABLES if s.lower() in present]:
+            cur.execute(
+                "SELECT obj_description(c.oid) "
+                "FROM pg_class c JOIN pg_namespace n ON c.relnamespace=n.oid "
+                "WHERE n.nspname=%s AND c.relname=%s",
+                (target_schema, t.lower()),
+            )
+            row = cur.fetchone()
+            comment = row[0] if row else None
+            expected = None
+            if comment:
+                m = _re.search(r"tpcdi_staging_seed: rows=(\d+)", comment)
+                if m:
+                    expected = int(m.group(1))
             cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{t}"')
-            n = cur.fetchone()[0]
-            if n > 0:
-                nonempty.add(t.lower())
+            actual = cur.fetchone()[0]
+            if expected is not None:
+                if actual == expected and actual > 0:
+                    nonempty.add(t.lower())
+                else:
+                    print(f"[bootstrap] {t}: count mismatch (actual={actual:,}, expected={expected:,}) — will re-seed")
             else:
-                print(f"[bootstrap] {t}: present but ZERO rows — will re-seed")
+                # Legacy seed without comment marker — fall back to >0.
+                if actual > 0:
+                    nonempty.add(t.lower())
+                else:
+                    print(f"[bootstrap] {t}: present but ZERO rows — will re-seed")
     missing = [t for t in STAGING_TABLES if t.lower() not in nonempty]
 
     if not missing:
@@ -343,6 +383,8 @@ def ensure_staging_environment(conn, *,
         user=_get_secret("user"),
         password=_get_secret("password"),
         dbname=database, sslmode="require", connect_timeout=30,
+        keepalives=1, keepalives_idle=30,
+        keepalives_interval=10, keepalives_count=3,
     )
     verify_conn.autocommit = True
     try:

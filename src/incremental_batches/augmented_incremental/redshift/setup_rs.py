@@ -46,6 +46,14 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volu
 dbutils.widgets.text("s3_volume_prefix", "s3://tpcds-datasets/shannon_tpcdi/",
                      "S3 prefix matching the UC volume backing")
 dbutils.widgets.text("aws_region",      "us-west-2", "Region for COPY")
+# IDEMPOTENT MODE (default). When YES, skip work that's already done:
+#   - bootstrap skips staging tables that are present with matching counts
+#   - CTAS skips per-table if run-schema table already has the staging row count
+#   - bronze DDLs use CREATE TABLE IF NOT EXISTS
+# Set force_reset=YES to fully recreate (drop run schema, re-CTAS everything).
+dbutils.widgets.dropdown("force_reset", "NO", ["NO", "YES"],
+                         "YES = drop the run schema and re-CTAS everything (slow). "
+                         "NO = pick up where a prior partial run left off.")
 
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
@@ -56,6 +64,7 @@ databricks_catalog = dbutils.widgets.get("databricks_catalog")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory").rstrip("/") + "/"
 s3_volume_prefix = dbutils.widgets.get("s3_volume_prefix")
 aws_region       = dbutils.widgets.get("aws_region")
+force_reset      = dbutils.widgets.get("force_reset").upper() == "YES"
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -140,14 +149,20 @@ print("[ok] re-opened conn after bootstrap")
 
 # COMMAND ----------
 
-# 1. DROP+CREATE the per-run schema. Redshift has no CREATE OR REPLACE SCHEMA;
-#    DROP CASCADE then CREATE is the clean-slate equivalent. Bronze tables
-#    live in this same schema (no separate _bronze schema in the new
-#    pre_hook-COPY architecture).
+# 1. Ensure the per-run schema exists. Two modes:
+#    - force_reset=YES → DROP CASCADE + CREATE (slow at SF=20k: throws away
+#      every CTAS'd table; the next cell re-does all 22)
+#    - default (idempotent) → CREATE IF NOT EXISTS; leave existing tables
+#      in place so the per-table CTAS step below can skip work that's
+#      already done with the right row counts. This is what saves wall
+#      time on a re-run after a partial failure (cancel mid-CTAS,
+#      transient SSL drop, etc.).
 with conn.cursor() as cur:
-    cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
-    cur.execute(f'CREATE SCHEMA "{target_schema}"')
-print(f"[ok] schema {database}.{target_schema} ready")
+    if force_reset:
+        cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
+        print(f"[reset] dropped {database}.{target_schema} (force_reset=YES)")
+    cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
+print(f"[ok] schema {database}.{target_schema} ready (force_reset={force_reset})")
 
 # COMMAND ----------
 
@@ -229,7 +244,11 @@ if _missing_layouts:
 import concurrent.futures as _cf
 import time as _time
 
-def _ctas_one(table_name: str) -> tuple[str, float]:
+def _ctas_one(table_name: str) -> tuple[str, float, str]:
+    """CTAS one table. Idempotent: if target already exists with row count
+    matching the staging source, skip the CTAS entirely. Returns
+    (table_name, elapsed_s, status) where status ∈ {'ctas', 'skip'}.
+    """
     dist_spec, sortkey_cols = TABLE_LAYOUTS[table_name]
 
     # Build the layout clauses. `DISTKEY(col)` alone implies `DISTSTYLE KEY`.
@@ -245,14 +264,6 @@ def _ctas_one(table_name: str) -> tuple[str, float]:
 
     sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
 
-    sql = f'''
-        CREATE TABLE "{target_schema}"."{table_name}"
-            {dist_sql}
-            {sort_sql}
-        AS
-        SELECT * FROM "{staging_schema}"."{table_name}"
-    '''.strip()
-
     t0 = _time.time()
     # Each thread needs its own connection — psycopg2 connections aren't safe
     # for concurrent use across threads.
@@ -263,20 +274,47 @@ def _ctas_one(table_name: str) -> tuple[str, float]:
     )
     try:
         with local_conn.cursor() as cur:
+            # Idempotency check: does the target already exist with the
+            # right row count? If yes, skip CTAS. Saves multi-hour re-runs
+            # at SF=20k when a prior attempt got partway through.
+            cur.execute("""
+                SELECT EXISTS (
+                  SELECT 1 FROM information_schema.tables
+                  WHERE table_schema=%s AND table_name=%s
+                )
+            """, (target_schema, table_name))
+            target_exists = cur.fetchone()[0]
+            if target_exists:
+                cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{table_name}"')
+                target_rows = cur.fetchone()[0]
+                cur.execute(f'SELECT COUNT(*) FROM "{staging_schema}"."{table_name}"')
+                staging_rows = cur.fetchone()[0]
+                if target_rows == staging_rows and target_rows > 0:
+                    return (table_name, _time.time() - t0, f"skip ({target_rows:,} rows already present)")
+                # Mismatch — drop and re-CTAS for clean state.
+                cur.execute(f'DROP TABLE "{target_schema}"."{table_name}"')
+            # Run the CTAS.
+            sql = f'''
+                CREATE TABLE "{target_schema}"."{table_name}"
+                    {dist_sql}
+                    {sort_sql}
+                AS
+                SELECT * FROM "{staging_schema}"."{table_name}"
+            '''.strip()
             cur.execute(sql)
     finally:
         local_conn.close()
-    return (table_name, _time.time() - t0)
+    return (table_name, _time.time() - t0, "ctas")
 
 
 t_clone = _time.time()
-print(f"[parallel] CTAS {len(STAGING_TABLES_EXPECTED)} tables (8 concurrent)...")
+print(f"[parallel] CTAS check/run {len(STAGING_TABLES_EXPECTED)} tables (8 concurrent)...")
 with _cf.ThreadPoolExecutor(max_workers=8) as ex:
     futures = {ex.submit(_ctas_one, t): t for t in sorted(STAGING_TABLES_EXPECTED)}
     for f in _cf.as_completed(futures):
         try:
-            name, wall = f.result()
-            print(f"[ctas] {name:32s} {wall:5.2f}s")
+            name, wall, status = f.result()
+            print(f"[ctas] {name:32s} {wall:7.2f}s  {status}")
         except Exception as e:
             name = futures[f]
             print(f"[FAIL] {name:32s}  {type(e).__name__}: {e}")
@@ -430,12 +468,25 @@ def _dist_clause(spec: str) -> str:
         return f"DISTKEY({col})"
     raise ValueError(f"unknown distribution_spec: {spec}")
 
+# CTAS step above may have taken hours; reopen conn so bronze DDL doesn't
+# inherit a stale SSL socket.
+conn.close()
+conn = rs_connect(
+    database=database, secret_scope=secret_scope,
+    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
+                 "task": "setup_rs", "phase": "post_ctas"},
+)
+print("[ok] re-opened conn after CTAS")
+
 with conn.cursor() as cur:
     for tbl, cols_sql in BRONZE_DDLS.items():
         dist_spec, sortkey_cols = BRONZE_LAYOUTS[tbl]
         sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
+        # IF NOT EXISTS: idempotent. dbt may have already populated bronze
+        # tables on a prior partial run; preserve their data on re-run.
+        # If schema needs to change, use force_reset=YES at the top.
         ddl = f'''
-            CREATE TABLE "{target_schema}"."{tbl}" (
+            CREATE TABLE IF NOT EXISTS "{target_schema}"."{tbl}" (
               {cols_sql.strip().rstrip(",")}
             )
             {_dist_clause(dist_spec)}
