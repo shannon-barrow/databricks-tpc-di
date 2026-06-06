@@ -57,7 +57,7 @@ TABLE_LAYOUTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "dimtrade":                   ("KEY(sk_securityid)", ("sk_closedateid", "sk_brokerid", "sk_securityid")),
     "dimcustomer":                ("KEY(customerid)",    ("enddate", "customerid")),
     "dimaccount":                 ("KEY(accountid)",     ("enddate", "accountid")),
-    "currentaccountbalances":     ("ALL",                ("customerid",)),
+    "currentaccountbalances":     ("ALL",                ("accountid",)),
     "dimbroker":                  ("ALL",                ("brokerid",)),
     "dimsecurity":                ("ALL",                ("symbol",)),
     "dimcompany":                 ("ALL",                ("companyid",)),
@@ -70,7 +70,7 @@ TABLE_LAYOUTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "batchdate":                  ("ALL",                ()),
     "bronzedailymarket":          ("KEY(dm_s_symb)",     ("dm_date",)),
     "financial":                  ("KEY(sk_companyid)",  ("fi_year", "fi_qtr")),
-    "companyyeareps":             ("KEY(sk_companyid)",  ("fi_year",)),
+    "companyyeareps":             ("KEY(sk_companyid)",  ("qtr_start_date",)),
     "cashtransactionhistorical":  ("KEY(accountid)",     ("event_dt", "ct_dts")),
 }
 _missing_layouts = set(STAGING_TABLES) - set(TABLE_LAYOUTS)

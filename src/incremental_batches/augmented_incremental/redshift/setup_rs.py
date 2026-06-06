@@ -160,7 +160,7 @@ TABLE_LAYOUTS = {
     "dimaccount":                 ("KEY(accountid)",     ("enddate", "accountid")),
 
     # Small dims / snapshot tables — DISTSTYLE ALL
-    "currentaccountbalances":     ("ALL", ("customerid",)),
+    "currentaccountbalances":     ("ALL", ("accountid",)),
     "dimbroker":                  ("ALL", ("brokerid",)),
     "dimsecurity":                ("ALL", ("symbol",)),    # ~16M, big-ish but heavily joined
     "dimcompany":                 ("ALL", ("companyid",)),
@@ -179,7 +179,7 @@ TABLE_LAYOUTS = {
 
     # Quarterly financial data
     "financial":                  ("KEY(sk_companyid)",  ("fi_year", "fi_qtr")),
-    "companyyeareps":             ("KEY(sk_companyid)",  ("fi_year",)),
+    "companyyeareps":             ("KEY(sk_companyid)",  ("qtr_start_date",)),
 
     # Cash transaction history — large, time-ordered
     "cashtransactionhistorical":  ("KEY(accountid)",     ("event_dt", "ct_dts")),
