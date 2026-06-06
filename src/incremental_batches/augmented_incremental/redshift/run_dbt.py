@@ -167,12 +167,23 @@ try:
     if result.exception:
         summary_lines.append(f"# exception: {type(result.exception).__name__}: {result.exception}")
     if result.result:
-        # result.result is a RunExecutionResult — iterate nodes
+        # result.result is a RunExecutionResult — iterate nodes; include
+        # the per-node message (which holds the SQL error text for
+        # failed nodes) so the log captures actionable detail rather
+        # than just status + timing.
         for node_result in getattr(result.result, "results", []):
             summary_lines.append(
                 f"  {node_result.status:>8s}  {node_result.node.unique_id:50s}  "
                 f"exec={getattr(node_result, 'execution_time', 0):.2f}s"
             )
+            msg = getattr(node_result, "message", None)
+            if msg:
+                # Indent the message for readability
+                for line in str(msg).splitlines():
+                    summary_lines.append(f"      {line}")
+            adapter_response = getattr(node_result, "adapter_response", None)
+            if adapter_response:
+                summary_lines.append(f"      adapter_response: {adapter_response}")
     dbutils.fs.put(log_path, "\n".join(summary_lines) + "\n", overwrite=True)
     print(f"[log] wrote dbt summary to {log_path}")
 except Exception as e:
