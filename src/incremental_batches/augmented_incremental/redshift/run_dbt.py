@@ -29,6 +29,10 @@ dbutils.widgets.text("batch_date",       "")
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("secret_scope",     "tpcdi_redshift")
 dbutils.widgets.text("dbt_project_dir",  "", "Workspace-repo path to the dbt project")
+dbutils.widgets.text("s3_volume_prefix", "s3://tpcds-datasets/shannon_tpcdi/",
+                     "S3 prefix matching the UC volume — bronze pre_hook reads from here")
+dbutils.widgets.text("aws_region",       "us-west-2", "REGION clause for COPY")
+dbutils.widgets.text("file_ext",         "txt", "File extension of per-batch CSV drops")
 
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
@@ -37,6 +41,9 @@ batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
 secret_scope     = dbutils.widgets.get("secret_scope")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
+s3_volume_prefix = dbutils.widgets.get("s3_volume_prefix")
+aws_region       = dbutils.widgets.get("aws_region")
+file_ext         = dbutils.widgets.get("file_ext").strip()
 
 if not (wh_db and batch_date and dbt_project_dir):
     raise ValueError("wh_db, batch_date, and dbt_project_dir are required")
@@ -112,12 +119,24 @@ print(f"wrote profiles.yml to {profile_path}")
 
 # COMMAND ----------
 
+rs_iam_role = _get("iam_role")
+if not rs_iam_role:
+    raise RuntimeError(
+        f"Redshift secret scope '{secret_scope}' missing 'iam_role' "
+        f"(required for bronze pre_hook COPY)"
+    )
+
 vars_payload = {
-    "catalog":         database,                # dbt uses var('catalog') as the DB name
-    "wh_db":           wh_db,
-    "scale_factor":    str(scale_factor),
-    "batch_date":      batch_date,
-    "tpcdi_directory": tpcdi_directory,
+    "catalog":          database,                # dbt uses var('catalog') as the DB name
+    "wh_db":            wh_db,
+    "scale_factor":     str(scale_factor),
+    "batch_date":       batch_date,
+    "tpcdi_directory":  tpcdi_directory,
+    # Redshift-specific — consumed by the rs_bronze_copy_prehook macro
+    "s3_volume_prefix": s3_volume_prefix,
+    "rs_iam_role":      rs_iam_role,
+    "aws_region":       aws_region,
+    "file_ext":         file_ext,
 }
 cmd = [
     sys.executable, "-m", "dbt.cli.main", "run",

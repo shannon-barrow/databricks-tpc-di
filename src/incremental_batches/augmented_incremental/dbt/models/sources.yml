@@ -39,25 +39,6 @@ sources:
           streaming foreachBatch semantics. The DAG remains acyclic:
           source -> bronzeaccount -> silver/dimaccount -> (next batch's source).
 
-  # Redshift-only: the 8 COPY landing tables in the {wh_db}_{sf}_bronze
-  # schema. Populated by load_bronze_rs.py before dbt runs each batch.
-  # rs_bronze models declare these as sources and emit `materialized: view`
-  # wrappers in the main schema with the canonical bronze names. Schema
-  # name follows the BQ pattern (target schema + "_bronze" suffix).
-  - name: rs_landing
-    description: Redshift COPY landing tables populated by load_bronze_rs.py.
-    database: "{{ var('catalog') }}"
-    schema: "{{ var('wh_db') }}_{{ var('scale_factor') }}_bronze"
-    tables:
-      - name: bronzecustomer
-      - name: bronzeaccount
-      - name: bronzetrade
-      - name: bronzecashtransaction
-      - name: bronzeholdings
-      - name: bronzedailymarket
-      - name: bronzewatches
-      - name: account_updates_from_customer
-
   # BigQuery-only: the 7 wildcard external tables created by setup_bq.py.
   # Each points at gs://.../_dailybatches/{wh_db}_{N}/*/{Dataset}.txt and is
   # rescanned at query time, so the current batch's CSV is what bronze sees.

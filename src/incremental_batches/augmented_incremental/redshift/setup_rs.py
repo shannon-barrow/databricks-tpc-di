@@ -56,10 +56,8 @@ if not wh_db:
     raise ValueError("wh_db is required")
 
 target_schema  = f"{wh_db}_{scale_factor}".lower()    # Redshift identifiers are lowercase by default
-bronze_schema  = f"{target_schema}_bronze"            # Separate schema for COPY landing tables
 staging_schema = f"tpcdi_staging_sf{scale_factor}".lower()
 print(f"target  = {database}.{target_schema}")
-print(f"bronze  = {database}.{bronze_schema} (COPY landing zone)")
 print(f"staging = {database}.{staging_schema} (CTAS source; must exist)")
 
 # COMMAND ----------
@@ -120,14 +118,14 @@ print(f"[bootstrap] {_boot}")
 
 # COMMAND ----------
 
-# 1. DROP+CREATE both per-run schemas. Redshift has no CREATE OR REPLACE SCHEMA;
-#    DROP CASCADE then CREATE is the clean-slate equivalent.
+# 1. DROP+CREATE the per-run schema. Redshift has no CREATE OR REPLACE SCHEMA;
+#    DROP CASCADE then CREATE is the clean-slate equivalent. Bronze tables
+#    live in this same schema (no separate _bronze schema in the new
+#    pre_hook-COPY architecture).
 with conn.cursor() as cur:
     cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
     cur.execute(f'CREATE SCHEMA "{target_schema}"')
-    cur.execute(f'DROP SCHEMA IF EXISTS "{bronze_schema}" CASCADE')
-    cur.execute(f'CREATE SCHEMA "{bronze_schema}"')
-print(f"[ok] schemas {database}.{target_schema} + {database}.{bronze_schema} ready")
+print(f"[ok] schema {database}.{target_schema} ready")
 
 # COMMAND ----------
 
@@ -265,79 +263,19 @@ print(f"[parallel] CTAS done in {_time.time() - t_clone:.1f}s")
 
 # COMMAND ----------
 
-# 3. Pre-create the 8 COPY landing tables in the `_bronze` schema (empty;
-#    load_bronze_rs.py populates them per batch via COPY from S3). dbt
-#    rs_bronze models then declare these as `sources` and emit
-#    `materialized: view` wrappers in the main schema with the canonical
-#    bronze table names — same naming as BQ/SF bronze layer, just split
-#    across two schemas to keep COPY targets distinct from dbt-managed
-#    bronze views.
+# 3. Bronze layer setup: the CTAS step above already created all 22 staging
+#    tables in the main schema, INCLUDING bronzedailymarket / bronzecustomer
+#    / bronzeaccount / etc. (which are part of STAGING_TABLES). dbt's rs_bronze
+#    models use these as their incremental `{{ this }}` target — the pre_hook
+#    `CREATE TEMP TABLE foo_stg (LIKE foo)` clause inherits the schema from
+#    these CTAS'd tables, and each per-batch INSERT … SELECT FROM stg appends
+#    the day's rows.
 #
-# Schema mapping (Databricks → Redshift): BIGINT/INT/TINYINT → BIGINT,
-# DOUBLE → DOUBLE PRECISION, STRING → VARCHAR(MAX), DATE/TIMESTAMP unchanged.
-# DISTKEY/SORTKEY chosen to support the date-bounded SELECT pattern dbt uses.
-BRONZE_DDLS = {
-    "bronzeaccount": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT,
-        customerid BIGINT, accountdesc VARCHAR(64), taxstatus SMALLINT,
-        status VARCHAR(16), update_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(update_dt)"),
-
-    "bronzecashtransaction": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, ct_dts TIMESTAMP,
-        ct_amt DOUBLE PRECISION, ct_name VARCHAR(128), event_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(event_dt)"),
-
-    "bronzecustomer": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, customerid BIGINT, taxid VARCHAR(20),
-        status VARCHAR(16), lastname VARCHAR(64), firstname VARCHAR(64),
-        middleinitial VARCHAR(4), gender VARCHAR(2), tier SMALLINT, dob DATE,
-        addressline1 VARCHAR(128), addressline2 VARCHAR(128), postalcode VARCHAR(16),
-        city VARCHAR(64), stateprov VARCHAR(64), country VARCHAR(64),
-        c_ctry_1 VARCHAR(8), c_area_1 VARCHAR(8), c_local_1 VARCHAR(16), c_ext_1 VARCHAR(8),
-        c_ctry_2 VARCHAR(8), c_area_2 VARCHAR(8), c_local_2 VARCHAR(16), c_ext_2 VARCHAR(8),
-        c_ctry_3 VARCHAR(8), c_area_3 VARCHAR(8), c_local_3 VARCHAR(16), c_ext_3 VARCHAR(8),
-        email1 VARCHAR(128), email2 VARCHAR(128),
-        lcl_tx_id VARCHAR(16), nat_tx_id VARCHAR(16), update_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(customerid)", "SORTKEY(update_dt)"),
-
-    "bronzeholdings": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT,
-        hh_before_qty BIGINT, hh_after_qty BIGINT, event_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(hh_t_id)", "SORTKEY(event_dt)"),
-
-    "bronzetrade": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, tradeid BIGINT, t_dts TIMESTAMP,
-        status VARCHAR(16), t_tt_id VARCHAR(8), cashflag SMALLINT,
-        t_s_symb VARCHAR(16), quantity BIGINT, bidprice DOUBLE PRECISION,
-        t_ca_id BIGINT, executedby VARCHAR(64), tradeprice DOUBLE PRECISION,
-        fee DOUBLE PRECISION, commission DOUBLE PRECISION, tax DOUBLE PRECISION,
-        event_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(tradeid)", "SORTKEY(event_dt)"),
-
-    "bronzewatches": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb VARCHAR(16),
-        w_dts TIMESTAMP, w_action VARCHAR(8), event_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(w_c_id)", "SORTKEY(event_dt)"),
-
-    "account_updates_from_customer": ("""
-        cdc_flag VARCHAR(8), cdc_dsn BIGINT, accountid BIGINT, brokerid BIGINT,
-        customerid BIGINT, accountdesc VARCHAR(64), taxstatus SMALLINT,
-        status VARCHAR(16), update_dt DATE
-    """, "DISTSTYLE KEY DISTKEY(accountid)", "SORTKEY(update_dt)"),
-}
-
-with conn.cursor() as cur:
-    for name, (cols_sql, dist_clause, sort_clause) in BRONZE_DDLS.items():
-        cur.execute(f'''
-            CREATE TABLE "{bronze_schema}"."{name}" (
-                {cols_sql}
-            )
-            {dist_clause}
-            {sort_clause}
-        ''')
-        print(f"[ddl] {name:32s}  {dist_clause}  {sort_clause}")
-print(f"[ok] 8 COPY landing tables ready under {database}.{bronze_schema}")
+#    No separate `_bronze` landing schema, no pre-created empty bronze
+#    tables. Bronze ingestion lives entirely inside the dbt run (pre_hook
+#    COPYs from S3 on the same compute that runs silver+gold) — same
+#    compute attribution as the SF/BQ variants. See
+#    `dbt/macros/rs_bronze_copy_prehook.sql` for the COPY incantation.
 
 # COMMAND ----------
 

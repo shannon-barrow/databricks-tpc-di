@@ -22,17 +22,18 @@ Pre-requisites (one-time, manual, out-of-band):
   pre-installed as libraries (defensive pip-install in tools as backup)
 
 Two builders here:
-- ``build_child(...)`` — 3-task per-date job: simulate_filedrops_rs →
-  load_bronze_rs → dbt_run, all on the same interactive cluster
+- ``build_child(...)`` — 2-task per-date job: simulate_filedrops_rs →
+  dbt_run, both on the same interactive cluster (bronze COPY runs as a
+  dbt pre_hook inside the dbt_run task)
 - ``build_parent(...)`` — wrapper: setup_rs then for_each loop over the
   child job per simulated day, gated cleanup at the end
 
-The Redshift child has ONE more task than BQ/SF: an explicit COPY step
-(`load_bronze_rs`) between the filedrop and dbt. Redshift's COPY-into-native
-pattern is the analog of BQ's wildcard external tables and SF's `@stage`
-positional select — but it's an explicit task because Spectrum-style external
-tables are too slow + bypass DISTKEY co-location (decision documented in
-`incremental_batches/augmented_incremental/redshift/PORT_NOTES.md`).
+The Redshift child has the SAME 2-task shape as BQ/SF — simulate_filedrops
+then dbt_run. Bronze ingestion (COPY from S3) happens INSIDE the dbt run via
+`pre_hook`s on the 7 CSV-driven `rs_bronze/*.sql` models — keeps the bronze
+read on the same Redshift compute that runs silver+gold, so per-batch cost
+attribution is apples-to-apples with the other engines (decision documented
+in `incremental_batches/augmented_incremental/redshift/PORT_NOTES.md`).
 """
 from __future__ import annotations
 
@@ -136,15 +137,15 @@ def _description_parent(*, scale_factor: int, database: str, wh_db: str,
         f"TPC-DI Augmented Incremental benchmark (Redshift, **parent**) "
         f"at SF={scale_factor}. Sequence: (1) `setup_rs` runs on an "
         f"interactive cluster, dispatching DDL/CTAS to Redshift: "
-        f"DROP+CREATE the per-run schemas `{wh_db}_{scale_factor}` + "
-        f"`{wh_db}_{scale_factor}_bronze`, CTAS the 22 reference + "
-        f"dimension tables from `tpcdi_staging_sf{scale_factor}` "
-        f"(seeded once via onetime_stg_rs_tables), pre-create the 8 "
-        f"bronze landing tables; (2) `loop_incremental_tpcdi` for_each-loops "
-        f"the child job per simulated day from the emitted `batch_date_ls`. "
-        f"Each child runs simulate_filedrops_rs + load_bronze_rs + dbt_run "
-        f"on the same interactive cluster. Cleanup gated by "
-        f"`delete_tables_when_finished` (default TRUE)."
+        f"DROP+CREATE the per-run schema `{wh_db}_{scale_factor}`, "
+        f"self-bootstrap `tpcdi_staging_sf{scale_factor}` if missing "
+        f"(via rs_staging_bootstrap inline), CTAS the 22 reference + "
+        f"dimension tables from staging into the per-run schema; "
+        f"(2) `loop_incremental_tpcdi` for_each-loops the child job per "
+        f"simulated day from the emitted `batch_date_ls`. Each child runs "
+        f"simulate_filedrops_rs + dbt_run (with bronze COPY inside dbt "
+        f"pre_hooks). Cleanup gated by `delete_tables_when_finished` "
+        f"(default TRUE)."
     )
 
 
@@ -165,14 +166,16 @@ def build_child(
 ) -> dict:
     """Builds the per-date child job spec.
 
-    Three tasks, all pinned to the same interactive cluster:
+    Two tasks, both pinned to the same compute target:
       1. `simulate_filedrops_rs` — copies day's .txt files into the UC
          external volume (writes via UC; Redshift reads the same bytes
-         via COPY in the next task)
-      2. `load_bronze_rs` — issues 7 COPY statements from S3 → Redshift
-         bronze landing tables in `{wh_db}_{sf}_bronze` schema
-      3. `dbt_run` — pip-checks dbt-redshift, writes profiles.yml from
-         the secret scope, runs `dbt run --target redshift --vars {...}`
+         via COPY in the bronze pre_hooks)
+      2. `dbt_run` — pip-checks dbt-redshift, writes profiles.yml from
+         the secret scope, runs `dbt run --target redshift --vars {...}`.
+         Each rs_bronze model's pre_hook issues a `COPY ... FROM
+         's3://.../{batch_date}/{Dataset}.txt' ... FORMAT AS CSV` into
+         a temp table, then the model body appends to the persistent
+         bronze table.
     """
     aug = f"{repo_src_path}/{_AUG_PATH}"
     # On tpcdi-fresh the workspace only has serverless compute available
@@ -183,6 +186,9 @@ def build_child(
     # environment declared on the parent job.
     use_classic = bool(interactive_cluster_id)
     env_key = None if use_classic else "serverless_rs"
+    # Two child tasks now: simulate_filedrops drops the day's CSVs into S3,
+    # then dbt_run does everything else (bronze COPY happens inside dbt via
+    # pre_hooks on bronze models — no separate load_bronze task needed).
     tasks = [
         _make_task(
             task_key="simulate_filedrops_rs",
@@ -192,17 +198,9 @@ def build_child(
             environment_key=env_key,
         ),
         _make_task(
-            task_key="load_bronze_rs",
-            notebook_path=f"{aug}/redshift/load_bronze_rs",
-            depends_on=["simulate_filedrops_rs"],
-            base_params=_BATCHED_PARAMS,
-            existing_cluster_id=interactive_cluster_id,
-            environment_key=env_key,
-        ),
-        _make_task(
             task_key="dbt_run",
             notebook_path=f"{aug}/redshift/run_dbt",
-            depends_on=["load_bronze_rs"],
+            depends_on=["simulate_filedrops_rs"],
             base_params=dict(
                 _BATCHED_PARAMS,
                 dbt_project_dir=f"{aug}/dbt",

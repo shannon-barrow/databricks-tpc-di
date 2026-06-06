@@ -1,12 +1,15 @@
 {{
   config(
-    materialized = 'view',
+    materialized='incremental',
+    incremental_strategy='append',
+    on_schema_change='ignore',
+    pre_hook=rs_bronze_copy_prehook('Customer'),
   )
 }}
 
-{# Redshift variant — the COPY landing table in the {wh_db}_{sf}_bronze
-   schema is populated by load_bronze_rs.py BEFORE dbt runs each batch.
-   This view is just a pass-through so the dbt DAG retains bronze→silver→gold
-   lineage with zero write amplification. #}
+{# Per-batch Redshift bronze customer. Pre-hook above COPYs Customer.txt
+   into a TEMP table matching this model's schema; body just appends.
+   First run's target table is the staging CTAS from setup_rs.py — that's
+   what gives `LIKE {{ this }}` a valid template. #}
 
-select * from {{ source('rs_landing', 'bronzecustomer') }}
+select * from {{ rs_bronze_stg_table() }}

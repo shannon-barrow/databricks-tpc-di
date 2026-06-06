@@ -37,7 +37,6 @@ if not wh_db:
     raise ValueError("wh_db is required")
 
 target_schema  = f"{wh_db}_{scale_factor}".lower()
-bronze_schema  = f"{target_schema}_bronze"
 batches_dir    = f"{tpcdi_directory}augmented_incremental/_dailybatches/{target_schema}"
 
 # COMMAND ----------
@@ -54,12 +53,11 @@ conn = rs_connect(
 # COMMAND ----------
 
 with conn.cursor() as cur:
-    for schema in (target_schema, bronze_schema):
-        try:
-            cur.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
-            print(f"[ok] dropped schema {database}.{schema}")
-        except Exception as e:
-            print(f"[warn] DROP SCHEMA {schema} failed: {type(e).__name__}: {e}")
+    try:
+        cur.execute(f'DROP SCHEMA IF EXISTS "{target_schema}" CASCADE')
+        print(f"[ok] dropped schema {database}.{target_schema}")
+    except Exception as e:
+        print(f"[warn] DROP SCHEMA failed: {type(e).__name__}: {e}")
 
 conn.close()
 

@@ -1,7 +1,10 @@
 {{
   config(
-    materialized = 'view',
+    materialized='incremental',
+    incremental_strategy='append',
+    on_schema_change='ignore',
+    pre_hook=rs_bronze_copy_prehook('HoldingHistory'),
   )
 }}
 
-select * from {{ source('rs_landing', 'bronzeholdings') }}
+select * from {{ rs_bronze_stg_table() }}
