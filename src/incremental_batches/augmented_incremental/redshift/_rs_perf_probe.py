@@ -38,24 +38,23 @@ def q(sql, label):
         for r in rows:
             lines.append("  " + " | ".join(str(v)[:80] for v in r))
 
-# 1) Recent COPY commands — load history (last 4 hrs)
+# 0) Discover actual column schemas first
 q("""
-SELECT
-  query_id,
-  start_time,
-  end_time,
-  DATEDIFF(second, start_time, end_time) AS elapsed_s,
-  data_source,
-  bytes_scanned,
-  ROUND(bytes_scanned / 1024.0 / 1024.0 / 1024.0, 2) AS gb_scanned,
-  loaded_rows,
-  ROUND(loaded_rows / NULLIF(DATEDIFF(second, start_time, end_time), 0)::float, 0) AS rows_per_s,
-  ROUND((bytes_scanned/1024.0/1024.0) / NULLIF(DATEDIFF(second, start_time, end_time), 0), 1) AS mb_per_s
+SELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_schema = 'pg_catalog'
+  AND table_name IN ('sys_load_history', 'sys_query_history', 'sys_serverless_usage')
+ORDER BY table_name, ordinal_position
+""", "schema of sys_load_history / sys_query_history / sys_serverless_usage")
+
+# 1) Recent COPY commands — load history (last 6 hrs) — use SELECT *
+q("""
+SELECT *
 FROM SYS_LOAD_HISTORY
 WHERE start_time > GETDATE() - INTERVAL '6 hours'
 ORDER BY start_time DESC
 LIMIT 30
-""", "SYS_LOAD_HISTORY (recent COPY commands)")
+""", "SYS_LOAD_HISTORY (recent COPY commands, ALL COLUMNS)")
 
 # 2) Serverless RPU usage by minute (last 4 hrs) — see if autoscaling kicked in
 q("""
