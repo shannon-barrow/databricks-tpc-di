@@ -33,6 +33,7 @@ conn.autocommit = True
 tables_of_interest = ["dimsecurity", "dimcustomer", "dimaccount", "factmarkethistory",
                        "factwatches", "factholdings", "factcashbalances", "dimtrade"]
 
+output_lines = []
 with conn.cursor() as cur:
     for t in tables_of_interest:
         cur.execute("""
@@ -42,8 +43,14 @@ with conn.cursor() as cur:
             ORDER BY ordinal_position
         """, (target_schema, t))
         rows = cur.fetchall()
-        print(f"\n=== {target_schema}.{t} ===")
+        output_lines.append(f"\n=== {target_schema}.{t} ===")
         for r in rows:
-            print(f"  {r[0]:30s} {r[1]:20s} len={r[2]}  prec={r[3]}")
+            output_lines.append(f"  {r[0]:30s} {r[1]:20s} len={r[2]}  prec={r[3]}")
 
 conn.close()
+report = "\n".join(output_lines)
+print(report)
+log_path = "/Volumes/main/tpcdi_raw_data/tpcdi_volume/_dbt_run_logs/_describe_rs.log"
+dbutils.fs.put(log_path, report, overwrite=True)
+print(f"\nwrote {log_path}")
+dbutils.notebook.exit(report[:4000])
