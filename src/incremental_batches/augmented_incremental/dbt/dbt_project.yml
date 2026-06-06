@@ -27,7 +27,7 @@ vars:
 # Three parallel model trees — the active one is selected by target.type at
 # parse time via +enabled flags below. Same dbt_project.yml drives Databricks,
 # Snowflake, and BigQuery runs; CLI controls which engine via --target.
-model-paths: ["models/", "snowflake_models/", "bigquery_models/"]
+model-paths: ["models/", "snowflake_models/", "bigquery_models/", "redshift_models/"]
 macro-paths: ["macros/"]
 seed-paths: ["seeds/"]
 test-paths: ["tests/"]
