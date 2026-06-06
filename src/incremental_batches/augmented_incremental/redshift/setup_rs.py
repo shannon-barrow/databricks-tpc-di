@@ -117,7 +117,12 @@ _boot = bootstrap.ensure_staging_environment(
     spark=spark,
     dbutils=dbutils,
     secret_scope=secret_scope,
-    parallel=4,
+    # parallel=8 matches sf_staging_bootstrap. Each worker does
+    # spark.read → write parquet (UC volume) → COPY FROM PARQUET.
+    # At SF=20k, big tables (factmarkethistory ~6B rows, dimtrade ~2B,
+    # dimsecurity ~16M) dominate; with parallel=4 the long-pole sets a
+    # ~30-40 min floor on bootstrap wall.
+    parallel=8,
 )
 print(f"[bootstrap] {_boot}")
 

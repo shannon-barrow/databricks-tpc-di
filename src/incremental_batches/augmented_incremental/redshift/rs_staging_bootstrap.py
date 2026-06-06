@@ -225,7 +225,7 @@ def ensure_staging_environment(conn, *,
                                 spark,
                                 dbutils,
                                 secret_scope: str,
-                                parallel: int = 4) -> dict:
+                                parallel: int = 8) -> dict:
     """Idempotent Redshift staging bootstrap. Mirrors
     `bq_staging_bootstrap.ensure_staging_environment` and
     `sf_staging_bootstrap.ensure_staging_environment`.
