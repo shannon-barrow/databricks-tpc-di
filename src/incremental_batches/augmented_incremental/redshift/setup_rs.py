@@ -212,13 +212,14 @@ import time as _time
 def _ctas_one(table_name: str) -> tuple[str, float]:
     dist_spec, sortkey_cols = TABLE_LAYOUTS[table_name]
 
-    # Build the layout clauses
+    # Build the layout clauses. `DISTKEY(col)` alone implies `DISTSTYLE KEY`.
     if dist_spec == "ALL":
         dist_sql = "DISTSTYLE ALL"
     elif dist_spec == "EVEN":
         dist_sql = "DISTSTYLE EVEN"
     elif dist_spec.startswith("KEY("):
-        dist_sql = f"DISTSTYLE KEY {dist_spec}"   # "DISTSTYLE KEY DISTKEY(col)"
+        col = dist_spec[len("KEY("):-1]
+        dist_sql = f"DISTKEY({col})"
     else:
         raise ValueError(f"Unknown distribution_spec for {table_name}: {dist_spec}")
 

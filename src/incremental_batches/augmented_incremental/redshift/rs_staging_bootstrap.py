@@ -97,7 +97,11 @@ _TYPE_MAP: dict[str, str] = {
 def _dist_clause(spec: str) -> str:
     if spec == "ALL":  return "DISTSTYLE ALL"
     if spec == "EVEN": return "DISTSTYLE EVEN"
-    if spec.startswith("KEY("): return f"DISTSTYLE KEY {spec}"
+    if spec.startswith("KEY("):
+        col = spec[len("KEY("):-1]
+        # `DISTKEY(col)` alone implies `DISTSTYLE KEY` — cleaner than
+        # writing both. Writing `DISTSTYLE KEY KEY(col)` is a syntax error.
+        return f"DISTKEY({col})"
     raise ValueError(f"unknown distribution_spec: {spec}")
 
 
