@@ -326,13 +326,34 @@ def ensure_staging_environment(conn, *,
     elapsed_s = _time.time() - t_start
     print(f"\n[bootstrap] seeded {len(results)} tables, {len(failures)} failures in {elapsed_s:.1f}s")
 
-    # 4) Re-verify after seed.
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
-            (target_schema,),
-        )
-        present_after = {r[0].lower() for r in cur.fetchall()}
+    # 4) Re-verify after seed. CRITICAL: the original `conn` was opened in
+    #    setup_rs.py before this function ran, and has been idle for the
+    #    entire bootstrap duration. At SF=20k that's 30-80 minutes — far
+    #    longer than Redshift Serverless's SSL keepalive. Re-using `conn`
+    #    here raises "SSL connection has been closed unexpectedly".
+    #
+    #    Open a fresh short-lived connection just for the verify check.
+    import psycopg2 as _psy
+    def _get_secret(k, default=None):
+        try: return dbutils.secrets.get(scope=secret_scope, key=k)
+        except Exception: return default
+    verify_conn = _psy.connect(
+        host=_get_secret("host"),
+        port=int(_get_secret("port", "5439")),
+        user=_get_secret("user"),
+        password=_get_secret("password"),
+        dbname=database, sslmode="require", connect_timeout=30,
+    )
+    verify_conn.autocommit = True
+    try:
+        with verify_conn.cursor() as cur:
+            cur.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
+                (target_schema,),
+            )
+            present_after = {r[0].lower() for r in cur.fetchall()}
+    finally:
+        verify_conn.close()
     still_missing = [t for t in STAGING_TABLES if t.lower() not in present_after]
     if still_missing or failures:
         raise RuntimeError(

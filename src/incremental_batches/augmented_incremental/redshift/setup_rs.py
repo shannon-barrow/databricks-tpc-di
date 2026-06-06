@@ -126,6 +126,18 @@ _boot = bootstrap.ensure_staging_environment(
 )
 print(f"[bootstrap] {_boot}")
 
+# CRITICAL: the `conn` opened above has been idle for the bootstrap
+# duration (30-80 min at SF=20k). Redshift's SSL connection times out
+# long before that; the next use of `conn` (cell 6's DROP SCHEMA) would
+# raise "SSL connection has been closed unexpectedly". Close + reopen.
+conn.close()
+conn = rs_connect(
+    database=database,
+    secret_scope=secret_scope,
+    query_group={"wh_db": wh_db, "scale_factor": scale_factor, "task": "setup_rs", "phase": "post_bootstrap"},
+)
+print("[ok] re-opened conn after bootstrap")
+
 # COMMAND ----------
 
 # 1. DROP+CREATE the per-run schema. Redshift has no CREATE OR REPLACE SCHEMA;
