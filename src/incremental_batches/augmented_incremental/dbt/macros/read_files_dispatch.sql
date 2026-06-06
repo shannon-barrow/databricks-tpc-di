@@ -41,6 +41,25 @@
   (select * from `{{ var('catalog') }}.{{ tgt_db() }}_bronze.{{ table_name }}`)
 {%- endmacro %}
 
+{% macro redshift__read_daily_csv(filename, schema_str) %}
+  {# Redshift's bronze ingestion does NOT use this macro — bronze models in
+     `redshift_models/rs_bronze/` use a `pre_hook` that issues a `COPY ...
+     FROM 's3://...'` into a temp table, with the model body just selecting
+     `* FROM <stg>`. See `dbt/macros/rs_bronze_copy_prehook.sql`.
+
+     This stub exists only so dbt's `adapter.dispatch('read_daily_csv', ...)`
+     can resolve when the manifest is parsed against target.type='redshift'
+     — the Databricks-tree bronze models (which ARE the callers of
+     `read_daily_csv`) are gated by `+enabled: target.type == 'databricks'`,
+     so this body should never actually execute. If it does, surface a
+     clear error rather than silently producing wrong SQL. #}
+  {{ exceptions.raise_compiler_error(
+       "read_daily_csv() was called with target=redshift. This macro is "
+       "Databricks-only — Redshift bronze ingestion uses pre_hook COPY in "
+       "`redshift_models/rs_bronze/*.sql` (see dbt/macros/rs_bronze_copy_prehook.sql)."
+  ) }}
+{%- endmacro %}
+
 {% macro snowflake__read_daily_csv(filename, schema_str) %}
   {# Snowflake reads from an external stage. The {{ var('snowflake_stage') }}
      variable controls which stage; default 'tpcdi_stage'. The stage URL
