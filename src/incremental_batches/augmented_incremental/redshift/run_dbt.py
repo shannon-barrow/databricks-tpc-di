@@ -3,7 +3,7 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # dependencies = [
-#   "dbt-redshift==1.10.0",
+#   "dbt-redshift==1.10.1",
 #   "psycopg2-binary",
 # ]
 # ///
@@ -61,7 +61,7 @@ except ImportError:
     print("[install] dbt-redshift not found, pip-installing...")
     subprocess.check_call(
         [sys.executable, "-m", "pip", "install", "--quiet",
-         "dbt-redshift==1.10.0"]
+         "dbt-redshift==1.10.1"]
     )
 
 # COMMAND ----------
@@ -138,57 +138,49 @@ vars_payload = {
     "aws_region":       aws_region,
     "file_ext":         file_ext,
 }
-# On serverless DBR, `python -m dbt.cli.main` fails with
-# "No module named 'dbt.cli'" even though dbt-redshift is installed —
-# the entrypoint packaging is awkward on env_version=5. The `dbt`
-# executable from the env's bin/ is the reliable invocation path.
-import shutil
-dbt_exe = shutil.which("dbt")
-if dbt_exe:
-    cmd = [
-        dbt_exe, "run",
-        "--target", "redshift",
-        "--profiles-dir", profiles_dir,
-        "--project-dir", dbt_project_dir,
-        "--vars", json.dumps(vars_payload),
-        "--no-version-check",
-    ]
-else:
-    # Last resort — try the python -m form. If dbt.cli is missing this
-    # will also fail, but at least the error path is loud.
-    cmd = [
-        sys.executable, "-m", "dbt", "run",
-        "--target", "redshift",
-        "--profiles-dir", profiles_dir,
-        "--project-dir", dbt_project_dir,
-        "--vars", json.dumps(vars_payload),
-        "--no-version-check",
-    ]
-print("dbt cmd:", " ".join(cmd))
-res = subprocess.run(cmd, capture_output=True, text=True)
-print(res.stdout)
-print(res.stderr, file=sys.stderr)
+# Invoke dbt IN-PROCESS via dbtRunner (the documented Python API).
+# Avoids subprocess + serverless env_version=5 venv inheritance issues that
+# make `python -m dbt.cli.main` fail with "No module named 'dbt.cli'" even
+# though dbt-redshift is importable in the notebook's own Python process.
+from dbt.cli.main import dbtRunner
 
-# Persist dbt output to a volume file for inspection.
+dbt_args = [
+    "run",
+    "--target", "redshift",
+    "--profiles-dir", profiles_dir,
+    "--project-dir", dbt_project_dir,
+    "--vars", json.dumps(vars_payload),
+    "--no-version-check",
+]
+print("dbt args:", dbt_args)
+result = dbtRunner().invoke(dbt_args)
+
+# Persist a summary log for inspection.
 log_dir = f"{tpcdi_directory}_dbt_run_logs/{wh_db}_{scale_factor}_rs"
 log_path = f"{log_dir}/{batch_date}.log"
 try:
     dbutils.fs.mkdirs(log_dir)
-    dbutils.fs.put(
-        log_path,
-        f"# dbt run target=redshift batch_date={batch_date} exit_code={res.returncode}\n"
-        f"# --- stdout ---\n{res.stdout}\n"
-        f"# --- stderr ---\n{res.stderr}\n",
-        overwrite=True,
-    )
-    print(f"[log] wrote dbt output to {log_path}")
+    summary_lines = [
+        f"# dbt run target=redshift batch_date={batch_date} success={result.success}",
+    ]
+    if result.exception:
+        summary_lines.append(f"# exception: {type(result.exception).__name__}: {result.exception}")
+    if result.result:
+        # result.result is a RunExecutionResult — iterate nodes
+        for node_result in getattr(result.result, "results", []):
+            summary_lines.append(
+                f"  {node_result.status:>8s}  {node_result.node.unique_id:50s}  "
+                f"exec={getattr(node_result, 'execution_time', 0):.2f}s"
+            )
+    dbutils.fs.put(log_path, "\n".join(summary_lines) + "\n", overwrite=True)
+    print(f"[log] wrote dbt summary to {log_path}")
 except Exception as e:
-    print(f"[log] failed to persist dbt output: {e}")
+    print(f"[log] failed to persist dbt summary: {e}")
 
-if res.returncode != 0:
-    tail = (res.stdout + res.stderr)[-3000:]
+if not result.success:
+    err = result.exception or "see dbt results above"
     dbutils.notebook.exit(
-        f"FAILED exit={res.returncode}\nlog={log_path}\n---tail---\n{tail}"
+        f"FAILED success={result.success}\nlog={log_path}\nerr={type(err).__name__}: {err}"
     )
 
 print(f"[done] dbt run --target redshift batch_date={batch_date} complete.")

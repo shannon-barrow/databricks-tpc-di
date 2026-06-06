@@ -243,7 +243,7 @@ def build_child(
                 "spec": {
                     "client": "3",
                     "dependencies": [
-                        "dbt-redshift==1.10.0",
+                        "dbt-redshift==1.10.1",
                         "psycopg2-binary",
                     ],
                 },
