@@ -3,6 +3,7 @@
 # [tool.databricks.environment]
 # environment_version = "5"
 # dependencies = [
+#   "dbt-core==1.11.8",
 #   "dbt-redshift==1.10.1",
 #   "psycopg2-binary",
 # ]
