@@ -256,14 +256,32 @@ def ensure_staging_environment(conn, *,
     with conn.cursor() as cur:
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
 
-    # 2) Check what's already present.
+    # 2) Check what's already present AND non-empty. Plain `table_exists` is
+    #    not enough — a prior cancelled run can leave behind tables that were
+    #    CREATE TABLE'd but for which the COPY never completed. Those shells
+    #    pass the existence test and get skipped, then the downstream CTAS
+    #    copies an empty table into the per-run schema. We hit this exact
+    #    failure mode on the SF=20k re-run: factmarkethistory CTAS'd in 1.86s
+    #    (should have been multiple minutes for ~6B rows) because the staging
+    #    table was empty.
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
             (target_schema,),
         )
         present = {r[0].lower() for r in cur.fetchall()}
-    missing = [t for t in STAGING_TABLES if t.lower() not in present]
+    # Verify row count > 0 on each "present" table. Any STAGING_TABLE with
+    # zero rows is treated as "missing" so the worker re-DROPs + re-seeds it.
+    nonempty = set()
+    with conn.cursor() as cur:
+        for t in [s for s in STAGING_TABLES if s.lower() in present]:
+            cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{t}"')
+            n = cur.fetchone()[0]
+            if n > 0:
+                nonempty.add(t.lower())
+            else:
+                print(f"[bootstrap] {t}: present but ZERO rows — will re-seed")
+    missing = [t for t in STAGING_TABLES if t.lower() not in nonempty]
 
     if not missing:
         msg = f"[bootstrap] {database}.{target_schema} already has all {len(STAGING_TABLES)} staging tables — skipping"
