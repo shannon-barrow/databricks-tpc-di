@@ -292,14 +292,30 @@ def run(
             # tpcdi_raw_data + its volume are SHARED across all workspace users.
             # Always GRANT ALL PRIVILEGES so the first creator doesn't lock everyone
             # else out (matches data_gen_tasks/data_gen.py for the Spark path).
+            # The GRANTs need MANAGE/ownership; when the shared resource was first
+            # created by a different user, a later runner only inherits `account
+            # users` ALL_PRIVILEGES and can't re-issue the grant. Swallow the
+            # resulting PERMISSION_DENIED so the run isn't blocked by an
+            # already-applied grant.
+            def _grant_permissive(grant_sql: str) -> None:
+                try:
+                    spark.sql(grant_sql)
+                except Exception as e:
+                    msg = str(e)
+                    if "PERMISSION_DENIED" in msg or "UNAUTHORIZED_ACCESS" in msg:
+                        print(f"[digen] skipping GRANT (no MANAGE on target; grant "
+                              f"likely already applied by the owner): {msg.splitlines()[0]}")
+                    else:
+                        raise
+
             spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
                       f"COMMENT 'Shared TPC-DI raw files schema'")
-            spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
-                      f"TO `account users`")
+            _grant_permissive(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+                              f"TO `account users`")
             spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
                       f"COMMENT 'Shared TPC-DI raw files volume'")
-            spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
-                      f"TO `account users`")
+            _grant_permissive(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+                              f"TO `account users`")
 
         filenames = [
             os.path.join(root, name)

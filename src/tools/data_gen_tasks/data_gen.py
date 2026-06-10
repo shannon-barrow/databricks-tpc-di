@@ -94,14 +94,32 @@ cfg = ctx["cfg"]
 # factors. Grant ALL PRIVILEGES to `account users` so the first creator
 # doesn't lock everyone else out. The GRANT is idempotent — it runs on
 # every data_gen invocation but only takes effect once.
+#
+# The GRANTs require MANAGE/ownership on the target. When the shared
+# resource was first created by a *different* user (the common case on a
+# shared metastore), a later runner only has the inherited `account users`
+# ALL_PRIVILEGES — enough to read/write, but not to re-issue the grant.
+# Swallow the resulting PERMISSION_DENIED so a non-owner run isn't blocked
+# by an already-applied grant; everything else propagates.
+def _grant_permissive(grant_sql: str) -> None:
+    try:
+        spark.sql(grant_sql)
+    except Exception as e:
+        msg = str(e)
+        if "PERMISSION_DENIED" in msg or "UNAUTHORIZED_ACCESS" in msg:
+            print(f"[data_gen] skipping GRANT (no MANAGE on target; grant "
+                  f"likely already applied by the owner): {msg.splitlines()[0]}")
+        else:
+            raise
+
 spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
           f"COMMENT 'Shared TPC-DI raw files schema'")
-spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
-          f"TO `account users`")
+_grant_permissive(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+                  f"TO `account users`")
 spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
           f"COMMENT 'Shared TPC-DI raw files volume'")
-spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
-          f"TO `account users`")
+_grant_permissive(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+                  f"TO `account users`")
 
 stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 print(f"[data_gen] ensuring {stage_schema} exists")
@@ -114,9 +132,9 @@ if augmented_incremental:
     spark.sql(f"CREATE DATABASE IF NOT EXISTS "
               f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
               f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
-    spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA "
-              f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
-              f"TO `account users`")
+    _grant_permissive(f"GRANT ALL PRIVILEGES ON SCHEMA "
+                      f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
+                      f"TO `account users`")
 
 # COMMAND ----------
 
