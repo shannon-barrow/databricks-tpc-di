@@ -21,7 +21,7 @@ CREATE OR REPLACE TABLE factwatches (
   CONSTRAINT factwatches_dateplaced_fk FOREIGN KEY (sk_dateid_dateplaced) REFERENCES DimDate(sk_dateid),
   CONSTRAINT factwatches_dateremoved_fk FOREIGN KEY (sk_dateid_dateremoved) REFERENCES DimDate(sk_dateid)
 )
-CLUSTER BY (sk_dateid_dateremoved)  -- liquid: matches setup choice. NOT the `removed` boolean — the same sk_dateid_dateremoved the SDP/cluster liquid variants cluster on
+CLUSTER BY (customerid)  -- liquid: business key, also half of the SCD1 MERGE key (symbol, customerid). The daily ACTV/CNCL events touch watches for a scattered subset of customers, so clustering on customerid fragments the layout each batch (recluster work) and serves "watchlist for customer X" BI. (Was sk_dateid_dateremoved, a date key that did little recluster work.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

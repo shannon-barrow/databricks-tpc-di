@@ -10,9 +10,9 @@
 {# `merge` (not `insert_overwrite`) so the model isn't tied to partition
    replacement semantics — Liquid tables have no partitions. Unique key
    is composite (sk_securityid, sk_dateid) — one row per (security, date).
-   No `liquid_clustered_by` here on purpose — the table is pre-created in
-   setup_dbt.py with CLUSTER BY (sk_dateid). Declaring it in dbt config
-   would force per-batch ALTER TABLE CLUSTER BY. #}
+   No `liquid_clustered_by` here on purpose — the table's layout is owned
+   by setup_dbt.py (DEEP CLONE from staging, CLUSTER BY sk_securityid).
+   Declaring it in dbt config would force per-batch ALTER TABLE CLUSTER BY. #}
 {{ config(
     incremental_strategy='merge',
     unique_key=['sk_securityid','sk_dateid'],

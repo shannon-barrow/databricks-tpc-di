@@ -15,8 +15,12 @@
 }}
 
 {# Snowflake variant of dimtrade. Same merge contract as Databricks
-   (open-trades partition prune via incremental_predicates +
-   merge_update_columns scope).
+   (open-trades logical prune via incremental_predicates +
+   merge_update_columns scope). Clustering key is sk_customerid (set in
+   setup, mirroring the Databricks side) — chosen so Snowflake Automatic
+   Clustering has real work to do as each batch scatters trades across the
+   customer key space; the sk_closedateid predicate is a logical prune,
+   not a cluster-aligned one.
 
    Translations from Databricks:
      - max_by(struct(...), key)    -> max_by(object_construct(...), key)

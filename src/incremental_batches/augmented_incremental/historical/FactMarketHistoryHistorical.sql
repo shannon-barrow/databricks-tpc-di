@@ -36,7 +36,7 @@ CREATE OR REPLACE TABLE factmarkethistory (
   daylow DOUBLE COMMENT 'Lowest price for the security on this day',
   volume INT COMMENT 'Trading volume of the security on this day'
 )
-CLUSTER BY (sk_dateid)  -- liquid: matches setup choice
+CLUSTER BY (sk_securityid)  -- liquid: each batch inserts one row per security for the day, so the new rows scatter across the whole security range — clustering on sk_securityid fragments the layout each batch (recluster work) and serves "market history for security X" BI. (Was sk_dateid, which appended a single new date bucket per batch = no recluster work.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

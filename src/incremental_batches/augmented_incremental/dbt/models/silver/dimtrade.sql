@@ -17,10 +17,13 @@
 
 {# incremental_predicates adds `AND DBT_INTERNAL_DEST.sk_closedateid IS NULL`
    to the MERGE ON clause, mirroring the Classic build's MERGE condition.
-   Combined with the cloned dimtrade's PARTITIONED BY (sk_closedateid),
-   this prunes the merge to just the open-trades partition (sk_closedateid
-   IS NULL) — same partition-prune optimization Classic gets, and avoids
-   scanning the full multi-million-row historical dimtrade. #}
+   This restricts the MERGE to open trades (only those can still close),
+   keeping it correct and bounded. NOTE: dimtrade is now clustered on
+   sk_customerid (not sk_closedateid), so this predicate is a logical
+   prune rather than a cluster-aligned data-skipping prune — the table's
+   layout serves "trades for customer X" reads and gives the background
+   clustering service real work as each batch scatters trades across the
+   customer key space. #}
 
 {# Trade lifecycle: SBMT -> ACTV -> (CMPT | CNCL). One bronze event per
    transition. Aggregate per tradeid keeping create_ts (the 'I' event's

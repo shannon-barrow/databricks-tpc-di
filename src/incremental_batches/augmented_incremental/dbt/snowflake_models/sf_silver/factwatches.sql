@@ -14,9 +14,12 @@
 }}
 
 {# Snowflake variant of factwatches. SCD1 (one row per customer×symbol,
-   updated when CNCL arrives). Same incremental_predicates contract;
-   merge-prune relies on the table being clustered on
-   sk_dateid_dateremoved (set in setup, not here).
+   updated when CNCL arrives). Same incremental_predicates contract.
+   Clustering key is customerid (set in setup, mirroring the Databricks
+   side) — chosen so Snowflake Automatic Clustering has real work to do as
+   each batch scatters watch events across the customer key space; the
+   removed / sk_dateid_dateremoved predicates are logical prunes, not
+   cluster-aligned ones.
 
    Translations from Databricks:
      - if(cond, t, NULL)           -> iff(cond, t, NULL)

@@ -39,7 +39,7 @@ CREATE OR REPLACE TABLE DimTrade (
   CONSTRAINT dimtrade_createtime_fk FOREIGN KEY (sk_createtimeid) REFERENCES DimTime(sk_timeid),
   CONSTRAINT dimtrade_closetime_fk FOREIGN KEY (sk_closetimeid) REFERENCES DimTime(sk_timeid)
 )
-CLUSTER BY (sk_closedateid)  -- liquid: matches setup choice
+CLUSTER BY (sk_customerid)  -- liquid: a customer's trades arrive scattered across all 365 daily batches, so clustering on the customer surrogate fragments the layout each batch (recluster work) and serves the realistic "all trades for customer X" BI filter. (Was sk_closedateid, a date key that stayed naturally time-ordered.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

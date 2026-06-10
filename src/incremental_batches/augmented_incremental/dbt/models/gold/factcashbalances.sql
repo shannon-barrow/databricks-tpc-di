@@ -10,9 +10,9 @@
 {# switch to merge with composite key (sk_accountid, sk_dateid).
    Each batch writes one row per touched account keyed at today's sk_dateid;
    merge inserts new (account,date) pairs without updating existing ones.
-   No `liquid_clustered_by` here on purpose — the table is pre-created in
-   setup_dbt.py with CLUSTER BY (sk_dateid). Declaring it in dbt
-   config would force per-batch ALTER TABLE CLUSTER BY. #}
+   No `liquid_clustered_by` here on purpose — the table's layout is owned
+   by setup_dbt.py (DEEP CLONE from staging, CLUSTER BY sk_accountid).
+   Declaring it in dbt config would force per-batch ALTER TABLE CLUSTER BY. #}
 {{ config(
     incremental_strategy='merge',
     unique_key=['sk_accountid','sk_dateid'],

@@ -72,14 +72,27 @@ FEDERATED_TABLES: tuple[str, ...] = tuple(sorted(set(
 # Cluster keys mirror the Databricks-side Liquid layout. Setting CLUSTER BY
 # in the native CTAS lets subsequent CLONEs inherit the layout.
 # Used by setup_native_staging (silver/gold/ref CTAS from federation).
+#
+# Dim/fact tables cluster on their business/entity key (customerid /
+# accountid / sk_customerid / sk_securityid / sk_accountid) rather than a
+# load-date key. Each daily batch touches a random subset of entities
+# scattered across the whole key range, so the new/updated rows fragment
+# the layout every batch — giving Snowflake Automatic Clustering (and
+# Databricks Predictive Optimization on the mirror side) continuous
+# recluster work to do, which is the realistic steady state for these
+# BI-queried tables. Date keys (the prior choice) stayed naturally
+# time-ordered as data arrived, so the background services had almost
+# nothing to maintain. Bronze tables stay on their date columns below:
+# they are append-only daily ingests read by date-range filters, where
+# date clustering both prunes those reads and naturally stays ordered.
 CLUSTER_KEYS: dict[str, str] = {
-    "dimcustomer":           "enddate",
-    "dimaccount":            "enddate",
-    "dimtrade":              "sk_closedateid",
-    "factwatches":           "sk_dateid_dateremoved",
-    "factmarkethistory":     "sk_dateid",
-    "factcashbalances":      "sk_dateid",
-    "factholdings":          "sk_dateid",
+    "dimcustomer":           "customerid",
+    "dimaccount":            "accountid",
+    "dimtrade":              "sk_customerid",
+    "factwatches":           "customerid",
+    "factmarkethistory":     "sk_securityid",
+    "factcashbalances":      "sk_accountid",
+    "factholdings":          "sk_customerid",
     "bronzedailymarket":     "dm_date",
     "companyyeareps":        "qtr_start_date",
     "bronzeaccount":         "update_dt",

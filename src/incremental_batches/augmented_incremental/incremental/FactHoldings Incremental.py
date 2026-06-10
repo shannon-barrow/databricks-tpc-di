@@ -33,7 +33,9 @@ def upsertToDelta(microBatchOutputDF, batch_id):
   # sk_closedateid predicate lives in the ON clause and references the
   # per-row h.event_dt rather than a constant. Spark constant-folds
   # bronzeholdings's per-microbatch event_dt into the join's sk_closedateid
-  # filter, letting dimtrade prune via its Liquid CLUSTER BY (sk_closedateid).
+  # filter. NOTE: dimtrade now clusters on sk_customerid (shared staging
+  # change for the PO/auto-cluster comparison), so this is a logical filter
+  # rather than a cluster-aligned prune on dimtrade.
   microBatchOutputDF.createOrReplaceTempView("bronzeholdings")
   microBatchOutputDF.sparkSession.sql(f"""
     INSERT INTO {tgt_table}

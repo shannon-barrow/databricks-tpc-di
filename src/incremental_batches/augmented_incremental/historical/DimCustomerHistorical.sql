@@ -37,7 +37,7 @@ CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_fa
   iscurrent BOOLEAN COMMENT 'True if this is the current record',
   CONSTRAINT dimcustomer_pk PRIMARY KEY(sk_customerid)
 ) 
-CLUSTER BY (enddate)  -- liquid: matches setup / setup_dbt choice; current rows (enddate=9999-12-31) cluster together
+CLUSTER BY (customerid)  -- liquid: business key. Each daily batch touches a random subset of customers scattered across the customerid range, so new SCD2 versions fragment the layout and force PO/auto-clustering to recluster — and it matches the realistic "customer X history" BI filter. (Was enddate, which kept current rows in one bucket and did little recluster work.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

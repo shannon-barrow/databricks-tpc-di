@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS FactHoldings (
   CONSTRAINT factholdings_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid),
   CONSTRAINT factholdings_time_fk FOREIGN KEY (sk_timeid) REFERENCES DimTime(sk_timeid)
 )
-CLUSTER BY (sk_dateid)  -- liquid: matches setup choice
+CLUSTER BY (sk_customerid)  -- liquid: each batch appends holdings for a scattered subset of customers, so clustering on sk_customerid fragments the layout each batch (recluster work) and serves "portfolio for customer X" BI. (Was sk_dateid, which appended a single new date bucket per batch = no recluster work.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

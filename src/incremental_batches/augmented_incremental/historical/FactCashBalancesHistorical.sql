@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
   CONSTRAINT cashbalances_account_fk FOREIGN KEY (sk_accountid) REFERENCES DimAccount(sk_accountid),
   CONSTRAINT cashbalances_date_fk FOREIGN KEY (sk_dateid) REFERENCES DimDate(sk_dateid)
 )
-CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt pre-create + Liquid dbt model unique key)
+CLUSTER BY (sk_accountid)  -- liquid: also half of the MERGE key (sk_accountid, sk_dateid). Each batch writes balances for a scattered subset of accounts, so clustering on sk_accountid fragments the layout each batch (recluster work) and serves "balance history for account X" BI. (Was sk_dateid, a date key with no recluster work.)
 TBLPROPERTIES (
   'delta.autoOptimize.autoCompact' = 'true',
   'delta.autoOptimize.optimizeWrite' = 'true',

@@ -16,10 +16,12 @@
    sk_closedateid predicate lives in the ON clause and references the
    per-row h.event_dt instead of a constant pulled from `batch_date`.
    DBSQL/Photon constant-folds h.event_dt = batch_date through the CTE
-   into the join's sk_closedateid predicate, which lets dimtrade prune
-   via its Liquid CLUSTER BY (sk_closedateid). If we put the filter in
-   WHERE with the literal, dbt gets the prune trivially — but then we
-   wouldn't be testing the same plan SDP runs against. #}
+   into the join's sk_closedateid predicate. NOTE: dimtrade is now
+   clustered on sk_customerid (for the PO/auto-cluster comparison), so
+   this predicate is a logical filter rather than a cluster-aligned prune
+   on dimtrade — the join scans dimtrade by sk_closedateid without the
+   data-skipping it previously got from CLUSTER BY (sk_closedateid). Kept
+   in the ON clause to match the plan SDP runs against. #}
 
 with new_events as (
   select

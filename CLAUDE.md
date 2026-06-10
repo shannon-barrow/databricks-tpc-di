@@ -466,11 +466,23 @@ strictly faster than partitioning. See the case study at the end of
 this section.
 
 - **Staging is Liquid.** All `historical/*.sql` files build
-  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY` matching
-  each downstream variant's setup notebook choice — e.g.
-  dimcustomer/dimaccount on `enddate`, factwatches on
-  `sk_dateid_dateremoved`, factmarkethistory / factholdings /
-  factcashbalances on `sk_dateid`, bronzedailymarket on `dm_date`.
+  `tpcdi_incremental_staging_{sf}` tables with `CLUSTER BY`. The dim/fact
+  tables cluster on their **business/entity key** (not a load-date key)
+  so the background clustering service has real recluster work each batch:
+  dimcustomer on `customerid`, dimaccount on `accountid`, dimtrade +
+  factholdings on `sk_customerid`, factwatches on `customerid`,
+  factmarkethistory on `sk_securityid`, factcashbalances on
+  `sk_accountid`; bronzedailymarket stays on `dm_date`. Rationale: a date
+  key stays naturally time-ordered as each daily batch appends a new date
+  (background maintenance has nothing to do), whereas an entity key
+  scatters each batch's writes across the whole key range — continuously
+  fragmenting the layout so Predictive Optimization (Databricks) and
+  Automatic Clustering (Snowflake) both have ongoing work. This is the
+  basis of the PO-vs-auto-clustering comparison; the **same keys are
+  mirrored on Snowflake** in `snowflake/sf_staging_bootstrap.py::CLUSTER_KEYS`,
+  so change both sides together. Bronze tables stay on their date column
+  (`update_dt`/`event_dt`): append-only, read by date-range filters where
+  date clustering both prunes the read and stays naturally ordered.
 - **Setup-owns-layout pattern** (dbt path): `setup_dbt.py`
   pre-creates every Liquid-clustered table — dim/fact + bronzedailymarket
   + factcashbalances via DEEP CLONE from staging (inherits CLUSTER BY),

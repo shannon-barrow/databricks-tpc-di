@@ -24,10 +24,13 @@
        `!t.removed AND t.sk_dateid_dateremoved IS NULL`
    - `removed = false`: keeps already-removed rows from being matched again.
    - `sk_dateid_dateremoved IS NULL`: redundant with the first (the two
-     columns are kept in sync) but pinning the predicate on the Liquid
-     cluster column (`sk_dateid_dateremoved`) lets Delta data-skipping
-     prune the merge scan to only the files containing NULLs — the same
-     prune the partitioned variant got from `PARTITIONED BY (removed)`. #}
+     columns are kept in sync), kept for parity with the Classic MERGE
+     condition. NOTE: factwatches is now clustered on customerid (not
+     sk_dateid_dateremoved), so these are logical prunes rather than
+     cluster-aligned data-skipping prunes — the customerid layout serves
+     "watchlist for customer X" reads and gives the background clustering
+     service real work as each batch scatters watch events across the
+     customer key space. #}
 
 with new_events as (
   select * from {{ ref('bronzewatches') }}

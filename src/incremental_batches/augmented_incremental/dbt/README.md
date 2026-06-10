@@ -59,12 +59,12 @@ dbt model configs deliberately omit `liquid_clustered_by` /
 |---|---|---|
 | **bronze** (7) | `incremental` `append` | Tables pre-created in setup_dbt.py with CLUSTER BY + dataSkippingNumIndexedCols=34 |
 | **bronze** `account_updates_from_customer` | `incremental` `append` | Derived rows from bronzecustomer 'U' events joined to dimaccount AS-OF batch start. Mirrors SDP's `account_updates_from_customers` flow and Cluster's per-batch notebook — keeps bronzeaccount pure (file drops only); dimaccount UNIONs both at MERGE time |
-| **silver** dimcustomer / dimaccount | `incremental` `merge` | (target pre-CTAS'd Liquid by setup_dbt.py on `enddate`) |
-| **silver** dimtrade | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.sk_closedateid IS NULL']` | predicate matches the Liquid cluster column for data-skipping prune |
-| **silver** factwatches | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.removed = false', 'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL']` | first predicate is the business-logic prune; second is pinned on the Liquid cluster column for skipping |
-| **gold** factholdings | `incremental` `append` | target pre-CTAS'd Liquid on `sk_dateid` |
-| **gold** factmarkethistory | `incremental` `merge` + `unique_key=['sk_securityid','sk_dateid']` | target pre-CTAS'd Liquid on `sk_dateid` |
-| **gold** factcashbalances | `incremental` `merge` + `unique_key=['sk_accountid','sk_dateid']` | target pre-created empty by setup_dbt.py with CLUSTER BY (sk_dateid) |
+| **silver** dimcustomer / dimaccount | `incremental` `merge` | Liquid layout inherited from staging on the business key (`customerid` / `accountid`) |
+| **silver** dimtrade | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.sk_closedateid IS NULL']` | clustered on `sk_customerid`; the predicate is a logical open-trades prune (not cluster-aligned) |
+| **silver** factwatches | `incremental` `merge` + `incremental_predicates=['DBT_INTERNAL_DEST.removed = false', 'DBT_INTERNAL_DEST.sk_dateid_dateremoved IS NULL']` | clustered on `customerid`; both predicates are logical business prunes (not cluster-aligned) |
+| **gold** factholdings | `incremental` `append` | Liquid layout inherited from staging on `sk_customerid` |
+| **gold** factmarkethistory | `incremental` `merge` + `unique_key=['sk_securityid','sk_dateid']` | Liquid layout inherited from staging on `sk_securityid` |
+| **gold** factcashbalances | `incremental` `merge` + `unique_key=['sk_accountid','sk_dateid']` | Liquid layout inherited from staging on `sk_accountid` |
 | **gold** currentaccountbalances | `incremental` `insert_overwrite` (no partition_by) | small running-aggregate; CREATE OR REPLACE TABLE AS SELECT each batch — unclustered |
 
 The 11 read-only static + FinWire reference tables are populated by Stage
@@ -81,21 +81,54 @@ declares `liquid_clustered_by` / `tblproperties` to "synchronize"
 target state to model config, even when nothing has drifted).
 
 Concretely, `setup_dbt.py`:
-- **CTAS**s the dim/fact tables with `CLUSTER BY` (matches the SDP
-  pipeline's choices: `enddate` for dimcustomer/dimaccount,
-  `sk_closedateid` for dimtrade, `sk_dateid_dateremoved` for factwatches,
-  `sk_dateid` for factholdings + factmarkethistory + factcashbalances,
-  `dm_date` for bronzedailymarket).
+- **DEEP CLONE**s the dim/fact tables (incl. factcashbalances +
+  bronzedailymarket) from the `tpcdi_incremental_staging_{sf}` schema,
+  inheriting that schema's `CLUSTER BY`. The dim/fact tables cluster on
+  the **business/entity key** so the background clustering service has
+  real recluster work each batch (see "Clustering keys" below):
+  `customerid` (dimcustomer), `accountid` (dimaccount), `sk_customerid`
+  (dimtrade, factholdings), `customerid` (factwatches), `sk_securityid`
+  (factmarkethistory), `sk_accountid` (factcashbalances); `dm_date`
+  stays on bronzedailymarket (append-only, date-range read).
 - **Pre-creates the 6 bronze tables empty** (account / customer /
   cashtransaction / holdings / trade / watches) with `CLUSTER BY` on
   the per-batch ingest column (update_dt / event_dt) +
   `delta.dataSkippingNumIndexedCols = 34` (bronzecustomer's
-  cluster column is past the default 32-col stats window).
-- **Pre-creates factcashbalances** empty with `CLUSTER BY (sk_dateid)`
-  so the dbt MERGE has a Liquid target to write into.
+  cluster column is past the default 32-col stats window). Bronze stays
+  on the date column: it is append-only and read by date-range filters,
+  so date clustering both prunes those reads and stays naturally ordered.
 - Does NOT pre-create `currentaccountbalances` — dbt's `insert_overwrite`
   without `partition_by` does `CREATE OR REPLACE TABLE AS SELECT` each
   batch, which would wipe any cluster_by we set.
+
+## Clustering keys
+
+The dim/fact tables cluster on their **business/entity key** rather than a
+load-date key. This is deliberate for the Predictive-Optimization-vs-
+Automatic-Clustering comparison: a date key (the prior choice) stays
+naturally time-ordered as each daily batch appends a new date, so the
+background maintenance service has almost nothing to recluster. An entity
+key scatters each batch's writes across the whole key range (a random
+subset of customers/accounts/securities is touched per day), continuously
+fragmenting the layout so both Databricks Predictive Optimization and
+Snowflake Automatic Clustering have ongoing work — and it matches the
+realistic BI access pattern ("all rows for customer/account/security X").
+
+| Table | Cluster key | Why it scatters |
+|---|---|---|
+| dimcustomer | `customerid` | daily SCD2 versions for a random subset of customers |
+| dimaccount | `accountid` | daily SCD2 versions for a random subset of accounts |
+| dimtrade | `sk_customerid` | a customer's trades land across all 365 batches |
+| factwatches | `customerid` | watch ACTV/CNCL events scatter by customer |
+| factmarkethistory | `sk_securityid` | one row per security per day, all securities each batch |
+| factcashbalances | `sk_accountid` | balances for the day's touched accounts |
+| factholdings | `sk_customerid` | holdings for the day's touched customers |
+| bronze* + bronzedailymarket | date (`update_dt`/`event_dt`/`dm_date`) | append-only, date-range reads — kept on date so reads prune and the layout stays ordered |
+
+The **same keys are mirrored on Snowflake** (`snowflake/sf_staging_bootstrap.py::CLUSTER_KEYS`)
+so the two engines are compared on an identical layout. The Databricks
+keys live in `historical/*.sql` (inherited by every Databricks variant via
+DEEP CLONE); change both sides together to keep the comparison fair.
 
 ## Adapter targets
 

@@ -81,13 +81,16 @@ augmented_incremental/
 │   ├── ingest_bronze.py           # Auto Loader stream for the 7 raw datasets
 │   └── account_updates_from_customer.py  # DimCustomer events that also touch DimAccount
 ├── historical/                    # Pre-2016-07-06 SCD2 builds — all CLUSTER BY (Liquid)
-│   ├── DimCustomerHistorical.sql           # CLUSTER BY (enddate)
-│   ├── DimAccountHistorical.sql            # CLUSTER BY (enddate)
-│   ├── DimTradeHistorical.sql              # CLUSTER BY (sk_closedateid)
-│   ├── FactCashBalancesHistorical.sql      # CLUSTER BY (sk_dateid) / (event_dt for currentaccountbalances)
-│   ├── FactHoldingsHistorical.sql          # CLUSTER BY (sk_dateid)
-│   ├── FactWatchesHistorical.sql           # CLUSTER BY (sk_dateid_dateremoved)
-│   ├── FactMarketHistoryHistorical.sql     # CLUSTER BY (sk_dateid)
+│   │                              # dim/fact cluster on the business/entity key so the
+│   │                              # background clustering service (PO / SF auto-cluster)
+│   │                              # has real recluster work each batch; bronze stays on date
+│   ├── DimCustomerHistorical.sql           # CLUSTER BY (customerid)
+│   ├── DimAccountHistorical.sql            # CLUSTER BY (accountid)
+│   ├── DimTradeHistorical.sql              # CLUSTER BY (sk_customerid)
+│   ├── FactCashBalancesHistorical.sql      # CLUSTER BY (sk_accountid) / (event_dt for cashtransactionhistorical)
+│   ├── FactHoldingsHistorical.sql          # CLUSTER BY (sk_customerid)
+│   ├── FactWatchesHistorical.sql           # CLUSTER BY (customerid)
+│   ├── FactMarketHistoryHistorical.sql     # CLUSTER BY (sk_securityid)
 │   ├── DailyMarketHistorical.sql           # CLUSTER BY (dm_date) — bronzedailymarket
 │   └── CompanyYearEPS.sql                  # CLUSTER BY (qtr_start_date)
 ├── incremental/                   # Per-batch SCD2 / aggregate MERGEs (Cluster Jobs variant)
