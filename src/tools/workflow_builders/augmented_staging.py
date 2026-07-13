@@ -288,7 +288,10 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         # staging_check[outcome=false] cascade-skipped the gen DAG.
         # Failed upstream still blocks (preserves repair-run state).
         run_if="NONE_FAILED",
-        base_params={**_wh_param},
+        # augmented_incremental=true: the augmented `_stage` schema is SHARED
+        # (granted to `account users`, consumed by the benchmark) — cleanup
+        # drops only the `_gen_*`/`_dc_*` temp tables, never the schema itself.
+        base_params={**_wh_param, "augmented_incremental": "true"},
     ))
 
     # Stage 1 raw_ingestion / silver / historical tasks below depend on

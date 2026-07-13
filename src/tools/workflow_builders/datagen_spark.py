@@ -168,6 +168,7 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
           default_worker_type: str | None = None,
           default_dbr_version: str | None = None,
           datagen_choice: str = "spark",
+          user_prefix: str = "",
           **_unused) -> dict:
     """``datagen_choice`` flips the augmented_incremental widget on each
     task — ``"spark"`` writes raw files (standard mode);
@@ -214,18 +215,27 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     # ({catalog}.{wh_db}_{sf}_stage) that holds only the `_gen_*` / `_dc_*`
     # intermediates cleanup_intermediates later drops.
     #
-    # wh_db MUST differ between the standard and augmented datagen paths.
-    # The augmented builder (augmented_staging.py) uses
-    # "tpcdi_incremental_staging" — a deliberately-shared schema granted to
-    # `account users`. If the STANDARD path also used that name, its cell-5
-    # `regenerate_data=YES` DROP-all loop would try to MANAGE tables in a
-    # schema owned by whoever ran the augmented job first, and fail with
-    # PERMISSION_DENIED (observed at SF=10000:
-    # "User does not have MANAGE on Table
-    #  main.tpcdi_incremental_staging_10000_stage.finwire"). It's also
-    # misnamed — the standard generator isn't incremental. So the standard
-    # path gets its own distinct, non-incremental scratch schema.
-    _standard_wh_db = "tpcdi_spark_datagen"
+    # wh_db MUST differ between the standard and augmented datagen paths, and
+    # for the standard path it must be UNIQUE PER RUNNER.
+    #
+    # The augmented builder (augmented_staging.py) uses the shared
+    # "tpcdi_incremental_staging" — a schema granted to `account users` and
+    # consumed by the benchmark. The standard path instead uses a per-user
+    # throwaway schema `{user}_datagen` → `{catalog}.{user}_datagen_{sf}_stage`.
+    # Rationale: the standard datagen's real output is SHARED volume Batch
+    # files (generate-once, benchmark-many); the `_stage` schema only holds
+    # ephemeral `_gen_*`/`_dc_*` inter-task handoffs. If two users generate
+    # concurrently against ONE shared `_stage` schema they collide:
+    #   - PERMISSION_DENIED when one tries to DROP tables the other owns
+    #     (observed at SF=10000 vs an augmented run:
+    #      "User does not have MANAGE on Table
+    #       main.tpcdi_incremental_staging_10000_stage.finwire"), and/or
+    #   - silent corruption of each other's intermediates.
+    # A per-user schema removes both. cleanup_intermediates drops it entirely
+    # at the end (it's throwaway), so no per-user shells accumulate.
+    import re as _re
+    _norm_prefix = _re.sub(r"\W+", "_", user_prefix or "").strip("_").lower()
+    _standard_wh_db = f"{_norm_prefix}_datagen" if _norm_prefix else "tpcdi_spark_datagen"
     _wh_db = "tpcdi_incremental_staging" if is_augmented else _standard_wh_db
     _base = {
         "tpcdi_directory": tpcdi_directory,
@@ -347,7 +357,11 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
         notebook_path=f"{_dgt}/cleanup_intermediates",
         depends_on=_gen_keys + _copy_keys + ["audit_emit"],
         run_if="NONE_FAILED",
-        base_params=_wh_only, job_cluster_key=job_cluster_key,
+        # augmented_incremental=false authorizes cleanup_intermediates to DROP
+        # the whole per-user throwaway `_stage` schema (standard path only).
+        base_params={**_wh_only,
+                     "augmented_incremental": "true" if is_augmented else "false"},
+        job_cluster_key=job_cluster_key,
     ))
 
     payload = {

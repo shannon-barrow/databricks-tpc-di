@@ -232,6 +232,10 @@ datagen_job_id = generate_datagen_workflow(
     serverless=serverless,
     node_types=tpcdi_config.node_types,
     cloud_provider=tpcdi_config.cloud_provider,
+    # Standard datagen keys its throwaway `_stage` schema off the runner
+    # ({user}_datagen_{sf}_stage) so concurrent generators never collide;
+    # augmented ignores this (keeps its shared tpcdi_incremental_staging).
+    user_prefix=tpcdi_config.user_name,
 )
 displayHTML(f"<h2><a href=/#job/{datagen_job_id}>Data Generation Workflow</a></h2>")
 
