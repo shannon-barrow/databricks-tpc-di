@@ -210,12 +210,27 @@ def build(*, job_name: str, scale_factor: int, catalog: str,
     )
 
     # Common per-task base_params. tpcdi_directory + augmented_incremental
-    # are baked once; wh_db lands on the temp `_stage` schema by default
-    # (cleanup_intermediates drops `_gen_*` and `_dc_*` from there).
+    # are baked once; wh_db lands on the temp `_stage` schema
+    # ({catalog}.{wh_db}_{sf}_stage) that holds only the `_gen_*` / `_dc_*`
+    # intermediates cleanup_intermediates later drops.
+    #
+    # wh_db MUST differ between the standard and augmented datagen paths.
+    # The augmented builder (augmented_staging.py) uses
+    # "tpcdi_incremental_staging" — a deliberately-shared schema granted to
+    # `account users`. If the STANDARD path also used that name, its cell-5
+    # `regenerate_data=YES` DROP-all loop would try to MANAGE tables in a
+    # schema owned by whoever ran the augmented job first, and fail with
+    # PERMISSION_DENIED (observed at SF=10000:
+    # "User does not have MANAGE on Table
+    #  main.tpcdi_incremental_staging_10000_stage.finwire"). It's also
+    # misnamed — the standard generator isn't incremental. So the standard
+    # path gets its own distinct, non-incremental scratch schema.
+    _standard_wh_db = "tpcdi_spark_datagen"
+    _wh_db = "tpcdi_incremental_staging" if is_augmented else _standard_wh_db
     _base = {
         "tpcdi_directory": tpcdi_directory,
         "augmented_incremental": "true" if is_augmented else "false",
-        "wh_db": "tpcdi_incremental_staging",
+        "wh_db": _wh_db,
     }
     _wh_only = {"wh_db": _base["wh_db"]}
     _dgt = f"{repo_src_path}/tools/data_gen_tasks"
