@@ -49,6 +49,7 @@ def generate_datagen_workflow(
     serverless: str = "YES",
     node_types: Optional[dict] = None,
     cloud_provider: Optional[str] = None,
+    user_prefix: str = "",
 ) -> int:
     """Create the data-generation workflow and return its ``job_id``.
 
@@ -102,6 +103,7 @@ def generate_datagen_workflow(
         serverless=serverless,
         node_types=node_types,
         cloud_provider=cloud_provider,
+        user_prefix=user_prefix,
     )
     print(f"Submitting built JSON to Databricks API {_JOBS_API_ENDPOINT}")
     return submit_dag(dag_dict, _JOBS_API_ENDPOINT, api_call)
