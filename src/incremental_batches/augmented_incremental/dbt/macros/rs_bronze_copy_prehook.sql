@@ -23,7 +23,7 @@
    the FMH MIN/MAX lookback.
 
    Required vars (passed via `dbt run --vars` from run_dbt.py):
-     - s3_volume_prefix (e.g. s3://tpcds-datasets/shannon_tpcdi/)
+     - s3_volume_prefix (e.g. s3://REPLACE-ME/tpcdi/)
      - wh_db, scale_factor, batch_date
      - rs_iam_role
      - file_ext (default 'txt')
@@ -31,7 +31,7 @@
 #}
 
 {%- macro rs_bronze_copy_prehook(dataset_name) -%}
-  {%- set s3_prefix = var('s3_volume_prefix', 's3://tpcds-datasets/shannon_tpcdi/') -%}
+  {%- set s3_prefix = var('s3_volume_prefix', 's3://REPLACE-ME/tpcdi/') -%}
   {%- set s3_uri = s3_prefix ~ 'augmented_incremental/_dailybatches/' ~ var('wh_db') ~ '_' ~ var('scale_factor') ~ '/' ~ var('batch_date') ~ '/' ~ dataset_name ~ '.' ~ var('file_ext', 'txt') -%}
   {%- set iam_role = var('rs_iam_role') -%}
   {%- set aws_region = var('aws_region', 'us-west-2') -%}

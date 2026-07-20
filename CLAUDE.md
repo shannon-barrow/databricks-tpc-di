@@ -347,7 +347,7 @@ Jobs UI / API can filter without parsing the name.
 **Schema names** preserve the long form (`spark_data_gen` / `native_data_gen`)
 so already-materialized schemas survive the job-name refactor:
 `{catalog}.{wh_db}_{exec_type}_{datagen_label}_{batched_label}_{sf}` —
-e.g. `main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_10`.
+e.g. `main.<your-prefix>_TPCDI_CLUSTER_spark_data_gen_incremental_10`.
 SDP variants use `_SDP_{edition}_{datagen_label}_` instead.
 
 **Cleanup** runs as a final task on every benchmark workflow. A
@@ -561,8 +561,8 @@ every `*_audit.csv` using DIGen's exact counter semantics.
 ```sql
 -- Schema name pattern (single source of truth for schema label):
 --   {catalog}.{wh_db}_{exec_type}_{datagen_label}_{batched_label}_{sf}
--- e.g. main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_10
-SELECT * FROM main.shannon_barrow_TPCDI_CLUSTER_spark_data_gen_incremental_${SF}.automated_audit_results
+-- e.g. main.<your-prefix>_TPCDI_CLUSTER_spark_data_gen_incremental_10
+SELECT * FROM main.<your-prefix>_TPCDI_CLUSTER_spark_data_gen_incremental_${SF}.automated_audit_results
 WHERE result != 'OK' ORDER BY test, batch
 ```
 

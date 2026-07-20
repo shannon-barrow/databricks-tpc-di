@@ -8,16 +8,16 @@ Serverless. Same pattern as the BQ port: research → scaffold → port models
 Validated up front (Srilekha's "Test Redshift read" notebook):
 
 - Workgroup: `xsmall-8rpu-workgroup` (Redshift Serverless, us-west-2,
-  account `384416317380`, default database `dev`)
-- JDBC: `jdbc:redshift://xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com:5439/dev`
-- IAM role for S3 reads: `arn:aws:iam::384416317380:role/tpcds-redshift`
-- `COPY` from `s3://tpcds-datasets/shannon_tpcdi/augmented_incremental/_staging/sf=10/Customer/...`
+  account `<account-id>`, default database `dev`)
+- JDBC: `jdbc:redshift://xsmall-8rpu-workgroup.<account-id>.us-west-2.redshift-serverless.amazonaws.com:5439/dev`
+- IAM role for S3 reads: `arn:aws:iam::<account-id>:role/tpcds-redshift`
+- `COPY` from `s3://<your-bucket>/tpcdi/augmented_incremental/_staging/sf=10/Customer/...`
   with `IAM_ROLE`, `DELIMITER '\001'` works — same S3 path the Spark
   datagen already writes to from `tpcdi-fresh`.
 
 Orchestrator: same as the SF and BQ ports — `tpcdi-fresh` workspace
-(`https://dbc-08fc9045-faef.cloud.databricks.com/`). It owns the UC
-external-location volume on `s3://tpcds-datasets/shannon_tpcdi/`, so the
+(`https://<your-workspace>.cloud.databricks.com/`). It owns the UC
+external-location volume on `s3://<your-bucket>/tpcdi/`, so the
 365 daily filedrop CSVs are already on S3 in the same region as the
 Redshift workgroup — no cross-region egress.
 
@@ -140,12 +140,12 @@ Srilekha's notebook uses hardcoded `admin / PerfEng27Redshift`. Move to a
 
 | key | value |
 |---|---|
-| `host` | `xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com` |
+| `host` | `xsmall-8rpu-workgroup.<account-id>.us-west-2.redshift-serverless.amazonaws.com` |
 | `port` | `5439` |
 | `database` | `dev` |
 | `user` | `admin` |
 | `password` | (the actual password — TODO: rotate to a service account) |
-| `iam_role` | `arn:aws:iam::384416317380:role/tpcds-redshift` |
+| `iam_role` | `arn:aws:iam::<account-id>:role/tpcds-redshift` |
 
 `_rs_conn.py` reads these and exposes a `rs_connect()` factory that
 returns either a `jaydebeapi` connection (matching Srilekha's pattern)
@@ -242,8 +242,8 @@ into the bronze tables.
 
 ```sql
 COPY {wh_db}_{sf}.bronzecustomer
-FROM 's3://tpcds-datasets/shannon_tpcdi/augmented_incremental/_staging/sf={sf}/Customer/_pdate={batch_date}/'
-IAM_ROLE 'arn:aws:iam::384416317380:role/tpcds-redshift'
+FROM 's3://<your-bucket>/tpcdi/augmented_incremental/_staging/sf={sf}/Customer/_pdate={batch_date}/'
+IAM_ROLE 'arn:aws:iam::<account-id>:role/tpcds-redshift'
 DELIMITER '\001'
 REGION 'us-west-2'
 COMPUPDATE OFF STATUPDATE OFF
@@ -444,7 +444,7 @@ cluster and skips the serverless env definition.
   support. Pin to 1.10.x to align with the dbt-databricks pin
   (1.11.7) and avoid version-skew bugs.
 - **Cross-region:** Redshift Serverless workgroup is `us-west-2`; the S3
-  bucket `tpcds-datasets/shannon_tpcdi/` is in us-west-2 per the
+  bucket `tpcds-datasets/<your-prefix>_tpcdi/` is in us-west-2 per the
   IAM-role region match. ✅ no cross-region transfer.
 - **Encoding (RESOLVED):** `augmented_staging/_stage_ingestion.py:29` writes
   `delimiter="|"` for CSV by default. Srilekha's `\001` test was a one-off

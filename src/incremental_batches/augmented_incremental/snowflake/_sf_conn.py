@@ -4,7 +4,7 @@
 # secret scope and returns a live snowflake.connector connection.
 #
 # Secret scope layout (default scope name `tpcdi_snowflake`):
-#   account      — Snowflake account identifier (e.g. tla33105 or kponzso-bwa95870)
+#   account      — Snowflake account identifier (e.g. <org>-<account>)
 #   user         — Snowflake user
 #   private_key  — RSA private key PEM (preferred) OR
 #   password     — Snowflake password (fallback; will require MFA if enabled)

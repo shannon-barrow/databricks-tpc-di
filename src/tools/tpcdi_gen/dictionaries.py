@@ -111,11 +111,17 @@ def load_all(dict_dir: str = None) -> dict:
     # UC Volume path (reliable across all DBR versions)
     search_paths.append("/Volumes/main/tpcdi_raw_data/tpcdi_volume/spark_datagen/_module/tpcdi_gen/dicts/tpc-e")
 
-    # Workspace paths (may fail on DBR 18+ CLASSIC_PREVIEW due to /Workspace restrictions)
-    search_paths.extend([
-        "/Workspace/Repos/shannon.barrow@databricks.com/databricks-tpc-di/src/tools/datagen/pdgf/dicts/tpc-e",
-        "/Workspace/Users/shannon.barrow@databricks.com/tpc-di/tpcdi_gen/dicts/tpc-e",
-    ])
+    # Workspace path for the CURRENT user (derived, not hardcoded). May fail
+    # on DBR 18+ CLASSIC_PREVIEW due to /Workspace restrictions — caught below.
+    # Best-effort: only used if the relative + UC Volume paths above miss.
+    try:
+        from pyspark.sql import SparkSession
+        _user = SparkSession.getActiveSession().sql("SELECT current_user()").collect()[0][0]
+        if _user:
+            search_paths.append(
+                f"/Workspace/Users/{_user}/databricks-tpc-di-augmented/src/tools/datagen/pdgf/dicts/tpc-e")
+    except Exception:
+        pass
 
     # Find first valid path: must be a directory containing last_names.dict. OSError is caught because /Workspace paths raise OSError on newer DBR versions.
     base = None

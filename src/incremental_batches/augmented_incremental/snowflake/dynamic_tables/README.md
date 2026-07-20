@@ -41,11 +41,11 @@ from tools.workflow_builders import augmented_snowflake_dt as dt
 # child first
 child_spec = dt.build_child(
     job_name="TPCDI-SF20000-AugmentedIncremental-SF-DT-Child",
-    repo_src_path="/Workspace/Users/shannon.barrow@databricks.com/databricks-tpc-di-augmented/src",
+    repo_src_path="/Workspace/Users/<your-user>@example.com/databricks-tpc-di-augmented/src",
     catalog="TPCDI_TEST",
     scale_factor=20000,
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_benchmarking/",
-    wh_db="shannon_barrow_augmentedincremental_sf_dt",
+    wh_db="<your-prefix>_augmentedincremental_sf_dt",
     snowflake_warehouse="BARROW_MED_GEN2",
     interactive_cluster_id="<cluster-id-here>",
 )
@@ -55,11 +55,11 @@ child_spec = dt.build_child(
 parent_spec = dt.build_parent(
     job_name="TPCDI-SF20000-AugmentedIncremental-SF-DT-Parent",
     child_job_id=<child_job_id>,
-    repo_src_path="/Workspace/Users/shannon.barrow@databricks.com/databricks-tpc-di-augmented/src",
+    repo_src_path="/Workspace/Users/<your-user>@example.com/databricks-tpc-di-augmented/src",
     catalog="TPCDI_TEST",
     scale_factor=20000,
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_benchmarking/",
-    wh_db="shannon_barrow_augmentedincremental_sf_dt",
+    wh_db="<your-prefix>_augmentedincremental_sf_dt",
     snowflake_warehouse="BARROW_MED_GEN2",
     target_lag="1 minute",
     interactive_cluster_id="<cluster-id-here>",

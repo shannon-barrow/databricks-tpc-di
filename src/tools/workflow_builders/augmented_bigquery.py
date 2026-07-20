@@ -8,7 +8,7 @@ backed by GCS — BigQuery reads the same bytes via external tables CREATE OR
 REPLACEd per batch.
 
 Pre-requisites (one-time, manual, out-of-band):
-- GCS bucket `gs://shannon-tpcdi/tpcdi/` in `us-central1`
+- A GCS bucket (e.g. `gs://<your-bucket>/tpcdi/`) in your region
 - UC external volume `main.tpcdi_raw_data.tpcdi_volume` backed by that bucket
 - BQ project `databricks-sandbox-perfeng` (or override via the `catalog`
   job parameter)
@@ -154,7 +154,7 @@ def build_child(
     wh_db: str,
     secret_scope: str = "tpcdi_bigquery",
     bq_location: str = "us-central1",
-    gcs_volume_prefix: str = "gs://shannon-tpcdi/tpcdi/",
+    gcs_volume_prefix: str = "gs://REPLACE-ME/tpcdi/",
     interactive_cluster_id: str | None = None,
     **_unused,
 ) -> dict:
@@ -225,7 +225,7 @@ def build_parent(
     wh_db: str,
     secret_scope: str = "tpcdi_bigquery",
     bq_location: str = "us-central1",
-    gcs_volume_prefix: str = "gs://shannon-tpcdi/tpcdi/",
+    gcs_volume_prefix: str = "gs://REPLACE-ME/tpcdi/",
     databricks_catalog: str = "main",
     interactive_cluster_id: str | None = None,
     **_unused,
