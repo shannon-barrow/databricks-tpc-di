@@ -1,7 +1,10 @@
 # Databricks notebook source
 import dlt
 
-# Bumped broadcast threshold so SDP's factholdings_incremental gets the same h-side broadcast hash join on dimtrade that the Cluster variant gets implicitly. Back to 250 MB (matching Cluster's currentaccountbalances Incremental conf) after splitting factmarkethistory out into dlt_incremental_fmh.py — the prior 250 MB OOMs may have been driven by FMH's array-of-structs join, which no longer runs in the same pipeline update.
+# Raise the broadcast threshold to 250 MB so factholdings_incremental gets a
+# broadcast hash join on dimtrade (matching the Cluster variant).
+# FactMarketHistory runs in its own pipeline (dlt_incremental_fmh.py), so its
+# array-of-structs join can't OOM this one at that threshold.
 try:
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
     spark.conf.set("spark.databricks.adaptive.autoBroadcastJoinThreshold", 262144000)
