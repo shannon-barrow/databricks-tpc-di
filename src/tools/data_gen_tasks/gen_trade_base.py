@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: gen_trade_base (V6)
+# MAGIC # data_gen task: gen_trade_base
 # MAGIC
 # MAGIC Materializes ``_gen_trade_df`` Delta in
 # MAGIC ``{catalog}.{wh_db}_{sf}_stage`` with the *minimum* cross-task

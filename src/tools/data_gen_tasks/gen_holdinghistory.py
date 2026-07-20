@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: gen_holdinghistory (V6 leaf)
+# MAGIC # data_gen task: gen_holdinghistory
 # MAGIC
 # MAGIC Reads ``_gen_trade_df`` Delta (produced by ``gen_trade_base``) and
 # MAGIC writes ``HoldingHistory.txt`` for B1 (+ B2/B3 incrementals in

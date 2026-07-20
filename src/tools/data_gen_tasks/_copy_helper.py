@@ -1,9 +1,9 @@
 """Shared helper for the per-dataset copy_* notebooks.
 
-perf/v7 — Parallel cross-directory ``mv`` to flat Batch* layout. Each
+Parallel cross-directory ``mv`` into the flat Batch* layout. Each
 ``copy_*`` task iterates Batch1/2/3 looking for ``{batch_path}/{base}``
 staging directories (Spark's output) and calls
-``register_copies_from_staging`` which mv's part files concurrently
+``register_copies_from_staging``, which mv's part files concurrently
 (ThreadPoolExecutor, 32 workers, EAGAIN-retry) into
 ``{batch_path}/{base}_K{ext}``. The (now empty) staging dir is
 removed at the end of a successful pass so retries cleanly skip.
