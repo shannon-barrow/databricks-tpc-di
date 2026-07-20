@@ -19,7 +19,21 @@ from models import (
 from backend import backend, USE_MOCK
 
 st.set_page_config(page_title="TPC-DI Guided Builder", layout="centered",
-                   page_icon="🧱")
+                   page_icon="📊")
+
+# Databricks logomark, inline SVG (no external fetch — renders in the deployed
+# app with no network). Lava-red brand color; the stacked, offset ribbons echo
+# the Databricks "flowing data layers" mark.
+_DB_LOGO = """
+<svg width="40" height="40" viewBox="0 0 100 100" fill="none"
+     xmlns="http://www.w3.org/2000/svg" aria-label="Databricks">
+  <g fill="#FF3621">
+    <path d="M6 30 L50 8 L94 30 L50 52 Z" opacity="0.55"/>
+    <path d="M6 50 L50 28 L94 50 L50 72 Z" opacity="0.78"/>
+    <path d="M6 70 L50 48 L94 70 L50 92 Z" opacity="1"/>
+  </g>
+</svg>
+"""
 
 # Databricks-flavored styling: lava-red brand accents, a header band, and
 # tighter step framing. Kept in one CSS block so the theme config
@@ -29,10 +43,13 @@ st.markdown(
     <style>
       /* brand header band */
       .db-header {
+        display: flex; align-items: center; gap: 1rem;
         background: linear-gradient(90deg, #1B3139 0%, #2D4550 100%);
         border-left: 6px solid #FF3621;
         padding: 1.1rem 1.4rem; border-radius: 8px; margin-bottom: 1.25rem;
       }
+      .db-header svg { flex: 0 0 auto; }
+      .db-header .db-title { display: flex; flex-direction: column; }
       .db-header h1 { color: #FFFFFF; font-size: 1.6rem; margin: 0; }
       .db-header p  { color: #C7D0D4; margin: 0.25rem 0 0; font-size: 0.9rem; }
       /* radio selected dot + primary buttons already use primaryColor */
@@ -46,10 +63,13 @@ st.markdown(
 )
 
 st.markdown(
-    """
+    f"""
     <div class="db-header">
-      <h1>🧱 TPC-DI Benchmark Builder</h1>
-      <p>Guided setup for Databricks & competitive TPC-DI benchmarks.</p>
+      {_DB_LOGO}
+      <div class="db-title">
+        <h1>TPC-DI Benchmark Builder</h1>
+        <p>Guided setup for Databricks &amp; competitive TPC-DI benchmarks.</p>
+      </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -146,24 +166,29 @@ if not scale_factor:
 # prerequisite fields (secrets written to that engine's scope).
 st.divider()
 with st.form("details"):
-    st.markdown("**5. Confirm Databricks defaults** _(edit if needed)_")
+    st.markdown("**5. Confirm run defaults** _(edit if needed)_")
     catalog = st.text_input("Target catalog", value="main")
     wh_db = st.text_input(
         "Target schema (wh_db)", value="",
         help="Blank = derive from your username, as the driver does.")
-    batches = st.text_input(
-        "Batches to run", value="365",
-        help="Set at trigger time; lower it for a smoke run.")
+    # One batch count for the whole run — every engine (Databricks + each
+    # competitor) uses the same count so the comparison is fair.
+    batches = st.select_slider(
+        "Batches to run (applies to every engine)",
+        options=["30", "50", "100", "150", "365"], value="365",
+        help="Lower it for a quick smoke run.")
 
-    # Per-competitor prerequisite blocks.
+    # Per-competitor prerequisite blocks. The batch count is NOT collected
+    # here — it comes from the single control above.
     comp_values: dict[Engine, dict] = {}
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
         st.caption("🔑 fields are written to that engine's secret scope, never stored.")
-        cv: dict[str, str] = {"scale_factor": scale_factor}
+        cv: dict[str, str] = {"scale_factor": scale_factor,
+                              "incremental_batches_to_run": batches}
         for f in cspec.fields:
-            if f.key == "scale_factor":
+            if f.key in ("scale_factor", "incremental_batches_to_run"):
                 continue
             wkey = f"{eng.value}.{f.key}"
             if f.kind is FieldKind.SECRET:

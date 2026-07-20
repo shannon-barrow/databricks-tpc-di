@@ -89,11 +89,6 @@ _SCALE_FACTOR = InputField(
     required=True, default="10",
     help="TPC-DI scale factor (10, 100, 1000, 5000, 10000, 20000).",
 )
-_BATCHES = InputField(
-    key="incremental_batches_to_run", label="Batches to run",
-    kind=FieldKind.PARAM, default="365",
-    help="Daily batches the for_each loop runs. Lower it for a quick smoke run.",
-)
 
 # --- per-engine specs --------------------------------------------------------
 
@@ -102,7 +97,6 @@ DATABRICKS_SPEC = EngineSpec(
     label="Databricks (native)",
     fields=(
         _SCALE_FACTOR,
-        _BATCHES,
         InputField("variant", "Variant", FieldKind.PARAM, required=True,
                    default="dbt",
                    help="Cluster / DBSQL / SDP / dbt."),
@@ -118,7 +112,6 @@ REDSHIFT_SPEC = EngineSpec(
     secret_scope="tpcdi_redshift",
     fields=(
         _SCALE_FACTOR,
-        _BATCHES,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
                    required=True,
                    help="Databricks CLI profile / workspace that owns the UC "
@@ -150,7 +143,6 @@ BIGQUERY_SPEC = EngineSpec(
     secret_scope="tpcdi_bigquery",
     fields=(
         _SCALE_FACTOR,
-        _BATCHES,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
                    required=True, help="GCP Databricks workspace CLI profile."),
         InputField("catalog", "BigQuery project", FieldKind.PARAM, required=True,
@@ -173,7 +165,6 @@ SNOWFLAKE_SPEC = EngineSpec(
     secret_scope="tpcdi_snowflake",
     fields=(
         _SCALE_FACTOR,
-        _BATCHES,
         InputField("account", "Snowflake account", FieldKind.PARAM,
                    required=True, help="<org>-<account>."),
         InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
