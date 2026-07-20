@@ -22,6 +22,31 @@ class Engine(str, Enum):
     SNOWFLAKE = "snowflake"
 
 
+# --- guided decision tree ----------------------------------------------------
+# Mirrors _WORKFLOWS in `TPC-DI Driver.py` — the authoritative menu of valid
+# (batch type -> engine/SKU) combinations. The wizard reveals questions in
+# order and filters each choice by the answers before it.
+
+BATCH_TYPES = ["Single Batch", "Incremental", "Augmented Incremental"]
+
+# Databricks SKUs valid per batch type (from _WORKFLOWS).
+#   DBSQL has no Augmented; SDP has no per-day Incremental.
+DBX_SKUS_BY_BATCH: dict[str, list[str]] = {
+    "Single Batch":          ["Cluster", "DBSQL", "SDP"],
+    "Incremental":           ["Cluster", "DBSQL"],
+    "Augmented Incremental": ["Cluster", "SDP", "dbt"],
+}
+
+# SDP Single-Batch splits into editions; everything else is CORE.
+SDP_EDITIONS = ["CORE", "PRO", "ADVANCED"]
+
+# Competitive (non-Databricks, dbt-based) engines — only wired for Augmented.
+COMPETITIVE_ENGINES = [Engine.REDSHIFT, Engine.BIGQUERY, Engine.SNOWFLAKE]
+
+# Which batch types support a competitive run at all.
+COMPETITIVE_BATCH_TYPES = ["Augmented Incremental"]
+
+
 class FieldKind(str, Enum):
     PARAM = "param"      # a create()/job parameter
     SECRET = "secret"    # written to a Databricks secret scope, then referenced

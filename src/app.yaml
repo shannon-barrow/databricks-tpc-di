@@ -1,0 +1,11 @@
+command:
+  - "streamlit"
+  - "run"
+  - "databricks_app/app.py"
+
+env:
+  # Start in mock mode. Flip to "false" (in the app's env, via the UI or a
+  # redeploy) once you've confirmed the shell runs and want it to write
+  # secrets + emit real workflows.
+  - name: USE_MOCK_BACKEND
+    value: "true"
