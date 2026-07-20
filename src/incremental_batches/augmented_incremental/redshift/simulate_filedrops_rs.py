@@ -5,13 +5,11 @@
 # ///
 # Per-batch task: copies the day's pre-staged .txt files from `_staging/sf=N/`
 # to the per-(wh_db, sf, batch_date) directory under the UC external volume.
-# Redshift reads the same bytes via the COPY statement issued by
-# load_bronze_rs.py.
+# Redshift reads the same bytes via the COPY in each dbt bronze pre_hook.
 #
-# Adapter of simulate_filedrops_bq.py. The Redshift workgroup is in us-west-2
-# and the UC external volume's S3 backing bucket is also us-west-2 —
-# zero cross-region transfer. Mirrors the BQ pattern except the per-batch
-# dir naming follows lowercased Redshift identifier convention.
+# Adapter of simulate_filedrops_bq.py.
+# Keep the workgroup and the S3-backed volume in the same region to avoid
+# cross-region transfer. Per-batch dir names are lowercased (Redshift convention).
 
 import os
 import concurrent.futures
@@ -48,7 +46,7 @@ DATASETS = [
 
 # COMMAND ----------
 
-# Clear prior day's files so load_bronze_rs's COPY doesn't accidentally pick
+# Clear the prior day's files so the bronze pre_hook COPY doesn't pick
 # up stale data.
 if os.path.exists(batches_dir):
     dbutils.fs.rm(batches_dir, recurse=True)

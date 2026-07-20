@@ -6,30 +6,18 @@
 #   "psycopg2-binary",
 # ]
 # ///
-# Per-run Redshift setup. Dispatches DDL/CTAS to Redshift from a Databricks
-# task. No Spark compute needed beyond the JDBC client.
+# Per-run Redshift setup.
+# Dispatches DDL/CTAS to Redshift; no Spark compute beyond the JDBC client.
+# Steps:
+#   1. Bootstrap the staging schema tpcdi_staging_sf{sf} if missing
+#      (imports rs_staging_bootstrap, seeds Delta -> parquet -> COPY). Idempotent.
+#   2. CREATE the per-run schema {database}.{wh_db}_{sf}.
+#   3. CTAS the 22 staging tables into it (Redshift has no zero-copy clone).
+#   4. Pre-create the 6 streaming bronze tables empty
+#      (dbt fills them per batch via the rs_bronze_copy_prehook macro).
+#   5. Emit batch_date_ls for the parent's for_each loop.
 #
-# Sequence:
-#   1. DROP+CREATE the per-run Redshift schema {database}.{wh_db}_{sf}
-#   2. CTAS 22 historical/reference tables from {database}.tpcdi_staging_sf{sf}
-#      (zero-copy clone isn't available in Redshift; CTAS is the lightweight
-#      alternative, ~1-3 min at SF=20k for the 22 tables together).
-#      Includes bronzedailymarket — its 1-year history is needed for the
-#      FactMarketHistory MIN/MAX lookback.
-#   3. Pre-create 7 EMPTY tables (6 streaming bronze + account_updates_from_customer)
-#      with DISTKEY/SORTKEY but no data — dbt populates per-batch via the
-#      rs_bronze_copy_prehook macro (CREATE TEMP TABLE LIKE this + COPY +
-#      INSERT INTO this). Mirrors the empty-CREATE-TABLE pattern in setup_dbt.py
-#      lines 132-251 for the equivalent Databricks bronze layer.
-#   4. Emit batch_date_ls task value for the parent's for_each loop
-#
-# Self-bootstrapping: if {database}.tpcdi_staging_sf{sf} doesn't exist yet
-# for this scale factor, this notebook imports `rs_staging_bootstrap` and
-# seeds it inline (Delta → parquet → Redshift COPY). Idempotent — no-op
-# when all 22 staging tables are already present. No separate workflow
-# task; mirrors setup_bq.py's bootstrap pattern.
-#
-# Auth: reads connection creds from `tpcdi_redshift` secret scope (see _rs_conn).
+# Auth: connection creds from the `tpcdi_redshift` secret scope (see _rs_conn).
 
 # COMMAND ----------
 
@@ -97,15 +85,12 @@ iam_role     = rs_iam_role(secret_scope=secret_scope)
 
 # COMMAND ----------
 
-# 0. Self-bootstrap the staging schema if needed. Mirrors setup_bq.py /
-#    setup_sf.py pattern. Idempotent — no-op when all 22 staging tables
-#    already present with row counts matching their COMMENT markers.
+# Bootstrap the staging schema if missing.
+# Idempotent — a no-op when all 22 tables are present with matching row counts.
 #
-# CONNECTION DISCIPLINE: every cell opens its own short-lived conn at the
-# top and closes it at the bottom. No long-lived conn carries state across
-# cells. Reason: at SF=20k a phase can take >1hr, and Redshift Serverless
-# SSL sockets idle-close (see today's post-mortem in commit 7129e9e). TCP
-# keepalives in rs_connect provide belt-and-suspenders.
+# Each cell opens and closes its own connection.
+# A phase can run over an hour at SF=20k, and idle Redshift Serverless SSL
+# sockets get dropped, so a long-lived conn would go stale between cells.
 _conn = rs_connect(database=database, secret_scope=secret_scope,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "bootstrap"})
@@ -132,11 +117,10 @@ finally:
 
 # COMMAND ----------
 
-# 1. Ensure the per-run schema exists. Two modes:
-#    - force_reset=YES → DROP CASCADE + CREATE (slow at SF=20k: throws away
-#      every CTAS'd table; the next cell re-does all 22)
-#    - default (idempotent) → CREATE IF NOT EXISTS; existing tables stay
-#      and cell 8 skips per-table CTAS where staging row counts match.
+# Ensure the per-run schema exists.
+# force_reset=YES drops it first (re-CTAS everything).
+# Default keeps existing tables so the CTAS step below can skip any already
+# present with matching row counts.
 _conn = rs_connect(database=database, secret_scope=secret_scope,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "schema_init"})
@@ -152,22 +136,13 @@ finally:
 
 # COMMAND ----------
 
-# 2. CTAS 22 staging tables into the per-run schema with explicit
-#    DISTKEY/SORTKEY/DISTSTYLE declarations.
-#
-# Per Redshift semantics: DISTKEY/SORTKEY/DISTSTYLE are immutable once a table
-# exists — must be declared at CREATE time. Setup owns the layout; dbt models
-# declare nothing about distribution.
-#
-# Layout strategy decisions are documented in PORT_NOTES.md "DISTKEY / SORTKEY
-# strategy" section. Small reference tables (under ~5M rows) get DISTSTYLE ALL
-# so every node has a copy and joins stay local. Large facts use DISTKEY on
-# the most-frequent join column.
-#
-# Format below: (table_name, distribution_spec, sortkey_cols)
-#   distribution_spec: "ALL" | f"KEY({col})" | "EVEN"
-#   sortkey_cols: tuple of column names for compound SORTKEY (Redshift's
-#                 default); empty tuple = no sort key
+# Per-table distribution + sort layout, declared at CREATE time (Redshift
+# DISTKEY/SORTKEY/DISTSTYLE are immutable).
+# Small reference/dim tables use DISTSTYLE ALL (replicated, local joins);
+# large facts use DISTKEY on the main join column.
+# See PORT_NOTES.md for the strategy rationale.
+#   value = (distribution_spec, sortkey_cols)
+#   distribution_spec: "ALL" | "EVEN" | "KEY(col)"
 TABLE_LAYOUTS = {
     # Facts (large) — DISTKEY on join column, SORTKEY on date(s) for prune
     "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
@@ -206,8 +181,8 @@ TABLE_LAYOUTS = {
     "cashtransactionhistorical":  ("KEY(accountid)",     ("event_dt", "ct_dts")),
 }
 
-# Verify completeness against the canonical 22 STAGING_TABLES set used on
-# the SF / BQ sides. Update this list if the canonical set ever changes.
+# Canonical 22 staging tables (matches the SF/BQ sides). Guards TABLE_LAYOUTS
+# against drift.
 STAGING_TABLES_EXPECTED = {
     "bronzedailymarket", "factmarkethistory", "factwatches", "dimtrade",
     "factholdings", "factcashbalances", "cashtransactionhistorical",
@@ -224,17 +199,13 @@ if _missing_layouts:
 
 # COMMAND ----------
 
-# Run the 22 CTAS statements in parallel. Independent table writes — Redshift's
-# psql wire protocol supports concurrent statements (each cursor on its own
-# implicit transaction).
+# CTAS the 22 tables in parallel (independent writes, one connection each).
 import concurrent.futures as _cf
 import time as _time
 
 def _ctas_one(table_name: str) -> tuple[str, float, str]:
-    """CTAS one table. Idempotent: if target already exists with row count
-    matching the staging source, skip the CTAS entirely. Returns
-    (table_name, elapsed_s, status) where status ∈ {'ctas', 'skip'}.
-    """
+    """CTAS one table into the run schema. Idempotent: skips if the target
+    already holds the staging row count. Returns (name, elapsed_s, status)."""
     dist_spec, sortkey_cols = TABLE_LAYOUTS[table_name]
 
     # Build the layout clauses. `DISTKEY(col)` alone implies `DISTSTYLE KEY`.
@@ -251,8 +222,7 @@ def _ctas_one(table_name: str) -> tuple[str, float, str]:
     sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
 
     t0 = _time.time()
-    # Each thread needs its own connection — psycopg2 connections aren't safe
-    # for concurrent use across threads.
+    # Own connection per thread — psycopg2 connections aren't thread-safe.
     local_conn = rs_connect(
         database=database, secret_scope=secret_scope,
         query_group={"task": "setup_rs", "phase": "ctas", "table": table_name,
@@ -260,9 +230,8 @@ def _ctas_one(table_name: str) -> tuple[str, float, str]:
     )
     try:
         with local_conn.cursor() as cur:
-            # Idempotency check: does the target already exist with the
-            # right row count? If yes, skip CTAS. Saves multi-hour re-runs
-            # at SF=20k when a prior attempt got partway through.
+            # Skip if the target already has the staging row count (lets a
+            # partial prior run resume without re-CTAS'ing finished tables).
             cur.execute("""
                 SELECT EXISTS (
                   SELECT 1 FROM information_schema.tables
@@ -309,24 +278,19 @@ print(f"[parallel] CTAS done in {_time.time() - t_clone:.1f}s")
 
 # COMMAND ----------
 
-# 3. Pre-create 7 EMPTY bronze + account_updates_from_customer tables with
-#    DISTKEY/SORTKEY. These tables have NO staging source — dbt populates
-#    them per batch via the rs_bronze_copy_prehook macro:
-#      (a) CREATE TEMP TABLE foo_stg (LIKE foo)  -- needs foo to exist!
-#      (b) COPY foo_stg FROM 's3://...' FORMAT AS CSV ...
-#      (c) INSERT INTO foo SELECT * FROM foo_stg  -- dbt's append strategy
+# Pre-create the 6 streaming bronze tables empty.
+# They have no staging source — dbt fills them each batch via
+# rs_bronze_copy_prehook (CREATE TEMP TABLE LIKE this + COPY from S3 + INSERT).
+# The pre-hook's `LIKE this` requires the table to already exist, hence these DDLs.
+# Types mirror the Databricks bronze layer in setup_dbt.py
+# (STRING->VARCHAR, TINYINT->SMALLINT, DOUBLE->DOUBLE PRECISION);
+# VARCHAR widths are upper bounds only.
 #
-#    Column schemas mirror setup_dbt.py lines 132-251 (the Databricks
-#    equivalent of these tables). Redshift type swaps: STRING→VARCHAR(N),
-#    TINYINT→SMALLINT, DOUBLE→DOUBLE PRECISION. The VARCHAR widths are
-#    upper bounds for the CSV columns; over-allocating costs no on-disk
-#    bytes in Redshift (length is stored, not padded).
-#
-#    `account_updates_from_customer` mirrors bronzeaccount's schema — it's
-#    a dbt-managed staging table derived from bronzecustomer 'U' events
-#    for dimaccount to UNION with the day's bronzeaccount file drops.
-#    Its rs_bronze model has no pre_hook (no S3 source); it INSERTs from
-#    a SELECT, so the pre-creation gives the model a valid {{ this }}.
+# account_updates_from_customer is deliberately NOT pre-created.
+# Its model has no pre_hook (it's a pure SELECT off bronzecustomer+dimaccount),
+# so dbt CTAS's it on first run.
+# Pre-creating it would make dbt rewrite+reorder the columns, breaking
+# dimaccount's by-position UNION against bronzeaccount.
 BRONZE_DDLS = {
     "bronzecustomer": """
         cdc_flag        VARCHAR(1),
@@ -375,18 +339,6 @@ BRONZE_DDLS = {
         status      VARCHAR(10),
         update_dt   DATE
     """,
-    # NOTE: account_updates_from_customer is intentionally NOT pre-created.
-    # Its rs_bronze model has no pre_hook (no S3 source — body is a pure
-    # SELECT joining bronzecustomer + dimaccount). With incremental_strategy
-    # = 'append' on a non-existent target, dbt does CREATE TABLE AS SELECT
-    # the first time, inferring column types from the SELECT (a.accountdesc
-    # widens to VARCHAR(65535) from dimaccount's source).
-    #
-    # If we pre-create it like bronzeaccount, dbt detects the schema differs
-    # from its SELECT and rewrites the table — but the rewrite reorders
-    # columns (varchars to the end), which breaks dimaccount's
-    # `select * ... union all select * ...` by-position type matching
-    # against bronzeaccount.
     "bronzecashtransaction": """
         cdc_flag VARCHAR(1),
         cdc_dsn  BIGINT,
@@ -435,8 +387,8 @@ BRONZE_DDLS = {
     """,
 }
 
-# Layouts (DISTKEY + SORTKEY) for the 7 empty bronze tables. Mirrors the
-# CLUSTER BY column in setup_dbt.py: dist on natural ID, sort on batch-date.
+# DISTKEY on natural ID, SORTKEY on batch-date (mirrors the setup_dbt.py
+# CLUSTER BY choices).
 BRONZE_LAYOUTS = {
     "bronzecustomer":                ("KEY(customerid)", ("update_dt",)),
     "bronzeaccount":                 ("KEY(accountid)",  ("update_dt",)),
@@ -463,9 +415,8 @@ try:
         for tbl, cols_sql in BRONZE_DDLS.items():
             dist_spec, sortkey_cols = BRONZE_LAYOUTS[tbl]
             sort_sql = f"SORTKEY({', '.join(sortkey_cols)})" if sortkey_cols else ""
-            # IF NOT EXISTS: idempotent. dbt may have already populated bronze
-            # tables on a prior partial run; preserve their data on re-run.
-            # If schema needs to change, use force_reset=YES at the top.
+            # IF NOT EXISTS preserves any dbt-loaded rows on re-run; use
+            # force_reset=YES to change the schema.
             ddl = f'''
                 CREATE TABLE IF NOT EXISTS "{target_schema}"."{tbl}" (
                   {cols_sql.strip().rstrip(",")}
@@ -480,8 +431,8 @@ finally:
 
 # COMMAND ----------
 
-# 4. Emit batch_date_ls — match setup_dbt.py / setup_sf.py / setup_bq.py exactly:
-#    AUG_FILES_DATE_START is hardcoded to 2016-07-06.
+# Emit the batch-date list for the parent's for_each loop. Window starts
+# 2016-07-06 (AUG_FILES_DATE_START), matching the other setup notebooks.
 import datetime as dt
 incr_start = dt.date(2016, 7, 6)
 batches = [(incr_start + dt.timedelta(days=i)).isoformat()

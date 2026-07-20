@@ -86,12 +86,8 @@ def rs_connect(*, database: str | None = None,
     conn = psycopg2.connect(
         host=host, port=port, user=user, password=password,
         dbname=dbname, sslmode="require", connect_timeout=30,
-        # TCP keepalives: OS sends probes so an idle SSL socket doesn't
-        # silently close mid-pipeline. We hit "SSL connection has been
-        # closed unexpectedly" on the SF=20k bootstrap (80 min idle on
-        # conn while parallel workers seeded big tables on their own
-        # connections). Probes start after 30s idle, retry 3x at 10s
-        # spacing.
+        # TCP keepalives (probe after 30s idle, 3x at 10s) so a long-idle
+        # socket isn't silently dropped mid-pipeline by Redshift Serverless.
         keepalives=1, keepalives_idle=30,
         keepalives_interval=10, keepalives_count=3,
     )
@@ -116,7 +112,7 @@ def rs_iam_role(*, secret_scope: str = "tpcdi_redshift") -> str:
     """Return the IAM role ARN used by Redshift COPY statements.
 
     Pulled from the secret scope so the workgroup identity stays out of
-    source code. Used by `load_bronze_rs` and `setup_rs` when issuing
+    source code. Used by setup_rs and the dbt bronze pre_hooks when issuing
     `COPY ... IAM_ROLE '<arn>' ...`.
     """
     try:
