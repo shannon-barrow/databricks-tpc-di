@@ -14,7 +14,7 @@ import streamlit as st
 from models import (
     Engine, SPECS, FieldKind,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
-    COMPETITIVE_ENGINES, COMPETITIVE_BATCH_TYPES,
+    COMPETITIVE_ENGINES,
 )
 from backend import backend, USE_MOCK
 
@@ -50,53 +50,46 @@ def _radio(label, options, captions_map, help=None):
     )
 
 
-# --- Step 1: batch type ------------------------------------------------------
-batch_type = _radio("**1. What kind of run?**", BATCH_TYPES, _BATCH_CAPTIONS)
-if not batch_type:
+# --- Step 1: scope — Databricks only, or Databricks + competitors ------------
+# Asked first because it determines the rest: a competitive comparison fixes
+# the run to Augmented Incremental + dbt (apples-to-apples), so those questions
+# are skipped. A Databricks-only run gets the full batch-type / SKU choice.
+scope = _radio(
+    "**1. What do you want to run?**",
+    ["Databricks only", "Databricks and Competitors"],
+    {
+        "Databricks only": "Just the Databricks benchmark — pick any run type and SKU.",
+        "Databricks and Competitors":
+            "Databricks vs one or more competitors, executed via dbt to "
+            "standardize execution (Augmented Incremental only).",
+    },
+)
+if not scope:
     st.stop()
 
-# --- Step 2: scope — Databricks, or Databricks + competitors -----------------
-# A run always includes the Databricks baseline; competitors are additive and
-# only exist for Augmented Incremental.
 competitor_engines: list[Engine] = []
-if batch_type in COMPETITIVE_BATCH_TYPES:
-    scope = _radio(
-        "**2. What do you want to run?**",
-        ["Databricks", "Databricks and Competitors"],
-        {
-            "Databricks": "Just the Databricks benchmark.",
-            "Databricks and Competitors":
-                "Databricks plus one or more competitors, "
-                "executed via dbt to standardize execution.",
-        },
-    )
-    if not scope:
-        st.stop()
-    if scope == "Databricks and Competitors":
-        # Inline checkboxes (not a dropdown) so the selector never overlaps the
-        # next step. Each runs the same dbt project on its engine.
-        st.markdown("**2a. Which competitors?** _(pick one or more)_")
-        competitor_engines = [
-            e for e in COMPETITIVE_ENGINES
-            if st.checkbox(SPECS[e].label, key=f"comp_{e.value}")
-        ]
-        if not competitor_engines:
-            st.info("Select at least one competitor to continue.")
-            st.stop()
-else:
-    st.markdown("**2.** Databricks run _(competitors are Augmented-Incremental only)_.")
-
-# --- Step 3: Databricks SKU (the baseline always runs) -----------------------
-# When competitors are selected the comparison standardizes on dbt, so the
-# Databricks side is forced to dbt too (apples-to-apples). Only a
-# Databricks-only run gets to pick among the other SKUs.
-st.divider()
 edition = "CORE"
-if competitor_engines:
+
+if scope == "Databricks and Competitors":
+    # Competitive path: batch type + SKU are fixed; just pick competitors.
+    batch_type = "Augmented Incremental"
     sku = "dbt"
-    st.markdown("**3. Databricks SKU: dbt** "
-                "_(fixed — competitive comparisons run dbt on every engine)_.")
+    st.markdown("**2. Which competitors?** _(pick one or more)_")
+    st.caption("Run type is Augmented Incremental and every engine runs dbt, "
+               "so the comparison is apples-to-apples.")
+    competitor_engines = [
+        e for e in COMPETITIVE_ENGINES
+        if st.checkbox(SPECS[e].label, key=f"comp_{e.value}")
+    ]
+    if not competitor_engines:
+        st.info("Select at least one competitor to continue.")
+        st.stop()
 else:
+    # Databricks-only path: full run-type + SKU choice.
+    batch_type = _radio("**2. What kind of run?**", BATCH_TYPES, _BATCH_CAPTIONS)
+    if not batch_type:
+        st.stop()
+    st.divider()
     sku = _radio("**3. Which Databricks SKU?**", DBX_SKUS_BY_BATCH[batch_type],
                  _SKU_CAPTIONS, help="Filtered to what's valid for this batch type.")
     if not sku:
