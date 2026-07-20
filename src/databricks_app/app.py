@@ -86,20 +86,26 @@ if batch_type in COMPETITIVE_BATCH_TYPES:
 else:
     st.markdown("**2.** Databricks run _(competitors are Augmented-Incremental only)_.")
 
-# --- Step 3: Databricks SKU (always — the baseline always runs) --------------
-# Divider gives the multiselect above room to expand without visually
-# overlapping this question.
+# --- Step 3: Databricks SKU (the baseline always runs) -----------------------
+# When competitors are selected the comparison standardizes on dbt, so the
+# Databricks side is forced to dbt too (apples-to-apples). Only a
+# Databricks-only run gets to pick among the other SKUs.
 st.divider()
-sku = _radio("**3. Which Databricks SKU?**", DBX_SKUS_BY_BATCH[batch_type],
-             _SKU_CAPTIONS, help="Filtered to what's valid for this batch type.")
-if not sku:
-    st.stop()
 edition = "CORE"
-if sku == "SDP" and batch_type == "Single Batch":
-    edition = _radio("**3a. SDP edition?**", SDP_EDITIONS,
-                     {e: "" for e in SDP_EDITIONS})
-    if not edition:
+if competitor_engines:
+    sku = "dbt"
+    st.markdown("**3. Databricks SKU: dbt** "
+                "_(fixed — competitive comparisons run dbt on every engine)_.")
+else:
+    sku = _radio("**3. Which Databricks SKU?**", DBX_SKUS_BY_BATCH[batch_type],
+                 _SKU_CAPTIONS, help="Filtered to what's valid for this batch type.")
+    if not sku:
         st.stop()
+    if sku == "SDP" and batch_type == "Single Batch":
+        edition = _radio("**3a. SDP edition?**", SDP_EDITIONS,
+                         {e: "" for e in SDP_EDITIONS})
+        if not edition:
+            st.stop()
 
 # --- Step 4: scale factor ----------------------------------------------------
 scale_factor = st.radio("**4. Scale factor?**", SF_OPTIONS, index=None,
