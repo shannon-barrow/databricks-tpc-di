@@ -261,7 +261,7 @@ _AUG_COMMON = {
     "catalog": "main",
     "scale_factor": 20000,
     "tpcdi_directory": "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
-    "wh_db": "Shannon_Barrow_TPCDI_AugmentedIncremental_Cluster",
+    "wh_db": "TPCDI_AugmentedIncremental_Cluster",
     "repo_src_path": COMMON["repo_src_path"],
 }
 
