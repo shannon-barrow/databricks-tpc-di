@@ -112,7 +112,7 @@ def rs_iam_role(*, secret_scope: str = "tpcdi_redshift") -> str:
     """Return the IAM role ARN used by Redshift COPY statements.
 
     Pulled from the secret scope so the workgroup identity stays out of
-    source code. Used by `load_bronze_rs` and `setup_rs` when issuing
+    source code. Used by setup_rs and the dbt bronze pre_hooks when issuing
     `COPY ... IAM_ROLE '<arn>' ...`.
     """
     try:

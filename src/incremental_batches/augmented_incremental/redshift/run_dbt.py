@@ -109,11 +109,9 @@ lines = [
     f"      user: {rs_user}",
     f"      password: {rs_password}",
     "      threads: 8",
-    # connect_timeout in dbt-redshift is passed as the underlying socket
-    # timeout for redshift_connector. Default 30s killed SF=10 bronzes
-    # at 30-36s (XS workgroup cold-start latency). Larger SFs have
-    # individual queries that legitimately take 10-20 min, so 3600 (1 hr)
-    # gives headroom without hiding real hangs.
+    # dbt-redshift passes connect_timeout as the socket timeout, so it also
+    # caps individual query duration, not just connect.
+    # Large-SF queries can legitimately run 10-20 min, so use 1 hr.
     "      connect_timeout: 3600",
     "      sslmode: require",
 ]
@@ -144,10 +142,9 @@ vars_payload = {
     "aws_region":       aws_region,
     "file_ext":         file_ext,
 }
-# Invoke dbt IN-PROCESS via dbtRunner (the documented Python API).
-# Avoids subprocess + serverless env_version=5 venv inheritance issues that
-# make `python -m dbt.cli.main` fail with "No module named 'dbt.cli'" even
-# though dbt-redshift is importable in the notebook's own Python process.
+# Invoke dbt in-process via dbtRunner (the documented Python API).
+# A subprocess `python -m dbt.cli.main` doesn't inherit the serverless
+# env_version=5 venv, so it can't find dbt even when it's importable here.
 from dbt.cli.main import dbtRunner
 
 dbt_args = [
@@ -172,10 +169,8 @@ try:
     if result.exception:
         summary_lines.append(f"# exception: {type(result.exception).__name__}: {result.exception}")
     if result.result:
-        # result.result is a RunExecutionResult — iterate nodes; include
-        # the per-node message (which holds the SQL error text for
-        # failed nodes) so the log captures actionable detail rather
-        # than just status + timing.
+        # Include each node's message (holds the SQL error text on failure)
+        # so the log has actionable detail, not just status + timing.
         for node_result in getattr(result.result, "results", []):
             summary_lines.append(
                 f"  {node_result.status:>8s}  {node_result.node.unique_id:50s}  "
