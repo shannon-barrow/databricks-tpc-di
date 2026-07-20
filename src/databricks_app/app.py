@@ -66,4 +66,11 @@ if submitted:
     st.success("Workflow created.")
     st.json(result)
     if not result.get("mock"):
-        st.caption(f"Trigger the parent job (id {result['parent_id']}) to run.")
+        # incremental_batches_to_run is a run-now param, set at trigger time.
+        batches = values.get("incremental_batches_to_run") or "365"
+        st.caption("Trigger the parent job to run:")
+        st.code(
+            f'databricks jobs run-now {result["parent_id"]} --json '
+            f'\'{{"job_parameters": {{"incremental_batches_to_run": "{batches}"}}}}\'',
+            language="bash",
+        )

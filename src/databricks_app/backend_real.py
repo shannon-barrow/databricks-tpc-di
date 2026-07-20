@@ -67,9 +67,14 @@ class RealBackend:
 
     def _create_kwargs(self, spec: EngineSpec, values: dict) -> dict:
         """Map form values -> create() keyword args (params only; secrets are
-        already in the scope by the time this runs)."""
+        already in the scope by the time this runs).
+
+        incremental_batches_to_run is excluded: it's a run-now parameter set
+        when the parent job is *triggered*, not a build-time create() arg.
+        """
+        skip = {"incremental_batches_to_run"}
         p = {f.key: values[f.key] for f in spec.param_fields()
-             if values.get(f.key)}
+             if values.get(f.key) and f.key not in skip}
         p["scale_factor"] = int(p.pop("scale_factor"))
         return p
 
