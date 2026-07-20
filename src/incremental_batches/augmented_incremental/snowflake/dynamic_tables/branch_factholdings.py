@@ -15,7 +15,7 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000"
 dbutils.widgets.text("batch_date",     "")
 dbutils.widgets.text("secret_scope",   "tpcdi_snowflake")
 dbutils.widgets.text("snowflake_warehouse", "BARROW_MED_GEN2")
-dbutils.widgets.text("snowflake_stage", "TPCDI_TEST.PUBLIC.SHANNON_TPCDI_STAGE")
+dbutils.widgets.text("snowflake_stage", "<db>.<schema>.<your_stage>")
 
 catalog       = dbutils.widgets.get("catalog")
 wh_db         = dbutils.widgets.get("wh_db")

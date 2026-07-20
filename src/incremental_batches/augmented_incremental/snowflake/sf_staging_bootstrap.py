@@ -412,7 +412,7 @@ def materialize_bronze_into_schema(
     databricks_catalog_namespace: Optional[str] = None,
 ) -> None:
     """Per-run CTAS — copy each of the 7 federated bronze Iceberg tables into
-    `target_schema` (the per-benchmark schema, e.g. SHANNON_AUG_SF_DT_10).
+    `target_schema` (the per-benchmark schema, e.g. TPCDI_AUG_SF_DT_10).
 
     Targets keep the source name (no `_raw` suffix). Tables are created
     with `CHANGE_TRACKING = TRUE` so downstream DTs can incrementally
