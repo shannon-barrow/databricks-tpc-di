@@ -10,8 +10,7 @@ REPLACEd per batch.
 Pre-requisites (one-time, manual, out-of-band):
 - A GCS bucket (e.g. `gs://<your-bucket>/tpcdi/`) in your region
 - UC external volume `main.tpcdi_raw_data.tpcdi_volume` backed by that bucket
-- BQ project `databricks-sandbox-perfeng` (or override via the `catalog`
-  job parameter)
+- A BigQuery project (supplied via the `catalog` job parameter)
 - Databricks secret scope `tpcdi_bigquery` with key `sa_json` containing a
   service-account key JSON with BigQuery Data Editor + Job User on the
   target project

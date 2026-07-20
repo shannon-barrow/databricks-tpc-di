@@ -7,11 +7,11 @@
 #   sa_json  — full service-account key JSON (single secret)
 #
 # The SA needs BigQuery Data Editor + BigQuery Job User on the target
-# project (default: `databricks-sandbox-perfeng`).
+# project (default: `<your-bq-project>`).
 #
 # Usage from a calling notebook:
 #   %run ./_bq_conn
-#   client = bq_connect(project="databricks-sandbox-perfeng",
+#   client = bq_connect(project="<your-bq-project>",
 #                       location="us-central1",
 #                       query_label={"task": "setup_bq"})
 #   client.query("SELECT 1").result()
