@@ -192,7 +192,7 @@ swap the SQL dialect.
 
 ## Open questions for plumbing phase
 
-- Which GCS bucket / project owns the file drops? (memory: `tpcdi-fresh` workspace uses `s3://tpcds-datasets/shannon_tpcdi/` for AWS; need a GCS equivalent.)
+- Which GCS bucket / project owns the file drops? (memory: `tpcdi-fresh` workspace uses `s3://<your-bucket>/tpcdi/` for AWS; need a GCS equivalent.)
 - Service-account JSON storage: new Databricks secret scope `tpcdi_bigquery`?
 - Cross-cloud egress cost of streaming `_dailybatches/*` from Databricks to GCS each batch. Snowflake side avoided this because the SF stage points at the same S3 bucket; BQ may need files actually living in GCS.
 - Run-time: does `dbt_task` on Databricks have `dbt-bigquery` pinned, or do we need an env install? (currently `dbt-databricks==1.11.7`)

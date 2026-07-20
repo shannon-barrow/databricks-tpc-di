@@ -41,18 +41,24 @@
 import psycopg2
 
 dbutils.widgets.text("scale_factor",  "20000", "Scale factor")
-dbutils.widgets.text("producer_host",
-    "xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com",
+# Workgroup endpoints are supplied at run time (no default — they embed your
+# AWS account id + region, e.g.
+#   <workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com).
+dbutils.widgets.text("producer_host", "",
     "Producer workgroup endpoint (owns the built staging)")
-dbutils.widgets.text("consumer_host",
-    "medium-32rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com",
+dbutils.widgets.text("consumer_host", "",
     "Consumer workgroup endpoint (runs the benchmark)")
 dbutils.widgets.text("secret_scope", "tpcdi_redshift", "Databricks secret scope")
 
 sf            = int(dbutils.widgets.get("scale_factor"))
-PROD_HOST     = dbutils.widgets.get("producer_host")
-CONS_HOST     = dbutils.widgets.get("consumer_host")
+PROD_HOST     = dbutils.widgets.get("producer_host").strip()
+CONS_HOST     = dbutils.widgets.get("consumer_host").strip()
 secret_scope  = dbutils.widgets.get("secret_scope")
+
+if not PROD_HOST or not CONS_HOST:
+    raise ValueError(
+        "producer_host and consumer_host are required (Redshift Serverless "
+        "workgroup endpoints). Pass them as job/notebook parameters.")
 
 def _get(k):
     return dbutils.secrets.get(scope=secret_scope, key=k)

@@ -15,7 +15,7 @@ dbt_augmented_incremental:
       schema: dbt_augmented_incremental                  # overridden per-model via generate_schema_name macro
       threads: 8
     snowflake:
-      # account identifier — single locator (e.g. tla33105) or org-account (e.g. kponzso-bwa95870)
+      # account identifier — single locator or org-account form
       type: snowflake
       account: {ENTER_ACCOUNT_HERE}
       user: {ENTER_USER_HERE}

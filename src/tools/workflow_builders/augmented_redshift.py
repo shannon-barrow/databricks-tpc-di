@@ -8,12 +8,12 @@ per-batch files into a UC external volume backed by S3 (same bucket the
 Redshift workgroup is configured to read).
 
 Pre-requisites (one-time, manual, out-of-band):
-- S3 bucket `s3://tpcds-datasets/shannon_tpcdi/` in `us-west-2`
+- An S3 bucket (e.g. `s3://<your-bucket>/tpcdi/`) in your region
 - UC external volume `main.tpcdi_raw_data.tpcdi_volume` backed by that bucket
-- Redshift Serverless workgroup `xsmall-8rpu-workgroup` (us-west-2)
-- IAM role `arn:aws:iam::384416317380:role/tpcds-redshift` attached to the
-  workgroup; trust policy allows the workgroup to assume the role; bucket
-  policy grants the role s3:Get* on the prefix
+- A Redshift Serverless workgroup in the same region
+- An IAM role attached to the workgroup (trust policy allows the workgroup
+  to assume it; bucket policy grants the role s3:Get* on the prefix). The
+  role ARN + workgroup host are read from the `tpcdi_redshift` secret scope.
 - Databricks secret scope `tpcdi_redshift` with keys:
   host, port, database, user, password, iam_role
 - `tpcdi_staging_sf{N}` schema seeded in Redshift (one-time, via
@@ -163,7 +163,7 @@ def build_child(
     wh_db: str,
     database: str = "dev",
     secret_scope: str = "tpcdi_redshift",
-    s3_volume_prefix: str = "s3://tpcds-datasets/shannon_tpcdi/",
+    s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
     **_unused,
@@ -269,7 +269,7 @@ def build_parent(
     wh_db: str,
     database: str = "dev",
     secret_scope: str = "tpcdi_redshift",
-    s3_volume_prefix: str = "s3://tpcds-datasets/shannon_tpcdi/",
+    s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
     **_unused,

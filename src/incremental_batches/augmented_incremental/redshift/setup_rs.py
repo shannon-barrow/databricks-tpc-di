@@ -43,7 +43,7 @@ dbutils.widgets.text("databricks_catalog", "main",
                      "Databricks UC catalog where tpcdi_incremental_staging_{sf} lives")
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
                      "UC external volume root")
-dbutils.widgets.text("s3_volume_prefix", "s3://tpcds-datasets/shannon_tpcdi/",
+dbutils.widgets.text("s3_volume_prefix", "s3://REPLACE-ME/tpcdi/",
                      "S3 prefix matching the UC volume backing")
 dbutils.widgets.text("aws_region",      "us-west-2", "Region for COPY")
 # IDEMPOTENT MODE (default). When YES, skip work that's already done:

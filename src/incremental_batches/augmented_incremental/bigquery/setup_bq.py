@@ -35,7 +35,7 @@ dbutils.widgets.text("secret_scope",   "tpcdi_bigquery", "Databricks secret scop
 dbutils.widgets.text("bq_location",    "us-central1", "BQ dataset location (must match GCS bucket region)")
 dbutils.widgets.text("databricks_catalog", "main",
                      "Databricks catalog where tpcdi_incremental_staging_{sf} lives — used by bootstrap seed only")
-dbutils.widgets.text("gcs_volume_prefix", "gs://shannon-tpcdi/tpcdi/",
+dbutils.widgets.text("gcs_volume_prefix", "gs://REPLACE-ME/tpcdi/",
                      "GCS URI that maps 1:1 to /Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 

@@ -5,13 +5,13 @@
 #
 # Secret scope layout (default scope name `tpcdi_redshift`):
 #   host       — Redshift Serverless workgroup endpoint
-#                e.g. xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com
+#                e.g. <workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com
 #   port       — JDBC/PG wire port, default 5439
 #   database   — default database, e.g. "dev"
-#   user       — Redshift user (TODO: move from admin to a service account)
+#   user       — Redshift user (a service account is recommended over admin)
 #   password   — password
 #   iam_role   — ARN of the IAM role with S3 read access for COPY,
-#                e.g. arn:aws:iam::384416317380:role/tpcds-redshift
+#                e.g. arn:aws:iam::<account-id>:role/<role-name>
 #
 # Notes on driver choice:
 #   psycopg2 talks Redshift's PostgreSQL wire protocol natively. It's the

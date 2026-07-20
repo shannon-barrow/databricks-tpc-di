@@ -131,7 +131,7 @@ cp profiles.yml.template ~/.dbt/profiles.yml   # fill in credentials
 dbt run --vars '{
   batch_date: "2016-07-06",
   scale_factor: "10",
-  wh_db: "shannon_barrow_AugmentedIncremental_DBT",
+  wh_db: "<your-prefix>_AugmentedIncremental_DBT",
   catalog: "main",
   tpcdi_directory: "/Volumes/main/tpcdi_raw_data/tpcdi_volume/"
 }'

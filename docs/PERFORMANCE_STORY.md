@@ -536,7 +536,7 @@ The full V6/V7/V8 work was committed across May 2–4, 2026 on the `data-gen-dec
 | 2026-05-04 | `7014940` | Cleanup: deleted trade.py + dead helpers (-1,191 LoC)                |
 | 2026-05-04 | `880f439` | Refreshed README + CLAUDE.md                                         |
 
-Pull request #24 on `shannon-barrow/databricks-tpc-di` carries the full set.
+Pull request #24 on the repo carries the full set.
 
 ---
 

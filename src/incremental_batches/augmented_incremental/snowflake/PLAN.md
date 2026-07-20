@@ -93,7 +93,7 @@ Databricks secret scope `tpcdi_snowflake` (one-time create via
 
 | key | value |
 |---|---|
-| `account` | `kponzso-bwa95870` |
+| `account` | `<org>-<account>` |
 | `user` | `TPCDI_SVC` (service user with KEY_PAIR auth policy) |
 | `role` | `ACCOUNTADMIN` |
 | `warehouse` | `BARROW_XS_GEN2` (or whichever warehouse the benchmark uses) |

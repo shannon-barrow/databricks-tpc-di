@@ -6,6 +6,7 @@ APIs (via `databricks` CLI for auth), triggers each, and polls until terminal.
 Run: python tests/smoke_run_workflows.py
 """
 import json
+import os
 import subprocess
 import sys
 import time
@@ -24,9 +25,9 @@ from workflow_builders import (
 PROFILE = "tpc-di"
 SF = 10
 CATALOG = "main"
-NAME_BASE = "Shannon-Barrow-TPCDI-Smoke"
-WH_TARGET = "shannon_barrow_smoke"
-REPO_SRC = "/Workspace/Users/shannon.barrow@databricks.com/databricks-tpc-di-augmented/src"
+NAME_BASE = "TPCDI-Smoke"
+WH_TARGET = "tpcdi_smoke"
+REPO_SRC = os.environ.get("TPCDI_REPO_SRC", "/Workspace/Users/YOUR_USER@example.com/databricks-tpc-di-augmented/src")
 TPCDI_DIR = f"/Volumes/{CATALOG}/tpcdi_raw_data/tpcdi_volume/spark_datagen/"
 DBR = "16.4.x-photon-scala2.12"
 WORKER_TYPE = "Standard_D8pds_v6"

@@ -30,7 +30,7 @@ dbutils.widgets.text("batch_date",       "")
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("secret_scope",     "tpcdi_redshift")
 dbutils.widgets.text("dbt_project_dir",  "", "Workspace-repo path to the dbt project")
-dbutils.widgets.text("s3_volume_prefix", "s3://tpcds-datasets/shannon_tpcdi/",
+dbutils.widgets.text("s3_volume_prefix", "s3://REPLACE-ME/tpcdi/",
                      "S3 prefix matching the UC volume — bronze pre_hook reads from here")
 dbutils.widgets.text("aws_region",       "us-west-2", "REGION clause for COPY")
 dbutils.widgets.text("file_ext",         "txt", "File extension of per-batch CSV drops")
