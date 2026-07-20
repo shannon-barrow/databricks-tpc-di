@@ -1,0 +1,5 @@
+# Streamlit + the SDK are pre-installed on the Databricks Apps runtime;
+# pinned here so `run-local` (and any non-Apps host) matches.
+streamlit>=1.38.0
+databricks-sdk>=0.30.0
+pydantic>=2.0
