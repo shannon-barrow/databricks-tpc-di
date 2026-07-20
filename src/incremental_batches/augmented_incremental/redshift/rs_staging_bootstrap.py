@@ -1,35 +1,18 @@
-"""
-rs_staging_bootstrap.py — self-bootstrapping Redshift staging schema.
+"""Self-bootstrapping Redshift staging schema (pure Python module, imported
+by setup_rs.py — mirrors bq_/sf_staging_bootstrap.py).
 
-Pure Python module (NOT a notebook). Mirrors `bq_staging_bootstrap.py` and
-`sf_staging_bootstrap.py`. Entry point is called by `setup_rs.py` within the
-same notebook execution (NOT via dbutils.notebook.run — see
-[[feedback-no-dbutils-notebook-run]]):
+`ensure_staging_environment(...)` is idempotent: it seeds only the staging
+tables that are missing or empty, each via Delta -> parquet (UC external
+volume on S3) -> COPY -> row-count parity check.
 
-  ensure_staging_environment(conn, *, database, target_schema, src_catalog,
-                              src_schema, parquet_root, volume_root,
-                              s3_volume_prefix, iam_role, aws_region,
-                              spark, dbutils, secret_scope, parallel=4) -> dict
-    Idempotent. Checks Redshift `{database}.{target_schema}` exists with all
-    22 expected staging tables. If anything is missing, seeds only the
-    missing ones in parallel via Delta → parquet (UC external volume on S3)
-    → COPY into Redshift → row-count parity check.
-
-Per-table layout (DISTKEY / SORTKEY / DISTSTYLE) declared at CREATE time —
-mirrors the strategy in setup_rs.py's per-run CTAS layouts (PORT_NOTES.md
-"DISTKEY / SORTKEY strategy" section).
-
-Type mapping: Spark's `DataType.simpleString()` keys (bigint/smallint/
-tinyint/int/etc.) NOT internal Python names — Redshift COPY FROM PARQUET
-requires exact type match.
+Tables are sorted biggest-first so the thread pool starts the long-pole
+loads first. Layouts (DISTKEY/SORTKEY) match setup_rs.py's TABLE_LAYOUTS.
 """
 from __future__ import annotations
 
 import concurrent.futures as _cf
 import time as _time
 
-# Canonical 22 staging tables (same set as bq_staging_bootstrap.STAGING_TABLES,
-# sorted biggest-first so the ThreadPoolExecutor kicks off long-pole tables first).
 STAGING_TABLES: tuple[str, ...] = (
     "bronzedailymarket", "factmarkethistory",
     "factwatches",
@@ -45,10 +28,8 @@ STAGING_TABLES: tuple[str, ...] = (
     "statustype", "batchdate",
 )
 
-# Per-table Redshift layout. Spec format: (distribution_spec, sortkey_cols).
-# distribution_spec: "ALL" | "EVEN" | "KEY(col)"
-# Keep in sync with setup_rs.py's TABLE_LAYOUTS — both point at the same
-# physical tables (staging is the CTAS source for the per-run schema).
+# (distribution_spec, sortkey_cols) per table. Keep in sync with setup_rs.py's
+# TABLE_LAYOUTS — staging is the CTAS source for the per-run schema.
 TABLE_LAYOUTS: dict[str, tuple[str, tuple[str, ...]]] = {
     "factmarkethistory":          ("KEY(sk_securityid)", ("sk_dateid", "sk_securityid", "sk_companyid")),
     "factwatches":                ("KEY(sk_customerid)", ("sk_dateid_dateremoved", "sk_customerid", "sk_securityid")),
@@ -77,17 +58,16 @@ _missing_layouts = set(STAGING_TABLES) - set(TABLE_LAYOUTS)
 assert not _missing_layouts, f"TABLE_LAYOUTS missing: {_missing_layouts}"
 
 
-# Redshift COPY FROM PARQUET requires EXACT type match. Map keys MUST match
-# Spark `DataType.simpleString()` output (SQL-flavored: bigint/int/smallint/
-# tinyint), NOT internal Python type names.
+# COPY FROM PARQUET needs an exact type match, so keys are Spark
+# DataType.simpleString() values (SQL-flavored), not Python type names.
 _TYPE_MAP: dict[str, str] = {
     "boolean":    "BOOLEAN",
     "tinyint":    "SMALLINT",            # Redshift has no TINYINT
     "smallint":   "SMALLINT",
     "int":        "INTEGER",
     "bigint":     "BIGINT",
-    "float":      "REAL",                # parquet FLOAT (32-bit) → REAL/FLOAT4
-    "double":     "DOUBLE PRECISION",    # parquet DOUBLE (64-bit) → FLOAT8
+    "float":      "REAL",                # parquet FLOAT (32-bit) -> REAL
+    "double":     "DOUBLE PRECISION",    # parquet DOUBLE (64-bit) -> FLOAT8
     "date":       "DATE",
     "timestamp":  "TIMESTAMP",
     "binary":     "VARBYTE",
@@ -99,9 +79,7 @@ def _dist_clause(spec: str) -> str:
     if spec == "EVEN": return "DISTSTYLE EVEN"
     if spec.startswith("KEY("):
         col = spec[len("KEY("):-1]
-        # `DISTKEY(col)` alone implies `DISTSTYLE KEY` — cleaner than
-        # writing both. Writing `DISTSTYLE KEY KEY(col)` is a syntax error.
-        return f"DISTKEY({col})"
+        return f"DISTKEY({col})"  # implies DISTSTYLE KEY
     raise ValueError(f"unknown distribution_spec: {spec}")
 
 
@@ -133,16 +111,9 @@ def _seed_one(table: str, *, database: str, target_schema: str,
               parquet_root: str, volume_root: str, s3_volume_prefix: str,
               iam_role: str, aws_region: str,
               spark, dbutils, secret_scope: str) -> dict:
-    """Seed one staging table: Delta → parquet → COPY → row-count check.
-
-    Each call opens its own psycopg2 connection (psycopg2 connections are
-    NOT thread-safe to share, so per-thread is the rule). Raises on any
-    failure — caller catches and aggregates.
-
-    NOTE: do NOT do relative imports here. This module is loaded via
-    sys.path insertion (not as a package), so `from . import X` fails
-    immediately with "attempted relative import with no known parent
-    package". Use absolute imports only.
+    """Seed one staging table: Delta -> parquet -> COPY -> row-count check.
+    Opens its own psycopg2 connection (they aren't thread-safe to share).
+    Raises on failure; the caller aggregates.
     """
     import psycopg2
 
@@ -166,11 +137,9 @@ def _seed_one(table: str, *, database: str, target_schema: str,
     log.append(f"[{table}] delta_rows={delta_rows:,}")
     df.write.mode("overwrite").parquet(pq_path)
 
-    # Spark on UC volumes leaves `_committed_*` and `_SUCCESS` markers
-    # alongside part files. Redshift COPY treats them as parquet and fails
-    # with "Spectrum Scan Error / invalid version number". Defense in depth:
-    #   (1) delete the markers, (2) use `/part-` COPY URI prefix so any
-    #   leftover markers can't match.
+    # Spark leaves `_committed_*` / `_SUCCESS` markers next to the part files;
+    # COPY would try to read them as parquet and fail. Delete them, and point
+    # COPY at the `/part-` prefix so any stragglers can't match.
     try:
         for entry in dbutils.fs.ls(pq_path):
             if entry.name.rstrip("/").startswith("_"):
@@ -201,8 +170,8 @@ def _seed_one(table: str, *, database: str, target_schema: str,
             """)
             cur.execute(f'SELECT COUNT(*) FROM "{target_schema}"."{table}"')
             rs_rows = cur.fetchone()[0]
-            # Record expected row count in a TABLE COMMENT so future setup_rs
-            # runs can detect partial seeds without re-counting Delta.
+            # Stamp the row count in a TABLE COMMENT so a later run can detect
+            # a partial/empty seed without re-reading Delta.
             cur.execute(
                 f"COMMENT ON TABLE \"{target_schema}\".\"{table}\" "
                 f"IS 'tpcdi_staging_seed: rows={rs_rows}'"
@@ -234,63 +203,41 @@ def ensure_staging_environment(conn, *,
                                 dbutils,
                                 secret_scope: str,
                                 parallel: int = 8) -> dict:
-    """Idempotent Redshift staging bootstrap. Mirrors
-    `bq_staging_bootstrap.ensure_staging_environment` and
-    `sf_staging_bootstrap.ensure_staging_environment`.
+    """Idempotent Redshift staging bootstrap (mirrors the bq_/sf_ equivalents).
 
     Args:
-        conn: live psycopg2 connection (autocommit OK either way).
+        conn: live psycopg2 connection.
         database: Redshift database name (e.g. "dev").
         target_schema: per-SF staging schema (e.g. "tpcdi_staging_sf10").
-        src_catalog / src_schema: Databricks-side source
-          (e.g. "main" / "tpcdi_incremental_staging_{sf}").
+        src_catalog / src_schema: Databricks source (catalog / schema).
         parquet_root: UC volume path for the per-table parquet staging step.
-        volume_root: UC volume root used for s3_uri rewrite.
+        volume_root: UC volume root, rewritten to s3_volume_prefix for COPY.
         s3_volume_prefix: s3:// prefix that maps 1:1 to volume_root.
-        iam_role: IAM role ARN attached to the workgroup, for COPY.
-        aws_region: COPY's REGION clause.
-        spark: SparkSession.
-        dbutils: notebook dbutils for fs.ls/fs.rm/secrets.
-        secret_scope: scope name to load psycopg2 creds in worker threads.
-        parallel: ThreadPoolExecutor max_workers (default 8 — matches sf).
+        iam_role: IAM role ARN for COPY.
+        aws_region: COPY REGION clause.
+        spark / dbutils: notebook handles.
+        secret_scope: scope for psycopg2 creds in worker threads.
+        parallel: thread-pool size.
 
     Returns:
-        dict: {skipped: bool, n_seeded: int, elapsed_s: float, missing: list}.
+        {skipped, n_seeded, elapsed_s, missing}.
 
     Raises:
-        RuntimeError if any seeded table fails to load with matching row counts.
+        RuntimeError if any seeded table's row count doesn't match its source.
     """
-    # 1) Ensure schema exists.
     with conn.cursor() as cur:
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{target_schema}"')
 
-    # 2) Check what's already present AND non-empty. Plain `table_exists` is
-    #    not enough — a prior cancelled run can leave behind tables that were
-    #    CREATE TABLE'd but for which the COPY never completed. Those shells
-    #    pass the existence test and get skipped, then the downstream CTAS
-    #    copies an empty table into the per-run schema. We hit this exact
-    #    failure mode on the SF=20k re-run: factmarkethistory CTAS'd in 1.86s
-    #    (should have been multiple minutes for ~6B rows) because the staging
-    #    table was empty.
     with conn.cursor() as cur:
         cur.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = %s",
             (target_schema,),
         )
         present = {r[0].lower() for r in cur.fetchall()}
-    # Verify row count parity for each "present" table. _seed_one records the
-    # expected row count as a TABLE COMMENT on successful seed; we read it
-    # back here and compare to the actual count.
-    #
-    # Failure modes we catch:
-    #   1. Present but empty (CREATE TABLE ran, COPY never did — what we
-    #      observed after the SF=20k cancel). Caught by `actual > 0`.
-    #   2. Present but partial (theoretical — Redshift COPY is autocommit so
-    #      rollback should be all-or-nothing). Caught by `actual == expected`.
-    #   3. Present but mutated externally (DELETE, INSERT). Caught by `==`.
-    #
-    # Tables without a COMMENT (legacy seed before this hardening landed)
-    # fall through to the `actual > 0` check.
+    # A table counts as seeded only if its actual row count matches the count
+    # _seed_one stamped in its TABLE COMMENT — existence alone isn't enough,
+    # since a cancelled run can leave a CREATE'd-but-never-COPY'd empty shell.
+    # Tables without the comment marker (legacy seeds) fall back to `> 0`.
     import re as _re
     nonempty = set()
     with conn.cursor() as cur:
@@ -328,7 +275,7 @@ def ensure_staging_environment(conn, *,
         print(msg)
         return {"skipped": True, "n_seeded": 0, "elapsed_s": 0.0, "missing": []}
 
-    # 3) Seed only the missing tables in parallel.
+    # Seed only the missing tables, in parallel.
     print(f"[bootstrap] seeding {len(missing)} of {len(STAGING_TABLES)} staging tables: {missing}")
     t_start = _time.time()
     results: list[dict] = []
@@ -366,13 +313,9 @@ def ensure_staging_environment(conn, *,
     elapsed_s = _time.time() - t_start
     print(f"\n[bootstrap] seeded {len(results)} tables, {len(failures)} failures in {elapsed_s:.1f}s")
 
-    # 4) Re-verify after seed. CRITICAL: the original `conn` was opened in
-    #    setup_rs.py before this function ran, and has been idle for the
-    #    entire bootstrap duration. At SF=20k that's 30-80 minutes — far
-    #    longer than Redshift Serverless's SSL keepalive. Re-using `conn`
-    #    here raises "SSL connection has been closed unexpectedly".
-    #
-    #    Open a fresh short-lived connection just for the verify check.
+    # Re-verify on a fresh connection: the caller's `conn` has been idle for
+    # the whole (up to ~1hr) seed and Redshift Serverless would have dropped
+    # its SSL socket by now.
     import psycopg2 as _psy
     def _get_secret(k, default=None):
         try: return dbutils.secrets.get(scope=secret_scope, key=k)
