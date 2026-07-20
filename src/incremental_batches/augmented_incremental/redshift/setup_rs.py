@@ -6,14 +6,15 @@
 #   "psycopg2-binary",
 # ]
 # ///
-# Per-run Redshift setup. Dispatches DDL/CTAS to Redshift; no Spark compute
-# beyond the JDBC client. Steps:
-#   1. Bootstrap the staging schema tpcdi_staging_sf{sf} if missing (imports
-#      rs_staging_bootstrap, seeds Delta -> parquet -> COPY). Idempotent.
+# Per-run Redshift setup.
+# Dispatches DDL/CTAS to Redshift; no Spark compute beyond the JDBC client.
+# Steps:
+#   1. Bootstrap the staging schema tpcdi_staging_sf{sf} if missing
+#      (imports rs_staging_bootstrap, seeds Delta -> parquet -> COPY). Idempotent.
 #   2. CREATE the per-run schema {database}.{wh_db}_{sf}.
 #   3. CTAS the 22 staging tables into it (Redshift has no zero-copy clone).
-#   4. Pre-create the 6 streaming bronze tables empty (dbt fills them per
-#      batch via the rs_bronze_copy_prehook macro).
+#   4. Pre-create the 6 streaming bronze tables empty
+#      (dbt fills them per batch via the rs_bronze_copy_prehook macro).
 #   5. Emit batch_date_ls for the parent's for_each loop.
 #
 # Auth: connection creds from the `tpcdi_redshift` secret scope (see _rs_conn).
@@ -84,12 +85,12 @@ iam_role     = rs_iam_role(secret_scope=secret_scope)
 
 # COMMAND ----------
 
-# Bootstrap the staging schema if missing. Idempotent (no-op when all 22
-# tables are present with matching row counts).
+# Bootstrap the staging schema if missing.
+# Idempotent — a no-op when all 22 tables are present with matching row counts.
 #
-# Each cell opens its own connection and closes it — a phase can run >1hr at
-# SF=20k and idle Redshift Serverless SSL sockets get dropped; a long-lived
-# conn would go stale between cells.
+# Each cell opens and closes its own connection.
+# A phase can run over an hour at SF=20k, and idle Redshift Serverless SSL
+# sockets get dropped, so a long-lived conn would go stale between cells.
 _conn = rs_connect(database=database, secret_scope=secret_scope,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "bootstrap"})
@@ -116,9 +117,10 @@ finally:
 
 # COMMAND ----------
 
-# Ensure the per-run schema exists. force_reset=YES drops it first (re-CTAS
-# everything); default keeps existing tables so the CTAS step below can skip
-# any already present with matching row counts.
+# Ensure the per-run schema exists.
+# force_reset=YES drops it first (re-CTAS everything).
+# Default keeps existing tables so the CTAS step below can skip any already
+# present with matching row counts.
 _conn = rs_connect(database=database, secret_scope=secret_scope,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "schema_init"})
@@ -135,9 +137,10 @@ finally:
 # COMMAND ----------
 
 # Per-table distribution + sort layout, declared at CREATE time (Redshift
-# DISTKEY/SORTKEY/DISTSTYLE are immutable). Small reference/dim tables use
-# DISTSTYLE ALL (replicated, local joins); large facts use DISTKEY on the
-# main join column. See PORT_NOTES.md for the strategy rationale.
+# DISTKEY/SORTKEY/DISTSTYLE are immutable).
+# Small reference/dim tables use DISTSTYLE ALL (replicated, local joins);
+# large facts use DISTKEY on the main join column.
+# See PORT_NOTES.md for the strategy rationale.
 #   value = (distribution_spec, sortkey_cols)
 #   distribution_spec: "ALL" | "EVEN" | "KEY(col)"
 TABLE_LAYOUTS = {
@@ -275,17 +278,19 @@ print(f"[parallel] CTAS done in {_time.time() - t_clone:.1f}s")
 
 # COMMAND ----------
 
-# Pre-create the 6 streaming bronze tables empty. They have no staging
-# source — dbt fills them each batch via rs_bronze_copy_prehook (CREATE TEMP
-# TABLE LIKE this + COPY from S3 + INSERT). The pre-hook's `LIKE this`
-# requires the table to already exist, hence these DDLs. Types mirror the
-# Databricks bronze layer in setup_dbt.py (STRING->VARCHAR, TINYINT->SMALLINT,
-# DOUBLE->DOUBLE PRECISION); VARCHAR widths are upper bounds only.
+# Pre-create the 6 streaming bronze tables empty.
+# They have no staging source — dbt fills them each batch via
+# rs_bronze_copy_prehook (CREATE TEMP TABLE LIKE this + COPY from S3 + INSERT).
+# The pre-hook's `LIKE this` requires the table to already exist, hence these DDLs.
+# Types mirror the Databricks bronze layer in setup_dbt.py
+# (STRING->VARCHAR, TINYINT->SMALLINT, DOUBLE->DOUBLE PRECISION);
+# VARCHAR widths are upper bounds only.
 #
-# account_updates_from_customer is deliberately NOT pre-created: its model
-# has no pre_hook (it's a pure SELECT off bronzecustomer+dimaccount), so dbt
-# CTAS's it on first run. Pre-creating it would make dbt rewrite+reorder the
-# columns, breaking dimaccount's by-position UNION against bronzeaccount.
+# account_updates_from_customer is deliberately NOT pre-created.
+# Its model has no pre_hook (it's a pure SELECT off bronzecustomer+dimaccount),
+# so dbt CTAS's it on first run.
+# Pre-creating it would make dbt rewrite+reorder the columns, breaking
+# dimaccount's by-position UNION against bronzeaccount.
 BRONZE_DDLS = {
     "bronzecustomer": """
         cdc_flag        VARCHAR(1),

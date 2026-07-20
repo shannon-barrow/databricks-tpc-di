@@ -1,12 +1,13 @@
-"""Self-bootstrapping Redshift staging schema (pure Python module, imported
-by setup_rs.py — mirrors bq_/sf_staging_bootstrap.py).
+"""Self-bootstrapping Redshift staging schema.
 
-`ensure_staging_environment(...)` is idempotent: it seeds only the staging
-tables that are missing or empty, each via Delta -> parquet (UC external
-volume on S3) -> COPY -> row-count parity check.
+Pure Python module imported by setup_rs.py; mirrors bq_/sf_staging_bootstrap.py.
 
-Tables are sorted biggest-first so the thread pool starts the long-pole
-loads first. Layouts (DISTKEY/SORTKEY) match setup_rs.py's TABLE_LAYOUTS.
+`ensure_staging_environment(...)` is idempotent.
+It seeds only the staging tables that are missing or empty, each via
+Delta -> parquet (UC external volume on S3) -> COPY -> row-count parity check.
+
+Tables are sorted biggest-first so the thread pool starts the long-pole loads
+first. Layouts (DISTKEY/SORTKEY) match setup_rs.py's TABLE_LAYOUTS.
 """
 from __future__ import annotations
 
@@ -112,6 +113,7 @@ def _seed_one(table: str, *, database: str, target_schema: str,
               iam_role: str, aws_region: str,
               spark, dbutils, secret_scope: str) -> dict:
     """Seed one staging table: Delta -> parquet -> COPY -> row-count check.
+
     Opens its own psycopg2 connection (they aren't thread-safe to share).
     Raises on failure; the caller aggregates.
     """
@@ -235,8 +237,9 @@ def ensure_staging_environment(conn, *,
         )
         present = {r[0].lower() for r in cur.fetchall()}
     # A table counts as seeded only if its actual row count matches the count
-    # _seed_one stamped in its TABLE COMMENT — existence alone isn't enough,
-    # since a cancelled run can leave a CREATE'd-but-never-COPY'd empty shell.
+    # _seed_one stamped in its TABLE COMMENT.
+    # Existence alone isn't enough: a cancelled run can leave a
+    # CREATE'd-but-never-COPY'd empty shell.
     # Tables without the comment marker (legacy seeds) fall back to `> 0`.
     import re as _re
     nonempty = set()
@@ -313,9 +316,9 @@ def ensure_staging_environment(conn, *,
     elapsed_s = _time.time() - t_start
     print(f"\n[bootstrap] seeded {len(results)} tables, {len(failures)} failures in {elapsed_s:.1f}s")
 
-    # Re-verify on a fresh connection: the caller's `conn` has been idle for
-    # the whole (up to ~1hr) seed and Redshift Serverless would have dropped
-    # its SSL socket by now.
+    # Re-verify on a fresh connection.
+    # The caller's `conn` has been idle for the whole (up to ~1hr) seed, so
+    # Redshift Serverless would have dropped its SSL socket by now.
     import psycopg2 as _psy
     def _get_secret(k, default=None):
         try: return dbutils.secrets.get(scope=secret_scope, key=k)
