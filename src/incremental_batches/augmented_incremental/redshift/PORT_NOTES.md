@@ -1,25 +1,17 @@
-# dbt-Redshift port — research notes
+# dbt-Redshift port — design notes
 
-Pre-implementation reference for porting the 16-model augmented-incremental
-dbt project from Databricks / Snowflake / BigQuery to Amazon Redshift
-Serverless. Same pattern as the BQ port: research → scaffold → port models
-→ smoke at SF=10 → scale.
+How the 16-model augmented-incremental dbt project is ported from Databricks / Snowflake / BigQuery to Amazon Redshift Serverless.
 
-Validated up front (Srilekha's "Test Redshift read" notebook):
+Environment it expects:
 
-- Workgroup: `xsmall-8rpu-workgroup` (Redshift Serverless, us-west-2,
-  account `<account-id>`, default database `dev`)
-- JDBC: `jdbc:redshift://xsmall-8rpu-workgroup.<account-id>.us-west-2.redshift-serverless.amazonaws.com:5439/dev`
-- IAM role for S3 reads: `arn:aws:iam::<account-id>:role/tpcds-redshift`
-- `COPY` from `s3://<your-bucket>/tpcdi/augmented_incremental/_staging/sf=10/Customer/...`
-  with `IAM_ROLE`, `DELIMITER '\001'` works — same S3 path the Spark
-  datagen already writes to from `tpcdi-fresh`.
+- A Redshift Serverless workgroup (default database `dev`), reachable over the PG wire protocol on port 5439.
+- An IAM role attached to the workgroup with S3 read on the staging bucket, for `COPY`.
+- The staging bucket is the same S3 path the Spark datagen writes to, surfaced as the UC external volume.
 
-Orchestrator: same as the SF and BQ ports — `tpcdi-fresh` workspace
-(`https://<your-workspace>.cloud.databricks.com/`). It owns the UC
-external-location volume on `s3://<your-bucket>/tpcdi/`, so the
-365 daily filedrop CSVs are already on S3 in the same region as the
-Redshift workgroup — no cross-region egress.
+All of these (host, role ARN, creds) come from the `tpcdi_redshift` secret scope — see `_rs_conn.py`.
+
+Orchestrator: same as the SF and BQ ports — a Databricks workspace that owns the UC external-location volume on `s3://<your-bucket>/tpcdi/`.
+The 365 daily filedrop CSVs are therefore already on S3 in the same region as the Redshift workgroup — no cross-region egress.
 
 ## Project layout
 
@@ -135,21 +127,18 @@ small dim/reference tables under ~5 M rows. Worth flagging in setup.
 
 ## Auth & profile
 
-Srilekha's notebook uses hardcoded `admin / PerfEng27Redshift`. Move to a
-`tpcdi_redshift` Databricks secret scope, mirroring `tpcdi_snowflake`:
+Connection details live in a `tpcdi_redshift` Databricks secret scope (mirrors `tpcdi_snowflake`), with these keys:
 
-| key | value |
+| key | example |
 |---|---|
-| `host` | `xsmall-8rpu-workgroup.<account-id>.us-west-2.redshift-serverless.amazonaws.com` |
+| `host` | `<workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com` |
 | `port` | `5439` |
 | `database` | `dev` |
-| `user` | `admin` |
-| `password` | (the actual password — TODO: rotate to a service account) |
-| `iam_role` | `arn:aws:iam::<account-id>:role/tpcds-redshift` |
+| `user` | a Redshift service account |
+| `password` | that account's password |
+| `iam_role` | `arn:aws:iam::<account-id>:role/<role-name>` |
 
-`_rs_conn.py` reads these and exposes a `rs_connect()` factory that
-returns either a `jaydebeapi` connection (matching Srilekha's pattern)
-or a `psycopg2` connection — TBD which.
+`_rs_conn.py` reads these and exposes a `rs_connect()` factory returning a `psycopg2` connection (dbt-redshift uses psycopg2 under the hood, so connection semantics match what dbt will see).
 
 dbt-redshift's `profiles.yml` template:
 
@@ -225,60 +214,22 @@ per-task / per-batch breakdown the SF / BQ metrics scripts produce.
 
 ## Per-batch bronze ingestion (the second biggest difference)
 
-The three other engines all have a different bronze read path:
+The other three engines each have their own bronze read path:
 
 - Databricks: `read_files(volume_path, format=>csv, schema=>'...', ...)`
 - Snowflake: positional `$1::T` over `@stage/path/{batch_date}/File.txt`
 - BigQuery: external table over wildcard GCS prefix
 
-Redshift's option set:
+Redshift loads with `COPY` into the native bronze tables, and the COPY runs **inside the dbt run as a pre_hook** on each bronze model (macro `rs_bronze_copy_prehook`, in `dbt/macros/rs_bronze_copy_prehook.sql`).
+Per batch, each bronze model's pre_hook creates a temp table `LIKE` the bronze target, `COPY`s that day's CSV from S3 into it, then the model body `INSERT`s into the persistent bronze table (dbt `append` strategy).
 
-### Option A (recommended): per-batch COPY into bronze, dbt as orchestrator
+Keeping the COPY inside dbt (rather than a separate load task) means bronze ingestion is billed on the same Redshift compute as silver+gold, so the per-batch cost is apples-to-apples with the other engines.
+The COPY still surfaces in `SYS_LOAD_HISTORY` / `SYS_QUERY_HISTORY` for per-step timing.
 
-Pre-batch step (in `simulate_filedrops_rs.py` or a separate
-`load_bronze_rs.py` notebook) issues 7 `COPY` statements against
-Redshift to load `s3://.../sf={sf}/{Dataset}/_pdate={batch_date}/*.csv`
-into the bronze tables.
+`setup_rs.py` pre-creates the 6 streaming bronze tables empty so the pre_hook's `CREATE TEMP TABLE ... (LIKE this)` has a schema to copy.
+`bronzedailymarket` is the exception: setup_rs CTAS's it from staging with a year of history for the FactMarketHistory MIN/MAX lookback.
 
-```sql
-COPY {wh_db}_{sf}.bronzecustomer
-FROM 's3://<your-bucket>/tpcdi/augmented_incremental/_staging/sf={sf}/Customer/_pdate={batch_date}/'
-IAM_ROLE 'arn:aws:iam::<account-id>:role/tpcds-redshift'
-DELIMITER '\001'
-REGION 'us-west-2'
-COMPUPDATE OFF STATUPDATE OFF
-TRUNCATECOLUMNS;
-```
-
-Then dbt's `rs_bronze/*` models are pass-throughs (`SELECT * FROM
-{ self() }` — actually trivially `SELECT * FROM {{ target.schema }}.bronzecustomer`
-which is the COPY target). That gives:
-
-- The COPY is **measured** and surfaces in `SYS_LOAD_HISTORY` and
-  `SYS_QUERY_HISTORY` — comparable to the BQ "Python-load to native
-  table, bronze trivially selects" pattern.
-- Bronze model nodes still exist in the dbt DAG (silver/gold depend on
-  them), so the per-model timing breakdown stays comparable to other
-  engines.
-- One extra task per batch (the COPY notebook) — acceptable, matches
-  what we already pay on the BQ side (the `LOAD DATA FROM FILES` step
-  is also outside dbt).
-
-### Option B: External tables via Spectrum
-
-Redshift Spectrum lets you query S3 directly without loading. Pros:
-zero load step. Cons: Spectrum queries bill via RPU on Serverless (or
-Spectrum slot rates on RA3), runs queries with a hard "external table"
-optimizer barrier (no DISTKEY-based join co-location), and is generally
-slower than COPYing into native. Bronze→silver MERGEs would constantly
-re-scan S3. Skip for performance and apples-to-apples reasons.
-
-### Option C: External tables via federated query / data lake
-
-Same as B essentially. Skip.
-
-**Decision: Option A** for parity with BQ (where the load step is also
-outside dbt) and to avoid Spectrum's optimizer surprises.
+Alternatives considered and rejected: **Spectrum / federated external tables** avoid the load step but bill S3 scans via RPU, impose an external-table optimizer barrier (no DISTKEY join co-location), and would re-scan S3 on every bronze->silver MERGE — slower and not apples-to-apples.
 
 ## SQL dialect translation table (Snowflake → Redshift)
 
@@ -355,15 +306,11 @@ Parent (augmented_redshift_parent):
   cleanup (gated, ALL_DONE)
 
 Child (augmented_redshift_child):
-  simulate_filedrops_rs   (S3 cp daily files into _staging/sf={sf}/...)
-    └─ load_bronze_rs     (7 COPY statements into bronze*)
-    └─ dbt_run            (silver + gold via dbt-redshift)
+  simulate_filedrops_rs   (S3 cp daily files into _dailybatches/{wh_db}_{sf}/...)
+    └─ dbt_run            (bronze COPY pre_hooks + silver + gold via dbt-redshift)
 ```
 
-Three child tasks instead of two because COPY is split out from
-filedrops (the file COPY into Redshift bronze runs in Redshift, not on
-the Databricks cluster). Could merge COPY into simulate_filedrops_rs if
-we want only two tasks — single-notebook simplicity vs metric clarity.
+Two child tasks: the bronze COPY runs inside dbt_run (as a pre_hook on each bronze model), so there's no separate load task — it stays on the same Redshift compute as silver+gold for apples-to-apples cost.
 
 ## RPU sizing (Serverless equivalent of warehouse size)
 
@@ -395,14 +342,14 @@ Mirrors the BQ structure (which has 10 files including PORT_NOTES.md):
 ```
 src/incremental_batches/augmented_incremental/redshift/
   PORT_NOTES.md                   (this file)
-  _rs_conn.py                     (psycopg2 / jaydebeapi factory; reads tpcdi_redshift secret scope)
+  _rs_conn.py                     (psycopg2 connection factory; reads tpcdi_redshift secret scope)
   setup_rs.py                     (per-parent: CTAS 22 tables from tpcdi_staging_sf{sf} → {wh_db}_{sf})
   rs_staging_bootstrap.py         (pure Python module imported inline by setup_rs; self-bootstraps tpcdi_staging_sf{sf})
-  simulate_filedrops_rs.py        (per-batch: cp files into _staging/sf={sf}/{batch_date}/)
-  load_bronze_rs.py               (per-batch: 7 COPYs from _staging into bronze*)
-  run_dbt.py                      (per-batch: shells dbt run --target redshift)
+  simulate_filedrops_rs.py        (per-batch: cp files into _dailybatches/{wh_db}_{sf}/{batch_date}/)
+  run_dbt.py                      (per-batch: runs dbt in-process; bronze COPY pre_hooks + silver + gold)
   teardown_rs.py                  (drop {wh_db}_{sf} schema at end of parent)
   rs_metrics.py                   (SYS_QUERY_HISTORY + SYS_SERVERLESS_USAGE extract)
+  make_staging_share.py           (optional: datashare staging from a producer workgroup to a consumer)
   create_jobs.py                  (Databricks Jobs API JSON for parent + child)
 ```
 
@@ -410,50 +357,26 @@ Plus the `dbt/redshift_models/rs_{bronze,silver,gold}/` tree (16 .sql
 files mirroring the SF/BQ counterparts) and the `dbt_project.yml` +
 `profiles.yml.template` + `macros/query_comment.sql` updates.
 
-## Compute decision: serverless-only on tpcdi-fresh
+## Compute decision: serverless-only
 
-The `tpcdi-fresh` workspace (which owns the UC external volume mapping to the
-S3 bucket Redshift COPYs from) only exposes serverless compute — no interactive
-cluster access. All 3 child-job tasks (`simulate_filedrops_rs`,
-`load_bronze_rs`, `run_dbt`) therefore run on serverless via the workflow
-builder's `serverless_rs` env (deps: `dbt-redshift==1.10.0`, `psycopg2-binary`).
+The workspace that owns the UC external volume (mapping to the S3 bucket Redshift COPYs from) only exposes serverless compute — no interactive cluster access.
+Both child-job tasks (`simulate_filedrops_rs`, `run_dbt`) therefore run on serverless via the workflow builder's `serverless_rs` env (deps: `dbt-core==1.11.8`, `dbt-redshift==1.10.1`, `psycopg2-binary`).
 
-**Known tradeoff:** serverless cold-starts add variable latency (~30-60s per
-child run) that pollutes per-batch timing — documented in
-[[simulate-filedrops-cluster]]. The Redshift port accepts this for now because
-moving to a classic cluster requires a different workspace, which would need
-its own cross-mounting of the UC volume / S3 access. For competitive
-comparisons against other DWHs, factor cold-start into the comparison or
-re-run from a workspace that supports interactive clusters once that becomes
-available.
+**Known tradeoff:** serverless cold-starts add variable latency (~30-60s per child run) that pollutes per-batch timing.
+Moving to a classic cluster would require a different workspace with its own cross-mounting of the UC volume / S3 access, so the port accepts this for now.
+For competitive comparisons, factor cold-start in, or re-run from a workspace that supports interactive clusters.
 
-The workflow builder still accepts an `interactive_cluster_id` parameter for
-forward compatibility — passing it switches all 3 child tasks to that classic
-cluster and skips the serverless env definition.
+The workflow builder still accepts an `interactive_cluster_id` parameter for forward compatibility — passing it switches both child tasks to that classic cluster and skips the serverless env definition.
 
-## Open questions for plumbing phase
+## Operational notes
 
-- **Secret rotation:** the `admin/PerfEng27Redshift` from Srilekha's
-  notebook needs to move to the secret scope and rotate to a service
-  account. Who owns the workgroup admin?
-- **S3 IAM-role attachment to the Serverless workgroup.** COPY needs
-  the workgroup to ASSUME the IAM role. Already in place per Srilekha's
-  successful read — verify the role's trust policy includes the
-  workgroup's principal, not just an example.
-- **dbt-redshift adapter version.** Latest is 1.10+ with native MERGE
-  support. Pin to 1.10.x to align with the dbt-databricks pin
-  (1.11.7) and avoid version-skew bugs.
-- **Cross-region:** Redshift Serverless workgroup is `us-west-2`; the S3
-  bucket `tpcds-datasets/<your-prefix>_tpcdi/` is in us-west-2 per the
-  IAM-role region match. ✅ no cross-region transfer.
-- **Encoding (RESOLVED):** `augmented_staging/_stage_ingestion.py:29` writes
-  `delimiter="|"` for CSV by default. Srilekha's `\001` test was a one-off
-  with a different upstream — not what production datagen produces. Use
-  `|` for Redshift `COPY ... DELIMITER '|'`. Uncompressed CSV (no codec
-  set on the Spark write side); Redshift COPY handles that natively.
-- **`STL_LOAD_ERRORS` vs `SYS_LOAD_ERROR_DETAIL`.** Serverless uses
-  `SYS_LOAD_ERROR_DETAIL` for COPY errors. Surface these in
-  `load_bronze_rs.py`'s on-error path.
+- **Credentials:** connection creds (host, port, database, user, password, iam_role) come from the `tpcdi_redshift` secret scope — never hardcode them.
+Use a service account rather than the workgroup admin.
+- **S3 IAM role:** COPY requires the Serverless workgroup to assume the IAM role, so the role's trust policy must include the workgroup's principal.
+- **dbt versions:** `dbt-core==1.11.8` + `dbt-redshift==1.10.1` (the dbt Cloud "compatible track" pairing for Redshift; keep in sync with `run_dbt.py`).
+- **Cross-region:** keep the Serverless workgroup and the S3 bucket in the same region — the COPY IAM-role match assumes it, and it avoids cross-region transfer.
+- **Delimiter:** `augmented_staging/_stage_ingestion.py` writes uncompressed CSV with `delimiter="|"`, so the pre_hook uses `COPY ... DELIMITER '|'`.
+- **COPY errors:** Serverless reports COPY failures in `SYS_LOAD_ERROR_DETAIL` (not `STL_LOAD_ERRORS`).
 
 ## Validation plan (parallel to BQ #96)
 
