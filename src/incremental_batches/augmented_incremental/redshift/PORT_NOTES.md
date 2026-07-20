@@ -1,0 +1,470 @@
+# dbt-Redshift port — research notes
+
+Pre-implementation reference for porting the 16-model augmented-incremental
+dbt project from Databricks / Snowflake / BigQuery to Amazon Redshift
+Serverless. Same pattern as the BQ port: research → scaffold → port models
+→ smoke at SF=10 → scale.
+
+Validated up front (Srilekha's "Test Redshift read" notebook):
+
+- Workgroup: `xsmall-8rpu-workgroup` (Redshift Serverless, us-west-2,
+  account `384416317380`, default database `dev`)
+- JDBC: `jdbc:redshift://xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com:5439/dev`
+- IAM role for S3 reads: `arn:aws:iam::384416317380:role/tpcds-redshift`
+- `COPY` from `s3://tpcds-datasets/shannon_tpcdi/augmented_incremental/_staging/sf=10/Customer/...`
+  with `IAM_ROLE`, `DELIMITER '\001'` works — same S3 path the Spark
+  datagen already writes to from `tpcdi-fresh`.
+
+Orchestrator: same as the SF and BQ ports — `tpcdi-fresh` workspace
+(`https://dbc-08fc9045-faef.cloud.databricks.com/`). It owns the UC
+external-location volume on `s3://tpcds-datasets/shannon_tpcdi/`, so the
+365 daily filedrop CSVs are already on S3 in the same region as the
+Redshift workgroup — no cross-region egress.
+
+## Project layout
+
+Match the existing per-engine tree pattern:
+
+```
+dbt/
+  models/                   (databricks)
+  snowflake_models/sf_*     (snowflake)
+  bigquery_models/bq_*      (bigquery)
+  redshift_models/rs_*      (redshift)         <-- new
+```
+
+`dbt_project.yml` adds a fourth config block gated on
+`target.type == 'redshift'`. `rs_bronze` / `rs_silver` / `rs_gold` subdir
+names mirror the BQ + SF prefix discipline so dbt's config resolution
+doesn't double-apply.
+
+```yaml
+# new in dbt_project.yml
+rs_bronze:
+  +enabled: "{{ target.type == 'redshift' }}"
+  +materialized: incremental
+  +incremental_strategy: append    # see "insert_overwrite" notes below
+  +on_schema_change: ignore
+rs_silver:
+  +enabled: "{{ target.type == 'redshift' }}"
+  +materialized: incremental
+  +incremental_strategy: merge     # Redshift MERGE (GA 2023+)
+  +on_schema_change: ignore
+rs_gold:
+  +enabled: "{{ target.type == 'redshift' }}"
+  +materialized: incremental
+  +on_schema_change: ignore
+```
+
+## Adapter feature parity
+
+The matrix expanded for Redshift:
+
+| Config / feature | Databricks | Snowflake | BigQuery | Redshift | Notes |
+|---|---|---|---|---|---|
+| `merge` strategy | ✅ | ✅ | ✅ | ✅ (2023+) | dbt-redshift uses Redshift's native MERGE statement (`MERGE INTO target USING source ON ... WHEN MATCHED ... WHEN NOT MATCHED ...`). Honors `unique_key`, `merge_update_columns`, `incremental_predicates`. |
+| `insert_overwrite` | ✅ | ✅ (fallback) | ✅ (metadata partition swap) | ✅ via `delete+insert` | dbt-redshift implements `delete+insert` strategy — DELETE the target rows matching `unique_key`, then INSERT the new ones. NOT a metadata-only partition swap; physically rewrites blocks. Bronze can use either `append` or `delete+insert`. |
+| `append` | ✅ | ✅ | ✅ | ✅ | Bronze tables, no change. |
+| **Zero-copy clone** | DEEP CLONE | CREATE TABLE … CLONE | CREATE TABLE … CLONE | ❌ **No native zero-copy clone.** Datashares are read-only. | This is the biggest structural difference. The "setup-owns-layout via CLONE from `STAGING_SF{sf}`" pattern can't carry over verbatim — see "No-clone workaround" section below. |
+| Auto-optimize / cluster | Liquid + setup-owned | auto-cluster + setup-owned | Auto-clustering on `cluster_by`, free | DISTKEY (data distribution across nodes) + SORTKEY (column-major zone maps) | Both declared at CREATE TABLE time; **immutable** without recreate. Redshift Serverless still has the concept of distribution under the hood. |
+| Transient / temp | n/a | `+transient: false` | n/a | n/a | No equivalent setting. |
+
+## No-clone workaround (the central decision)
+
+The Snowflake and BQ ports both rely on:
+
+```
+{project_or_db}.tpcdi_staging_sf{sf}   <-- one-time materialized once per SF
+        │
+        ▼ CLONE on every parent run (zero-copy, instant)
+{project_or_db}.{wh_db}_{sf}            <-- per-run starting point
+```
+
+That guarantees every parent run starts from a clean, layout-correct
+snapshot of the 22 historical/reference tables. Redshift has no such
+mechanism. Three options ranked from best to worst:
+
+### Option A (recommended): CTAS-based reset, paid once per parent run
+
+Per-run setup does `CREATE TABLE {wh_db}_{sf}.<t> AS SELECT * FROM tpcdi_staging_sf{sf}.<t>` for each of the 22 tables, **including the DISTKEY/SORTKEY declarations**. This is a real materialization, but:
+
+- Tables are small relative to facts (largest is `dimcustomer` ≈ 4-10 M rows at SF=20k).
+- All 22 in parallel via separate JDBC threads from the setup notebook.
+- Cost is roughly equivalent to running 22 medium INSERT statements once per parent run. At SF=20k, expect ~1-3 min total.
+
+This keeps the setup-owns-layout invariant exactly the same as BQ/SF —
+dbt models declare zero DDL.
+
+### Option B: `CREATE TABLE LIKE` + `INSERT INTO ... SELECT`
+
+Splits structure (instant) from data (the same materialization). No real
+benefit over (A), just two statements per table. Skip.
+
+### Option C: Datashare from a producer cluster
+
+Read-only, can't be used as the dbt target. Could work for the staging
+source but adds a second cluster to manage. Overkill.
+
+**Decision: go with (A).** Document the "one CTAS per table per parent
+run" cost explicitly; it shows up in the per-batch cost numbers as a
+small per-parent overhead, not per-batch.
+
+## DISTKEY / SORTKEY strategy
+
+Both are declared at CREATE TABLE time. Once set, can't be ALTERed —
+have to recreate. The setup notebook owns this; dbt models declare no
+table-level layout. Per-table:
+
+| Table | DISTKEY | SORTKEY (≤ 4 cols, compound) | Notes |
+|---|---|---|---|
+| `dimcustomer` | `customerid` | `enddate, customerid` | Most queries probe by customerid or filter on iscurrent/enddate. Distribute by customerid for join co-location; SORTKEY hot range first. |
+| `dimaccount` | `accountid` | `enddate, accountid` | Symmetric with dimcustomer. |
+| `dimtrade` | `sk_securityid` | `sk_closedateid, sk_brokerid, sk_securityid` | Fact-side joins on sk_securityid (factholdings, factmarkethistory). Sort-prune on close date for time-range queries. |
+| `factwatches` | `sk_customerid` | `sk_dateid_dateremoved, sk_customerid, sk_securityid` | SCD2 update flips `removed` — sort key gets stale fast; rely on per-batch sort+vacuum off-hours (or AUTO TABLE OPTIMIZATION on Serverless). |
+| `factmarkethistory` | `sk_securityid` | `sk_dateid, sk_securityid, sk_companyid` | The bigger one. Sort by sk_dateid keeps time-window prior-year scans selective. |
+| `factholdings` | `sk_customerid` | `sk_dateid, sk_customerid, sk_securityid` | Distributed on customerid keeps `factcashbalances` join co-located. |
+| `factcashbalances` | `sk_customerid` | `sk_dateid, sk_customerid` | Co-locate with factholdings. |
+| `currentaccountbalances` | `customerid` | `customerid` | Small snapshot — DISTSTYLE ALL might actually be better; small table, every node gets a copy, all joins local. Decide after first benchmark run. |
+
+**Bronze tables:** skip DISTKEY (DISTSTYLE EVEN or AUTO is fine — these
+are append-mostly and read once per batch). SORTKEY on the date column
+the bronze model filters on (`update_dt` / `event_dt` / `dm_date`).
+
+**`DISTSTYLE ALL` candidates:** `currentaccountbalances`, `dimbroker`,
+small dim/reference tables under ~5 M rows. Worth flagging in setup.
+
+## Auth & profile
+
+Srilekha's notebook uses hardcoded `admin / PerfEng27Redshift`. Move to a
+`tpcdi_redshift` Databricks secret scope, mirroring `tpcdi_snowflake`:
+
+| key | value |
+|---|---|
+| `host` | `xsmall-8rpu-workgroup.384416317380.us-west-2.redshift-serverless.amazonaws.com` |
+| `port` | `5439` |
+| `database` | `dev` |
+| `user` | `admin` |
+| `password` | (the actual password — TODO: rotate to a service account) |
+| `iam_role` | `arn:aws:iam::384416317380:role/tpcds-redshift` |
+
+`_rs_conn.py` reads these and exposes a `rs_connect()` factory that
+returns either a `jaydebeapi` connection (matching Srilekha's pattern)
+or a `psycopg2` connection — TBD which.
+
+dbt-redshift's `profiles.yml` template:
+
+```yaml
+dbt_augmented_incremental:
+  target: redshift
+  outputs:
+    redshift:
+      type: redshift
+      method: database         # password-based (TODO: switch to IAM later)
+      host: "{{ env_var('REDSHIFT_HOST') }}"
+      port: 5439
+      dbname: "{{ env_var('REDSHIFT_DATABASE') }}"
+      schema: "{{ env_var('DBT_SCHEMA') }}"        # = {wh_db}_{sf}
+      user: "{{ env_var('REDSHIFT_USER') }}"
+      password: "{{ env_var('REDSHIFT_PASSWORD') }}"
+      threads: 8
+      ra3_node: true
+      connect_timeout: 30
+      sslmode: require
+```
+
+(`ra3_node: true` doesn't apply to Serverless but doesn't hurt; dbt
+ignores it on Serverless workgroups. Skip if dbt-redshift's latest
+adapter complains about it.)
+
+`run_dbt.py` (analog of SF/BQ) reads the scope, exports env vars, shells
+out to `dbt run --target redshift`. Same pattern as `_sf_conn.py` /
+`_bq_conn.py`.
+
+## Cost attribution (Redshift's equivalent of QUERY_TAG / job labels)
+
+Redshift Serverless has two attribution mechanisms:
+
+1. **`SET query_group = '...'`** — session-level string tag. Lands in
+   `SYS_QUERY_HISTORY.query_label`. We set this once per dbt session via
+   the `query-comment` macro mechanism, embedding a JSON blob:
+
+   ```yaml
+   # dbt_project.yml
+   query-comment:
+     comment: "{{ query_comment(node) }}"
+     append: true     # appends as SQL comment; query_group set separately
+   ```
+
+   ```jinja
+   {# macros/query_comment.sql — add Redshift branch #}
+   {% macro query_comment(node) %}
+     {%- if target.type == 'redshift' -%}
+       {# Redshift truncates query_group at 320 chars; keep it terse #}
+       {{- '/* ' ~ tojson({
+         'wh_db': var('wh_db'),
+         'scale_factor': var('scale_factor'),
+         'batch_date': var('batch_date'),
+         'task': 'dbt_run',
+       }) ~ ' */' -}}
+     {%- elif target.type == 'snowflake' -%}
+       ...
+     {%- endif -%}
+   {% endmacro %}
+   ```
+
+   A dbt `on-run-start` hook sets `SET query_group = '...'` once per
+   invocation. The hook reads vars + builds the string.
+
+2. **`SYS_QUERY_HISTORY` system view** — the canonical query-history
+   surface on Serverless. Has `query_text`, `query_label` (from
+   query_group), `elapsed_time`, `execution_time`, `compile_time`, etc.
+
+`rs_metrics.py` reads `SYS_QUERY_HISTORY` (joined with
+`SYS_SERVERLESS_USAGE` for RPU consumption) and emits the same
+per-task / per-batch breakdown the SF / BQ metrics scripts produce.
+
+## Per-batch bronze ingestion (the second biggest difference)
+
+The three other engines all have a different bronze read path:
+
+- Databricks: `read_files(volume_path, format=>csv, schema=>'...', ...)`
+- Snowflake: positional `$1::T` over `@stage/path/{batch_date}/File.txt`
+- BigQuery: external table over wildcard GCS prefix
+
+Redshift's option set:
+
+### Option A (recommended): per-batch COPY into bronze, dbt as orchestrator
+
+Pre-batch step (in `simulate_filedrops_rs.py` or a separate
+`load_bronze_rs.py` notebook) issues 7 `COPY` statements against
+Redshift to load `s3://.../sf={sf}/{Dataset}/_pdate={batch_date}/*.csv`
+into the bronze tables.
+
+```sql
+COPY {wh_db}_{sf}.bronzecustomer
+FROM 's3://tpcds-datasets/shannon_tpcdi/augmented_incremental/_staging/sf={sf}/Customer/_pdate={batch_date}/'
+IAM_ROLE 'arn:aws:iam::384416317380:role/tpcds-redshift'
+DELIMITER '\001'
+REGION 'us-west-2'
+COMPUPDATE OFF STATUPDATE OFF
+TRUNCATECOLUMNS;
+```
+
+Then dbt's `rs_bronze/*` models are pass-throughs (`SELECT * FROM
+{ self() }` — actually trivially `SELECT * FROM {{ target.schema }}.bronzecustomer`
+which is the COPY target). That gives:
+
+- The COPY is **measured** and surfaces in `SYS_LOAD_HISTORY` and
+  `SYS_QUERY_HISTORY` — comparable to the BQ "Python-load to native
+  table, bronze trivially selects" pattern.
+- Bronze model nodes still exist in the dbt DAG (silver/gold depend on
+  them), so the per-model timing breakdown stays comparable to other
+  engines.
+- One extra task per batch (the COPY notebook) — acceptable, matches
+  what we already pay on the BQ side (the `LOAD DATA FROM FILES` step
+  is also outside dbt).
+
+### Option B: External tables via Spectrum
+
+Redshift Spectrum lets you query S3 directly without loading. Pros:
+zero load step. Cons: Spectrum queries bill via RPU on Serverless (or
+Spectrum slot rates on RA3), runs queries with a hard "external table"
+optimizer barrier (no DISTKEY-based join co-location), and is generally
+slower than COPYing into native. Bronze→silver MERGEs would constantly
+re-scan S3. Skip for performance and apples-to-apples reasons.
+
+### Option C: External tables via federated query / data lake
+
+Same as B essentially. Skip.
+
+**Decision: Option A** for parity with BQ (where the load step is also
+outside dbt) and to avoid Spectrum's optimizer surprises.
+
+## SQL dialect translation table (Snowflake → Redshift)
+
+Most of the BQ translation table also applies; the deltas are:
+
+| Snowflake | Redshift | Notes |
+|---|---|---|
+| `to_char(d, 'YYYYMMDD')` | `TO_CHAR(d, 'YYYYMMDD')` | Same syntax. ✅ |
+| `to_char(d, 'HH24MISS')` | `TO_CHAR(d, 'HH24MISS')` | ✅ |
+| `to_date(ts)` | `TRUNC(ts)` or `CAST(ts AS DATE)` | `TO_DATE(string)` exists but takes string, not timestamp |
+| `::number` / `::int` / `::float` | `::numeric` / `::int` / `::float8` | Cast shorthand works; type names differ |
+| `iff(c, t, f)` | `DECODE(c, true, t, f)` or `CASE WHEN c THEN t ELSE f END` | No IF/IFF — use DECODE or CASE |
+| `decode(val, k1, v1, ...)` | `DECODE(val, k1, v1, ...)` | ✅ same syntax |
+| `object_construct('k', v, ...)` | **`JSON_OBJECT('k': v, ...)` (RS 2023+)** or build via JSON_PARSE/CONCAT | Redshift SUPER type. Less ergonomic than SF VARIANT. |
+| `max_by(object_construct(...), key)` | Subquery with `ROW_NUMBER() OVER (PARTITION BY ... ORDER BY key DESC) = 1` | No MAX_BY in Redshift. Falls back to window. |
+| `:field::type` access | `s.k::type` on SUPER, or pre-extract into columns | SUPER access syntax is similar but less universally supported |
+| `div0(a, b)` | `CASE WHEN b = 0 THEN 0 ELSE a/b END` or `NULLIF(b, 0)` | No DIV0; matches BQ's lack of it |
+| `IDENTIFIER(:catalog \|\| '.' \|\| ...)` | `"{{ var('catalog') }}"."{{ var('schema') }}".tbl` | Double-quote identifiers; dotted FQN |
+| `current_timestamp()` | `CURRENT_TIMESTAMP` (no parens) or `GETDATE()` | Drop parens — Redshift parses `current_timestamp` as keyword |
+| `dateadd(day, -n, d)` | `DATEADD(day, -n, d)` | ✅ same syntax (PostgreSQL-compatible) |
+| `GROUP BY ALL` | Spell columns out | Not supported |
+| `SELECT * EXCLUDE col` | Spell columns out | Not supported in Redshift |
+| `transient` table | n/a | Ignore |
+| `LIMIT (expr)` | `LIMIT <integer literal>` | Same restriction as Snowflake — pre-compute in Python before embedding |
+| `QUALIFY` | Wrap in subquery + WHERE | Not supported; standard workaround |
+
+The **biggest model-translation pain** vs SF/BQ:
+
+- No `QUALIFY` → every silver MERGE that uses `QUALIFY ROW_NUMBER() = 1`
+  needs an extra subquery layer
+- No `IFF` → every `iff(...)` becomes a `CASE WHEN`
+- `MAX_BY(struct)` → window function rewrite (same as BQ but Redshift's
+  ARRAY_AGG ordering semantics are slightly different)
+- No `SELECT * EXCEPT` — every dim/fact projection that uses it has to
+  spell columns out
+
+## Models that need the most translation work (delta from BQ port)
+
+Same five clusters as BQ, plus Redshift-specific overhead:
+
+1. **dimtrade** — already heaviest; gains `DECODE` (still fine) but loses
+   `IFF`/`QUALIFY` simplifications.
+2. **factmarkethistory** — `max_by(struct(...))` → window function;
+   `div0` → `CASE/NULLIF`; prior-year window scan stays the same shape.
+3. **factwatches** — `GROUP BY ALL` → explicit (same fix as BQ).
+4. **dimcustomer / dimaccount** — `iff` → `CASE`, `SELECT * EXCEPT(...)`
+   → spell columns.
+5. **All 7 bronze** — schema lives in setup notebook (COPY DDL); dbt
+   models are trivial pass-throughs.
+
+## Per-batch staging "clone" workaround (in setup_rs.py)
+
+Translated from the SF / BQ pattern but with CTAS instead of CLONE:
+
+- `rs_staging_bootstrap.py` — pure Python module imported inline by setup_rs.py; one-time per SF load of Databricks staging
+  → S3 (UNLOAD-shape via Spark), then COPY into
+  `tpcdi_staging_sf{sf}.<table>` with DISTKEY/SORTKEY declared at
+  CREATE. ~10-20 min at SF=20k (~150 GB of staging data).
+- `setup_rs.py` — per-parent: CTAS from `tpcdi_staging_sf{sf}.<t>` →
+  `{wh_db}_{sf}.<t>`, re-declaring DISTKEY/SORTKEY. ~1-3 min at SF=20k.
+
+The CTAS pattern carries the layout because Redshift's `CREATE TABLE
+AS` accepts `DISTKEY (col) SORTKEY (cols...)` in the same DDL.
+
+## Workflow shape (`augmented_redshift.py`)
+
+Mirrors `augmented_snowflake.py`:
+
+```
+Parent (augmented_redshift_parent):
+  setup_rs                        (interactive cluster)
+    └─ for_each_task loop over batch_date_ls
+         └─ Child job per batch_date
+  cleanup (gated, ALL_DONE)
+
+Child (augmented_redshift_child):
+  simulate_filedrops_rs   (S3 cp daily files into _staging/sf={sf}/...)
+    └─ load_bronze_rs     (7 COPY statements into bronze*)
+    └─ dbt_run            (silver + gold via dbt-redshift)
+```
+
+Three child tasks instead of two because COPY is split out from
+filedrops (the file COPY into Redshift bronze runs in Redshift, not on
+the Databricks cluster). Could merge COPY into simulate_filedrops_rs if
+we want only two tasks — single-notebook simplicity vs metric clarity.
+
+## RPU sizing (Serverless equivalent of warehouse size)
+
+`xsmall-8rpu-workgroup` = 8 RPU base. Redshift Serverless auto-scales.
+For comparability with the BQ port (where slot allocation is dynamic)
+and SF port (where warehouse size is explicit), default to **leaving
+auto-scaling on with `MaxRPU` set explicitly per SF** instead of
+forcing a fixed RPU. See `_dbt_wh_size()` in
+`generate_benchmark_workflow.py` for the SF / BQ / SDP precedent.
+
+Suggested MaxRPU (decide after first run):
+
+| Scale factor | MaxRPU |
+|---|---|
+| SF=10 | 8 (current workgroup default) |
+| SF=100 | 16 |
+| SF=1000 | 32 |
+| SF=10000 | 64 |
+| SF=20000 | 128 |
+
+The 8 RPU base matches Snowflake's BARROW_XS_GEN2 + BQ's small slot
+reservation in compute units (rough approximation; not 1:1 with slot
+hours).
+
+## Tooling files to create
+
+Mirrors the BQ structure (which has 10 files including PORT_NOTES.md):
+
+```
+src/incremental_batches/augmented_incremental/redshift/
+  PORT_NOTES.md                   (this file)
+  _rs_conn.py                     (psycopg2 / jaydebeapi factory; reads tpcdi_redshift secret scope)
+  setup_rs.py                     (per-parent: CTAS 22 tables from tpcdi_staging_sf{sf} → {wh_db}_{sf})
+  rs_staging_bootstrap.py         (pure Python module imported inline by setup_rs; self-bootstraps tpcdi_staging_sf{sf})
+  simulate_filedrops_rs.py        (per-batch: cp files into _staging/sf={sf}/{batch_date}/)
+  load_bronze_rs.py               (per-batch: 7 COPYs from _staging into bronze*)
+  run_dbt.py                      (per-batch: shells dbt run --target redshift)
+  teardown_rs.py                  (drop {wh_db}_{sf} schema at end of parent)
+  rs_metrics.py                   (SYS_QUERY_HISTORY + SYS_SERVERLESS_USAGE extract)
+  create_jobs.py                  (Databricks Jobs API JSON for parent + child)
+```
+
+Plus the `dbt/redshift_models/rs_{bronze,silver,gold}/` tree (16 .sql
+files mirroring the SF/BQ counterparts) and the `dbt_project.yml` +
+`profiles.yml.template` + `macros/query_comment.sql` updates.
+
+## Compute decision: serverless-only on tpcdi-fresh
+
+The `tpcdi-fresh` workspace (which owns the UC external volume mapping to the
+S3 bucket Redshift COPYs from) only exposes serverless compute — no interactive
+cluster access. All 3 child-job tasks (`simulate_filedrops_rs`,
+`load_bronze_rs`, `run_dbt`) therefore run on serverless via the workflow
+builder's `serverless_rs` env (deps: `dbt-redshift==1.10.0`, `psycopg2-binary`).
+
+**Known tradeoff:** serverless cold-starts add variable latency (~30-60s per
+child run) that pollutes per-batch timing — documented in
+[[simulate-filedrops-cluster]]. The Redshift port accepts this for now because
+moving to a classic cluster requires a different workspace, which would need
+its own cross-mounting of the UC volume / S3 access. For competitive
+comparisons against other DWHs, factor cold-start into the comparison or
+re-run from a workspace that supports interactive clusters once that becomes
+available.
+
+The workflow builder still accepts an `interactive_cluster_id` parameter for
+forward compatibility — passing it switches all 3 child tasks to that classic
+cluster and skips the serverless env definition.
+
+## Open questions for plumbing phase
+
+- **Secret rotation:** the `admin/PerfEng27Redshift` from Srilekha's
+  notebook needs to move to the secret scope and rotate to a service
+  account. Who owns the workgroup admin?
+- **S3 IAM-role attachment to the Serverless workgroup.** COPY needs
+  the workgroup to ASSUME the IAM role. Already in place per Srilekha's
+  successful read — verify the role's trust policy includes the
+  workgroup's principal, not just an example.
+- **dbt-redshift adapter version.** Latest is 1.10+ with native MERGE
+  support. Pin to 1.10.x to align with the dbt-databricks pin
+  (1.11.7) and avoid version-skew bugs.
+- **Cross-region:** Redshift Serverless workgroup is `us-west-2`; the S3
+  bucket `tpcds-datasets/shannon_tpcdi/` is in us-west-2 per the
+  IAM-role region match. ✅ no cross-region transfer.
+- **Encoding (RESOLVED):** `augmented_staging/_stage_ingestion.py:29` writes
+  `delimiter="|"` for CSV by default. Srilekha's `\001` test was a one-off
+  with a different upstream — not what production datagen produces. Use
+  `|` for Redshift `COPY ... DELIMITER '|'`. Uncompressed CSV (no codec
+  set on the Spark write side); Redshift COPY handles that natively.
+- **`STL_LOAD_ERRORS` vs `SYS_LOAD_ERROR_DETAIL`.** Serverless uses
+  `SYS_LOAD_ERROR_DETAIL` for COPY errors. Surface these in
+  `load_bronze_rs.py`'s on-error path.
+
+## Validation plan (parallel to BQ #96)
+
+1. Scaffold per-engine tooling + `redshift_models/`. Pre-flight smoke at
+   SF=10 (≤5 min per parent run on 8 RPU).
+2. End-to-end SF=10 with the dbt benchmark variant. Compare row counts
+   per dim/fact against the Databricks dbt variant. Same correctness
+   bar as BQ and SF.
+3. SF=100 + SF=1000 to confirm scaling pattern. Time per task and RPU
+   utilization vs MaxRPU.
+4. SF=10000 anchor run to populate the cross-CDW dashboard.
+
+Same scope discipline as BQ #96 — no SF=20k validation until lower SFs
+are clean.
