@@ -42,7 +42,7 @@ import argparse
 import subprocess
 import sys
 
-PROJECT = "databricks-sandbox-perfeng"
+PROJECT = "REPLACE-ME-bq-project"
 REGION = "region-us-central1"
 DEFAULT_WH_DB = "shannon_aug_bq_dbt"
 DEFAULT_SF = "10"

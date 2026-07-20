@@ -21,7 +21,7 @@ import requests
 
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("catalog",         "databricks-sandbox-perfeng",
+dbutils.widgets.text("catalog",         "REPLACE-ME-bq-project",
                      "Treated as BQ project — same meaning as `catalog` everywhere else")
 dbutils.widgets.text("batch_date",      "")
 dbutils.widgets.text("wh_db",           "")

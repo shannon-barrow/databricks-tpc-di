@@ -34,7 +34,7 @@ dbt_augmented_incremental:
       type: bigquery
       method: service-account
       keyfile: /tmp/bq_sa/sa.json                        # path to a service-account JSON key
-      project: databricks-sandbox-perfeng                # BQ project
+      project: <your-bq-project>                # BQ project
       dataset: dbt_augmented_incremental                 # overridden per-model via generate_schema_name macro
       location: us-central1                              # must match the GCS bucket region
       threads: 8

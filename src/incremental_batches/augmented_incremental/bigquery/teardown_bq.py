@@ -24,7 +24,7 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog",          "databricks-sandbox-perfeng", "BigQuery project")
+dbutils.widgets.text("catalog",          "REPLACE-ME-bq-project", "BigQuery project")
 dbutils.widgets.text("wh_db",            "",                            "wh_db prefix")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"])

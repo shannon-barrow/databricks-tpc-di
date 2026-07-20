@@ -29,7 +29,7 @@ import os, subprocess, sys, json, tempfile
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog",        "databricks-sandbox-perfeng",
+dbutils.widgets.text("catalog",        "REPLACE-ME-bq-project",
                      "Treated as BQ project — same meaning as `catalog` everywhere else")
 dbutils.widgets.text("wh_db",          "")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])

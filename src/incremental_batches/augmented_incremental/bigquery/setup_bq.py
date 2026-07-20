@@ -26,7 +26,7 @@
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog",        "databricks-sandbox-perfeng", "BigQuery project (treated as `catalog`)")
+dbutils.widgets.text("catalog",        "REPLACE-ME-bq-project", "BigQuery project (treated as `catalog`)")
 dbutils.widgets.text("wh_db",          "", "wh_db prefix; final dataset = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
