@@ -371,7 +371,10 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
             Window.orderBy("creation_quarter", "Symbol")) - 1).cast("long"))
         .select("Symbol", "creation_quarter", "deactivation_quarter", "_idx"))
 
-    # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can read it independently of the remaining FINWIRE compute (CMP/FIN union + the 10-25 min text write). This detaches downstream start time from the overall FINWIRE wallclock — previously they waited on f_fw.result(), now they wait on symbols_ready_event set right below.
+    # Stage _symbols to Parquet so Trade/WatchHistory/DailyMarket can start as
+    # soon as symbols are ready, rather than waiting on the rest of the FINWIRE
+    # compute (CMP/FIN union + the 10-25 min text write).
+    # They gate on symbols_ready_event (set just below), not the full stage.
     symbols, _sym_cleanup = disk_cache(symbols, spark, "FINWIRE symbols",
                                         volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg)
     symbols.createOrReplaceTempView("_symbols")
@@ -497,7 +500,11 @@ def generate(spark: SparkSession, cfg, dicts: dict, dbutils, symbols_ready_event
     # =====================================================================
     # Write CMP / SEC / FIN as separate staging dirs (in parallel).
     # =====================================================================
-    # The bronze-layer FINWIRE ingest reads all FINWIRE_*.txt files as a single globbed input and distinguishes record type by the 3-char type code at byte position 16, so it's indifferent to which file contains which subset — we don't need to union CMP/SEC/FIN into one output stream. Splitting lets the 3 writes fan out across executors in parallel, and avoids a 244M-row union + columnar→row that previously dominated the FINWIRE stage.
+    # Write CMP/SEC/FIN as separate files rather than unioning them.
+    # The bronze ingest globs all FINWIRE_*.txt and keys record type off the
+    # 3-char code at byte 16, so it doesn't care which file holds which subset.
+    # Splitting fans the 3 writes across executors and avoids a 244M-row union
+    # + columnar->row that would otherwise dominate the FINWIRE stage.
     max_records = int(128 * 1024 * 1024 / 260)  # ~260 bytes per fixed-width line
 
     # FIN repartition happens earlier, right on cmp_quarters before the crossJoin — see the block there. Doing it here (just before .write) would shuffle after the in-memory 475M-row compute had already been forced onto the narrow spark.range default partitioning, which is what causes the 15GB/task spill. CMP/SEC are small enough to use default partitioning and write directly.

@@ -221,7 +221,14 @@ def _gen_historical(spark, cfg, dbutils):
     n_cncl = del_pu * total_updates
     wh_total_hist = wh_rpu * total_updates
 
-    # Precompute generation sizes (Python side — only ~435 values). Also precompute bijective permutation parameters (b, c) per generation so each generation's ACTV records map to UNIQUE pair_ids via the LCG f(x) = (b*x + c) % new_cp_size (DIGen-style). This eliminates the hash collisions that previously caused ~5-25% WH_ACTIVE drift vs DIGen as scale grew — each record now gets a distinct pair instead of colliding with other records' hashes. `b` must be coprime with new_cp_size; we start from a large odd prime-ish candidate and step until gcd==1.
+    # Precompute generation sizes (Python side — only ~435 values), plus
+    # bijective permutation params (b, c) per generation.
+    # Each generation's ACTV records map to UNIQUE pair_ids via the LCG
+    # f(x) = (b*x + c) % new_cp_size (DIGen-style), so every record gets a
+    # distinct pair instead of colliding — a plain hash collides and drifts
+    # WH_ACTIVE ~5-25% vs DIGen as scale grows.
+    # `b` must be coprime with new_cp_size; start from a large odd candidate
+    # and step until gcd == 1.
     import math as _math
     import random as _rand
     _bc_rng = _rand.Random(seed_for("WH", "bcperm"))
@@ -407,7 +414,11 @@ def _gen_historical(spark, cfg, dbutils):
         .drop("_dd_rn"))
 
     # === Step 6: ACTV + CNCL generation using deterministic hash-based selection ===
-    # Previously used .sample(fraction).limit(target) which is stochastic per-partition and produces slightly different row counts on each re-evaluation (groupBy.count() vs. write_file). That divergence over-counts WH_RECORDS in the audit file by a few hundred rows vs. the actual file, breaking the automated_audit check "FactWatches active watches" (Row count + Inactive watches == cumulative WH_RECORDS). Replacing with a deterministic hash filter: pick rows where hash(c_id|symbol) mod M < cutoff. Count and write see identical rows.
+    # Deterministic selection: keep rows where hash(c_id|symbol) mod M < cutoff.
+    # The count and the write then see identical rows.
+    # (`.sample().limit()` is stochastic per-partition, so count vs. write
+    # diverge by a few hundred rows and break the "FactWatches active watches"
+    # audit check.)
     actv_df = deduped_df.withColumn("w_action", F.lit("ACTV"))
     n_actv = cfg.wh_actv_count
     target_total = cfg.wh_total
