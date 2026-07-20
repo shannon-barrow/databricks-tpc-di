@@ -1,6 +1,6 @@
 # Databricks notebook source
 # MAGIC %md
-# MAGIC # data_gen task: gen_tradehistory (V6 leaf)
+# MAGIC # data_gen task: gen_tradehistory
 # MAGIC
 # MAGIC Reads ``_gen_trade_df`` Delta (produced by ``gen_trade_base``) and
 # MAGIC writes ``TradeHistory.txt`` (B1 only — TH is historical-only).
