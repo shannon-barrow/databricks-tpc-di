@@ -644,7 +644,9 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
         .drop("_rn"))
     all_df = _acct_targets.unionByName(_acct_others)
 
-    # Global one-INACT-per-customer and one-CLOSEACCT-per-account dedups are no longer needed: inact_schedule and close_schedule pre-pick unique C_IDs/CA_IDs across all updates by construction (scan-bijection with set exclusion). No duplicates can exist.
+    # No global INACT/CLOSEACCT dedup needed: inact_schedule and
+    # close_schedule pick unique C_IDs/CA_IDs across all updates by
+    # construction (scan-bijection with set exclusion), so no duplicates exist.
 
     # === Filter out ADDACCTs on the same day as their customer's INACT ===
     # An ADDACCT and INACT for the same customer on the same day would create a same-day conflict when we generate the synthetic CLOSEACCT. Remove the ADDACCT — no point creating an account for a customer being deactivated.
@@ -662,7 +664,14 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
 
     # No cascade CLOSEACCT for INACT'd customers — DIGen's CustomerAccountBlackBox generates Customer DELETE (INACT) and Account DELETE (CLOSEACCT) as independent streams; INACT does not imply that the customer's accounts are closed. Adding cascade closes produced ~+51% CA_CLOSEACCT drift vs DIGen and indirectly suppressed UPDACCTs (Rule 3: no UPDACCT after CLOSEACCT) causing -29.7% CA_UPDACCT drift.
 
-    # Cache all_df — it's used to derive 4 views + the XML write + incrementals. Classic: persist; serverless: Parquet staging. Target ~100MB per XML file — the Databricks native XML reader cannot split XML files, so one file = one ingest task. 128MB files push task runtime too high (7+ min at SF=5000); 100MB keeps ingest parallelism reasonable. maxRecordsPerFile on both parquet staging (for read-back partitioning) and final XML write ensures bounded sizes without an explicit repartition. 580 bytes/row avg at SF=5000, with ~1.35x variance across partitions (largest file observed 157MB vs 116MB avg). To keep MAX file <=128MB we need max_records * worst-case-bytes <= 128MB → 128K records with ~1000 B/row worst case, producing avg ~74MB and max ~120MB. Favors file-count over file-size to stay safely under the XML reader's single-task constraint.
+    # Cache all_df — it feeds 4 views + the XML write + incrementals
+    # (classic: persist; serverless: Parquet staging).
+    #
+    # Cap rows-per-file rather than repartition: the Databricks XML reader
+    # can't split a file, so one file = one ingest task, and file size drives
+    # per-task runtime. Sizing for <=128MB/file (worst-case ~1000 B/row at
+    # SF=5000) lands ~75MB avg / ~120MB max, keeping ingest parallel without
+    # any single task running long.
     _xml_records_per_file = 128 * 1024  # 131K rows → ~75MB avg / ~120MB max
     all_df, _all_df_cleanup = disk_cache(all_df, spark, "CustomerMgmt actions",
                                           volume_path=cfg.volume_path, dbutils=dbutils, cfg=cfg,
@@ -832,7 +841,12 @@ def generate_customermgmt(spark: SparkSession, cfg, dicts: dict, dbutils, views_
     ).text(tmp_path)
     log(f"[CustomerMgmt] XML body written to staging")
 
-    # Step 2: Concat header + body + footer per file using pure-Python I/O. Previously this shelled out to `bash -c "cat hdr src ftr > dst"`; at SF=20000 with ~800 files concat'd in parallel, UC Volume FUSE throws EAGAIN ("Resource temporarily unavailable") on both reads and the output redirect. shell-level retries can't recover a half-written redirect once cat has already failed. Mirror the retry pattern used in utils.py register_copies_from_staging: open dst once, write header bytes, copyfileobj the source in 4MB chunks with per-source retry on OSError, then write footer bytes.
+    # Step 2: concat header + body + footer per file using pure-Python I/O.
+    # Use copyfileobj in 4MB chunks with per-source retry on OSError (same
+    # pattern as utils.register_copies_from_staging).
+    # A shell `cat hdr src ftr > dst` can't be retried safely: UC Volume FUSE
+    # throws EAGAIN under the parallel load at high SF, and a half-written
+    # redirect isn't recoverable once cat has failed.
     xml_header_bytes = b'<?xml version="1.0" encoding="UTF-8"?>\n<TPCDI:Actions xmlns:TPCDI="http://www.tpc.org/tpc-di">\n'
     xml_footer_bytes = b'\n</TPCDI:Actions>\n'
     import shutil, time as _time

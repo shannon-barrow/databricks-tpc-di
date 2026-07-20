@@ -1,8 +1,7 @@
-"""V6: decomposed Trade generation — base + 4 parallel leaves.
+"""Decomposed Trade generation — base + 4 parallel leaves.
 
-Splits the work that today lives inside ``trade._gen_historical_trades``
-across 5 workflow tasks so each Trade-family dataset has its own
-repair-run granularity and writes happen in parallel:
+Splits Trade-family generation across 5 workflow tasks so each dataset has
+its own repair-run granularity and the writes happen in parallel:
 
   materialize_base(spark, cfg, dbutils, dicts) -> writes
     ``_gen_trade_df`` Delta to ``{wh_db}_{sf}_stage`` with the *minimum*
@@ -33,16 +32,8 @@ trades = ~300 GB at SF=20k — expensive to materialize, cheap to
 re-derive in the CT leaf), ``_trade_val``, ``_broker_idx``,
 ``_qty_val``, intermediate offsets.
 
-Inter-leaf state (the original ``_hh_hist_batch{N}``,
-``_ct_hist_batch{N}``, ``_t_submit_hist_batch{N}`` temp views) is
-*not* shared — each leaf computes the equivalent filter directly from
-``base_df``. This eliminates the inter-leaf dependency that would
-otherwise serialize the writes back together.
-
-Trade.py is intentionally left untouched — this is an additive module
-the new task notebooks call instead. Once V6 lands and is validated
-trade.py was deleted in the V8 cleanup pass once this module was the
-sole code path for Trade-family generation.
+Inter-leaf state is *not* shared — each leaf computes its filters directly
+from ``base_df``, so the writes don't serialize back together.
 """
 from datetime import datetime, timedelta
 
@@ -317,11 +308,10 @@ def gen_trade(spark, cfg, dbutils, dicts, base_df):
 
 def _gen_trade_incremental(spark, cfg, dbutils, base_df, *, batch_id: int,
                             n_valid: int, n_brokers: int, num_sec: int):
-    """B2/B3 Trade.txt CDC writer. Mirrors trade._gen_incremental_trades.
+    """B2/B3 Trade.txt CDC writer.
 
-    Originally consumed ``_hh_hist_batch{N}`` and ``_t_submit_hist_batch{N}``
-    temp views produced by sibling write functions; here we filter
-    ``base_df`` directly so the leaf is independent.
+    Filters ``base_df`` directly (rather than depending on sibling writers'
+    temp views) so the leaf runs independently.
     """
     symbols_df = spark.table("_symbols")
     bs = seed_for(f"T_B{batch_id}", "base")
@@ -388,7 +378,7 @@ def _gen_trade_incremental(spark, cfg, dbutils, base_df, *, batch_id: int,
     t_dts_cncl = f"{batch_date_str} 00:00:02"
     t_dts_cmpt = f"{batch_date_str} 00:00:03"
 
-    # CMPT tids — derive from base_df (originally _hh_hist_batch{N}).
+    # CMPT tids — derive from base_df.
     cmpt_tids = (base_df
         .filter(~F.col("_is_canceled"))
         .filter((F.col("_complete_ts") >= F.lit(b_start).cast("long")) &
@@ -398,7 +388,7 @@ def _gen_trade_incremental(spark, cfg, dbutils, base_df, *, batch_id: int,
     upd_cmpt = _build_u_rows(cmpt_tids, F.lit("CMPT"), t_dts_cmpt,
                              dsn_offset=n_new, bs_offset=21)
 
-    # SBMT/CNCL tids — derive from base_df (originally _t_submit_hist_batch{N}).
+    # SBMT/CNCL tids — derive from base_df.
     submit_in_window = (base_df
         .filter(F.col("_is_limit") &
                 (F.col("_submit_ts") >= F.lit(b_start).cast("long")) &
