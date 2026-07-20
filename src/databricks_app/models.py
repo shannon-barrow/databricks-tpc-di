@@ -169,7 +169,7 @@ BIGQUERY_SPEC = EngineSpec(
 
 SNOWFLAKE_SPEC = EngineSpec(
     engine=Engine.SNOWFLAKE,
-    label="Snowflake (UC Iceberg federation)",
+    label="Snowflake",
     secret_scope="tpcdi_snowflake",
     fields=(
         _SCALE_FACTOR,

@@ -73,20 +73,23 @@ if batch_type in COMPETITIVE_BATCH_TYPES:
     if not scope:
         st.stop()
     if scope == "Databricks and Competitors":
-        labels = st.multiselect(
-            "**2a. Which competitors?**",
-            [SPECS[e].label for e in COMPETITIVE_ENGINES],
-            help="Pick one or more. Each runs the same dbt project on its engine.",
-        )
-        if not labels:
+        # Inline checkboxes (not a dropdown) so the selector never overlaps the
+        # next step. Each runs the same dbt project on its engine.
+        st.markdown("**2a. Which competitors?** _(pick one or more)_")
+        competitor_engines = [
+            e for e in COMPETITIVE_ENGINES
+            if st.checkbox(SPECS[e].label, key=f"comp_{e.value}")
+        ]
+        if not competitor_engines:
             st.info("Select at least one competitor to continue.")
             st.stop()
-        competitor_engines = [e for e in COMPETITIVE_ENGINES
-                              if SPECS[e].label in labels]
 else:
     st.markdown("**2.** Databricks run _(competitors are Augmented-Incremental only)_.")
 
 # --- Step 3: Databricks SKU (always — the baseline always runs) --------------
+# Divider gives the multiselect above room to expand without visually
+# overlapping this question.
+st.divider()
 sku = _radio("**3. Which Databricks SKU?**", DBX_SKUS_BY_BATCH[batch_type],
              _SKU_CAPTIONS, help="Filtered to what's valid for this batch type.")
 if not sku:
