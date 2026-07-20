@@ -18,10 +18,43 @@ from models import (
 )
 from backend import backend, USE_MOCK
 
-st.set_page_config(page_title="TPC-DI Guided Builder", layout="centered")
+st.set_page_config(page_title="TPC-DI Guided Builder", layout="centered",
+                   page_icon="🧱")
 
-st.title("TPC-DI Guided Benchmark Builder")
-st.caption("Answer each step; the next one appears based on your choice.")
+# Databricks-flavored styling: lava-red brand accents, a header band, and
+# tighter step framing. Kept in one CSS block so the theme config
+# (.streamlit/config.toml) owns colors and this owns layout polish.
+st.markdown(
+    """
+    <style>
+      /* brand header band */
+      .db-header {
+        background: linear-gradient(90deg, #1B3139 0%, #2D4550 100%);
+        border-left: 6px solid #FF3621;
+        padding: 1.1rem 1.4rem; border-radius: 8px; margin-bottom: 1.25rem;
+      }
+      .db-header h1 { color: #FFFFFF; font-size: 1.6rem; margin: 0; }
+      .db-header p  { color: #C7D0D4; margin: 0.25rem 0 0; font-size: 0.9rem; }
+      /* radio selected dot + primary buttons already use primaryColor */
+      div[data-testid="stForm"] {
+        border: 1px solid #E3E3E3; border-radius: 8px; padding: 1rem 1.2rem;
+      }
+      .stButton>button[kind="primary"] { font-weight: 600; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    """
+    <div class="db-header">
+      <h1>🧱 TPC-DI Benchmark Builder</h1>
+      <p>Guided setup for Databricks & competitive TPC-DI benchmarks.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 if USE_MOCK:
     st.info("Mock mode — nothing is written or created. "
             "Set USE_MOCK_BACKEND=false to emit real workflows.", icon="🧪")

@@ -20,21 +20,35 @@ from databricks.sdk import WorkspaceClient
 
 from models import Engine, EngineSpec
 
-# Repo root, relative to this file: src/databricks_app/ -> repo root.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_PORT_DIR = _REPO_ROOT / "src/incremental_batches/augmented_incremental"
+def _find_dir(marker: str) -> Path:
+    """Walk up from this file to find `marker` (a relative dir path).
+
+    Robust to both layouts: the repo (marker under src/) and a deployed app
+    where the whole src/ tree is uploaded (marker under the app root). Returns
+    the first ancestor that contains `marker`.
+    """
+    here = Path(__file__).resolve()
+    for base in here.parents:
+        cand = base / marker
+        if cand.is_dir():
+            return cand
+    raise RuntimeError(f"could not locate '{marker}' above {here}")
+
+
+_PORT_DIR = _find_dir("incremental_batches/augmented_incremental")
+_TOOLS_DIR = _find_dir("tools")
 
 
 def _load_create(engine: Engine):
     """Import the port's create_jobs module and return its create() fn.
 
     Loaded by file path (the ports aren't a package) so the app doesn't
-    depend on sys.path layout beyond the repo root.
+    depend on a particular sys.path layout.
     """
     sub = {Engine.REDSHIFT: "redshift", Engine.BIGQUERY: "bigquery"}[engine]
     path = _PORT_DIR / sub / "create_jobs.py"
-    # create_jobs adds ../../../tools to sys.path for its builder import.
-    sys.path.insert(0, str(_REPO_ROOT / "src/tools"))
+    # create_jobs imports from workflow_builders, which lives under tools/.
+    sys.path.insert(0, str(_TOOLS_DIR))
     spec = importlib.util.spec_from_file_location(f"{sub}_create_jobs", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
