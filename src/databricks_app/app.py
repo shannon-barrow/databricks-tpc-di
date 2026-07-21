@@ -80,16 +80,28 @@ if USE_MOCK:
 
 SF_OPTIONS = ["10", "100", "1000", "5000", "10000", "20000"]
 
-# Augmented-incremental data footprint per scale factor. Anchored on measured
-# SF=20000 (~500 GB initial incremental tables, ~1.75 GB new raw data per daily
-# batch) and scaled linearly — TPC-DI data volume is linear in scale factor.
-_SF_CAPTIONS = {
+# Data footprint per scale factor. TPC-DI data volume is linear in scale
+# factor, so both maps are anchored on one measured point and scaled linearly.
+#
+# Augmented incremental: measured SF=20000 = ~500 GB initial incremental tables
+# + ~1.75 GB new raw data per daily batch.
+_SF_CAPTIONS_AUGMENTED = {
     "10":    "Incremental tables start at ~250 MB total; each daily batch adds ~0.9 MB of new raw data.",
     "100":   "Incremental tables start at ~2.5 GB total; each daily batch adds ~9 MB of new raw data.",
     "1000":  "Incremental tables start at ~25 GB total; each daily batch adds ~90 MB of new raw data.",
     "5000":  "Incremental tables start at ~125 GB total; each daily batch adds ~440 MB of new raw data.",
     "10000": "Incremental tables start at ~250 GB total; each daily batch adds ~875 MB of new raw data.",
     "20000": "Incremental tables start at ~500 GB total; each daily batch adds ~1.75 GB of new raw data.",
+}
+# Single-batch / incremental: the full raw dataset is processed. Anchored on
+# SF=10000 = ~1 TB of raw data.
+_SF_CAPTIONS_RAW = {
+    "10":    "~1 GB of raw data to process.",
+    "100":   "~10 GB of raw data to process.",
+    "1000":  "~100 GB of raw data to process.",
+    "5000":  "~500 GB of raw data to process.",
+    "10000": "~1 TB of raw data to process.",
+    "20000": "~2 TB of raw data to process.",
 }
 
 # Context lines shown under each choice (st.radio captions).
@@ -166,11 +178,18 @@ else:
 
 # --- Step 4: scale factor ----------------------------------------------------
 # Vertical (captioned) so each SF can show its data-footprint sentence. The
-# footprint sizing is for the augmented-incremental workload; shown regardless
-# of run type since it's a useful order-of-magnitude either way.
-scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _SF_CAPTIONS)
-st.caption("Data footprint shown is for the augmented-incremental workload; "
-           "TPC-DI data volume scales linearly with the scale factor.")
+# footprint differs by run type: augmented incremental starts from a historical
+# table set + streams small daily batches, whereas single-batch / incremental
+# processes the full raw dataset.
+_is_augmented = batch_type == "Augmented Incremental"
+_sf_captions = _SF_CAPTIONS_AUGMENTED if _is_augmented else _SF_CAPTIONS_RAW
+scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _sf_captions)
+st.caption(
+    ("Footprint is for the augmented-incremental workload (initial tables + "
+     "per-batch new data)." if _is_augmented else
+     "Footprint is the full raw dataset processed by a single-batch / "
+     "incremental run.")
+    + " TPC-DI data volume scales linearly with the scale factor.")
 if not scale_factor:
     st.stop()
 
