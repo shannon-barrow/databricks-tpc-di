@@ -80,6 +80,18 @@ if USE_MOCK:
 
 SF_OPTIONS = ["10", "100", "1000", "5000", "10000", "20000"]
 
+# Augmented-incremental data footprint per scale factor. Anchored on measured
+# SF=20000 (~500 GB initial incremental tables, ~1.75 GB new raw data per daily
+# batch) and scaled linearly — TPC-DI data volume is linear in scale factor.
+_SF_CAPTIONS = {
+    "10":    "Incremental tables start at ~250 MB total; each daily batch adds ~0.9 MB of new raw data.",
+    "100":   "Incremental tables start at ~2.5 GB total; each daily batch adds ~9 MB of new raw data.",
+    "1000":  "Incremental tables start at ~25 GB total; each daily batch adds ~90 MB of new raw data.",
+    "5000":  "Incremental tables start at ~125 GB total; each daily batch adds ~440 MB of new raw data.",
+    "10000": "Incremental tables start at ~250 GB total; each daily batch adds ~875 MB of new raw data.",
+    "20000": "Incremental tables start at ~500 GB total; each daily batch adds ~1.75 GB of new raw data.",
+}
+
 # Context lines shown under each choice (st.radio captions).
 _BATCH_CAPTIONS = {
     "Single Batch": "Load all history in one pass.",
@@ -153,8 +165,12 @@ else:
             st.stop()
 
 # --- Step 4: scale factor ----------------------------------------------------
-scale_factor = st.radio("**4. Scale factor?**", SF_OPTIONS, index=None,
-                        horizontal=True)
+# Vertical (captioned) so each SF can show its data-footprint sentence. The
+# footprint sizing is for the augmented-incremental workload; shown regardless
+# of run type since it's a useful order-of-magnitude either way.
+scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _SF_CAPTIONS)
+st.caption("Data footprint shown is for the augmented-incremental workload; "
+           "TPC-DI data volume scales linearly with the scale factor.")
 if not scale_factor:
     st.stop()
 
