@@ -9,6 +9,9 @@ inputs a native run can just default. The wizard collects those, shows the
 defaults for review, writes any secrets to the target scope, and emits the
 workflow via each port's create_jobs.create().
 """
+import base64
+from pathlib import Path
+
 import streamlit as st
 
 from models import (
@@ -21,19 +24,15 @@ from backend import backend, USE_MOCK
 st.set_page_config(page_title="TPC-DI Guided Builder", layout="centered",
                    page_icon="📊")
 
-# Databricks logomark, inline SVG (no external fetch — renders in the deployed
-# app with no network). Lava-red brand color; the stacked, offset ribbons echo
-# the Databricks "flowing data layers" mark.
-_DB_LOGO = """
-<svg width="40" height="40" viewBox="0 0 100 100" fill="none"
-     xmlns="http://www.w3.org/2000/svg" aria-label="Databricks">
-  <g fill="#FF3621">
-    <path d="M6 30 L50 8 L94 30 L50 52 Z" opacity="0.55"/>
-    <path d="M6 50 L50 28 L94 50 L50 72 Z" opacity="0.78"/>
-    <path d="M6 70 L50 48 L94 70 L50 92 Z" opacity="1"/>
-  </g>
-</svg>
-"""
+# Databricks logomark, base64-embedded from the bundled PNG asset. Inlining it
+# as a data URI means it ships in the HTML and renders in the deployed app with
+# no network fetch (Databricks Apps can't reliably hotlink external images).
+_LOGO_PATH = Path(__file__).with_name("assets") / "databricks_logomark.png"
+_LOGO_B64 = base64.b64encode(_LOGO_PATH.read_bytes()).decode()
+_DB_LOGO = (
+    f'<img src="data:image/png;base64,{_LOGO_B64}" alt="Databricks" '
+    f'height="40" />'
+)
 
 # Databricks-flavored styling: lava-red brand accents, a header band, and
 # tighter step framing. Kept in one CSS block so the theme config
@@ -48,7 +47,7 @@ st.markdown(
         border-left: 6px solid #FF3621;
         padding: 1.1rem 1.4rem; border-radius: 8px; margin-bottom: 1.25rem;
       }
-      .db-header svg { flex: 0 0 auto; }
+      .db-header img { flex: 0 0 auto; }
       .db-header .db-title { display: flex; flex-direction: column; }
       .db-header h1 { color: #FFFFFF; font-size: 1.6rem; margin: 0; }
       .db-header p  { color: #C7D0D4; margin: 0.25rem 0 0; font-size: 0.9rem; }
