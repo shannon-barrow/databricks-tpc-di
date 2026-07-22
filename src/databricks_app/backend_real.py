@@ -2,9 +2,10 @@
 create_jobs.create(). It never handles credentials: the form passes a Unity
 Catalog secret location (catalog + schema) that the job reads at run time.
 
-Auth: uses the Databricks SDK's Config()/WorkspaceClient, which auto-detects
-the app's service-principal credentials in a deployed Databricks App (and a
-CLI profile when run locally with USE_MOCK_BACKEND=false).
+Auth: workflow creation runs through each port's create(), which authenticates
+via its own Databricks CLI profile. A WorkspaceClient is constructed lazily
+(only diagnose mode, a later phase, needs it) via the SDK's Config(), which
+auto-detects the app's service-principal credentials when deployed.
 
 v1 is single-workspace: it targets the workspace the app authenticates to.
 Cross-workspace competitor runs (e.g. a separate AWS-bench workspace) are a
@@ -58,7 +59,16 @@ def _load_create(engine: Engine):
 
 class RealBackend:
     def __init__(self) -> None:
-        self.w = WorkspaceClient()
+        # Lazy: workflow creation goes through each port's create() (which
+        # auths via its own CLI profile), so a WorkspaceClient isn't needed
+        # for the Create path. Diagnose mode (a later phase) will use it.
+        self._w = None
+
+    @property
+    def w(self) -> WorkspaceClient:
+        if self._w is None:
+            self._w = WorkspaceClient()
+        return self._w
 
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         """Emit the parent+child workflow for one engine via its create()."""
