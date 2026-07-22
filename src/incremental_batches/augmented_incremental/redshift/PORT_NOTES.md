@@ -127,18 +127,23 @@ small dim/reference tables under ~5 M rows. Worth flagging in setup.
 
 ## Auth & profile
 
-Connection details live in UC secrets under `main.tpcdi_redshift` (catalog.schema; mirrors `main.tpcdi_snowflake`), read via `dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=...)` with these keys:
+Only the password is a genuine UC secret. Everything else is a plain job
+parameter / notebook widget passed in directly (no `dbutils.secrets.get`):
 
-| key | example |
-|---|---|
-| `host` | `<workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com` |
-| `port` | `5439` |
-| `database` | `dev` |
-| `user` | a Redshift service account |
-| `password` | that account's password |
-| `iam_role` | `arn:aws:iam::<account-id>:role/<role-name>` |
+| value | kind | example |
+|---|---|---|
+| `rs_host` | plain param | `<workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com` |
+| `port` | plain (default `5439`) | `5439` |
+| `database` | plain param | `dev` |
+| `rs_user` | plain param | a Redshift service account |
+| `rs_iam_role` | plain param | `arn:aws:iam::<account-id>:role/<role-name>` |
+| `rs_password_secret` | **full UC secret path** | `main.tpcdi_redshift.password` |
 
-`_rs_conn.py` reads these and exposes a `rs_connect()` factory returning a `psycopg2` connection (dbt-redshift uses psycopg2 under the hood, so connection semantics match what dbt will see).
+The password is resolved via `_secret_from_path("catalog.schema.key")` (splits
+with `maxsplit=2`, so a dotted key still resolves). `_rs_conn.py` exposes a
+`rs_connect(host=, user=, rs_password_secret=, database=, ...)` factory
+returning a `psycopg2` connection (dbt-redshift uses psycopg2 under the hood,
+so connection semantics match what dbt will see).
 
 dbt-redshift's `profiles.yml` template:
 

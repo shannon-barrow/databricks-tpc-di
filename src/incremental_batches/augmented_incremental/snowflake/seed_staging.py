@@ -15,14 +15,21 @@
 dbutils.widgets.text("catalog", "main", "Databricks catalog (source)")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"], "scale_factor")
 dbutils.widgets.text("snowflake_database", "TPCDI_TEST", "Snowflake DB (sink)")
-dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
+dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
+dbutils.widgets.text("role", "", "Snowflake role (plain value; empty = ACCOUNTADMIN)")
+dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse (plain value; empty = BARROW_XS_GEN2)")
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+                     "Full UC secret path to the Snowflake credential (PEM private key expected for the Spark connector)")
 
 src_catalog       = dbutils.widgets.get("catalog")
 scale_factor      = dbutils.widgets.get("scale_factor")
 sf_db             = dbutils.widgets.get("snowflake_database")
-secret_catalog    = dbutils.widgets.get("secret_catalog")
-secret_schema     = dbutils.widgets.get("secret_schema")
+account           = dbutils.widgets.get("account")
+sf_user           = dbutils.widgets.get("sf_user")
+role              = dbutils.widgets.get("role") or None
+warehouse_override = dbutils.widgets.get("snowflake_warehouse")
+sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
 
 src_schema = f"tpcdi_incremental_staging_{scale_factor}"
 sf_schema  = f"STAGING_SF{scale_factor}"
@@ -31,19 +38,20 @@ print(f"sink = {sf_db}.{sf_schema}")
 
 # COMMAND ----------
 
-def _secret(name, default=None):
-    try: return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
-    except Exception: return default
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
 
 sf_opts = {
-    "sfUrl":       f"{_secret('account')}.snowflakecomputing.com",
-    "sfUser":      _secret("user"),
-    "sfRole":      _secret("role") or "ACCOUNTADMIN",
-    "sfWarehouse": _secret("warehouse") or "BARROW_XS_GEN2",
+    "sfUrl":       f"{account}.snowflakecomputing.com",
+    "sfUser":      sf_user,
+    "sfRole":      role or "ACCOUNTADMIN",
+    "sfWarehouse": warehouse_override or "BARROW_XS_GEN2",
     "sfDatabase":  sf_db,
     "sfSchema":    sf_schema,
-    # Use keypair auth (more reliable than password for service users)
-    "pem_private_key": _secret("private_key"),
+    # Use keypair auth (more reliable than password for service users). The
+    # single credential secret is expected to hold the PEM private key here.
+    "pem_private_key": _secret_from_path(sf_credential_secret),
 }
 
 # COMMAND ----------

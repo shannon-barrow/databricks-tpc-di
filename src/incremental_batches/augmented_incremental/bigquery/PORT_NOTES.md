@@ -75,9 +75,10 @@ dbt_augmented_incremental:
 ```
 
 The `run_dbt.py` notebook (analog of Snowflake's) reads the JSON from the
-UC secrets under `main.tpcdi_bigquery` (via `dbutils.secrets.get(catalog=secret_catalog,
-schema=secret_schema, key="sa_json")`), exports it as `BQ_KEYFILE_JSON`, then shells out
-to `dbt run --target bigquery`. Same pattern as `_sf_conn.py`.
+UC secret referenced by the full `sa_json_secret` path (default
+`main.tpcdi_bigquery.sa_json`, resolved via `_secret_from_path(...)` in
+`_bq_conn.py`), materializes it to a keyfile, then shells out to
+`dbt run --target bigquery`. Same pattern as `_sf_conn.py`.
 
 ## Cost attribution (BQ equivalent of Snowflake query_tag)
 

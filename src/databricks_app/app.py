@@ -281,9 +281,9 @@ results.append({
     "mock": USE_MOCK,
 })
 
-# 2. Each competitor: emit its workflow. No secrets are handled by the app —
-# the secret_catalog/secret_schema in cv point the job at the operator's UC
-# secrets, which it reads at run time.
+# 2. Each competitor: emit its workflow. No secret values are handled by the
+# app — the secret-path fields in cv (catalog.schema.key) point the job at the
+# operator's existing UC secrets, which it reads at run time.
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
     try:

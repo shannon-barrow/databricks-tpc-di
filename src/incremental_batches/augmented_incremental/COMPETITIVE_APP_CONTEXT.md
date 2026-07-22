@@ -16,11 +16,12 @@ The app's job is:
    "only run 50 batches"), and read-only failure triage (explain why a run
    failed, usually a prerequisite that isn't wired).
 
-Rule for credentials: the app never handles secret values. Each port reads
-its credentials from **Unity Catalog secrets** — the operator creates the
-secrets under a `{catalog}.{schema}` they own, and the app collects only that
-catalog + schema, passing the pair as `secret_catalog` / `secret_schema` job
-params. At run time the port reads each key via
+Rule for credentials: the app never handles secret values. Only genuine
+secrets (passwords, keys, tokens) are **Unity Catalog secrets** — the operator
+creates each one and the app collects its full path (`catalog.schema.key`) as a
+job param. Non-sensitive config (usernames, hosts, accounts, ARNs, regions,
+warehouses) travels as plain job params. At run time the port splits each
+secret path and reads the value via
 `dbutils.secrets.get(catalog=…, schema=…, key=…)`. The app is never a
 credential store, and no secret value flows through job params. (Requires a
 runtime that supports UC secrets: DBR 17.3 LTS+ or serverless env v4+.)
@@ -51,16 +52,15 @@ Maps to `redshift/create_jobs.py::create()`.
   — its trust policy must include the workgroup's principal (COPY assumes it).
 - An **S3 bucket** for staging, in the same region as the workgroup, surfaced
   as the UC external volume the Spark datagen writes to.
-- **UC secrets** under `{secret_catalog}.{secret_schema}` (default
-  `main.tpcdi_redshift`) holding keys: host, port, database, user, password,
-  iam_role.
+- A **UC secret** for the Redshift password, referenced by full path
+  `rs_password_secret` (default `main.tpcdi_redshift.password`). Host, user, and
+  IAM role ARN are plain params, not secrets.
 - One-time **staging seed** (`tpcdi_staging_sf{sf}`) — expensive; setup_rs
   self-bootstraps it and skips if already present with matching row counts.
 
 **App form fields:** scale_factor; target-workspace profile; `s3_volume_prefix`
-(required); aws_region; wh_db/database/catalog (defaults fine); secret_catalog +
-secret_schema (the UC location where you created the host/user/password/iam_role
-secrets).
+(required); aws_region; wh_db/catalog (defaults fine); rs_host / rs_user /
+rs_iam_role (plain); rs_password_secret (full UC secret path to the password).
 
 ---
 
@@ -74,14 +74,13 @@ Maps to `bigquery/create_jobs.py::create()`.
 - A **GCS bucket** for staging, in the same region, surfaced as the UC
   external volume.
 - A **service-account JSON key** with BigQuery Data Editor + Job User, stored
-  as a **UC secret** under `{secret_catalog}.{secret_schema}` (default
-  `main.tpcdi_bigquery`, key `sa_json`).
+  as a **UC secret** referenced by full path `sa_json_secret` (default
+  `main.tpcdi_bigquery.sa_json`). This is BigQuery's only secret.
 - One-time staging seed (bootstrap step).
 
 **App form fields:** scale_factor; GCP-workspace profile; `catalog` (BQ project,
 required); `gcs_volume_prefix` (required); bq_location; wh_db (default fine);
-secret_catalog + secret_schema (the UC location where you created the `sa_json`
-secret).
+sa_json_secret (full UC secret path to the SA JSON key).
 
 ---
 
@@ -110,21 +109,22 @@ there's a whole bridge to stand up beyond "account + warehouse + creds".
   table (setup builds these; also the fix for stale-federation errors).
 - A **warehouse** to run the models (or a Dynamic Tables warehouse).
 - A **stage** for the per-batch file drops.
-- **UC secrets** under `{secret_catalog}.{secret_schema}` (default
-  `main.tpcdi_snowflake`): account, user, password (or keypair), warehouse, and
-  the Databricks PAT key.
+- Two **UC secrets**, each referenced by full path: `sf_credential_secret`
+  (default `main.tpcdi_snowflake.password`) — the password OR a PEM private key
+  for keypair auth; and `dbx_pat_secret` (default `main.tpcdi_snowflake.dbx_pat`)
+  — the Databricks PAT for federation. Account, user, and warehouse are plain
+  params, not secrets.
 
 **Known failure the app should recognize:** `SHOW SCHEMAS` works but
 `SELECT`/`CREATE ICEBERG TABLE ... CATALOG=<int>` fails to vend S3 creds ->
 the catalog integration's PAT is expired. Fix: `ALTER CATALOG INTEGRATION
 <int> SET REST_AUTHENTICATION = (BEARER_TOKEN='<fresh PAT>')` (only that field
-is alterable; TYPE is not). Refresh via `dbx_pat_secret_key`.
+is alterable; TYPE is not). Refresh the UC secret at `dbx_pat_secret`.
 
-**App form fields:** scale_factor; Snowflake account, warehouse, stage;
-target database (catalog) + wh_db; catalog-integration name; secret_catalog +
-secret_schema (the UC location where you created the Snowflake user/password,
-keypair, and Databricks-PAT secrets). Plus a pre-flight that confirms UniForm
-is enabled on the sources.
+**App form fields:** scale_factor; Snowflake account, user, warehouse, stage;
+target database (catalog) + wh_db; catalog-integration name; sf_credential_secret
+and dbx_pat_secret (full UC secret paths to the credential and the Databricks
+PAT). Plus a pre-flight that confirms UniForm is enabled on the sources.
 
 ---
 

@@ -88,19 +88,28 @@ Both tasks pinned to the same interactive cluster ID. No serverless.
 
 ## Secrets / config
 
-UC secrets under `main.tpcdi_snowflake` (catalog.schema; the old flat scope
-name is now the schema, under catalog `main` by default), read via
-`dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=...)`:
+Only genuine secrets live in UC; everything else is a plain job param.
 
-| key | value |
+Plain params (job parameters / widgets — NOT secrets):
+
+| param | value |
 |---|---|
 | `account` | `<org>-<account>` |
-| `user` | `TPCDI_SVC` (service user with KEY_PAIR auth policy) |
-| `role` | `ACCOUNTADMIN` |
-| `warehouse` | `BARROW_XS_GEN2` (or whichever warehouse the benchmark uses) |
-| `private_key` | PEM contents of `~/.snowflake_keys/tpcdi_kp.pem` |
+| `sf_user` | `TPCDI_SVC` (service user with KEY_PAIR auth policy) |
+| `role` | `ACCOUNTADMIN` (optional; empty = connector default) |
+| `snowflake_warehouse` | `BARROW_XS_GEN2` (or whichever warehouse the benchmark uses) |
 
-`_sf_conn.py` (already present) reads these.
+Real secrets — each a FULL UC secret path (`catalog.schema.key`) resolved via
+`_secret_from_path(path)` in `_sf_conn.py`:
+
+| param | example value | holds |
+|---|---|---|
+| `sf_credential_secret` | `main.tpcdi_snowflake.password` | password OR PEM private key — auth mode decided by PEM-sniffing the resolved value |
+| `dbx_pat_secret` | `main.tpcdi_snowflake.dbx_pat` | Databricks PAT for catalog-integration federation token refresh |
+
+`_sf_conn.py`'s `sf_connect(...)` takes `account` / `user` / `warehouse` /
+`role` as plain values plus `sf_credential_secret` (a secret path), resolves
+the credential once, and branches keypair-vs-password on the PEM sniff.
 
 ## What changes vs the Databricks dbt variant
 

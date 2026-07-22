@@ -34,10 +34,9 @@
 #     (late-binding). Late-binding views DO appear in `information_schema.tables`,
 #     so setup_rs's detection still sees them.
 #
-# Auth: reads connection creds from the `main.tpcdi_redshift` UC secret schema.
-# The producer/consumer are addressed by explicit host so this can wire any
-# pair of workgroups regardless of which one the schema's `host` currently
-# targets.
+# Auth: user/database are plain params; only the password is a UC secret,
+# referenced by full path in rs_password_secret. The producer/consumer are
+# addressed by explicit host so this can wire any pair of workgroups.
 
 import psycopg2
 
@@ -49,22 +48,26 @@ dbutils.widgets.text("producer_host", "",
     "Producer workgroup endpoint (owns the built staging)")
 dbutils.widgets.text("consumer_host", "",
     "Consumer workgroup endpoint (runs the benchmark)")
-dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema", "tpcdi_redshift", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("database", "dev", "Redshift database (plain value)")
+dbutils.widgets.text("rs_user",  "", "Redshift user (plain value)")
+dbutils.widgets.text("rs_password_secret", "main.tpcdi_redshift.password",
+    "Full UC secret path for the Redshift password (catalog.schema.key)")
 
 sf            = int(dbutils.widgets.get("scale_factor"))
 PROD_HOST     = dbutils.widgets.get("producer_host").strip()
 CONS_HOST     = dbutils.widgets.get("consumer_host").strip()
-secret_catalog = dbutils.widgets.get("secret_catalog")
-secret_schema  = dbutils.widgets.get("secret_schema")
+RS_DATABASE   = dbutils.widgets.get("database").strip() or "dev"
+RS_USER       = dbutils.widgets.get("rs_user").strip()
+RS_PASSWORD_SECRET = dbutils.widgets.get("rs_password_secret").strip()
 
 if not PROD_HOST or not CONS_HOST:
     raise ValueError(
         "producer_host and consumer_host are required (Redshift Serverless "
         "workgroup endpoints). Pass them as job/notebook parameters.")
 
-def _get(k):
-    return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=k)
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
 
 SCHEMA   = f"tpcdi_staging_sf{sf}".lower()      # local schema on consumer (matches producer FQN)
 SHARE    = f"{SCHEMA}_share"                    # datashare name on producer
@@ -81,8 +84,9 @@ TABLES = [
 
 def _conn(host):
     c = psycopg2.connect(
-        host=host, port=int(_get("port") or "5439"),
-        user=_get("user"), password=_get("password"), dbname=_get("database"),
+        host=host, port=5439,
+        user=RS_USER, password=_secret_from_path(RS_PASSWORD_SECRET),
+        dbname=RS_DATABASE,
         sslmode="require", connect_timeout=60,
         keepalives=1, keepalives_idle=30, keepalives_interval=10, keepalives_count=3,
     )

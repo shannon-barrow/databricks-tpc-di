@@ -25,15 +25,19 @@ dbutils.widgets.text("wh_db",            "")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"])
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("secret_catalog",   "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema",    "tpcdi_redshift", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("rs_host",          "", "Redshift Serverless workgroup endpoint (plain value)")
+dbutils.widgets.text("rs_user",          "", "Redshift user (plain value)")
+dbutils.widgets.text("rs_iam_role",      "", "IAM role ARN for COPY (plain value)")
+dbutils.widgets.text("rs_password_secret", "main.tpcdi_redshift.password",
+                     "Full UC secret path for the Redshift password (catalog.schema.key)")
 
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
-secret_catalog   = dbutils.widgets.get("secret_catalog")
-secret_schema    = dbutils.widgets.get("secret_schema")
+rs_host          = dbutils.widgets.get("rs_host")
+rs_user          = dbutils.widgets.get("rs_user")
+rs_password_secret = dbutils.widgets.get("rs_password_secret")
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -48,7 +52,8 @@ batches_dir    = f"{tpcdi_directory}augmented_incremental/_dailybatches/{target_
 # COMMAND ----------
 
 conn = rs_connect(
-    database=database, secret_catalog=secret_catalog, secret_schema=secret_schema,
+    database=database, host=rs_host, user=rs_user,
+    rs_password_secret=rs_password_secret,
     query_group={"wh_db": wh_db, "scale_factor": scale_factor, "task": "teardown_rs"},
 )
 

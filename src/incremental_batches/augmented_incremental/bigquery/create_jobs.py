@@ -52,8 +52,7 @@ DEFAULT_PROFILE = "tpc-di-gcp"
 DEFAULTS = dict(
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
     wh_db="tpcdi_aug_bq_dbt",                      # target dataset prefix -> {wh_db}_sf{N}
-    secret_catalog="main",
-    secret_schema="tpcdi_bigquery",
+    sa_json_secret="main.tpcdi_bigquery.sa_json",  # full UC secret path (catalog.schema.key)
     bq_location="us-central1",
     databricks_catalog="main",                     # for the bootstrap seed step
 )

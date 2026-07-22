@@ -17,15 +17,19 @@
 #      (dbt fills them per batch via the rs_bronze_copy_prehook macro).
 #   5. Emit batch_date_ls for the parent's for_each loop.
 #
-# Auth: connection creds from the `main.tpcdi_redshift` UC secret schema (see _rs_conn).
+# Auth: host/user/iam_role are plain params; only the password is a UC secret,
+# referenced by full path in rs_password_secret (see _rs_conn).
 
 # COMMAND ----------
 
 dbutils.widgets.text("database",        "dev", "Redshift database (default 'dev')")
 dbutils.widgets.text("wh_db",           "", "wh_db prefix; final schema = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
-dbutils.widgets.text("secret_catalog",  "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema",   "tpcdi_redshift", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("rs_host",         "", "Redshift Serverless workgroup endpoint (plain value)")
+dbutils.widgets.text("rs_user",         "", "Redshift user (plain value)")
+dbutils.widgets.text("rs_iam_role",     "", "IAM role ARN for COPY (plain value)")
+dbutils.widgets.text("rs_password_secret", "main.tpcdi_redshift.password",
+                     "Full UC secret path for the Redshift password (catalog.schema.key)")
 dbutils.widgets.text("incremental_batches_to_run", "365",
                      "Number of batches the for_each loop runs")
 dbutils.widgets.text("databricks_catalog", "main",
@@ -47,8 +51,10 @@ dbutils.widgets.dropdown("force_reset", "NO", ["NO", "YES"],
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
-secret_catalog   = dbutils.widgets.get("secret_catalog")
-secret_schema    = dbutils.widgets.get("secret_schema")
+rs_host          = dbutils.widgets.get("rs_host")
+rs_user          = dbutils.widgets.get("rs_user")
+rs_iam_role_arn  = dbutils.widgets.get("rs_iam_role")
+rs_password_secret = dbutils.widgets.get("rs_password_secret")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 databricks_catalog = dbutils.widgets.get("databricks_catalog")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory").rstrip("/") + "/"
@@ -83,7 +89,7 @@ if _module_dir not in sys.path:
 import rs_staging_bootstrap as bootstrap
 
 parquet_root = f"{tpcdi_directory}staging_parquet_rs/sf={scale_factor}"
-iam_role     = rs_iam_role(secret_catalog=secret_catalog, secret_schema=secret_schema)
+iam_role     = rs_iam_role(iam_role=rs_iam_role_arn)
 
 # COMMAND ----------
 
@@ -93,8 +99,8 @@ iam_role     = rs_iam_role(secret_catalog=secret_catalog, secret_schema=secret_s
 # Each cell opens and closes its own connection.
 # A phase can run over an hour at SF=20k, and idle Redshift Serverless SSL
 # sockets get dropped, so a long-lived conn would go stale between cells.
-_conn = rs_connect(database=database, secret_catalog=secret_catalog,
-                   secret_schema=secret_schema,
+_conn = rs_connect(database=database, host=rs_host, user=rs_user,
+                   rs_password_secret=rs_password_secret,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "bootstrap"})
 try:
@@ -111,8 +117,9 @@ try:
         aws_region=aws_region,
         spark=spark,
         dbutils=dbutils,
-        secret_catalog=secret_catalog,
-        secret_schema=secret_schema,
+        host=rs_host,
+        user=rs_user,
+        rs_password_secret=rs_password_secret,
         parallel=8,
     )
     print(f"[bootstrap] {_boot}")
@@ -125,8 +132,8 @@ finally:
 # force_reset=YES drops it first (re-CTAS everything).
 # Default keeps existing tables so the CTAS step below can skip any already
 # present with matching row counts.
-_conn = rs_connect(database=database, secret_catalog=secret_catalog,
-                   secret_schema=secret_schema,
+_conn = rs_connect(database=database, host=rs_host, user=rs_user,
+                   rs_password_secret=rs_password_secret,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "schema_init"})
 try:
@@ -229,8 +236,8 @@ def _ctas_one(table_name: str) -> tuple[str, float, str]:
     t0 = _time.time()
     # Own connection per thread — psycopg2 connections aren't thread-safe.
     local_conn = rs_connect(
-        database=database, secret_catalog=secret_catalog,
-        secret_schema=secret_schema,
+        database=database, host=rs_host, user=rs_user,
+        rs_password_secret=rs_password_secret,
         query_group={"task": "setup_rs", "phase": "ctas", "table": table_name,
                      "wh_db": wh_db, "scale_factor": scale_factor},
     )
@@ -413,8 +420,8 @@ def _dist_clause(spec: str) -> str:
     raise ValueError(f"unknown distribution_spec: {spec}")
 
 # Fresh conn for bronze DDLs (CTAS above can take hours).
-_conn = rs_connect(database=database, secret_catalog=secret_catalog,
-                   secret_schema=secret_schema,
+_conn = rs_connect(database=database, host=rs_host, user=rs_user,
+                   rs_password_secret=rs_password_secret,
                    query_group={"wh_db": wh_db, "scale_factor": scale_factor,
                                 "task": "setup_rs", "phase": "bronze_ddls"})
 try:

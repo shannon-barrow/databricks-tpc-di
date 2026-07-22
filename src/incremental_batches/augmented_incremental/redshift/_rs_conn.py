@@ -1,15 +1,16 @@
 # Databricks notebook source
 # Shared Redshift connection helper for the TPC-DI augmented incremental
-# Redshift workflow notebooks. Reads credentials from a Unity Catalog secret
-# schema and returns a live psycopg2 connection.
+# Redshift workflow notebooks. Returns a live psycopg2 connection.
 #
-# Secret layout (default location `main.tpcdi_redshift`):
+# Secret contract: only the password is a genuine UC secret. It arrives as a
+# FULL UC secret path (`catalog.schema.key`, e.g. "main.tpcdi_redshift.password")
+# and is resolved via `_secret_from_path`. Everything else is a plain value
+# passed in directly by the caller (job params / notebook widgets):
 #   host       — Redshift Serverless workgroup endpoint
 #                e.g. <workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com
 #   port       — JDBC/PG wire port, default 5439
 #   database   — default database, e.g. "dev"
 #   user       — Redshift user (a service account is recommended over admin)
-#   password   — password
 #   iam_role   — ARN of the IAM role with S3 read access for COPY,
 #                e.g. arn:aws:iam::<account-id>:role/<role-name>
 #
@@ -31,6 +32,16 @@ import json
 import os
 
 
+def _secret_from_path(path):
+    """Resolve a full UC secret path "catalog.schema.key" to its value.
+
+    maxsplit=2 so a key containing dots still resolves — the first two dots
+    delimit catalog + schema, everything after is the key.
+    """
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)  # noqa: F821
+
+
 def _maybe_install_psycopg2():
     """No-op if psycopg2 already imports; else pip-install psycopg2-binary."""
     try:
@@ -44,11 +55,17 @@ def _maybe_install_psycopg2():
 
 def rs_connect(*, database: str | None = None,
                schema: str | None = None,
-               secret_catalog: str = "main",
-               secret_schema: str = "tpcdi_redshift",
+               host: str | None = None,
+               port: str = "5439",
+               user: str | None = None,
+               rs_password_secret: str | None = None,
                query_group: str | dict | None = None,
                autocommit: bool = True):
-    """Open a Redshift connection using creds from a Unity Catalog secret schema.
+    """Open a Redshift connection.
+
+    host / user / port / database are plain values passed in directly. The
+    password is the only genuine secret — `rs_password_secret` is a full UC
+    secret path (e.g. "main.tpcdi_redshift.password") resolved at connect.
 
     Mirrors `_sf_conn.sf_connect` / `_bq_conn.bq_connect` shape.
 
@@ -65,27 +82,20 @@ def rs_connect(*, database: str | None = None,
     _maybe_install_psycopg2()
     import psycopg2
 
-    def _get(name, default=None):
-        try:
-            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)  # noqa: F821
-        except Exception:
-            return default
-
-    host     = _get("host")
-    port     = int(_get("port", "5439"))
-    user     = _get("user")
-    password = _get("password")
-    dbname   = database or _get("database", "dev")
+    password = _secret_from_path(rs_password_secret) if rs_password_secret else None
+    dbname   = database or "dev"
 
     missing = [k for k, v in [("host", host), ("user", user),
-                              ("password", password)] if not v]
+                              ("rs_password_secret", rs_password_secret)] if not v]
     if missing:
         raise RuntimeError(
-            f"Redshift secrets under {secret_catalog}.{secret_schema} missing required key(s): {missing}"
+            f"Redshift connection missing required value(s): {missing} "
+            f"(host/user are plain params; password comes from the UC secret "
+            f"path in rs_password_secret)"
         )
 
     conn = psycopg2.connect(
-        host=host, port=port, user=user, password=password,
+        host=host, port=int(port), user=user, password=password,
         dbname=dbname, sslmode="require", connect_timeout=30,
         # TCP keepalives (probe after 30s idle, 3x at 10s) so a long-idle
         # socket isn't silently dropped mid-pipeline by Redshift Serverless.
@@ -109,18 +119,15 @@ def rs_connect(*, database: str | None = None,
     return conn
 
 
-def rs_iam_role(*, secret_catalog: str = "main",
-                secret_schema: str = "tpcdi_redshift") -> str:
+def rs_iam_role(*, iam_role: str) -> str:
     """Return the IAM role ARN used by Redshift COPY statements.
 
-    Pulled from the UC secret schema so the workgroup identity stays out of
-    source code. Used by setup_rs and the dbt bronze pre_hooks when issuing
-    `COPY ... IAM_ROLE '<arn>' ...`.
+    The ARN is now a PLAIN value (not a secret) — the workgroup identity ARN
+    isn't sensitive. This thin passthrough is retained so call sites read
+    identically to the old secret-backed contract. Used by setup_rs and the
+    dbt bronze pre_hooks when issuing `COPY ... IAM_ROLE '<arn>' ...`.
     """
-    try:
-        return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="iam_role")  # noqa: F821
-    except Exception as e:
-        raise RuntimeError(
-            f"Redshift secrets under {secret_catalog}.{secret_schema} missing key 'iam_role' "
-            f"({type(e).__name__}: {e})"
-        )
+    if not iam_role:
+        raise RuntimeError("rs_iam_role: iam_role is required (plain param, "
+                           "e.g. arn:aws:iam::<account-id>:role/<role-name>)")
+    return iam_role

@@ -19,8 +19,9 @@
 # (b) CTASs the 22 staging tables into native STAGING_SF{sf} ready for
 # zero-copy CLONEs. No separate one-time notebook required.
 #
-# Auth: reads creds from the {secret_catalog}.{secret_schema} UC secret
-# schema (see ./_sf_conn.py).
+# Auth: account/user/warehouse are plain params; the Snowflake credential
+# (password OR PEM private key) is a full UC secret path passed as
+# `sf_credential_secret` (see ./_sf_conn.py).
 
 # COMMAND ----------
 
@@ -30,28 +31,33 @@ dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000",
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
                      "UC external volume root the per-batch files land under")
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
-dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret default)")
+dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
+dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
+dbutils.widgets.text("role", "", "Snowflake role to assume (plain value; empty = connector default)")
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+                     "Full UC secret path to the Snowflake credential (password OR PEM private key)")
+dbutils.widgets.text("dbx_pat_secret", "main.tpcdi_snowflake.dbx_pat",
+                     "Full UC secret path to a fresh Databricks PAT (for catalog-integration token refresh). Empty = skip refresh.")
+dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse for the session (plain value)")
 dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"],
                           "Lineage tag for query attribution. 'native' = the per-run tables are Snowflake-native (current default — what setup_sf actually does today, regardless of this value). 'iceberg' is reserved for when we plumb a real Iceberg-table path; setting it today is just a tag, NOT a behavior switch. Flows through to Snowflake query_tag so the dashboard can split runs by lineage.")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the prior-year backfill window")
 dbutils.widgets.text("catalog_integration", "TPCDI_DBX_UC_SF10_INT",
                      "Snowflake catalog integration name pointing at the Databricks UC iceberg-rest endpoint")
-dbutils.widgets.text("dbx_pat_secret_key", "",
-                     "Optional: secret key (in `secret_catalog.secret_schema`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
 
 catalog          = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
-secret_catalog   = dbutils.widgets.get("secret_catalog")
-secret_schema    = dbutils.widgets.get("secret_schema")
+account          = dbutils.widgets.get("account")
+sf_user          = dbutils.widgets.get("sf_user")
+role             = dbutils.widgets.get("role") or None
+sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
 warehouse        = dbutils.widgets.get("snowflake_warehouse") or None
 table_format     = dbutils.widgets.get("table_format")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 catalog_integration = dbutils.widgets.get("catalog_integration")
-dbx_pat_secret_key  = dbutils.widgets.get("dbx_pat_secret_key")
+dbx_pat_secret   = dbutils.widgets.get("dbx_pat_secret")
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -69,9 +75,11 @@ print(f"staging = {catalog}.{staging_schema} (clone source — self-bootstrapped
 
 conn = sf_connect(
     database=catalog,
-    secret_catalog=secret_catalog,
-    secret_schema=secret_schema,
+    account=account,
+    user=sf_user,
+    role=role,
     warehouse=warehouse,
+    sf_credential_secret=sf_credential_secret,
     query_tag={
         "wh_db":        wh_db,
         "scale_factor": scale_factor,
@@ -79,7 +87,7 @@ conn = sf_connect(
         "task":         "setup_sf",
     },
 )
-print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from warehouse secret default)'}")
+print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(connector default)'}")
 cur = conn.cursor()
 
 # COMMAND ----------
@@ -101,18 +109,18 @@ import sf_staging_bootstrap as bootstrap
 
 def _new_conn():
     return sf_connect(
-        database=catalog, secret_catalog=secret_catalog, secret_schema=secret_schema,
-        warehouse=warehouse,
+        database=catalog, account=account, user=sf_user, role=role,
+        warehouse=warehouse, sf_credential_secret=sf_credential_secret,
         query_tag={"scale_factor": scale_factor, "task": "setup_sf:ctas"},
     )
 
 _new_pat = None
-if dbx_pat_secret_key:
+if dbx_pat_secret:
     try:
-        _new_pat = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=dbx_pat_secret_key)
-        print(f"[ok] picked up PAT from {secret_catalog}.{secret_schema}.{dbx_pat_secret_key}")
+        _new_pat = _secret_from_path(dbx_pat_secret)
+        print(f"[ok] picked up PAT from {dbx_pat_secret}")
     except Exception:
-        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in {secret_catalog}.{secret_schema} — proceeding without token refresh")
+        print(f"[warn] dbx_pat_secret={dbx_pat_secret!r} not resolvable — proceeding without token refresh")
 
 _boot = bootstrap.ensure_staging_environment(
     conn,
@@ -164,9 +172,11 @@ def _clone_one(table_name: str) -> tuple[str, float]:
     _t0 = _time.time()
     _conn = sf_connect(
         database=catalog,
-        secret_catalog=secret_catalog,
-        secret_schema=secret_schema,
+        account=account,
+        user=sf_user,
+        role=role,
         warehouse=warehouse,
+        sf_credential_secret=sf_credential_secret,
         query_tag={
             "wh_db":        wh_db,
             "scale_factor": scale_factor,

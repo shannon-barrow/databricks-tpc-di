@@ -13,8 +13,8 @@
 #
 # Contract:
 #   - dbt project lives at {dbt_project_dir} (workspace-repo path)
-#   - Redshift creds come from the `main.tpcdi_redshift` UC secret schema:
-#       host, port, database, user, password, iam_role
+#   - host/user/iam_role/database/port are plain params; only the password is
+#     a UC secret, referenced by full path in rs_password_secret
 #   - profiles.yml written to a fresh /tmp dir per invocation
 #
 # Vars passed to dbt match what the redshift_models dbt models expect.
@@ -28,8 +28,11 @@ dbutils.widgets.text("wh_db",            "")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("batch_date",       "")
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("secret_catalog",   "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema",    "tpcdi_redshift", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("rs_host",          "", "Redshift Serverless workgroup endpoint (plain value)")
+dbutils.widgets.text("rs_user",          "", "Redshift user (plain value)")
+dbutils.widgets.text("rs_iam_role",      "", "IAM role ARN for COPY (plain value)")
+dbutils.widgets.text("rs_password_secret", "main.tpcdi_redshift.password",
+                     "Full UC secret path for the Redshift password (catalog.schema.key)")
 dbutils.widgets.text("dbt_project_dir",  "", "Workspace-repo path to the dbt project")
 dbutils.widgets.text("s3_volume_prefix", "s3://REPLACE-ME/tpcdi/",
                      "S3 prefix matching the UC volume — bronze pre_hook reads from here")
@@ -41,8 +44,10 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
-secret_catalog   = dbutils.widgets.get("secret_catalog")
-secret_schema    = dbutils.widgets.get("secret_schema")
+rs_host          = dbutils.widgets.get("rs_host")
+rs_user          = dbutils.widgets.get("rs_user")
+rs_iam_role_arn  = dbutils.widgets.get("rs_iam_role")
+rs_password_secret = dbutils.widgets.get("rs_password_secret")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 s3_volume_prefix = dbutils.widgets.get("s3_volume_prefix")
 aws_region       = dbutils.widgets.get("aws_region")
@@ -69,22 +74,19 @@ except ImportError:
 
 # COMMAND ----------
 
-# Read connection creds from the UC secret schema. Export as env vars so the
-# profiles.yml `env_var(...)` template references can resolve.
-def _get(name, default=None):
-    try:
-        return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
-    except Exception:
-        return default
+# host/user/port/database are plain params; only the password is a UC secret,
+# referenced by its full path (catalog.schema.key).
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
 
-rs_host     = _get("host")
-rs_port     = _get("port", "5439")
-rs_database = _get("database", database)
-rs_user     = _get("user")
-rs_password = _get("password")
+rs_port     = "5439"
+rs_database = database
+rs_password = _secret_from_path(rs_password_secret) if rs_password_secret else None
 if not all([rs_host, rs_user, rs_password]):
     raise RuntimeError(
-        f"Redshift secrets under {secret_catalog}.{secret_schema} missing host/user/password"
+        "Redshift connection missing host/user/password "
+        "(host/user are plain params; password comes from rs_password_secret)"
     )
 
 # COMMAND ----------
@@ -125,11 +127,10 @@ print(f"wrote profiles.yml to {profile_path}")
 
 # COMMAND ----------
 
-rs_iam_role = _get("iam_role")
+rs_iam_role = rs_iam_role_arn
 if not rs_iam_role:
     raise RuntimeError(
-        f"Redshift secrets under {secret_catalog}.{secret_schema} missing 'iam_role' "
-        f"(required for bronze pre_hook COPY)"
+        "rs_iam_role is required (plain param, for bronze pre_hook COPY)"
     )
 
 vars_payload = {

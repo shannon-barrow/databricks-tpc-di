@@ -26,15 +26,20 @@ dbutils.library.restartPython()
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("snowflake_database", "TPCDI_TEST")
-dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret)")
+dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
+dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
+dbutils.widgets.text("role", "", "Snowflake role (plain value; empty = ACCOUNTADMIN)")
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+                     "Full UC secret path to the Snowflake credential (PEM private key expected here)")
+dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse (plain value; empty = BARROW_XS_GEN2)")
 
 src_catalog  = dbutils.widgets.get("catalog")
 scale_factor = dbutils.widgets.get("scale_factor")
 sf_db        = dbutils.widgets.get("snowflake_database")
-secret_catalog = dbutils.widgets.get("secret_catalog")
-secret_schema  = dbutils.widgets.get("secret_schema")
+account      = dbutils.widgets.get("account")
+sf_user      = dbutils.widgets.get("sf_user")
+role_widget  = dbutils.widgets.get("role")
+sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
 warehouse_override = dbutils.widgets.get("snowflake_warehouse")
 
 src_schema = f"tpcdi_incremental_staging_{scale_factor}"
@@ -44,18 +49,17 @@ print(f"sink = {sf_db}.{sf_schema}")
 
 # COMMAND ----------
 
-def _secret(name, default=None):
-    try: return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
-    except Exception: return default
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
 
-account   = _secret("account")
-user      = _secret("user")
-role      = _secret("role") or "ACCOUNTADMIN"
-warehouse = warehouse_override or _secret("warehouse") or "BARROW_XS_GEN2"
-pk_pem    = _secret("private_key")
+user      = sf_user
+role      = role_widget or "ACCOUNTADMIN"
+warehouse = warehouse_override or "BARROW_XS_GEN2"
+pk_pem    = _secret_from_path(sf_credential_secret) if sf_credential_secret else None
 
 if not (account and user and pk_pem):
-    raise RuntimeError(f"Snowflake creds missing account/user/private_key under {secret_catalog}.{secret_schema}")
+    raise RuntimeError("Snowflake requires plain 'account'/'sf_user' params and a PEM private key at sf_credential_secret")
 
 # COMMAND ----------
 

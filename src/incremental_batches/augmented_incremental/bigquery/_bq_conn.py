@@ -13,11 +13,17 @@
 #   %run ./_bq_conn
 #   client = bq_connect(project="<your-bq-project>",
 #                       location="us-central1",
+#                       sa_json_secret="main.tpcdi_bigquery.sa_json",
 #                       query_label={"task": "setup_bq"})
 #   client.query("SELECT 1").result()
 
 import json
 import os
+
+
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)  # noqa: F821
 
 
 def _maybe_install_bigquery():
@@ -32,8 +38,7 @@ def _maybe_install_bigquery():
 
 
 def bq_connect(*, project: str, location: str = "us-central1",
-               secret_catalog: str = "main",
-               secret_schema: str = "tpcdi_bigquery",
+               sa_json_secret: str = "main.tpcdi_bigquery.sa_json",
                query_label: dict | None = None):
     """Open a BigQuery client using a service-account key from a Unity
     Catalog secret.
@@ -54,10 +59,10 @@ def bq_connect(*, project: str, location: str = "us-central1",
     from google.oauth2 import service_account
 
     try:
-        sa_json = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="sa_json")  # noqa: F821
+        sa_json = _secret_from_path(sa_json_secret)
     except Exception as e:
         raise RuntimeError(
-            f"BigQuery secret 'sa_json' is missing under {secret_catalog}.{secret_schema} "
+            f"BigQuery secret at '{sa_json_secret}' is missing "
             f"({type(e).__name__}: {e})"
         )
 
@@ -78,8 +83,7 @@ def bq_connect(*, project: str, location: str = "us-central1",
     return client
 
 
-def bq_credentials_path(*, secret_catalog: str = "main",
-                         secret_schema: str = "tpcdi_bigquery",
+def bq_credentials_path(*, sa_json_secret: str = "main.tpcdi_bigquery.sa_json",
                          out_dir: str | None = None) -> str:
     """Materialize the SA key JSON to a tempfile and return its path.
 
@@ -89,10 +93,10 @@ def bq_credentials_path(*, secret_catalog: str = "main",
     """
     import tempfile
     try:
-        sa_json = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="sa_json")  # noqa: F821
+        sa_json = _secret_from_path(sa_json_secret)
     except Exception as e:
         raise RuntimeError(
-            f"BigQuery secret 'sa_json' is missing under {secret_catalog}.{secret_schema} "
+            f"BigQuery secret at '{sa_json_secret}' is missing "
             f"({type(e).__name__}: {e})"
         )
     if out_dir is None:

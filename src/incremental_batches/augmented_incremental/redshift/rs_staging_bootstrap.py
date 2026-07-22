@@ -75,6 +75,13 @@ _TYPE_MAP: dict[str, str] = {
 }
 
 
+def _secret_from_path(dbutils, path: str) -> str:
+    """Resolve a full UC secret path "catalog.schema.key" via the passed
+    dbutils handle. maxsplit=2 so a dotted key still resolves."""
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
+
+
 def _dist_clause(spec: str) -> str:
     if spec == "ALL":  return "DISTSTYLE ALL"
     if spec == "EVEN": return "DISTSTYLE EVEN"
@@ -111,19 +118,15 @@ def _seed_one(table: str, *, database: str, target_schema: str,
               src_catalog: str, src_schema: str,
               parquet_root: str, volume_root: str, s3_volume_prefix: str,
               iam_role: str, aws_region: str,
-              spark, dbutils, secret_catalog: str, secret_schema: str) -> dict:
+              spark, dbutils, host: str, user: str,
+              rs_password_secret: str) -> dict:
     """Seed one staging table: Delta -> parquet -> COPY -> row-count check.
 
     Opens its own psycopg2 connection (they aren't thread-safe to share).
-    Raises on failure; the caller aggregates.
+    host/user are plain values; only the password is resolved from the UC
+    secret path. Raises on failure; the caller aggregates.
     """
     import psycopg2
-
-    def _get(key, default=None):
-        try:
-            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=key)
-        except Exception:
-            return default
 
     log = [f"[{table}] starting"]
     t0 = _time.time()
@@ -152,8 +155,8 @@ def _seed_one(table: str, *, database: str, target_schema: str,
     s3_uri = pq_path.replace(volume_root, s3_volume_prefix.rstrip("/") + "/") + "/part-"
 
     conn = psycopg2.connect(
-        host=_get("host"), port=int(_get("port", "5439")),
-        user=_get("user"), password=_get("password"),
+        host=host, port=5439,
+        user=user, password=_secret_from_path(dbutils, rs_password_secret),
         dbname=database, sslmode="require", connect_timeout=30,
         keepalives=1, keepalives_idle=30,
         keepalives_interval=10, keepalives_count=3,
@@ -203,8 +206,9 @@ def ensure_staging_environment(conn, *,
                                 aws_region: str,
                                 spark,
                                 dbutils,
-                                secret_catalog: str,
-                                secret_schema: str,
+                                host: str,
+                                user: str,
+                                rs_password_secret: str,
                                 parallel: int = 8) -> dict:
     """Idempotent Redshift staging bootstrap (mirrors the bq_/sf_ equivalents).
 
@@ -219,8 +223,8 @@ def ensure_staging_environment(conn, *,
         iam_role: IAM role ARN for COPY.
         aws_region: COPY REGION clause.
         spark / dbutils: notebook handles.
-        secret_catalog / secret_schema: UC location of psycopg2 creds for
-            worker threads.
+        host / user: plain Redshift connection values for worker threads.
+        rs_password_secret: full UC secret path for the password.
         parallel: thread-pool size.
 
     Returns:
@@ -301,8 +305,9 @@ def ensure_staging_environment(conn, *,
                 aws_region=aws_region,
                 spark=spark,
                 dbutils=dbutils,
-                secret_catalog=secret_catalog,
-                secret_schema=secret_schema,
+                host=host,
+                user=user,
+                rs_password_secret=rs_password_secret,
             ): t for t in missing
         }
         for fut in _cf.as_completed(futures):
@@ -323,14 +328,11 @@ def ensure_staging_environment(conn, *,
     # The caller's `conn` has been idle for the whole (up to ~1hr) seed, so
     # Redshift Serverless would have dropped its SSL socket by now.
     import psycopg2 as _psy
-    def _get_secret(k, default=None):
-        try: return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=k)
-        except Exception: return default
     verify_conn = _psy.connect(
-        host=_get_secret("host"),
-        port=int(_get_secret("port", "5439")),
-        user=_get_secret("user"),
-        password=_get_secret("password"),
+        host=host,
+        port=5439,
+        user=user,
+        password=_secret_from_path(dbutils, rs_password_secret),
         dbname=database, sslmode="require", connect_timeout=30,
         keepalives=1, keepalives_idle=30,
         keepalives_interval=10, keepalives_count=3,

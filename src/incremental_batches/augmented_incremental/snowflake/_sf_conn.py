@@ -1,23 +1,31 @@
 # Databricks notebook source
 # Shared Snowflake connection helper for the TPC-DI augmented incremental
-# Snowflake workflow notebooks. Reads credentials from a Unity Catalog
-# secret schema and returns a live snowflake.connector connection.
+# Snowflake workflow notebooks. Returns a live snowflake.connector connection.
 #
-# Secret layout (default location `main.tpcdi_snowflake`):
-#   account      — Snowflake account identifier (e.g. <org>-<account>)
-#   user         — Snowflake user
-#   private_key  — RSA private key PEM (preferred) OR
-#   password     — Snowflake password (fallback; will require MFA if enabled)
-#   role         — Snowflake role to assume
-#   warehouse    — default warehouse for the session
+# Secret contract (rework, no backward compat):
+#   account / user / warehouse / role  — plain values (job params / widgets),
+#                                         NOT secrets.
+#   sf_credential_secret               — full UC secret PATH (e.g.
+#                                         "main.tpcdi_snowflake.password")
+#                                         resolving to EITHER a PEM private key
+#                                         OR a password. Auth mode is decided
+#                                         by sniffing the resolved value.
 #
 # Usage from a calling notebook:
 #   %run ./_sf_conn
-#   ctx = sf_connect(database=catalog, schema=f"{wh_db}_{scale_factor}")
+#   ctx = sf_connect(database=catalog, schema=f"{wh_db}_{scale_factor}",
+#                    account=account, user=sf_user, warehouse=warehouse,
+#                    sf_credential_secret="main.tpcdi_snowflake.password")
 #   with ctx.cursor() as cur:
 #       cur.execute("...")
 
 import os
+
+
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)  # noqa: F821
+
 
 def _maybe_install_connector():
     """No-op if snowflake.connector already imports; else pip-install it."""
@@ -31,15 +39,18 @@ def _maybe_install_connector():
 
 
 def sf_connect(*, database: str | None = None, schema: str | None = None,
+               account: str | None = None, user: str | None = None,
                warehouse: str | None = None, role: str | None = None,
-               secret_catalog: str = "main",
-               secret_schema: str = "tpcdi_snowflake",
+               sf_credential_secret: str | None = None,
                query_tag: str | dict | None = None):
-    """Open a Snowflake connection using creds from a UC secret schema.
+    """Open a Snowflake connection.
 
-    Prefers private-key auth when the `private_key` secret is set; otherwise
-    falls back to password (which means MFA needs to already be cached on
-    the account, or the user must allow password-only auth).
+    account / user / warehouse / role are plain values passed in by the
+    caller (job params / widgets). The one real secret is
+    `sf_credential_secret` — a full UC secret path. Its resolved value is
+    used as a PEM private key when it looks like one (contains "BEGIN" and
+    "PRIVATE KEY"); otherwise it is treated as a password (MFA must already
+    be cached on the account, or the user must allow password-only auth).
 
     query_tag (str or dict) is stamped on every query issued through this
     connection. The task-time extract reads it from
@@ -49,29 +60,26 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
     _maybe_install_connector()
     import snowflake.connector
 
-    def _get(name, default=None):
-        try:
-            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)  # noqa: F821
-        except Exception:
-            return default
-
-    account   = _get("account")
-    user      = _get("user")
-    role      = role or _get("role")
-    warehouse = warehouse or _get("warehouse")
     if not account or not user:
         raise RuntimeError(
-            f"Snowflake creds missing 'account' or 'user' under "
-            f"{secret_catalog}.{secret_schema}."
+            "Snowflake connection requires plain 'account' and 'user' values "
+            "(pass them as job params / widgets — they are no longer secrets)."
+        )
+    if not sf_credential_secret:
+        raise RuntimeError(
+            "sf_credential_secret is required — pass the full UC secret path "
+            "(e.g. 'main.tpcdi_snowflake.password') to the password OR PEM "
+            "private key."
         )
 
-    pk_pem = _get("private_key")
-    if pk_pem:
-        # Keypair auth — preferred for unattended runs.
+    credential = _secret_from_path(sf_credential_secret)
+
+    if "BEGIN" in credential and "PRIVATE KEY" in credential:
+        # PEM private key → keypair auth (preferred for unattended runs).
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.backends import default_backend
         pk = serialization.load_pem_private_key(
-            pk_pem.encode("utf-8"), password=None, backend=default_backend()
+            credential.encode("utf-8"), password=None, backend=default_backend()
         )
         pk_der = pk.private_bytes(
             encoding=serialization.Encoding.DER,
@@ -80,13 +88,7 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
         )
         conn_kwargs = dict(account=account, user=user, private_key=pk_der)
     else:
-        password = _get("password")
-        if not password:
-            raise RuntimeError(
-                f"Neither 'private_key' nor 'password' is set under "
-                f"{secret_catalog}.{secret_schema}."
-            )
-        conn_kwargs = dict(account=account, user=user, password=password,
+        conn_kwargs = dict(account=account, user=user, password=credential,
                            authenticator="username_password_mfa",
                            client_request_mfa_token=True)
 

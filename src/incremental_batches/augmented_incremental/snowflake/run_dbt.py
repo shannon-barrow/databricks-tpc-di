@@ -7,7 +7,8 @@
 #     (defensive pip-install below in case it's not)
 #   - dbt project lives at {dbt_project_dir} (workspace-repo path, set
 #     by the workflow builder; same convention as the existing dbt driver)
-#   - Snowflake creds come from the {secret_catalog}.{secret_schema} UC secret schema
+#   - Snowflake account/user/warehouse/role are plain params; the credential
+#     (password OR PEM private key) is a full UC secret path (sf_credential_secret)
 #   - profiles.yml is written to a fresh /tmp dir per invocation
 #
 # Vars passed through to dbt match what the snowflake_models dbt models
@@ -23,9 +24,12 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000"
 dbutils.widgets.text("batch_date",     "")
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_benchmarking/")
 dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
-dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
-dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret)")
+dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
+dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
+dbutils.widgets.text("role", "", "Snowflake role to assume (plain value; empty = ACCOUNTADMIN)")
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+                     "Full UC secret path to the Snowflake credential (password OR PEM private key)")
+dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse for the session (plain value)")
 dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution. 'native' = the actual current behavior (Snowflake-native tables); 'iceberg' is a reserved label for a future Iceberg-table path — no behavior switch today.")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
@@ -35,8 +39,7 @@ scale_factor     = dbutils.widgets.get("scale_factor")
 batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
 snowflake_stage  = dbutils.widgets.get("snowflake_stage")
-secret_catalog   = dbutils.widgets.get("secret_catalog")
-secret_schema    = dbutils.widgets.get("secret_schema")
+sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 
 if not (wh_db and batch_date and dbt_project_dir):
@@ -60,23 +63,27 @@ except ImportError:
 
 # COMMAND ----------
 
-# Write profiles.yml from the UC secret schema. Keypair auth preferred.
-def _secret(name, default=None):
-    try:    return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
-    except Exception: return default
+# Write profiles.yml. account/user/role/warehouse are plain params; the one
+# credential secret (full UC path) resolves to a PEM private key (keypair auth,
+# preferred) or a password (PEM-sniff decides). Keypair auth preferred.
+def _secret_from_path(path):
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)
 
-account   = _secret("account")
-user      = _secret("user")
-role      = _secret("role")
-# job-param override wins; falls back to secret if widget is empty
-warehouse = dbutils.widgets.get("snowflake_warehouse") or _secret("warehouse")
-pk_pem    = _secret("private_key")
-password  = _secret("password")
+account   = dbutils.widgets.get("account")
+user      = dbutils.widgets.get("sf_user")
+role      = dbutils.widgets.get("role") or None
+warehouse = dbutils.widgets.get("snowflake_warehouse") or None
 
 if not (account and user):
-    raise RuntimeError(f"Snowflake creds missing account/user under {secret_catalog}.{secret_schema}")
-if not (pk_pem or password):
-    raise RuntimeError(f"Snowflake creds missing private_key OR password under {secret_catalog}.{secret_schema}")
+    raise RuntimeError("Snowflake requires plain 'account' and 'sf_user' params (no longer secrets)")
+if not sf_credential_secret:
+    raise RuntimeError("sf_credential_secret is required — full UC secret path to the password OR PEM private key")
+
+credential = _secret_from_path(sf_credential_secret)
+_is_keypair = "BEGIN" in credential and "PRIVATE KEY" in credential
+pk_pem   = credential if _is_keypair else None
+password = None if _is_keypair else credential
 
 profiles_dir = tempfile.mkdtemp(prefix="dbt_profiles_")
 profile_path = os.path.join(profiles_dir, "profiles.yml")

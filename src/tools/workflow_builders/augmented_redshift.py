@@ -13,10 +13,11 @@ Pre-requisites (one-time, manual, out-of-band):
 - A Redshift Serverless workgroup in the same region
 - An IAM role attached to the workgroup (trust policy allows the workgroup
   to assume it; bucket policy grants the role s3:Get* on the prefix). The
-  role ARN + workgroup host are read from the `main.tpcdi_redshift` UC secret
-  schema.
-- Unity Catalog secret schema `main.tpcdi_redshift` with keys:
-  host, port, database, user, password, iam_role
+  role ARN + workgroup host + user are plain job parameters (rs_iam_role,
+  rs_host, rs_user).
+- The only genuine secret is the password: a Unity Catalog secret referenced
+  by full path in the rs_password_secret job parameter
+  (e.g. "main.tpcdi_redshift.password").
 - `tpcdi_staging_sf{N}` schema seeded in Redshift (one-time, via
   `onetime_stg_rs_tables.py` — paid once per scale_factor)
 - Interactive cluster with `dbt-redshift==1.10.0` + `psycopg2-binary`
@@ -61,18 +62,21 @@ _AUG_PATH = "incremental_batches/augmented_incremental"
 
 # Job parameters every per-batch task needs. Redshift Serverless has no
 # warehouse-sizing knob at the per-task level — workgroup MaxRPU is set at
-# the workgroup level out-of-band. The IAM role for COPY comes from the
-# UC secret schema so it doesn't appear here.
+# the workgroup level out-of-band. host/user/iam_role are plain values; the
+# only genuine secret is the password, passed as a full UC secret path in
+# rs_password_secret.
 _COMMON_PARAMS = {
-    "catalog":           "{{job.parameters.catalog}}",
-    "database":          "{{job.parameters.database}}",
-    "scale_factor":      "{{job.parameters.scale_factor}}",
-    "tpcdi_directory":   "{{job.parameters.tpcdi_directory}}",
-    "wh_db":             "{{job.parameters.wh_db}}",
-    "secret_catalog":    "{{job.parameters.secret_catalog}}",
-    "secret_schema":     "{{job.parameters.secret_schema}}",
-    "s3_volume_prefix":  "{{job.parameters.s3_volume_prefix}}",
-    "aws_region":        "{{job.parameters.aws_region}}",
+    "catalog":            "{{job.parameters.catalog}}",
+    "database":           "{{job.parameters.database}}",
+    "scale_factor":       "{{job.parameters.scale_factor}}",
+    "tpcdi_directory":    "{{job.parameters.tpcdi_directory}}",
+    "wh_db":              "{{job.parameters.wh_db}}",
+    "rs_host":            "{{job.parameters.rs_host}}",
+    "rs_user":            "{{job.parameters.rs_user}}",
+    "rs_iam_role":        "{{job.parameters.rs_iam_role}}",
+    "rs_password_secret": "{{job.parameters.rs_password_secret}}",
+    "s3_volume_prefix":   "{{job.parameters.s3_volume_prefix}}",
+    "aws_region":         "{{job.parameters.aws_region}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
 
@@ -164,8 +168,10 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_catalog: str = "main",
-    secret_schema: str = "tpcdi_redshift",
+    rs_host: str = "",
+    rs_user: str = "",
+    rs_iam_role: str = "",
+    rs_password_secret: str = "main.tpcdi_redshift.password",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -229,16 +235,18 @@ def build_child(
         "max_concurrent_runs": 1000,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
-            {"name": "catalog",           "default": catalog},
-            {"name": "database",          "default": database},
-            {"name": "scale_factor",      "default": str(scale_factor)},
-            {"name": "tpcdi_directory",   "default": tpcdi_directory},
-            {"name": "wh_db",             "default": wh_db},
-            {"name": "secret_catalog",    "default": secret_catalog},
-            {"name": "secret_schema",     "default": secret_schema},
-            {"name": "s3_volume_prefix",  "default": s3_volume_prefix},
-            {"name": "aws_region",        "default": aws_region},
-            {"name": "batch_date",        "default": ""},
+            {"name": "catalog",            "default": catalog},
+            {"name": "database",           "default": database},
+            {"name": "scale_factor",       "default": str(scale_factor)},
+            {"name": "tpcdi_directory",    "default": tpcdi_directory},
+            {"name": "wh_db",              "default": wh_db},
+            {"name": "rs_host",            "default": rs_host},
+            {"name": "rs_user",            "default": rs_user},
+            {"name": "rs_iam_role",        "default": rs_iam_role},
+            {"name": "rs_password_secret", "default": rs_password_secret},
+            {"name": "s3_volume_prefix",   "default": s3_volume_prefix},
+            {"name": "aws_region",         "default": aws_region},
+            {"name": "batch_date",         "default": ""},
         ],
         "tasks": tasks,
         # Serverless env for ALL child tasks when no interactive cluster
@@ -272,8 +280,10 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_catalog: str = "main",
-    secret_schema: str = "tpcdi_redshift",
+    rs_host: str = "",
+    rs_user: str = "",
+    rs_iam_role: str = "",
+    rs_password_secret: str = "main.tpcdi_redshift.password",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -309,16 +319,18 @@ def build_parent(
                 "run_job_task": {
                     "job_id": child_job_id,
                     "job_parameters": {
-                        "catalog":          "{{job.parameters.catalog}}",
-                        "database":         "{{job.parameters.database}}",
-                        "scale_factor":     "{{job.parameters.scale_factor}}",
-                        "tpcdi_directory":  "{{job.parameters.tpcdi_directory}}",
-                        "wh_db":            "{{job.parameters.wh_db}}",
-                        "secret_catalog":   "{{job.parameters.secret_catalog}}",
-                        "secret_schema":    "{{job.parameters.secret_schema}}",
-                        "s3_volume_prefix": "{{job.parameters.s3_volume_prefix}}",
-                        "aws_region":       "{{job.parameters.aws_region}}",
-                        "batch_date":       "{{input}}",
+                        "catalog":            "{{job.parameters.catalog}}",
+                        "database":           "{{job.parameters.database}}",
+                        "scale_factor":       "{{job.parameters.scale_factor}}",
+                        "tpcdi_directory":    "{{job.parameters.tpcdi_directory}}",
+                        "wh_db":              "{{job.parameters.wh_db}}",
+                        "rs_host":            "{{job.parameters.rs_host}}",
+                        "rs_user":            "{{job.parameters.rs_user}}",
+                        "rs_iam_role":        "{{job.parameters.rs_iam_role}}",
+                        "rs_password_secret": "{{job.parameters.rs_password_secret}}",
+                        "s3_volume_prefix":   "{{job.parameters.s3_volume_prefix}}",
+                        "aws_region":         "{{job.parameters.aws_region}}",
+                        "batch_date":         "{{input}}",
                     },
                 },
                 "timeout_seconds": 0,
@@ -373,8 +385,10 @@ def build_parent(
             {"name": "scale_factor",                "default": str(scale_factor)},
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
-            {"name": "secret_catalog",              "default": secret_catalog},
-            {"name": "secret_schema",               "default": secret_schema},
+            {"name": "rs_host",                     "default": rs_host},
+            {"name": "rs_user",                     "default": rs_user},
+            {"name": "rs_iam_role",                 "default": rs_iam_role},
+            {"name": "rs_password_secret",          "default": rs_password_secret},
             {"name": "s3_volume_prefix",            "default": s3_volume_prefix},
             {"name": "aws_region",                  "default": aws_region},
             {"name": "delete_tables_when_finished", "default": "TRUE"},

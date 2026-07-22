@@ -5,10 +5,11 @@
 # the simulate_filedrops volume writes to, and pre-creates the empty
 # target tables with the right clustering for the benchmark.
 #
-# Auth: reads creds from Unity Catalog secrets under
-# {secret_catalog}.{secret_schema} (default main.tpcdi_snowflake; see
-# ./_sf_conn.py). The notebook runs on an interactive cluster so the
-# secret/conn lifecycle is per-cluster, not per-batch.
+# Auth: account/user/warehouse/role are plain params; the Snowflake
+# credential (password OR PEM private key) is a full UC secret path passed
+# as sf_credential_secret (see ./_sf_conn.py). The notebook runs on an
+# interactive cluster so the secret/conn lifecycle is per-cluster, not
+# per-batch.
 
 # COMMAND ----------
 
@@ -18,6 +19,12 @@ dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000",
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/", "Databricks Volume root (mirror for stage path)")
 dbutils.widgets.text("s3_stage_url",    "",                    "S3 URL the external stage will point at (s3://bucket/prefix/)")
 dbutils.widgets.text("storage_integration_name", "TPCDI_S3_INT", "Snowflake storage integration to attach to the stage")
+dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
+dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
+dbutils.widgets.text("role", "", "Snowflake role to assume (plain value; empty = connector default)")
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+                     "Full UC secret path to the Snowflake credential (password OR PEM private key)")
+dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse for the session (plain value)")
 dbutils.widgets.text("incremental_batches_to_run", "365",      "Number of batches the for_each loop will run")
 dbutils.widgets.text("benchmark_start_date", "2015-07-06",     "Start of the prior-year backfill window")
 
@@ -26,6 +33,11 @@ wh_db         = dbutils.widgets.get("wh_db")
 scale_factor  = dbutils.widgets.get("scale_factor")
 s3_stage_url  = dbutils.widgets.get("s3_stage_url").strip()
 storage_int   = dbutils.widgets.get("storage_integration_name").strip()
+account       = dbutils.widgets.get("account")
+sf_user       = dbutils.widgets.get("sf_user")
+role          = dbutils.widgets.get("role") or None
+sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
+warehouse     = dbutils.widgets.get("snowflake_warehouse") or None
 incremental_batches_to_run = int(dbutils.widgets.get("incremental_batches_to_run"))
 
 if not wh_db:
@@ -41,7 +53,8 @@ print(f"stage  = {s3_stage_url or '(none — bronze models will fail until set)'
 
 # COMMAND ----------
 
-conn = sf_connect(database=catalog)
+conn = sf_connect(database=catalog, account=account, user=sf_user, role=role,
+                  warehouse=warehouse, sf_credential_secret=sf_credential_secret)
 cur = conn.cursor()
 
 # --- 1. Database + schema (idempotent) ---
