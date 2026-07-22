@@ -1,7 +1,7 @@
 command:
   - "streamlit"
   - "run"
-  - "app.py"
+  - "databricks_app/app.py"
 
 env:
   # Flip to "false" once the app is deployed and you want it to emit real
