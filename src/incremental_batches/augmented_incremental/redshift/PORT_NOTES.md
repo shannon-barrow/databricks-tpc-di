@@ -8,7 +8,7 @@ Environment it expects:
 - An IAM role attached to the workgroup with S3 read on the staging bucket, for `COPY`.
 - The staging bucket is the same S3 path the Spark datagen writes to, surfaced as the UC external volume.
 
-All of these (host, role ARN, creds) come from the `tpcdi_redshift` secret scope — see `_rs_conn.py`.
+All of these (host, role ARN, creds) come from the UC secrets under `main.tpcdi_redshift` (catalog.schema) — see `_rs_conn.py`.
 
 Orchestrator: same as the SF and BQ ports — a Databricks workspace that owns the UC external-location volume on `s3://<your-bucket>/tpcdi/`.
 The 365 daily filedrop CSVs are therefore already on S3 in the same region as the Redshift workgroup — no cross-region egress.
@@ -127,7 +127,7 @@ small dim/reference tables under ~5 M rows. Worth flagging in setup.
 
 ## Auth & profile
 
-Connection details live in a `tpcdi_redshift` Databricks secret scope (mirrors `tpcdi_snowflake`), with these keys:
+Connection details live in UC secrets under `main.tpcdi_redshift` (catalog.schema; mirrors `main.tpcdi_snowflake`), read via `dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=...)` with these keys:
 
 | key | example |
 |---|---|
@@ -342,7 +342,7 @@ Mirrors the BQ structure (which has 10 files including PORT_NOTES.md):
 ```
 src/incremental_batches/augmented_incremental/redshift/
   PORT_NOTES.md                   (this file)
-  _rs_conn.py                     (psycopg2 connection factory; reads tpcdi_redshift secret scope)
+  _rs_conn.py                     (psycopg2 connection factory; reads UC secrets under main.tpcdi_redshift)
   setup_rs.py                     (per-parent: CTAS 22 tables from tpcdi_staging_sf{sf} → {wh_db}_{sf})
   rs_staging_bootstrap.py         (pure Python module imported inline by setup_rs; self-bootstraps tpcdi_staging_sf{sf})
   simulate_filedrops_rs.py        (per-batch: cp files into _dailybatches/{wh_db}_{sf}/{batch_date}/)
@@ -370,7 +370,7 @@ The workflow builder still accepts an `interactive_cluster_id` parameter for for
 
 ## Operational notes
 
-- **Credentials:** connection creds (host, port, database, user, password, iam_role) come from the `tpcdi_redshift` secret scope — never hardcode them.
+- **Credentials:** connection creds (host, port, database, user, password, iam_role) come from the UC secrets under `main.tpcdi_redshift` (catalog.schema) — never hardcode them.
 Use a service account rather than the workgroup admin.
 - **S3 IAM role:** COPY requires the Serverless workgroup to assume the IAM role, so the role's trust policy must include the workgroup's principal.
 - **dbt versions:** `dbt-core==1.11.8` + `dbt-redshift==1.10.1` (the dbt Cloud "compatible track" pairing for Redshift; keep in sync with `run_dbt.py`).

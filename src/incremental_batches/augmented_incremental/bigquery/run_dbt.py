@@ -19,7 +19,7 @@
 #   - dbt project lives at {dbt_project_dir} (workspace-repo path, set
 #     by the workflow builder; same convention as the Databricks + Snowflake
 #     dbt drivers)
-#   - BQ creds come from the {secret_scope}.sa_json secret (single JSON key)
+#   - BQ creds come from the {secret_catalog}.{secret_schema}.sa_json secret (single JSON key)
 #   - profiles.yml is written to a fresh /tmp dir per invocation
 #
 # Vars passed through to dbt match what the bigquery_models dbt models
@@ -35,7 +35,8 @@ dbutils.widgets.text("wh_db",          "")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("batch_date",     "")
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("secret_scope",   "tpcdi_bigquery")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_bigquery", "Unity Catalog schema holding the credentials")
 dbutils.widgets.text("bq_location",    "us-central1")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
@@ -44,7 +45,8 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 bq_location      = dbutils.widgets.get("bq_location")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 
@@ -72,11 +74,13 @@ except ImportError:
 
 # COMMAND ----------
 
-# Write profiles.yml from the secret scope. dbt-bigquery's keyfile auth
+# Write profiles.yml from the UC secret. dbt-bigquery's keyfile auth
 # needs a path, so we materialize the SA JSON to a tempfile.
 profiles_dir = tempfile.mkdtemp(prefix="dbt_profiles_")
 profile_path = os.path.join(profiles_dir, "profiles.yml")
-keyfile_path = bq_credentials_path(secret_scope=secret_scope, out_dir=profiles_dir)
+keyfile_path = bq_credentials_path(secret_catalog=secret_catalog,
+                                   secret_schema=secret_schema,
+                                   out_dir=profiles_dir)
 
 # BigQuery labels — stamped on every dbt-issued job. The task-time extract
 # reads these from INFORMATION_SCHEMA.JOBS_BY_PROJECT to attribute jobs

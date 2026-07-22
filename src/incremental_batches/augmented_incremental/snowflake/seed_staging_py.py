@@ -26,13 +26,15 @@ dbutils.library.restartPython()
 dbutils.widgets.text("catalog", "main")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("snowflake_database", "TPCDI_TEST")
-dbutils.widgets.text("secret_scope",       "tpcdi_snowflake")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret)")
 
 src_catalog  = dbutils.widgets.get("catalog")
 scale_factor = dbutils.widgets.get("scale_factor")
 sf_db        = dbutils.widgets.get("snowflake_database")
-secret_scope = dbutils.widgets.get("secret_scope")
+secret_catalog = dbutils.widgets.get("secret_catalog")
+secret_schema  = dbutils.widgets.get("secret_schema")
 warehouse_override = dbutils.widgets.get("snowflake_warehouse")
 
 src_schema = f"tpcdi_incremental_staging_{scale_factor}"
@@ -43,7 +45,7 @@ print(f"sink = {sf_db}.{sf_schema}")
 # COMMAND ----------
 
 def _secret(name, default=None):
-    try: return dbutils.secrets.get(scope=secret_scope, key=name)
+    try: return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
     except Exception: return default
 
 account   = _secret("account")
@@ -53,7 +55,7 @@ warehouse = warehouse_override or _secret("warehouse") or "BARROW_XS_GEN2"
 pk_pem    = _secret("private_key")
 
 if not (account and user and pk_pem):
-    raise RuntimeError(f"Secret scope '{secret_scope}' is missing account/user/private_key")
+    raise RuntimeError(f"Snowflake creds missing account/user/private_key under {secret_catalog}.{secret_schema}")
 
 # COMMAND ----------
 

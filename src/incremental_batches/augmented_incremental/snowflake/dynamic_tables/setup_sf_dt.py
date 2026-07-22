@@ -27,7 +27,8 @@ dbutils.widgets.text("catalog",         "TPCDI_TEST", "Snowflake database (treat
 dbutils.widgets.text("wh_db",           "",           "wh_db prefix; final schema = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"], "scale_factor")
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
-dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
 dbutils.widgets.text("snowflake_warehouse", "BARROW_MED_GEN2",
                      "Steady-state DT refresh warehouse — what per-batch refreshes use")
 dbutils.widgets.text("backfill_warehouse", "",
@@ -39,12 +40,13 @@ dbutils.widgets.text("dt_create_sql_path", "", "Absolute workspace path to dt_cr
 dbutils.widgets.text("catalog_integration", "TPCDI_DBX_UC_SF10_INT",
                      "Snowflake catalog integration name pointing at the Databricks UC iceberg-rest endpoint")
 dbutils.widgets.text("dbx_pat_secret_key", "",
-                     "Optional: secret key (in `secret_scope`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
+                     "Optional: secret key (in `secret_catalog.secret_schema`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
 
 catalog          = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 warehouse        = dbutils.widgets.get("snowflake_warehouse")
 backfill_warehouse = dbutils.widgets.get("backfill_warehouse").strip() or None
 target_lag       = dbutils.widgets.get("target_lag")
@@ -94,7 +96,8 @@ setup_warehouse = backfill_warehouse or warehouse
 
 conn = sf_connect(
     database=catalog,
-    secret_scope=secret_scope,
+    secret_catalog=secret_catalog,
+    secret_schema=secret_schema,
     warehouse=setup_warehouse,
     query_tag={
         "wh_db":        wh_db,
@@ -110,7 +113,8 @@ def _new_conn():
     """Worker connection on the setup warehouse. Used by every parallel
     CTAS / ALTER / DDL — bootstrap, bronze materialization, dt_create.sql."""
     return sf_connect(
-        database=catalog, secret_scope=secret_scope, warehouse=setup_warehouse,
+        database=catalog, secret_catalog=secret_catalog, secret_schema=secret_schema,
+        warehouse=setup_warehouse,
         query_tag={"scale_factor": scale_factor, "task": "setup_sf_dt:worker"},
     )
 
@@ -120,10 +124,10 @@ def _new_conn():
 _new_pat = None
 if dbx_pat_secret_key:
     try:
-        _new_pat = dbutils.secrets.get(scope=secret_scope, key=dbx_pat_secret_key)
-        print(f"[ok] picked up PAT from secret_scope.{dbx_pat_secret_key}")
+        _new_pat = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=dbx_pat_secret_key)
+        print(f"[ok] picked up PAT from {secret_catalog}.{secret_schema}.{dbx_pat_secret_key}")
     except Exception as _e:
-        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in secret_scope — proceeding without token refresh")
+        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in {secret_catalog}.{secret_schema} — proceeding without token refresh")
 
 # COMMAND ----------
 

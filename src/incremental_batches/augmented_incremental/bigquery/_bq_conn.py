@@ -1,9 +1,9 @@
 # Databricks notebook source
 # Shared BigQuery client helper for the TPC-DI augmented incremental
 # BigQuery workflow notebooks. Reads a service-account key from a
-# Databricks secret scope and returns a live google.cloud.bigquery.Client.
+# Unity Catalog secret and returns a live google.cloud.bigquery.Client.
 #
-# Secret scope layout (default scope name `tpcdi_bigquery`):
+# Secret layout (default UC location `main.tpcdi_bigquery`):
 #   sa_json  — full service-account key JSON (single secret)
 #
 # The SA needs BigQuery Data Editor + BigQuery Job User on the target
@@ -32,10 +32,11 @@ def _maybe_install_bigquery():
 
 
 def bq_connect(*, project: str, location: str = "us-central1",
-               secret_scope: str = "tpcdi_bigquery",
+               secret_catalog: str = "main",
+               secret_schema: str = "tpcdi_bigquery",
                query_label: dict | None = None):
-    """Open a BigQuery client using a service-account key from a Databricks
-    secret scope.
+    """Open a BigQuery client using a service-account key from a Unity
+    Catalog secret.
 
     BigQuery's Application Default Credentials chain doesn't work on
     Databricks worker pods (no metadata server), so we always load the
@@ -53,10 +54,10 @@ def bq_connect(*, project: str, location: str = "us-central1",
     from google.oauth2 import service_account
 
     try:
-        sa_json = dbutils.secrets.get(scope=secret_scope, key="sa_json")  # noqa: F821
+        sa_json = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="sa_json")  # noqa: F821
     except Exception as e:
         raise RuntimeError(
-            f"BigQuery secret scope '{secret_scope}' is missing key 'sa_json' "
+            f"BigQuery secret 'sa_json' is missing under {secret_catalog}.{secret_schema} "
             f"({type(e).__name__}: {e})"
         )
 
@@ -77,7 +78,8 @@ def bq_connect(*, project: str, location: str = "us-central1",
     return client
 
 
-def bq_credentials_path(*, secret_scope: str = "tpcdi_bigquery",
+def bq_credentials_path(*, secret_catalog: str = "main",
+                         secret_schema: str = "tpcdi_bigquery",
                          out_dir: str | None = None) -> str:
     """Materialize the SA key JSON to a tempfile and return its path.
 
@@ -87,10 +89,10 @@ def bq_credentials_path(*, secret_scope: str = "tpcdi_bigquery",
     """
     import tempfile
     try:
-        sa_json = dbutils.secrets.get(scope=secret_scope, key="sa_json")  # noqa: F821
+        sa_json = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="sa_json")  # noqa: F821
     except Exception as e:
         raise RuntimeError(
-            f"BigQuery secret scope '{secret_scope}' is missing key 'sa_json' "
+            f"BigQuery secret 'sa_json' is missing under {secret_catalog}.{secret_schema} "
             f"({type(e).__name__}: {e})"
         )
     if out_dir is None:

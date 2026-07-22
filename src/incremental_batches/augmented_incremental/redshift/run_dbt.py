@@ -13,7 +13,7 @@
 #
 # Contract:
 #   - dbt project lives at {dbt_project_dir} (workspace-repo path)
-#   - Redshift creds come from `tpcdi_redshift` secret scope:
+#   - Redshift creds come from the `main.tpcdi_redshift` UC secret schema:
 #       host, port, database, user, password, iam_role
 #   - profiles.yml written to a fresh /tmp dir per invocation
 #
@@ -28,7 +28,8 @@ dbutils.widgets.text("wh_db",            "")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("batch_date",       "")
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("secret_scope",     "tpcdi_redshift")
+dbutils.widgets.text("secret_catalog",   "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema",    "tpcdi_redshift", "Unity Catalog schema holding the credentials")
 dbutils.widgets.text("dbt_project_dir",  "", "Workspace-repo path to the dbt project")
 dbutils.widgets.text("s3_volume_prefix", "s3://REPLACE-ME/tpcdi/",
                      "S3 prefix matching the UC volume — bronze pre_hook reads from here")
@@ -40,7 +41,8 @@ wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 s3_volume_prefix = dbutils.widgets.get("s3_volume_prefix")
 aws_region       = dbutils.widgets.get("aws_region")
@@ -67,11 +69,11 @@ except ImportError:
 
 # COMMAND ----------
 
-# Read connection creds from the secret scope. Export as env vars so the
+# Read connection creds from the UC secret schema. Export as env vars so the
 # profiles.yml `env_var(...)` template references can resolve.
 def _get(name, default=None):
     try:
-        return dbutils.secrets.get(scope=secret_scope, key=name)
+        return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
     except Exception:
         return default
 
@@ -82,7 +84,7 @@ rs_user     = _get("user")
 rs_password = _get("password")
 if not all([rs_host, rs_user, rs_password]):
     raise RuntimeError(
-        f"Redshift secret scope '{secret_scope}' missing host/user/password"
+        f"Redshift secrets under {secret_catalog}.{secret_schema} missing host/user/password"
     )
 
 # COMMAND ----------
@@ -126,7 +128,7 @@ print(f"wrote profiles.yml to {profile_path}")
 rs_iam_role = _get("iam_role")
 if not rs_iam_role:
     raise RuntimeError(
-        f"Redshift secret scope '{secret_scope}' missing 'iam_role' "
+        f"Redshift secrets under {secret_catalog}.{secret_schema} missing 'iam_role' "
         f"(required for bronze pre_hook COPY)"
     )
 

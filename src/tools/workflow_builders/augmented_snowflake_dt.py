@@ -12,8 +12,8 @@ for the architecture rationale and per-model translation notes.
 Pre-requisites (one-time, manual, out-of-band — same as the dbt variant):
 - Snowflake `TPCDI_SVC` service user with KEY_PAIR auth
 - Snowflake `STORAGE INTEGRATION` + `STAGE TPCDI_TEST.{wh_db}_{sf}.TPCDI_STAGE`
-- Databricks secret scope `tpcdi_snowflake` (account, user, role, warehouse,
-  private_key PEM)
+- Unity Catalog secret schema `main.tpcdi_snowflake` (account, user, role,
+  warehouse, private_key PEM)
 - `STAGING_SF{sf}` schema self-bootstrapped by `setup_sf_dt` via `sf_staging_bootstrap`
 - UC external volume `main.tpcdi_raw_data.tpcdi_benchmarking`
 
@@ -56,7 +56,8 @@ _COMMON_PARAMS = {
     "scale_factor":        "{{job.parameters.scale_factor}}",
     "wh_db":               "{{job.parameters.wh_db}}",
     "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
-    "secret_scope":        "{{job.parameters.secret_scope}}",
+    "secret_catalog":      "{{job.parameters.secret_catalog}}",
+    "secret_schema":       "{{job.parameters.secret_schema}}",
     "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
 }
 _BATCHED_PARAMS = dict(
@@ -154,7 +155,8 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_snowflake",
     snowflake_warehouse: str | None = None,
     interactive_cluster_id: str | None = None,
     **_unused,
@@ -210,7 +212,8 @@ def build_child(
             {"name": "tpcdi_directory",     "default": tpcdi_directory},
             {"name": "wh_db",               "default": wh_db},
             {"name": "snowflake_stage",     "default": snowflake_stage},
-            {"name": "secret_scope",        "default": secret_scope},
+            {"name": "secret_catalog",      "default": secret_catalog},
+            {"name": "secret_schema",       "default": secret_schema},
             {"name": "snowflake_warehouse", "default": snowflake_warehouse},
             {"name": "batch_date",          "default": ""},
         ],
@@ -229,7 +232,8 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_snowflake",
     snowflake_warehouse: str | None = None,
     target_lag: str = "1 minute",
     interactive_cluster_id: str | None = None,
@@ -289,7 +293,8 @@ def build_parent(
                         "tpcdi_directory":     "{{job.parameters.tpcdi_directory}}",
                         "wh_db":               "{{job.parameters.wh_db}}",
                         "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
-                        "secret_scope":        "{{job.parameters.secret_scope}}",
+                        "secret_catalog":      "{{job.parameters.secret_catalog}}",
+                        "secret_schema":       "{{job.parameters.secret_schema}}",
                         "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
                         "batch_date":          "{{input}}",
                     },
@@ -345,7 +350,8 @@ def build_parent(
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
             {"name": "snowflake_stage",             "default": snowflake_stage},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "secret_catalog",              "default": secret_catalog},
+            {"name": "secret_schema",               "default": secret_schema},
             {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
             {"name": "target_lag",                  "default": target_lag},
             {"name": "delete_tables_when_finished", "default": "TRUE"},

@@ -25,13 +25,15 @@ dbutils.widgets.text("wh_db",            "")
 dbutils.widgets.dropdown("scale_factor", "10",
                          ["10", "100", "1000", "5000", "10000", "20000"])
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("secret_scope",     "tpcdi_redshift")
+dbutils.widgets.text("secret_catalog",   "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema",    "tpcdi_redshift", "Unity Catalog schema holding the credentials")
 
 database         = dbutils.widgets.get("database")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 
 if not wh_db:
     raise ValueError("wh_db is required")
@@ -46,7 +48,7 @@ batches_dir    = f"{tpcdi_directory}augmented_incremental/_dailybatches/{target_
 # COMMAND ----------
 
 conn = rs_connect(
-    database=database, secret_scope=secret_scope,
+    database=database, secret_catalog=secret_catalog, secret_schema=secret_schema,
     query_group={"wh_db": wh_db, "scale_factor": scale_factor, "task": "teardown_rs"},
 )
 

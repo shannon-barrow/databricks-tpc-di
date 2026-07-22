@@ -5,9 +5,10 @@
 # the simulate_filedrops volume writes to, and pre-creates the empty
 # target tables with the right clustering for the benchmark.
 #
-# Auth: reads creds from the `tpcdi_snowflake` Databricks secret scope
-# (see ./_sf_conn.py). The notebook runs on an interactive cluster so
-# the secret/conn lifecycle is per-cluster, not per-batch.
+# Auth: reads creds from Unity Catalog secrets under
+# {secret_catalog}.{secret_schema} (default main.tpcdi_snowflake; see
+# ./_sf_conn.py). The notebook runs on an interactive cluster so the
+# secret/conn lifecycle is per-cluster, not per-batch.
 
 # COMMAND ----------
 

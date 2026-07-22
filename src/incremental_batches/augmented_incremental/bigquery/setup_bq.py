@@ -22,7 +22,7 @@
 # yet for this scale factor, this notebook calls seed_staging_py to populate
 # it (Delta → parquet → bq load). No separate one-time notebook required.
 #
-# Auth: reads SA key JSON from `{secret_scope}.sa_json` (see ./_bq_conn.py).
+# Auth: reads SA key JSON from `{secret_catalog}.{secret_schema}.sa_json` (see ./_bq_conn.py).
 
 # COMMAND ----------
 
@@ -31,7 +31,8 @@ dbutils.widgets.text("wh_db",          "", "wh_db prefix; final dataset = {wh_db
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
                      "UC external volume root the per-batch files land under")
-dbutils.widgets.text("secret_scope",   "tpcdi_bigquery", "Databricks secret scope holding sa_json")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_bigquery", "Unity Catalog schema holding the credentials")
 dbutils.widgets.text("bq_location",    "us-central1", "BQ dataset location (must match GCS bucket region)")
 dbutils.widgets.text("databricks_catalog", "main",
                      "Databricks catalog where tpcdi_incremental_staging_{sf} lives — used by bootstrap seed only")
@@ -42,7 +43,8 @@ dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the
 bq_project       = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 bq_location      = dbutils.widgets.get("bq_location")
 databricks_catalog = dbutils.widgets.get("databricks_catalog")
 gcs_volume_prefix  = dbutils.widgets.get("gcs_volume_prefix")
@@ -67,7 +69,8 @@ from google.cloud import bigquery
 client = bq_connect(
     project=bq_project,
     location=bq_location,
-    secret_scope=secret_scope,
+    secret_catalog=secret_catalog,
+    secret_schema=secret_schema,
     query_label={
         "wh_db":        wh_db,
         "scale_factor": scale_factor,

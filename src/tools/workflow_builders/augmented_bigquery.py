@@ -11,9 +11,9 @@ Pre-requisites (one-time, manual, out-of-band):
 - A GCS bucket (e.g. `gs://<your-bucket>/tpcdi/`) in your region
 - UC external volume `main.tpcdi_raw_data.tpcdi_volume` backed by that bucket
 - A BigQuery project (supplied via the `catalog` job parameter)
-- Databricks secret scope `tpcdi_bigquery` with key `sa_json` containing a
-  service-account key JSON with BigQuery Data Editor + Job User on the
-  target project
+- Unity Catalog secret schema `main.tpcdi_bigquery` with key `sa_json`
+  containing a service-account key JSON with BigQuery Data Editor + Job
+  User on the target project
 - Phase B already run for this SF (seeds `tpcdi_staging_sf{N}`), OR
   set up to self-bootstrap from setup_bq.py (it falls back to
   seed_staging_py if the staging dataset is missing/incomplete)
@@ -57,7 +57,8 @@ _COMMON_PARAMS = {
     "scale_factor":      "{{job.parameters.scale_factor}}",
     "tpcdi_directory":   "{{job.parameters.tpcdi_directory}}",
     "wh_db":             "{{job.parameters.wh_db}}",
-    "secret_scope":      "{{job.parameters.secret_scope}}",
+    "secret_catalog":    "{{job.parameters.secret_catalog}}",
+    "secret_schema":     "{{job.parameters.secret_schema}}",
     "bq_location":       "{{job.parameters.bq_location}}",
     "gcs_volume_prefix": "{{job.parameters.gcs_volume_prefix}}",
 }
@@ -151,7 +152,8 @@ def build_child(
     scale_factor: int,
     tpcdi_directory: str,
     wh_db: str,
-    secret_scope: str = "tpcdi_bigquery",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_bigquery",
     bq_location: str = "us-central1",
     gcs_volume_prefix: str = "gs://REPLACE-ME/tpcdi/",
     interactive_cluster_id: str | None = None,
@@ -165,7 +167,7 @@ def build_child(
          via external tables CREATE OR REPLACEd at the end of the same
          notebook)
       2. `dbt_run` — pip-checks dbt-bigquery, writes profiles.yml from
-         the secret scope, runs `dbt run --target bigquery --vars {...}`
+         the UC secret, runs `dbt run --target bigquery --vars {...}`
     """
     aug = f"{repo_src_path}/{_AUG_PATH}"
     tasks = [
@@ -203,7 +205,8 @@ def build_child(
             {"name": "scale_factor",      "default": str(scale_factor)},
             {"name": "tpcdi_directory",   "default": tpcdi_directory},
             {"name": "wh_db",             "default": wh_db},
-            {"name": "secret_scope",      "default": secret_scope},
+            {"name": "secret_catalog",    "default": secret_catalog},
+            {"name": "secret_schema",     "default": secret_schema},
             {"name": "bq_location",       "default": bq_location},
             {"name": "gcs_volume_prefix", "default": gcs_volume_prefix},
             {"name": "batch_date",        "default": ""},
@@ -222,7 +225,8 @@ def build_parent(
     scale_factor: int,
     tpcdi_directory: str,
     wh_db: str,
-    secret_scope: str = "tpcdi_bigquery",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_bigquery",
     bq_location: str = "us-central1",
     gcs_volume_prefix: str = "gs://REPLACE-ME/tpcdi/",
     databricks_catalog: str = "main",
@@ -270,7 +274,8 @@ def build_parent(
                         "scale_factor":      "{{job.parameters.scale_factor}}",
                         "tpcdi_directory":   "{{job.parameters.tpcdi_directory}}",
                         "wh_db":             "{{job.parameters.wh_db}}",
-                        "secret_scope":      "{{job.parameters.secret_scope}}",
+                        "secret_catalog":    "{{job.parameters.secret_catalog}}",
+                        "secret_schema":     "{{job.parameters.secret_schema}}",
                         "bq_location":       "{{job.parameters.bq_location}}",
                         "gcs_volume_prefix": "{{job.parameters.gcs_volume_prefix}}",
                         "batch_date":        "{{input}}",
@@ -330,7 +335,8 @@ def build_parent(
             {"name": "scale_factor",                "default": str(scale_factor)},
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "secret_catalog",              "default": secret_catalog},
+            {"name": "secret_schema",               "default": secret_schema},
             {"name": "bq_location",                 "default": bq_location},
             {"name": "gcs_volume_prefix",           "default": gcs_volume_prefix},
             {"name": "databricks_catalog",          "default": databricks_catalog},

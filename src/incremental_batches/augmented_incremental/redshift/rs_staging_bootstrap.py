@@ -111,7 +111,7 @@ def _seed_one(table: str, *, database: str, target_schema: str,
               src_catalog: str, src_schema: str,
               parquet_root: str, volume_root: str, s3_volume_prefix: str,
               iam_role: str, aws_region: str,
-              spark, dbutils, secret_scope: str) -> dict:
+              spark, dbutils, secret_catalog: str, secret_schema: str) -> dict:
     """Seed one staging table: Delta -> parquet -> COPY -> row-count check.
 
     Opens its own psycopg2 connection (they aren't thread-safe to share).
@@ -121,7 +121,7 @@ def _seed_one(table: str, *, database: str, target_schema: str,
 
     def _get(key, default=None):
         try:
-            return dbutils.secrets.get(scope=secret_scope, key=key)
+            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=key)
         except Exception:
             return default
 
@@ -203,7 +203,8 @@ def ensure_staging_environment(conn, *,
                                 aws_region: str,
                                 spark,
                                 dbutils,
-                                secret_scope: str,
+                                secret_catalog: str,
+                                secret_schema: str,
                                 parallel: int = 8) -> dict:
     """Idempotent Redshift staging bootstrap (mirrors the bq_/sf_ equivalents).
 
@@ -218,7 +219,8 @@ def ensure_staging_environment(conn, *,
         iam_role: IAM role ARN for COPY.
         aws_region: COPY REGION clause.
         spark / dbutils: notebook handles.
-        secret_scope: scope for psycopg2 creds in worker threads.
+        secret_catalog / secret_schema: UC location of psycopg2 creds for
+            worker threads.
         parallel: thread-pool size.
 
     Returns:
@@ -299,7 +301,8 @@ def ensure_staging_environment(conn, *,
                 aws_region=aws_region,
                 spark=spark,
                 dbutils=dbutils,
-                secret_scope=secret_scope,
+                secret_catalog=secret_catalog,
+                secret_schema=secret_schema,
             ): t for t in missing
         }
         for fut in _cf.as_completed(futures):
@@ -321,7 +324,7 @@ def ensure_staging_environment(conn, *,
     # Redshift Serverless would have dropped its SSL socket by now.
     import psycopg2 as _psy
     def _get_secret(k, default=None):
-        try: return dbutils.secrets.get(scope=secret_scope, key=k)
+        try: return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=k)
         except Exception: return default
     verify_conn = _psy.connect(
         host=_get_secret("host"),

@@ -18,8 +18,8 @@ Pre-requisites (one-time, manual, out-of-band):
   backed by that integration
 - One-time `seed_staging.py` run to copy
   `main.tpcdi_incremental_staging_{sf}` → `TPCDI_TEST.STAGING_SF{sf}`
-- Databricks secret scope `tpcdi_snowflake` with keys: account, user, role,
-  warehouse, private_key (PEM)
+- Unity Catalog secret schema `main.tpcdi_snowflake` with keys: account,
+  user, role, warehouse, private_key (PEM)
 - UC external volume `main.tpcdi_raw_data.tpcdi_benchmarking`
   rooted at the bucket Snowflake's stage reads from
 - Interactive cluster with `dbt-snowflake==1.9.*` + `dbt-core==1.9.*`
@@ -66,7 +66,8 @@ _COMMON_PARAMS = {
     "tpcdi_directory":           "{{job.parameters.tpcdi_directory}}",
     "wh_db":                     "{{job.parameters.wh_db}}",
     "snowflake_stage":           "{{job.parameters.snowflake_stage}}",
-    "secret_scope":              "{{job.parameters.secret_scope}}",
+    "secret_catalog":            "{{job.parameters.secret_catalog}}",
+    "secret_schema":             "{{job.parameters.secret_schema}}",
     "snowflake_warehouse":       "{{job.parameters.snowflake_warehouse}}",
     "snowflake_warehouse_setup": "{{job.parameters.snowflake_warehouse_setup}}",
     "table_format":              "{{job.parameters.table_format}}",
@@ -166,7 +167,8 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_snowflake",
     snowflake_warehouse: str | None = None,
     snowflake_warehouse_setup: str = "",
     table_format: str = "native",
@@ -180,7 +182,7 @@ def build_child(
          external volume (writes via UC; Snowflake reads the same bytes
          via storage integration)
       2. `dbt_run` — pip-checks dbt-snowflake, writes profiles.yml from
-         the secret scope, runs `dbt run --target snowflake --vars {...}`
+         the UC secret schema, runs `dbt run --target snowflake --vars {...}`
     """
     if snowflake_warehouse is None:
         snowflake_warehouse = _default_sf_warehouse(scale_factor)
@@ -221,7 +223,8 @@ def build_child(
             {"name": "tpcdi_directory",     "default": tpcdi_directory},
             {"name": "wh_db",               "default": wh_db},
             {"name": "snowflake_stage",     "default": snowflake_stage},
-            {"name": "secret_scope",        "default": secret_scope},
+            {"name": "secret_catalog",      "default": secret_catalog},
+            {"name": "secret_schema",       "default": secret_schema},
             {"name": "snowflake_warehouse",       "default": snowflake_warehouse},
             {"name": "snowflake_warehouse_setup", "default": snowflake_warehouse_setup},
             {"name": "table_format",              "default": table_format},
@@ -242,7 +245,8 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_snowflake",
     snowflake_warehouse: str | None = None,
     snowflake_warehouse_setup: str = "",
     table_format: str = "native",
@@ -286,7 +290,8 @@ def build_parent(
                         "tpcdi_directory":     "{{job.parameters.tpcdi_directory}}",
                         "wh_db":               "{{job.parameters.wh_db}}",
                         "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
-                        "secret_scope":        "{{job.parameters.secret_scope}}",
+                        "secret_catalog":      "{{job.parameters.secret_catalog}}",
+                        "secret_schema":       "{{job.parameters.secret_schema}}",
                         "snowflake_warehouse":       "{{job.parameters.snowflake_warehouse}}",
                         "snowflake_warehouse_setup": "{{job.parameters.snowflake_warehouse_setup}}",
                         "table_format":              "{{job.parameters.table_format}}",
@@ -345,7 +350,8 @@ def build_parent(
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
             {"name": "snowflake_stage",             "default": snowflake_stage},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "secret_catalog",              "default": secret_catalog},
+            {"name": "secret_schema",               "default": secret_schema},
             {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
             {"name": "snowflake_warehouse_setup",   "default": snowflake_warehouse_setup},
             {"name": "table_format",                "default": table_format},

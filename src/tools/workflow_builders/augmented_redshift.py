@@ -13,8 +13,9 @@ Pre-requisites (one-time, manual, out-of-band):
 - A Redshift Serverless workgroup in the same region
 - An IAM role attached to the workgroup (trust policy allows the workgroup
   to assume it; bucket policy grants the role s3:Get* on the prefix). The
-  role ARN + workgroup host are read from the `tpcdi_redshift` secret scope.
-- Databricks secret scope `tpcdi_redshift` with keys:
+  role ARN + workgroup host are read from the `main.tpcdi_redshift` UC secret
+  schema.
+- Unity Catalog secret schema `main.tpcdi_redshift` with keys:
   host, port, database, user, password, iam_role
 - `tpcdi_staging_sf{N}` schema seeded in Redshift (one-time, via
   `onetime_stg_rs_tables.py` — paid once per scale_factor)
@@ -61,14 +62,15 @@ _AUG_PATH = "incremental_batches/augmented_incremental"
 # Job parameters every per-batch task needs. Redshift Serverless has no
 # warehouse-sizing knob at the per-task level — workgroup MaxRPU is set at
 # the workgroup level out-of-band. The IAM role for COPY comes from the
-# secret scope so it doesn't appear here.
+# UC secret schema so it doesn't appear here.
 _COMMON_PARAMS = {
     "catalog":           "{{job.parameters.catalog}}",
     "database":          "{{job.parameters.database}}",
     "scale_factor":      "{{job.parameters.scale_factor}}",
     "tpcdi_directory":   "{{job.parameters.tpcdi_directory}}",
     "wh_db":             "{{job.parameters.wh_db}}",
-    "secret_scope":      "{{job.parameters.secret_scope}}",
+    "secret_catalog":    "{{job.parameters.secret_catalog}}",
+    "secret_schema":     "{{job.parameters.secret_schema}}",
     "s3_volume_prefix":  "{{job.parameters.s3_volume_prefix}}",
     "aws_region":        "{{job.parameters.aws_region}}",
 }
@@ -162,7 +164,8 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_scope: str = "tpcdi_redshift",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_redshift",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -175,7 +178,7 @@ def build_child(
          external volume (writes via UC; Redshift reads the same bytes
          via COPY in the bronze pre_hooks)
       2. `dbt_run` — pip-checks dbt-redshift, writes profiles.yml from
-         the secret scope, runs `dbt run --target redshift --vars {...}`.
+         the UC secrets, runs `dbt run --target redshift --vars {...}`.
          Each rs_bronze model's pre_hook issues a `COPY ... FROM
          's3://.../{batch_date}/{Dataset}.txt' ... FORMAT AS CSV` into
          a temp table, then the model body appends to the persistent
@@ -231,7 +234,8 @@ def build_child(
             {"name": "scale_factor",      "default": str(scale_factor)},
             {"name": "tpcdi_directory",   "default": tpcdi_directory},
             {"name": "wh_db",             "default": wh_db},
-            {"name": "secret_scope",      "default": secret_scope},
+            {"name": "secret_catalog",    "default": secret_catalog},
+            {"name": "secret_schema",     "default": secret_schema},
             {"name": "s3_volume_prefix",  "default": s3_volume_prefix},
             {"name": "aws_region",        "default": aws_region},
             {"name": "batch_date",        "default": ""},
@@ -268,7 +272,8 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_scope: str = "tpcdi_redshift",
+    secret_catalog: str = "main",
+    secret_schema: str = "tpcdi_redshift",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -309,7 +314,8 @@ def build_parent(
                         "scale_factor":     "{{job.parameters.scale_factor}}",
                         "tpcdi_directory":  "{{job.parameters.tpcdi_directory}}",
                         "wh_db":            "{{job.parameters.wh_db}}",
-                        "secret_scope":     "{{job.parameters.secret_scope}}",
+                        "secret_catalog":   "{{job.parameters.secret_catalog}}",
+                        "secret_schema":    "{{job.parameters.secret_schema}}",
                         "s3_volume_prefix": "{{job.parameters.s3_volume_prefix}}",
                         "aws_region":       "{{job.parameters.aws_region}}",
                         "batch_date":       "{{input}}",
@@ -367,7 +373,8 @@ def build_parent(
             {"name": "scale_factor",                "default": str(scale_factor)},
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "secret_catalog",              "default": secret_catalog},
+            {"name": "secret_schema",               "default": secret_schema},
             {"name": "s3_volume_prefix",            "default": s3_volume_prefix},
             {"name": "aws_region",                  "default": aws_region},
             {"name": "delete_tables_when_finished", "default": "TRUE"},

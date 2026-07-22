@@ -19,8 +19,8 @@
 # (b) CTASs the 22 staging tables into native STAGING_SF{sf} ready for
 # zero-copy CLONEs. No separate one-time notebook required.
 #
-# Auth: reads creds from the {secret_scope} Databricks secret scope
-# (see ./_sf_conn.py).
+# Auth: reads creds from the {secret_catalog}.{secret_schema} UC secret
+# schema (see ./_sf_conn.py).
 
 # COMMAND ----------
 
@@ -30,8 +30,9 @@ dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000",
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
                      "UC external volume root the per-batch files land under")
 dbutils.widgets.text("snowflake_stage", "TPCDI_STAGE", "Snowflake stage name (no @)")
-dbutils.widgets.text("secret_scope",    "tpcdi_snowflake", "Databricks secret scope")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse default)")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret default)")
 dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"],
                           "Lineage tag for query attribution. 'native' = the per-run tables are Snowflake-native (current default — what setup_sf actually does today, regardless of this value). 'iceberg' is reserved for when we plumb a real Iceberg-table path; setting it today is just a tag, NOT a behavior switch. Flows through to Snowflake query_tag so the dashboard can split runs by lineage.")
 dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
@@ -39,12 +40,13 @@ dbutils.widgets.text("benchmark_start_date",       "2015-07-06", "Start of the p
 dbutils.widgets.text("catalog_integration", "TPCDI_DBX_UC_SF10_INT",
                      "Snowflake catalog integration name pointing at the Databricks UC iceberg-rest endpoint")
 dbutils.widgets.text("dbx_pat_secret_key", "",
-                     "Optional: secret key (in `secret_scope`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
+                     "Optional: secret key (in `secret_catalog.secret_schema`) holding a fresh Databricks PAT. Set on first bootstrap or after PAT rotation.")
 
 catalog          = dbutils.widgets.get("catalog")
 wh_db            = dbutils.widgets.get("wh_db")
 scale_factor     = dbutils.widgets.get("scale_factor")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 warehouse        = dbutils.widgets.get("snowflake_warehouse") or None
 table_format     = dbutils.widgets.get("table_format")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
@@ -67,7 +69,8 @@ print(f"staging = {catalog}.{staging_schema} (clone source — self-bootstrapped
 
 conn = sf_connect(
     database=catalog,
-    secret_scope=secret_scope,
+    secret_catalog=secret_catalog,
+    secret_schema=secret_schema,
     warehouse=warehouse,
     query_tag={
         "wh_db":        wh_db,
@@ -76,7 +79,7 @@ conn = sf_connect(
         "task":         "setup_sf",
     },
 )
-print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from secret_scope default)'}")
+print(f"[ok] connected to Snowflake; warehouse = {warehouse or '(from warehouse secret default)'}")
 cur = conn.cursor()
 
 # COMMAND ----------
@@ -98,17 +101,18 @@ import sf_staging_bootstrap as bootstrap
 
 def _new_conn():
     return sf_connect(
-        database=catalog, secret_scope=secret_scope, warehouse=warehouse,
+        database=catalog, secret_catalog=secret_catalog, secret_schema=secret_schema,
+        warehouse=warehouse,
         query_tag={"scale_factor": scale_factor, "task": "setup_sf:ctas"},
     )
 
 _new_pat = None
 if dbx_pat_secret_key:
     try:
-        _new_pat = dbutils.secrets.get(scope=secret_scope, key=dbx_pat_secret_key)
-        print(f"[ok] picked up PAT from secret_scope.{dbx_pat_secret_key}")
+        _new_pat = dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=dbx_pat_secret_key)
+        print(f"[ok] picked up PAT from {secret_catalog}.{secret_schema}.{dbx_pat_secret_key}")
     except Exception:
-        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in secret_scope — proceeding without token refresh")
+        print(f"[warn] dbx_pat_secret_key={dbx_pat_secret_key!r} not in {secret_catalog}.{secret_schema} — proceeding without token refresh")
 
 _boot = bootstrap.ensure_staging_environment(
     conn,
@@ -160,7 +164,8 @@ def _clone_one(table_name: str) -> tuple[str, float]:
     _t0 = _time.time()
     _conn = sf_connect(
         database=catalog,
-        secret_scope=secret_scope,
+        secret_catalog=secret_catalog,
+        secret_schema=secret_schema,
         warehouse=warehouse,
         query_tag={
             "wh_db":        wh_db,

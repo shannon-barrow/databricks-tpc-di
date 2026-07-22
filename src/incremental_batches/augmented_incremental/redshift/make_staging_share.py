@@ -34,9 +34,10 @@
 #     (late-binding). Late-binding views DO appear in `information_schema.tables`,
 #     so setup_rs's detection still sees them.
 #
-# Auth: reads connection creds from the `tpcdi_redshift` secret scope. The
-# producer/consumer are addressed by explicit host so this can wire any pair
-# of workgroups regardless of which one the scope's `host` currently targets.
+# Auth: reads connection creds from the `main.tpcdi_redshift` UC secret schema.
+# The producer/consumer are addressed by explicit host so this can wire any
+# pair of workgroups regardless of which one the schema's `host` currently
+# targets.
 
 import psycopg2
 
@@ -48,12 +49,14 @@ dbutils.widgets.text("producer_host", "",
     "Producer workgroup endpoint (owns the built staging)")
 dbutils.widgets.text("consumer_host", "",
     "Consumer workgroup endpoint (runs the benchmark)")
-dbutils.widgets.text("secret_scope", "tpcdi_redshift", "Databricks secret scope")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_redshift", "Unity Catalog schema holding the credentials")
 
 sf            = int(dbutils.widgets.get("scale_factor"))
 PROD_HOST     = dbutils.widgets.get("producer_host").strip()
 CONS_HOST     = dbutils.widgets.get("consumer_host").strip()
-secret_scope  = dbutils.widgets.get("secret_scope")
+secret_catalog = dbutils.widgets.get("secret_catalog")
+secret_schema  = dbutils.widgets.get("secret_schema")
 
 if not PROD_HOST or not CONS_HOST:
     raise ValueError(
@@ -61,7 +64,7 @@ if not PROD_HOST or not CONS_HOST:
         "workgroup endpoints). Pass them as job/notebook parameters.")
 
 def _get(k):
-    return dbutils.secrets.get(scope=secret_scope, key=k)
+    return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=k)
 
 SCHEMA   = f"tpcdi_staging_sf{sf}".lower()      # local schema on consumer (matches producer FQN)
 SHARE    = f"{SCHEMA}_share"                    # datashare name on producer

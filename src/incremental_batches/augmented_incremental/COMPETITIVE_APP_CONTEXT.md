@@ -16,9 +16,14 @@ The app's job is:
    "only run 50 batches"), and read-only failure triage (explain why a run
    failed, usually a prerequisite that isn't wired).
 
-Rule for credentials: the app collects a secret once and writes it into the
-target Databricks secret scope, then keeps only the scope/key reference.
-It is never a credential store, and secrets never flow through job params.
+Rule for credentials: the app never handles secret values. Each port reads
+its credentials from **Unity Catalog secrets** — the operator creates the
+secrets under a `{catalog}.{schema}` they own, and the app collects only that
+catalog + schema, passing the pair as `secret_catalog` / `secret_schema` job
+params. At run time the port reads each key via
+`dbutils.secrets.get(catalog=…, schema=…, key=…)`. The app is never a
+credential store, and no secret value flows through job params. (Requires a
+runtime that supports UC secrets: DBR 17.3 LTS+ or serverless env v4+.)
 
 ---
 
@@ -46,14 +51,16 @@ Maps to `redshift/create_jobs.py::create()`.
   — its trust policy must include the workgroup's principal (COPY assumes it).
 - An **S3 bucket** for staging, in the same region as the workgroup, surfaced
   as the UC external volume the Spark datagen writes to.
-- The **`tpcdi_redshift` secret scope** populated: host, port, database, user,
-  password, iam_role.
+- **UC secrets** under `{secret_catalog}.{secret_schema}` (default
+  `main.tpcdi_redshift`) holding keys: host, port, database, user, password,
+  iam_role.
 - One-time **staging seed** (`tpcdi_staging_sf{sf}`) — expensive; setup_rs
   self-bootstraps it and skips if already present with matching row counts.
 
 **App form fields:** scale_factor; target-workspace profile; `s3_volume_prefix`
-(required); aws_region; workgroup host + Redshift user/password/iam_role
-(-> secret scope); wh_db/database/catalog (defaults fine).
+(required); aws_region; wh_db/database/catalog (defaults fine); secret_catalog +
+secret_schema (the UC location where you created the host/user/password/iam_role
+secrets).
 
 ---
 
@@ -66,13 +73,15 @@ Maps to `bigquery/create_jobs.py::create()`.
 - A **BigQuery project** (passed as `catalog`).
 - A **GCS bucket** for staging, in the same region, surfaced as the UC
   external volume.
-- A **service-account JSON key** with BigQuery Data Editor + Job User,
-  stored in the **`tpcdi_bigquery` secret scope** (key `sa_json`).
+- A **service-account JSON key** with BigQuery Data Editor + Job User, stored
+  as a **UC secret** under `{secret_catalog}.{secret_schema}` (default
+  `main.tpcdi_bigquery`, key `sa_json`).
 - One-time staging seed (bootstrap step).
 
 **App form fields:** scale_factor; GCP-workspace profile; `catalog` (BQ project,
-required); `gcs_volume_prefix` (required); bq_location; SA JSON (-> secret
-scope); wh_db (default fine).
+required); `gcs_volume_prefix` (required); bq_location; wh_db (default fine);
+secret_catalog + secret_schema (the UC location where you created the `sa_json`
+secret).
 
 ---
 
@@ -101,8 +110,9 @@ there's a whole bridge to stand up beyond "account + warehouse + creds".
   table (setup builds these; also the fix for stale-federation errors).
 - A **warehouse** to run the models (or a Dynamic Tables warehouse).
 - A **stage** for the per-batch file drops.
-- The **`tpcdi_snowflake` secret scope**: account, user, password (or keypair),
-  warehouse, and the Databricks PAT key.
+- **UC secrets** under `{secret_catalog}.{secret_schema}` (default
+  `main.tpcdi_snowflake`): account, user, password (or keypair), warehouse, and
+  the Databricks PAT key.
 
 **Known failure the app should recognize:** `SHOW SCHEMAS` works but
 `SELECT`/`CREATE ICEBERG TABLE ... CATALOG=<int>` fails to vend S3 creds ->
@@ -111,9 +121,10 @@ the catalog integration's PAT is expired. Fix: `ALTER CATALOG INTEGRATION
 is alterable; TYPE is not). Refresh via `dbx_pat_secret_key`.
 
 **App form fields:** scale_factor; Snowflake account, warehouse, stage;
-catalog-integration name; a fresh Databricks PAT (-> secret scope);
-Snowflake user/password (-> secret scope). Plus a pre-flight that confirms
-UniForm is enabled on the sources.
+target database (catalog) + wh_db; catalog-integration name; secret_catalog +
+secret_schema (the UC location where you created the Snowflake user/password,
+keypair, and Databricks-PAT secrets). Plus a pre-flight that confirms UniForm
+is enabled on the sources.
 
 ---
 

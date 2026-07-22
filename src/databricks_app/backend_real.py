@@ -1,5 +1,6 @@
-"""Real backend — writes secrets into the target Databricks secret scope and
-emits benchmark workflows by calling each port's create_jobs.create().
+"""Real backend — emits benchmark workflows by calling each port's
+create_jobs.create(). It never handles credentials: the form passes a Unity
+Catalog secret location (catalog + schema) that the job reads at run time.
 
 Auth: uses the Databricks SDK's Config()/WorkspaceClient, which auto-detects
 the app's service-principal credentials in a deployed Databricks App (and a
@@ -73,17 +74,15 @@ class RealBackend:
     def _create_kwargs(self, spec: EngineSpec, values: dict) -> dict:
         """Map form values -> create() keyword args.
 
-        Includes PARAM fields plus the secret_scope name (which each port's
-        create() accepts and passes to the job, where dbutils.secrets.get
-        reads the actual credentials). incremental_batches_to_run is excluded:
-        it's a run-now parameter set when the parent job is *triggered*, not a
-        build-time create() arg.
+        Includes PARAM fields plus the UC secret-location identifiers
+        (secret_catalog + secret_schema), which each port's create() accepts
+        and passes to the job, where dbutils.secrets.get reads the actual
+        credentials. incremental_batches_to_run is excluded: it's a run-now
+        parameter set when the parent job is *triggered*, not a build-time
+        create() arg.
         """
         skip = {"incremental_batches_to_run"}
-        pass_fields = list(spec.param_fields())
-        scope = spec.scope_field()
-        if scope:
-            pass_fields.append(scope)
+        pass_fields = list(spec.param_fields()) + list(spec.secret_ref_fields())
         p = {f.key: values[f.key] for f in pass_fields
              if values.get(f.key) and f.key not in skip}
         p["scale_factor"] = int(p.pop("scale_factor"))

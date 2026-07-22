@@ -4,9 +4,10 @@ A Databricks App for setting up and emitting TPC-DI benchmark workflows.
 Its flagship use case is the **competitive** (non-Databricks) benchmarks:
 Redshift, BigQuery, and Snowflake runs need many inputs that a native
 Databricks run can just derive (workspace, bucket, account, warehouse,
-credentials, catalog federation). The app collects those, writes any secrets
-to the target secret scope, and emits the parent+child workflow by calling
-each port's `create_jobs.create()`.
+credentials, catalog federation). The app collects those, references the
+operator's Unity Catalog secrets by catalog + schema (never handling the
+values), and emits the parent+child workflow by calling each port's
+`create_jobs.create()`.
 
 See `../incremental_batches/augmented_incremental/COMPETITIVE_APP_CONTEXT.md`
 for the per-engine prerequisites and failure signals this app is built around.
@@ -56,6 +57,13 @@ principal via the SDK `Config()`.
 
 ## Security
 
-The app never stores credentials. Secret fields (🔑 in the form) are written
-straight into the target Databricks secret scope and only the scope/key
-reference is retained. Secrets never flow into job parameters or results.
+The app never handles credentials. It uses **Unity Catalog secrets**: the
+operator creates the credential secrets under a `{catalog}.{schema}` they own
+(with the keys each engine expects), and the form's 🔑 fields collect only that
+**catalog + schema** — never a secret value. Those identifiers flow to the job,
+which reads each credential at run time via
+`dbutils.secrets.get(catalog=…, schema=…, key=…)`. No secret value ever passes
+through the app, its parameters, or its results.
+
+Requires a runtime that supports UC secrets (DBR 17.3 LTS+ or serverless
+environment v4+).

@@ -52,8 +52,8 @@ existing Databricks variants).
    the new external volume's `tpcdi_directory` instead of the managed Volume.
 
 2. **`dbt_run.py`** — pip-checks `dbt-snowflake==1.9.*` (no-op if already on
-   the cluster as a library), writes a per-run `profiles.yml` from a
-   Databricks secret scope, then runs:
+   the cluster as a library), writes a per-run `profiles.yml` from the
+   UC secrets under `main.tpcdi_snowflake` (catalog.schema), then runs:
 
    ```
    dbt run --target snowflake \
@@ -88,8 +88,9 @@ Both tasks pinned to the same interactive cluster ID. No serverless.
 
 ## Secrets / config
 
-Databricks secret scope `tpcdi_snowflake` (one-time create via
-`databricks secrets create-scope`):
+UC secrets under `main.tpcdi_snowflake` (catalog.schema; the old flat scope
+name is now the schema, under catalog `main` by default), read via
+`dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=...)`:
 
 | key | value |
 |---|---|

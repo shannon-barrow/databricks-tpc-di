@@ -7,7 +7,7 @@
 #     (defensive pip-install below in case it's not)
 #   - dbt project lives at {dbt_project_dir} (workspace-repo path, set
 #     by the workflow builder; same convention as the existing dbt driver)
-#   - Snowflake creds come from the {secret_scope} Databricks secret scope
+#   - Snowflake creds come from the {secret_catalog}.{secret_schema} UC secret schema
 #   - profiles.yml is written to a fresh /tmp dir per invocation
 #
 # Vars passed through to dbt match what the snowflake_models dbt models
@@ -23,8 +23,9 @@ dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000"
 dbutils.widgets.text("batch_date",     "")
 dbutils.widgets.text("tpcdi_directory","/Volumes/main/tpcdi_raw_data/tpcdi_benchmarking/")
 dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
-dbutils.widgets.text("secret_scope",   "tpcdi_snowflake")
-dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use secret_scope.warehouse)")
+dbutils.widgets.text("secret_catalog", "main", "Unity Catalog catalog holding the secret schema")
+dbutils.widgets.text("secret_schema", "tpcdi_snowflake", "Unity Catalog schema holding the credentials")
+dbutils.widgets.text("snowflake_warehouse", "", "Override the Snowflake warehouse (empty = use the warehouse secret)")
 dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution. 'native' = the actual current behavior (Snowflake-native tables); 'iceberg' is a reserved label for a future Iceberg-table path — no behavior switch today.")
 dbutils.widgets.text("dbt_project_dir","", "Workspace-repo path to the dbt project")
 
@@ -34,7 +35,8 @@ scale_factor     = dbutils.widgets.get("scale_factor")
 batch_date       = dbutils.widgets.get("batch_date")
 tpcdi_directory  = dbutils.widgets.get("tpcdi_directory")
 snowflake_stage  = dbutils.widgets.get("snowflake_stage")
-secret_scope     = dbutils.widgets.get("secret_scope")
+secret_catalog   = dbutils.widgets.get("secret_catalog")
+secret_schema    = dbutils.widgets.get("secret_schema")
 dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 
 if not (wh_db and batch_date and dbt_project_dir):
@@ -58,9 +60,9 @@ except ImportError:
 
 # COMMAND ----------
 
-# Write profiles.yml from the secret scope. Keypair auth preferred.
+# Write profiles.yml from the UC secret schema. Keypair auth preferred.
 def _secret(name, default=None):
-    try:    return dbutils.secrets.get(scope=secret_scope, key=name)
+    try:    return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)
     except Exception: return default
 
 account   = _secret("account")
@@ -72,9 +74,9 @@ pk_pem    = _secret("private_key")
 password  = _secret("password")
 
 if not (account and user):
-    raise RuntimeError(f"Secret scope '{secret_scope}' missing account/user")
+    raise RuntimeError(f"Snowflake creds missing account/user under {secret_catalog}.{secret_schema}")
 if not (pk_pem or password):
-    raise RuntimeError(f"Secret scope '{secret_scope}' missing private_key OR password")
+    raise RuntimeError(f"Snowflake creds missing private_key OR password under {secret_catalog}.{secret_schema}")
 
 profiles_dir = tempfile.mkdtemp(prefix="dbt_profiles_")
 profile_path = os.path.join(profiles_dir, "profiles.yml")

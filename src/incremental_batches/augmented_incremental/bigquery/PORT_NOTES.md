@@ -53,7 +53,7 @@ batch when setup CLONE happens. `event_dt` / `update_dt` clustering only.
 ## Auth & profile
 
 BQ profile invoked from Databricks `dbt_task` needs service-account-json
-from a Databricks secret scope:
+from UC secrets under `main.tpcdi_bigquery` (catalog.schema):
 
 ```yaml
 # profiles.yml.template
@@ -74,8 +74,9 @@ dbt_augmented_incremental:
       job_creation_timeout_seconds: 60
 ```
 
-The `run_dbt.py` notebook (analog of Snowflake's) reads the JSON from a
-Databricks secret scope, exports it as `BQ_KEYFILE_JSON`, then shells out
+The `run_dbt.py` notebook (analog of Snowflake's) reads the JSON from the
+UC secrets under `main.tpcdi_bigquery` (via `dbutils.secrets.get(catalog=secret_catalog,
+schema=secret_schema, key="sa_json")`), exports it as `BQ_KEYFILE_JSON`, then shells out
 to `dbt run --target bigquery`. Same pattern as `_sf_conn.py`.
 
 ## Cost attribution (BQ equivalent of Snowflake query_tag)
@@ -193,6 +194,6 @@ swap the SQL dialect.
 ## Open questions for plumbing phase
 
 - Which GCS bucket / project owns the file drops? (memory: `tpcdi-fresh` workspace uses `s3://<your-bucket>/tpcdi/` for AWS; need a GCS equivalent.)
-- Service-account JSON storage: new Databricks secret scope `tpcdi_bigquery`?
+- Service-account JSON storage: UC secrets under `main.tpcdi_bigquery` (catalog.schema), key `sa_json`.
 - Cross-cloud egress cost of streaming `_dailybatches/*` from Databricks to GCS each batch. Snowflake side avoided this because the SF stage points at the same S3 bucket; BQ may need files actually living in GCS.
 - Run-time: does `dbt_task` on Databricks have `dbt-bigquery` pinned, or do we need an env install? (currently `dbt-databricks==1.11.7`)

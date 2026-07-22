@@ -1,9 +1,9 @@
 # Databricks notebook source
 # Shared Snowflake connection helper for the TPC-DI augmented incremental
-# Snowflake workflow notebooks. Reads credentials from a Databricks
-# secret scope and returns a live snowflake.connector connection.
+# Snowflake workflow notebooks. Reads credentials from a Unity Catalog
+# secret schema and returns a live snowflake.connector connection.
 #
-# Secret scope layout (default scope name `tpcdi_snowflake`):
+# Secret layout (default location `main.tpcdi_snowflake`):
 #   account      — Snowflake account identifier (e.g. <org>-<account>)
 #   user         — Snowflake user
 #   private_key  — RSA private key PEM (preferred) OR
@@ -32,9 +32,10 @@ def _maybe_install_connector():
 
 def sf_connect(*, database: str | None = None, schema: str | None = None,
                warehouse: str | None = None, role: str | None = None,
-               secret_scope: str = "tpcdi_snowflake",
+               secret_catalog: str = "main",
+               secret_schema: str = "tpcdi_snowflake",
                query_tag: str | dict | None = None):
-    """Open a Snowflake connection using creds from a Databricks secret scope.
+    """Open a Snowflake connection using creds from a UC secret schema.
 
     Prefers private-key auth when the `private_key` secret is set; otherwise
     falls back to password (which means MFA needs to already be cached on
@@ -50,7 +51,7 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
 
     def _get(name, default=None):
         try:
-            return dbutils.secrets.get(scope=secret_scope, key=name)  # noqa: F821
+            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)  # noqa: F821
         except Exception:
             return default
 
@@ -60,7 +61,8 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
     warehouse = warehouse or _get("warehouse")
     if not account or not user:
         raise RuntimeError(
-            f"Snowflake secret scope '{secret_scope}' is missing 'account' or 'user'."
+            f"Snowflake creds missing 'account' or 'user' under "
+            f"{secret_catalog}.{secret_schema}."
         )
 
     pk_pem = _get("private_key")
@@ -82,7 +84,7 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
         if not password:
             raise RuntimeError(
                 f"Neither 'private_key' nor 'password' is set under "
-                f"secret scope '{secret_scope}'."
+                f"{secret_catalog}.{secret_schema}."
             )
         conn_kwargs = dict(account=account, user=user, password=password,
                            authenticator="username_password_mfa",

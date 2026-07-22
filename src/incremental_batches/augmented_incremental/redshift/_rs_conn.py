@@ -1,9 +1,9 @@
 # Databricks notebook source
 # Shared Redshift connection helper for the TPC-DI augmented incremental
-# Redshift workflow notebooks. Reads credentials from a Databricks secret
-# scope and returns a live psycopg2 connection.
+# Redshift workflow notebooks. Reads credentials from a Unity Catalog secret
+# schema and returns a live psycopg2 connection.
 #
-# Secret scope layout (default scope name `tpcdi_redshift`):
+# Secret layout (default location `main.tpcdi_redshift`):
 #   host       — Redshift Serverless workgroup endpoint
 #                e.g. <workgroup>.<account-id>.<region>.redshift-serverless.amazonaws.com
 #   port       — JDBC/PG wire port, default 5439
@@ -44,10 +44,11 @@ def _maybe_install_psycopg2():
 
 def rs_connect(*, database: str | None = None,
                schema: str | None = None,
-               secret_scope: str = "tpcdi_redshift",
+               secret_catalog: str = "main",
+               secret_schema: str = "tpcdi_redshift",
                query_group: str | dict | None = None,
                autocommit: bool = True):
-    """Open a Redshift connection using creds from a Databricks secret scope.
+    """Open a Redshift connection using creds from a Unity Catalog secret schema.
 
     Mirrors `_sf_conn.sf_connect` / `_bq_conn.bq_connect` shape.
 
@@ -66,7 +67,7 @@ def rs_connect(*, database: str | None = None,
 
     def _get(name, default=None):
         try:
-            return dbutils.secrets.get(scope=secret_scope, key=name)  # noqa: F821
+            return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key=name)  # noqa: F821
         except Exception:
             return default
 
@@ -80,7 +81,7 @@ def rs_connect(*, database: str | None = None,
                               ("password", password)] if not v]
     if missing:
         raise RuntimeError(
-            f"Redshift secret scope '{secret_scope}' missing required key(s): {missing}"
+            f"Redshift secrets under {secret_catalog}.{secret_schema} missing required key(s): {missing}"
         )
 
     conn = psycopg2.connect(
@@ -108,17 +109,18 @@ def rs_connect(*, database: str | None = None,
     return conn
 
 
-def rs_iam_role(*, secret_scope: str = "tpcdi_redshift") -> str:
+def rs_iam_role(*, secret_catalog: str = "main",
+                secret_schema: str = "tpcdi_redshift") -> str:
     """Return the IAM role ARN used by Redshift COPY statements.
 
-    Pulled from the secret scope so the workgroup identity stays out of
+    Pulled from the UC secret schema so the workgroup identity stays out of
     source code. Used by setup_rs and the dbt bronze pre_hooks when issuing
     `COPY ... IAM_ROLE '<arn>' ...`.
     """
     try:
-        return dbutils.secrets.get(scope=secret_scope, key="iam_role")  # noqa: F821
+        return dbutils.secrets.get(catalog=secret_catalog, schema=secret_schema, key="iam_role")  # noqa: F821
     except Exception as e:
         raise RuntimeError(
-            f"Redshift secret scope '{secret_scope}' missing key 'iam_role' "
+            f"Redshift secrets under {secret_catalog}.{secret_schema} missing key 'iam_role' "
             f"({type(e).__name__}: {e})"
         )

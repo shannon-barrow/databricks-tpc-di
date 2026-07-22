@@ -52,7 +52,8 @@ DEFAULTS = dict(
     database="dev",                                # Redshift database
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
     wh_db="tpcdi_aug_rs_dbt",                      # target schema prefix -> {wh_db}_{sf}
-    secret_scope="tpcdi_redshift",
+    secret_catalog="main",
+    secret_schema="tpcdi_redshift",
     aws_region="us-west-2",
 )
 
@@ -104,8 +105,8 @@ def create(scale_factor: int, *,
         profile: Databricks CLI profile.
         name_prefix: Job-name prefix. If None, derived from the username
             (so concurrent users don't collide).
-        overrides: Any DEFAULTS key (catalog, database, wh_db, secret_scope,
-            aws_region, tpcdi_directory) can be overridden.
+        overrides: Any DEFAULTS key (catalog, database, wh_db, secret_catalog,
+            secret_schema, aws_region, tpcdi_directory) can be overridden.
 
     Returns (child_id, parent_id).
     """

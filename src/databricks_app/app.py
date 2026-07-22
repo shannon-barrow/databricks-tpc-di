@@ -204,7 +204,7 @@ st.divider()
 def _render_field(eng_value: str, f) -> str:
     """Render one InputField as a form control and return its value."""
     wkey = f"{eng_value}.{f.key}"
-    if f.kind is FieldKind.SECRET_SCOPE:
+    if f.kind is FieldKind.SECRET_REF:
         return st.text_input(f"{f.label} 🔑", value=f.default,
                              help=f.help or None, key=wkey)
     if f.kind is FieldKind.DERIVED:
@@ -238,8 +238,9 @@ with st.form("details"):
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
-        st.caption("🔑 = name of a Databricks secret scope you created; the job "
-                   "reads the credentials from it at run time.")
+        st.caption("🔑 = the Unity Catalog catalog + schema where you created "
+                   "the credential secrets; the job reads them from there at "
+                   "run time (dbutils.secrets.get).")
         cv: dict[str, str] = {"scale_factor": scale_factor,
                               "incremental_batches_to_run": batches}
         for f in cspec.fields:
@@ -274,8 +275,9 @@ results.append({
     "mock": USE_MOCK,
 })
 
-# 2. Each competitor: emit its workflow. No secrets are written by the app —
-# the secret_scope name in cv points the job at the operator-managed scope.
+# 2. Each competitor: emit its workflow. No secrets are handled by the app —
+# the secret_catalog/secret_schema in cv point the job at the operator's UC
+# secrets, which it reads at run time.
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
     try:

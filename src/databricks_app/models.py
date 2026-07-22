@@ -5,9 +5,10 @@ This is the single source of truth the form renders from and the backend
 consumes — see COMPETITIVE_APP_CONTEXT.md for the prerequisite rationale.
 
 A native Databricks run derives almost everything (user, repo path, catalog).
-A competitor run can't, so each engine declares its required fields, which of
-them are secrets (written to a Databricks secret scope, never stored by the
-app), and sensible defaults for the rest.
+A competitor run can't, so each engine declares its required fields, the
+Unity Catalog secret location (catalog + schema) its credentials live in —
+never the values, which the app doesn't handle — and sensible defaults for
+the rest.
 """
 from __future__ import annotations
 
@@ -49,7 +50,9 @@ COMPETITIVE_BATCH_TYPES = ["Augmented Incremental"]
 
 class FieldKind(str, Enum):
     PARAM = "param"      # a create()/job parameter
-    SECRET_SCOPE = "secret_scope"  # name of a user-managed Databricks secret scope
+    SECRET_REF = "secret_ref"  # points at a user-managed Unity Catalog secret
+                               # location (catalog + schema); no values pass
+                               # through the app
     DERIVED = "derived"  # filled from workspace context when left blank
 
 
@@ -72,15 +75,13 @@ class EngineSpec:
     label: str
     fields: tuple[InputField, ...]
 
-    def scope_field(self) -> InputField | None:
-        """The single secret-scope field for this engine, if any. The user
-        creates the scope themselves and enters its name here; the app passes
-        the name to the job, which reads each credential via
-        dbutils.secrets.get(scope=..., key=...)."""
-        for f in self.fields:
-            if f.kind is FieldKind.SECRET_SCOPE:
-                return f
-        return None
+    def secret_ref_fields(self) -> tuple[InputField, ...]:
+        """The Unity Catalog secret-location fields (secret_catalog +
+        secret_schema) for this engine, if any. The operator creates the UC
+        secrets themselves and enters the catalog/schema here; the app passes
+        those identifiers to the job, which reads each credential via
+        dbutils.secrets.get(catalog=..., schema=..., key=...)."""
+        return tuple(f for f in self.fields if f.kind is FieldKind.SECRET_REF)
 
     def param_fields(self) -> tuple[InputField, ...]:
         return tuple(f for f in self.fields if f.kind is FieldKind.PARAM)
@@ -98,9 +99,26 @@ _SCALE_FACTOR = InputField(
 
 # Every competitor gets its own catalog + target-schema field so the operator
 # can point each engine at a distinct destination. Credentials are never
-# entered here: the operator pre-creates a Databricks secret scope holding the
-# required keys, and the app collects only the scope *name* (SECRET_SCOPE),
-# which the port reads via dbutils.secrets.get(scope=..., key=...).
+# entered here: the operator pre-creates Unity Catalog secrets under a
+# {catalog}.{schema} they own, and the app collects only that catalog + schema
+# (SECRET_REF), which the port reads via
+# dbutils.secrets.get(catalog=..., schema=..., key=...).
+
+
+def _secret_ref_fields(default_schema: str, keys: str) -> tuple[InputField, ...]:
+    """The two UC secret-location fields shared by every competitor: the
+    catalog + schema holding the credentials. `keys` documents the secret
+    names the port expects to find there."""
+    return (
+        InputField("secret_catalog", "Secret catalog", FieldKind.SECRET_REF,
+                   required=True, default="main",
+                   help="Unity Catalog catalog holding your credential secrets."),
+        InputField("secret_schema", "Secret schema", FieldKind.SECRET_REF,
+                   required=True, default=default_schema,
+                   help=f"UC schema (in that catalog) holding keys: {keys}. "
+                        "You create these UC secrets; the app only references "
+                        "their location."),
+    )
 
 DATABRICKS_SPEC = EngineSpec(
     engine=Engine.DATABRICKS,
@@ -138,10 +156,7 @@ REDSHIFT_SPEC = EngineSpec(
         InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
                    default="tpcdi_aug_rs_dbt",
                    help="Redshift target schema prefix → {wh_db}_{sf}."),
-        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
-                   required=True, default="tpcdi_redshift",
-                   help="Name of a Databricks secret scope YOU created, holding "
-                        "keys: host, user, password, iam_role."),
+        *_secret_ref_fields("tpcdi_redshift", "host, user, password, iam_role"),
     ),
 )
 
@@ -161,10 +176,8 @@ BIGQUERY_SPEC = EngineSpec(
         InputField("wh_db", "Target dataset prefix", FieldKind.PARAM,
                    default="tpcdi_aug_bq_dbt",
                    help="BigQuery target dataset prefix → {wh_db}_sf{N}."),
-        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
-                   required=True, default="tpcdi_bigquery",
-                   help="Name of a Databricks secret scope YOU created, holding "
-                        "key: sa_json (SA with BigQuery Data Editor + Job User)."),
+        *_secret_ref_fields("tpcdi_bigquery",
+                            "sa_json (SA with BigQuery Data Editor + Job User)"),
     ),
 )
 
@@ -189,10 +202,8 @@ SNOWFLAKE_SPEC = EngineSpec(
                    help="Snowflake CATALOG INTEGRATION pointing at the UC "
                         "Iceberg-REST endpoint. Requires UniForm enabled on "
                         "the Databricks source tables."),
-        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
-                   required=True, default="tpcdi_snowflake",
-                   help="Name of a Databricks secret scope YOU created, holding "
-                        "keys: user, password (or private_key), dbx_pat."),
+        *_secret_ref_fields("tpcdi_snowflake",
+                            "user, password (or private_key), dbx_pat"),
     ),
 )
 
