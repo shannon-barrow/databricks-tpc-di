@@ -59,15 +59,6 @@ class RealBackend:
     def __init__(self) -> None:
         self.w = WorkspaceClient()
 
-    def write_secret(self, scope: str, key: str, value: str) -> None:
-        """Ensure the scope exists, then put the secret. The app keeps only
-        the scope/key reference afterward — never the value."""
-        try:
-            self.w.secrets.create_scope(scope=scope)
-        except Exception:
-            pass  # already exists
-        self.w.secrets.put_secret(scope=scope, key=key, string_value=value)
-
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         """Emit the parent+child workflow for one engine via its create()."""
         if spec.engine in (Engine.REDSHIFT, Engine.BIGQUERY):
@@ -80,14 +71,20 @@ class RealBackend:
         raise NotImplementedError(f"{spec.engine.value} not wired yet")
 
     def _create_kwargs(self, spec: EngineSpec, values: dict) -> dict:
-        """Map form values -> create() keyword args (params only; secrets are
-        already in the scope by the time this runs).
+        """Map form values -> create() keyword args.
 
-        incremental_batches_to_run is excluded: it's a run-now parameter set
-        when the parent job is *triggered*, not a build-time create() arg.
+        Includes PARAM fields plus the secret_scope name (which each port's
+        create() accepts and passes to the job, where dbutils.secrets.get
+        reads the actual credentials). incremental_batches_to_run is excluded:
+        it's a run-now parameter set when the parent job is *triggered*, not a
+        build-time create() arg.
         """
         skip = {"incremental_batches_to_run"}
-        p = {f.key: values[f.key] for f in spec.param_fields()
+        pass_fields = list(spec.param_fields())
+        scope = spec.scope_field()
+        if scope:
+            pass_fields.append(scope)
+        p = {f.key: values[f.key] for f in pass_fields
              if values.get(f.key) and f.key not in skip}
         p["scale_factor"] = int(p.pop("scale_factor"))
         return p

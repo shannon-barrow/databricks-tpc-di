@@ -49,7 +49,7 @@ COMPETITIVE_BATCH_TYPES = ["Augmented Incremental"]
 
 class FieldKind(str, Enum):
     PARAM = "param"      # a create()/job parameter
-    SECRET = "secret"    # written to a Databricks secret scope, then referenced
+    SECRET_SCOPE = "secret_scope"  # name of a user-managed Databricks secret scope
     DERIVED = "derived"  # filled from workspace context when left blank
 
 
@@ -62,8 +62,6 @@ class InputField:
     required: bool = False
     default: str = ""
     help: str = ""
-    secret_scope: str = ""   # for SECRET fields: the scope the value writes to
-    secret_key: str = ""     # for SECRET fields: the key within that scope
 
 
 @dataclass(frozen=True)
@@ -73,10 +71,16 @@ class EngineSpec:
     engine: Engine
     label: str
     fields: tuple[InputField, ...]
-    secret_scope: str = ""   # default scope competitor secrets land in
 
-    def secret_fields(self) -> tuple[InputField, ...]:
-        return tuple(f for f in self.fields if f.kind is FieldKind.SECRET)
+    def scope_field(self) -> InputField | None:
+        """The single secret-scope field for this engine, if any. The user
+        creates the scope themselves and enters its name here; the app passes
+        the name to the job, which reads each credential via
+        dbutils.secrets.get(scope=..., key=...)."""
+        for f in self.fields:
+            if f.kind is FieldKind.SECRET_SCOPE:
+                return f
+        return None
 
     def param_fields(self) -> tuple[InputField, ...]:
         return tuple(f for f in self.fields if f.kind is FieldKind.PARAM)
@@ -92,6 +96,12 @@ _SCALE_FACTOR = InputField(
 
 # --- per-engine specs --------------------------------------------------------
 
+# Every competitor gets its own catalog + target-schema field so the operator
+# can point each engine at a distinct destination. Credentials are never
+# entered here: the operator pre-creates a Databricks secret scope holding the
+# required keys, and the app collects only the scope *name* (SECRET_SCOPE),
+# which the port reads via dbutils.secrets.get(scope=..., key=...).
+
 DATABRICKS_SPEC = EngineSpec(
     engine=Engine.DATABRICKS,
     label="Databricks (native)",
@@ -103,13 +113,14 @@ DATABRICKS_SPEC = EngineSpec(
         InputField("repo_src_path", "Repo src path", FieldKind.DERIVED,
                    help="Derived from the current user if left blank."),
         InputField("catalog", "UC catalog", FieldKind.PARAM, default="main"),
+        InputField("wh_db", "Target schema", FieldKind.DERIVED,
+                   help="Blank = derive from your username, as the driver does."),
     ),
 )
 
 REDSHIFT_SPEC = EngineSpec(
     engine=Engine.REDSHIFT,
     label="Amazon Redshift Serverless",
-    secret_scope="tpcdi_redshift",
     fields=(
         _SCALE_FACTOR,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
@@ -122,25 +133,21 @@ REDSHIFT_SPEC = EngineSpec(
                         "UC external volume."),
         InputField("aws_region", "AWS region", FieldKind.PARAM,
                    default="us-west-2"),
+        InputField("catalog", "UC catalog", FieldKind.PARAM, default="main",
+                   help="Databricks UC catalog holding the external volume."),
         InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
-                   default="tpcdi_aug_rs_dbt"),
-        InputField("rs_host", "Workgroup endpoint", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_redshift", secret_key="host",
-                   help="<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
-        InputField("rs_user", "Redshift user", FieldKind.SECRET, required=True,
-                   secret_scope="tpcdi_redshift", secret_key="user"),
-        InputField("rs_password", "Redshift password", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_redshift", secret_key="password"),
-        InputField("rs_iam_role", "IAM role ARN (for COPY)", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_redshift", secret_key="iam_role",
-                   help="arn:aws:iam::<account>:role/<role> attached to the workgroup."),
+                   default="tpcdi_aug_rs_dbt",
+                   help="Redshift target schema prefix → {wh_db}_{sf}."),
+        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
+                   required=True, default="tpcdi_redshift",
+                   help="Name of a Databricks secret scope YOU created, holding "
+                        "keys: host, user, password, iam_role."),
     ),
 )
 
 BIGQUERY_SPEC = EngineSpec(
     engine=Engine.BIGQUERY,
     label="Google BigQuery",
-    secret_scope="tpcdi_bigquery",
     fields=(
         _SCALE_FACTOR,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
@@ -152,23 +159,29 @@ BIGQUERY_SPEC = EngineSpec(
         InputField("bq_location", "BQ location", FieldKind.PARAM,
                    default="us-central1"),
         InputField("wh_db", "Target dataset prefix", FieldKind.PARAM,
-                   default="tpcdi_aug_bq_dbt"),
-        InputField("sa_json", "Service-account JSON key", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_bigquery", secret_key="sa_json",
-                   help="SA with BigQuery Data Editor + Job User."),
+                   default="tpcdi_aug_bq_dbt",
+                   help="BigQuery target dataset prefix → {wh_db}_sf{N}."),
+        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
+                   required=True, default="tpcdi_bigquery",
+                   help="Name of a Databricks secret scope YOU created, holding "
+                        "key: sa_json (SA with BigQuery Data Editor + Job User)."),
     ),
 )
 
 SNOWFLAKE_SPEC = EngineSpec(
     engine=Engine.SNOWFLAKE,
     label="Snowflake",
-    secret_scope="tpcdi_snowflake",
     fields=(
         _SCALE_FACTOR,
         InputField("account", "Snowflake account", FieldKind.PARAM,
                    required=True, help="<org>-<account>."),
         InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
                    required=True),
+        InputField("catalog", "Target database", FieldKind.PARAM, default="TPCDI_TEST",
+                   help="Snowflake database the models land in."),
+        InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
+                   default="tpcdi_aug_sf_dbt",
+                   help="Snowflake target schema prefix → {wh_db}_{sf}."),
         InputField("snowflake_stage", "Stage", FieldKind.PARAM, required=True,
                    help="<db>.<schema>.<stage> for the per-batch file drops."),
         InputField("catalog_integration", "Catalog integration name",
@@ -176,14 +189,10 @@ SNOWFLAKE_SPEC = EngineSpec(
                    help="Snowflake CATALOG INTEGRATION pointing at the UC "
                         "Iceberg-REST endpoint. Requires UniForm enabled on "
                         "the Databricks source tables."),
-        InputField("sf_user", "Snowflake user", FieldKind.SECRET, required=True,
-                   secret_scope="tpcdi_snowflake", secret_key="user"),
-        InputField("sf_password", "Snowflake password", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_snowflake", secret_key="password"),
-        InputField("dbx_pat", "Databricks PAT (for federation)", FieldKind.SECRET,
-                   required=True, secret_scope="tpcdi_snowflake", secret_key="dbx_pat",
-                   help="PAT Snowflake uses to auth to the UC Iceberg-REST "
-                        "endpoint (the catalog integration's bearer token)."),
+        InputField("secret_scope", "Secret scope", FieldKind.SECRET_SCOPE,
+                   required=True, default="tpcdi_snowflake",
+                   help="Name of a Databricks secret scope YOU created, holding "
+                        "keys: user, password (or private_key), dbx_pat."),
     ),
 )
 

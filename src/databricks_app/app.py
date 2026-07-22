@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 
 from models import (
-    Engine, SPECS, FieldKind,
+    Engine, SPECS, FieldKind, DATABRICKS_SPEC,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
     COMPETITIVE_ENGINES,
 )
@@ -91,7 +91,7 @@ _SF_CAPTIONS_AUGMENTED = {
     "1000":  "Incremental tables start at ~25 GB total; each daily batch adds ~90 MB of new raw data.",
     "5000":  "Incremental tables start at ~125 GB total; each daily batch adds ~440 MB of new raw data.",
     "10000": "Incremental tables start at ~250 GB total; each daily batch adds ~875 MB of new raw data.",
-    "20000": "Incremental tables start at ~500 GB total; each daily batch adds ~1.75 GB of new raw data.",
+    "20000": '"Recommended" — Incremental tables start at ~500 GB total; each daily batch adds ~1.75 GB of new raw data.',
 }
 # Single-batch / incremental: the full raw dataset is processed. Anchored on
 # SF=10000 = ~1 TB of raw data.
@@ -101,7 +101,7 @@ _SF_CAPTIONS_RAW = {
     "1000":  "~100 GB of raw data to process.",
     "5000":  "~500 GB of raw data to process.",
     "10000": "~1 TB of raw data to process.",
-    "20000": "~2 TB of raw data to process.",
+    "20000": '"Recommended" — ~2 TB of raw data to process.',
 }
 
 # Context lines shown under each choice (st.radio captions).
@@ -199,41 +199,53 @@ if not scale_factor:
 # Native inputs default/derive; each competitor contributes its own
 # prerequisite fields (secrets written to that engine's scope).
 st.divider()
+
+
+def _render_field(eng_value: str, f) -> str:
+    """Render one InputField as a form control and return its value."""
+    wkey = f"{eng_value}.{f.key}"
+    if f.kind is FieldKind.SECRET_SCOPE:
+        return st.text_input(f"{f.label} 🔑", value=f.default,
+                             help=f.help or None, key=wkey)
+    if f.kind is FieldKind.DERIVED:
+        return st.text_input(f"{f.label} (blank = derive)",
+                             help=f.help or None, key=wkey)
+    return st.text_input(f.label, value=f.default, help=f.help or None, key=wkey)
+
+
 with st.form("details"):
     st.markdown("**5. Confirm run defaults** _(edit if needed)_")
-    catalog = st.text_input("Target catalog", value="main")
-    wh_db = st.text_input(
-        "Target schema (wh_db)", value="",
-        help="Blank = derive from your username, as the driver does.")
+
     # One batch count for the whole run — every engine (Databricks + each
     # competitor) uses the same count so the comparison is fair.
     batches = st.select_slider(
         "Batches to run (applies to every engine)",
-        options=["30", "50", "100", "150", "365"], value="365",
+        options=["30", "50", "100", "150", "365"], value="150",
         help="Lower it for a quick smoke run.")
 
-    # Per-competitor prerequisite blocks. The batch count is NOT collected
-    # here — it comes from the single control above.
+    # Databricks baseline — its own catalog + target schema.
+    st.markdown("**Databricks details**")
+    dbx_values: dict[str, str] = {}
+    for f in DATABRICKS_SPEC.fields:
+        if f.key in ("scale_factor", "variant", "repo_src_path"):
+            continue
+        dbx_values[f.key] = _render_field("databricks", f)
+
+    # Per-competitor blocks — each has its own catalog / target schema and a
+    # single secret-scope name (the scope is created by the operator; the app
+    # only passes its name, never the credential values).
     comp_values: dict[Engine, dict] = {}
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
-        st.caption("🔑 fields are written to that engine's secret scope, never stored.")
+        st.caption("🔑 = name of a Databricks secret scope you created; the job "
+                   "reads the credentials from it at run time.")
         cv: dict[str, str] = {"scale_factor": scale_factor,
                               "incremental_batches_to_run": batches}
         for f in cspec.fields:
-            if f.key in ("scale_factor", "incremental_batches_to_run"):
+            if f.key == "scale_factor":
                 continue
-            wkey = f"{eng.value}.{f.key}"
-            if f.kind is FieldKind.SECRET:
-                cv[f.key] = st.text_input(f"{f.label} 🔑", type="password",
-                                          help=f.help or None, key=wkey)
-            elif f.kind is FieldKind.DERIVED:
-                cv[f.key] = st.text_input(f"{f.label} (blank = derive)",
-                                          help=f.help or None, key=wkey)
-            else:
-                cv[f.key] = st.text_input(f.label, value=f.default,
-                                          help=f.help or None, key=wkey)
+            cv[f.key] = _render_field(eng.value, f)
         comp_values[eng] = cv
 
     submitted = st.form_submit_button("Review & create")
@@ -257,16 +269,15 @@ results = []
 # 1. Databricks baseline (native — always runs).
 results.append({
     "engine": "databricks", "sku": sku, "edition": edition,
-    "scale_factor": scale_factor, "catalog": catalog,
-    "wh_db": wh_db or "(derived)", "batches": batches, "mock": USE_MOCK,
+    "scale_factor": scale_factor, "catalog": dbx_values.get("catalog", "main"),
+    "wh_db": dbx_values.get("wh_db") or "(derived)", "batches": batches,
+    "mock": USE_MOCK,
 })
 
-# 2. Each competitor: write its secrets, then emit its workflow.
+# 2. Each competitor: emit its workflow. No secrets are written by the app —
+# the secret_scope name in cv points the job at the operator-managed scope.
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
-    for f in cspec.secret_fields():
-        if cv.get(f.key):
-            backend.write_secret(f.secret_scope, f.secret_key, cv[f.key])
     try:
         results.append(backend.create_workflow(cspec, cv))
     except NotImplementedError as e:
