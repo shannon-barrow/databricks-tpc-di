@@ -183,15 +183,38 @@ else:
 # processes the full raw dataset.
 _is_augmented = batch_type == "Augmented Incremental"
 _sf_captions = _SF_CAPTIONS_AUGMENTED if _is_augmented else _SF_CAPTIONS_RAW
-scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _sf_captions)
-st.caption(
-    ("Footprint is for the augmented-incremental workload (initial tables + "
-     "per-batch new data)." if _is_augmented else
-     "Footprint is the full raw dataset processed by a single-batch / "
-     "incremental run.")
-    + " TPC-DI data volume scales linearly with the scale factor.")
-if not scale_factor:
-    st.stop()
+
+if _is_augmented:
+    # Push SF=20000 (the published benchmark anchor): surface only it + "Other"
+    # first, and reveal the smaller factors only if the user opts out.
+    _RECOMMENDED_SF = "20000"
+    choice = _radio(
+        "**4. Scale factor?**",
+        [_RECOMMENDED_SF, "Other…"],
+        {_RECOMMENDED_SF: _SF_CAPTIONS_AUGMENTED[_RECOMMENDED_SF],
+         "Other…": "Pick a smaller scale factor (quicker/cheaper, but not the "
+                   "published benchmark size)."},
+    )
+    if not choice:
+        st.stop()
+    if choice == _RECOMMENDED_SF:
+        scale_factor = _RECOMMENDED_SF
+    else:
+        _others = [sf for sf in SF_OPTIONS if sf != _RECOMMENDED_SF]
+        scale_factor = _radio("**4a. Which scale factor?**", _others,
+                              _SF_CAPTIONS_AUGMENTED)
+        if not scale_factor:
+            st.stop()
+    st.caption("Footprint is for the augmented-incremental workload (initial "
+               "tables + per-batch new data). TPC-DI data volume scales "
+               "linearly with the scale factor.")
+else:
+    scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _sf_captions)
+    st.caption("Footprint is the full raw dataset processed by a single-batch / "
+               "incremental run. TPC-DI data volume scales linearly with the "
+               "scale factor.")
+    if not scale_factor:
+        st.stop()
 
 # --- Step 5: details (Databricks defaults + per-competitor prerequisites) ----
 # --- Step 5: details -----------------------------------------------------
