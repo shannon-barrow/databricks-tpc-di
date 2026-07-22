@@ -49,10 +49,12 @@ COMPETITIVE_BATCH_TYPES = ["Augmented Incremental"]
 
 
 class FieldKind(str, Enum):
-    PARAM = "param"      # a create()/job parameter
-    SECRET_REF = "secret_ref"  # points at a user-managed Unity Catalog secret
-                               # location (catalog + schema); no values pass
-                               # through the app
+    PARAM = "param"      # a plain create()/job parameter (literal value)
+    SECRET_PATH = "secret_path"  # a full Unity Catalog secret reference,
+                                 # "catalog.schema.key", that the operator
+                                 # already created; the app passes only the
+                                 # path, and the job reads it via
+                                 # dbutils.secrets.get(catalog, schema, key)
     DERIVED = "derived"  # filled from workspace context when left blank
 
 
@@ -65,6 +67,7 @@ class InputField:
     required: bool = False
     default: str = ""
     help: str = ""
+    placeholder: str = ""   # greyed-in example shown in an empty text box
 
 
 @dataclass(frozen=True)
@@ -75,13 +78,12 @@ class EngineSpec:
     label: str
     fields: tuple[InputField, ...]
 
-    def secret_ref_fields(self) -> tuple[InputField, ...]:
-        """The Unity Catalog secret-location fields (secret_catalog +
-        secret_schema) for this engine, if any. The operator creates the UC
-        secrets themselves and enters the catalog/schema here; the app passes
-        those identifiers to the job, which reads each credential via
-        dbutils.secrets.get(catalog=..., schema=..., key=...)."""
-        return tuple(f for f in self.fields if f.kind is FieldKind.SECRET_REF)
+    def secret_path_fields(self) -> tuple[InputField, ...]:
+        """Fields that hold a full Unity Catalog secret path
+        ("catalog.schema.key"). Only genuine secrets — passwords, keys,
+        tokens — are these; the operator already created the UC secret and
+        enters its path, which the job resolves via dbutils.secrets.get."""
+        return tuple(f for f in self.fields if f.kind is FieldKind.SECRET_PATH)
 
     def param_fields(self) -> tuple[InputField, ...]:
         return tuple(f for f in self.fields if f.kind is FieldKind.PARAM)
@@ -98,27 +100,22 @@ _SCALE_FACTOR = InputField(
 # --- per-engine specs --------------------------------------------------------
 
 # Every competitor gets its own catalog + target-schema field so the operator
-# can point each engine at a distinct destination. Credentials are never
-# entered here: the operator pre-creates Unity Catalog secrets under a
-# {catalog}.{schema} they own, and the app collects only that catalog + schema
-# (SECRET_REF), which the port reads via
-# dbutils.secrets.get(catalog=..., schema=..., key=...).
+# can point each engine at a distinct destination. Only genuine secrets
+# (passwords, keys, tokens) are collected as a Unity Catalog secret PATH — one
+# text box holding "catalog.schema.key" for a secret the operator already
+# created. Non-sensitive config (usernames, hosts, accounts, ARNs, regions,
+# warehouses) are plain text fields, not routed through secrets.
 
 
-def _secret_ref_fields(default_schema: str, keys: str) -> tuple[InputField, ...]:
-    """The two UC secret-location fields shared by every competitor: the
-    catalog + schema holding the credentials. `keys` documents the secret
-    names the port expects to find there."""
-    return (
-        InputField("secret_catalog", "Secret catalog", FieldKind.SECRET_REF,
-                   required=True, default="main",
-                   help="Unity Catalog catalog holding your credential secrets."),
-        InputField("secret_schema", "Secret schema", FieldKind.SECRET_REF,
-                   required=True, default=default_schema,
-                   help=f"UC schema (in that catalog) holding keys: {keys}. "
-                        "You create these UC secrets; the app only references "
-                        "their location."),
-    )
+def _secret_path(key: str, label: str, example: str, help: str) -> InputField:
+    """A single UC secret reference field: the operator pastes the full
+    catalog.schema.key path to an existing secret. `example` is shown as the
+    input's placeholder so the expected 3-dot syntax is visible without
+    pre-filling a value."""
+    return InputField(key, label, FieldKind.SECRET_PATH, required=True,
+                      placeholder=example,
+                      help=f"{help} Full Unity Catalog secret path "
+                           f"(catalog.schema.key).")
 
 DATABRICKS_SPEC = EngineSpec(
     engine=Engine.DATABRICKS,
@@ -156,7 +153,15 @@ REDSHIFT_SPEC = EngineSpec(
         InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
                    default="tpcdi_aug_rs_dbt",
                    help="Redshift target schema prefix → {wh_db}_{sf}."),
-        *_secret_ref_fields("tpcdi_redshift", "host, user, password, iam_role"),
+        InputField("rs_host", "Workgroup endpoint", FieldKind.PARAM, required=True,
+                   help="<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
+        InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True),
+        InputField("rs_iam_role", "IAM role ARN (for COPY)", FieldKind.PARAM,
+                   required=True,
+                   help="arn:aws:iam::<account>:role/<role> attached to the workgroup."),
+        _secret_path("rs_password_secret", "Redshift password (secret)",
+                     "main.tpcdi_redshift.password",
+                     "The Redshift user's password."),
     ),
 )
 
@@ -176,8 +181,9 @@ BIGQUERY_SPEC = EngineSpec(
         InputField("wh_db", "Target dataset prefix", FieldKind.PARAM,
                    default="tpcdi_aug_bq_dbt",
                    help="BigQuery target dataset prefix → {wh_db}_sf{N}."),
-        *_secret_ref_fields("tpcdi_bigquery",
-                            "sa_json (SA with BigQuery Data Editor + Job User)"),
+        _secret_path("sa_json_secret", "Service-account JSON (secret)",
+                     "main.tpcdi_bigquery.sa_json",
+                     "SA JSON key with BigQuery Data Editor + Job User."),
     ),
 )
 
@@ -188,6 +194,7 @@ SNOWFLAKE_SPEC = EngineSpec(
         _SCALE_FACTOR,
         InputField("account", "Snowflake account", FieldKind.PARAM,
                    required=True, help="<org>-<account>."),
+        InputField("sf_user", "Snowflake user", FieldKind.PARAM, required=True),
         InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
                    required=True),
         InputField("catalog", "Target database", FieldKind.PARAM, default="TPCDI_TEST",
@@ -202,8 +209,14 @@ SNOWFLAKE_SPEC = EngineSpec(
                    help="Snowflake CATALOG INTEGRATION pointing at the UC "
                         "Iceberg-REST endpoint. Requires UniForm enabled on "
                         "the Databricks source tables."),
-        *_secret_ref_fields("tpcdi_snowflake",
-                            "user, password (or private_key), dbx_pat"),
+        _secret_path("sf_credential_secret", "Snowflake password / private key (secret)",
+                     "main.tpcdi_snowflake.password",
+                     "The Snowflake user's password, or a PEM private key for "
+                     "keypair auth."),
+        _secret_path("dbx_pat_secret", "Databricks PAT for federation (secret)",
+                     "main.tpcdi_snowflake.dbx_pat",
+                     "PAT Snowflake uses to auth to the UC Iceberg-REST "
+                     "endpoint (the catalog integration's bearer token)."),
     ),
 )
 

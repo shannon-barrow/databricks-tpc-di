@@ -204,13 +204,18 @@ st.divider()
 def _render_field(eng_value: str, f) -> str:
     """Render one InputField as a form control and return its value."""
     wkey = f"{eng_value}.{f.key}"
-    if f.kind is FieldKind.SECRET_REF:
+    if f.kind is FieldKind.SECRET_PATH:
+        # A UC secret reference — the operator pastes catalog.schema.key. Not a
+        # password box: the value is a path, not the secret itself.
         return st.text_input(f"{f.label} 🔑", value=f.default,
+                             placeholder=f.placeholder or None,
                              help=f.help or None, key=wkey)
     if f.kind is FieldKind.DERIVED:
         return st.text_input(f"{f.label} (blank = derive)",
                              help=f.help or None, key=wkey)
-    return st.text_input(f.label, value=f.default, help=f.help or None, key=wkey)
+    return st.text_input(f.label, value=f.default,
+                         placeholder=f.placeholder or None,
+                         help=f.help or None, key=wkey)
 
 
 with st.form("details"):
@@ -238,9 +243,10 @@ with st.form("details"):
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
-        st.caption("🔑 = the Unity Catalog catalog + schema where you created "
-                   "the credential secrets; the job reads them from there at "
-                   "run time (dbutils.secrets.get).")
+        st.caption("🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
+                   "secret you already created; the app passes the path and the "
+                   "job reads the value at run time. Only passwords/keys/tokens "
+                   "are secrets — other fields are plain config.")
         cv: dict[str, str] = {"scale_factor": scale_factor,
                               "incremental_batches_to_run": batches}
         for f in cspec.fields:
