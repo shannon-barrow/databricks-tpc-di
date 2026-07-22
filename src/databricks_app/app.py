@@ -266,10 +266,6 @@ with st.form("details"):
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
-        st.caption("🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
-                   "secret you already created; the app passes the path and the "
-                   "job reads the value at run time. Only passwords/keys/tokens "
-                   "are secrets — other fields are plain config.")
         cv: dict[str, str] = {"scale_factor": scale_factor,
                               "incremental_batches_to_run": batches}
         for f in cspec.fields:
@@ -277,6 +273,13 @@ with st.form("details"):
                 continue
             cv[f.key] = _render_field(eng.value, f)
         comp_values[eng] = cv
+
+    # One footnote for the whole competitor section (not per-engine).
+    if competitor_engines:
+        st.caption("🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
+                   "secret you already created; the app passes the path and the "
+                   "job reads the value at run time. Only passwords/keys/tokens "
+                   "are secrets — other fields are plain config.")
 
     submitted = st.form_submit_button("Review & create")
 
