@@ -20,7 +20,7 @@ from pathlib import Path
 
 from databricks.sdk import WorkspaceClient
 
-from models import Engine, EngineSpec
+from models import Engine, EngineSpec, derived_from_email
 
 def _find_dir(marker: str) -> Path:
     """Walk up from this file to find `marker` (a relative dir path).
@@ -69,6 +69,20 @@ class RealBackend:
         if self._w is None:
             self._w = WorkspaceClient()
         return self._w
+
+    def derived_defaults(self) -> dict:
+        """Ghost-fill values for DERIVED fields, mirroring the driver notebook.
+
+        The driver takes current_user()'s email local-part, lowercased with
+        non-word runs collapsed to spaces (e.g. "shannon barrow"), then builds
+        a wh_db prefix "Shannon_Barrow_TPCDI". Returns {} if the user can't be
+        resolved so the form just shows empty inputs.
+        """
+        try:
+            email = self.w.current_user.me().user_name or ""
+        except Exception:
+            return {}
+        return derived_from_email(email)
 
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         """Emit the parent+child workflow for one engine via its create()."""

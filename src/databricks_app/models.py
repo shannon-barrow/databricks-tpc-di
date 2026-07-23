@@ -12,8 +12,29 @@ the rest.
 """
 from __future__ import annotations
 
+import re
+import string
 from dataclasses import dataclass, field
 from enum import Enum
+
+
+def derived_from_email(email: str) -> dict:
+    """Reproduce the driver notebook's username-derived defaults from a
+    current_user() email. Mirrors setup_context._init_api_context /
+    _init_workflow_defaults exactly:
+
+        user_name  = lower(regexp_replace(local_part, '\\W+', ' '))
+        wh_prefix  = capwords(user_name).replace(' ', '_')
+        wh_db      = f"{wh_prefix}_TPCDI"
+
+    Returns {} for a blank/invalid email so the form falls back to empty.
+    """
+    local = (email or "").split("@")[0]
+    user_name = re.sub(r"\W+", " ", local).lower().strip()
+    if not user_name:
+        return {}
+    wh_prefix = string.capwords(user_name).replace(" ", "_")
+    return {"wh_db": f"{wh_prefix}_TPCDI"}
 
 
 class Engine(str, Enum):

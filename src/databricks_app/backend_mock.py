@@ -8,12 +8,17 @@ so the params are safe to echo back verbatim.
 """
 from __future__ import annotations
 
-from models import Engine, EngineSpec
+from models import Engine, EngineSpec, derived_from_email
 
 
 class MockBackend:
     def __init__(self) -> None:
         self.created_jobs: list[dict] = []
+
+    def derived_defaults(self) -> dict:
+        # No workspace in mock mode — show a representative ghost-fill so the
+        # derive behavior is visible in run-local.
+        return derived_from_email("first.last@example.com")
 
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         # Fake but shaped like the real (child_id, parent_id) result.

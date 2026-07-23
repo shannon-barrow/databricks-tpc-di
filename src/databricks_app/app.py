@@ -224,6 +224,13 @@ else:
 st.divider()
 
 
+# Workspace-derived ghost-fill values (username → wh_db prefix, etc.), computed
+# the same way the driver notebook does. Shown as placeholders on DERIVED
+# fields; leaving the field blank lets the job derive the same value at run
+# time, so the placeholder is a preview, not a committed value.
+_derived = backend.derived_defaults()
+
+
 def _render_field(eng_value: str, f) -> str:
     """Render one InputField as a form control and return its value."""
     wkey = f"{eng_value}.{f.key}"
@@ -234,7 +241,9 @@ def _render_field(eng_value: str, f) -> str:
                              placeholder=f.placeholder or None,
                              help=f.help or None, key=wkey)
     if f.kind is FieldKind.DERIVED:
+        ghost = _derived.get(f.key, "")
         return st.text_input(f"{f.label} (blank = derive)",
+                             placeholder=ghost or None,
                              help=f.help or None, key=wkey)
     return st.text_input(f.label, value=f.default,
                          placeholder=f.placeholder or None,
@@ -299,12 +308,14 @@ if errors:
 
 results = []
 
-# 1. Databricks baseline (native — always runs).
+# 1. Databricks baseline (native — always runs). Blank derived fields fall back
+# to the workspace-derived value (same as the driver), shown here so the result
+# reflects what the job will actually use.
 results.append({
     "engine": "databricks", "sku": sku, "edition": edition,
     "scale_factor": scale_factor, "catalog": dbx_values.get("catalog", "main"),
-    "wh_db": dbx_values.get("wh_db") or "(derived)", "batches": batches,
-    "mock": USE_MOCK,
+    "wh_db": (dbx_values.get("wh_db") or _derived.get("wh_db") or "(derived)"),
+    "batches": batches, "mock": USE_MOCK,
 })
 
 # 2. Each competitor: emit its workflow. No secret values are handled by the
