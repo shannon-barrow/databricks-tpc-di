@@ -15,7 +15,7 @@ from pathlib import Path
 import streamlit as st
 
 from models import (
-    Engine, SPECS, FieldKind, DATABRICKS_SPEC,
+    Engine, SPECS, FieldKind, DATABRICKS_SPEC, derived_from_email,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
     COMPETITIVE_ENGINES,
 )
@@ -228,7 +228,27 @@ st.divider()
 # the same way the driver notebook does. Shown as placeholders on DERIVED
 # fields; leaving the field blank lets the job derive the same value at run
 # time, so the placeholder is a preview, not a committed value.
-_derived = backend.derived_defaults()
+#
+# Source the *viewing* user, not the app: a deployed Databricks App runs as its
+# service principal, so current_user() would be the app identity. Databricks
+# forwards the end user's email in request headers (X-Forwarded-Email), which
+# Streamlit exposes via st.context.headers. Fall back to the backend only when
+# no header is present (local / run-local).
+def _viewer_email() -> str:
+    try:
+        h = st.context.headers or {}
+    except Exception:
+        return ""
+    for k in ("X-Forwarded-Email", "x-forwarded-email",
+              "X-Forwarded-Preferred-Username", "x-forwarded-preferred-username"):
+        v = h.get(k)
+        if v:
+            return v
+    return ""
+
+
+_email = _viewer_email()
+_derived = derived_from_email(_email) if _email else backend.derived_defaults()
 
 
 def _render_field(eng_value: str, f) -> str:

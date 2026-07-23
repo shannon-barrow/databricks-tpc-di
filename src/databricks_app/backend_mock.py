@@ -8,7 +8,7 @@ so the params are safe to echo back verbatim.
 """
 from __future__ import annotations
 
-from models import Engine, EngineSpec, derived_from_email
+from models import Engine, EngineSpec
 
 
 class MockBackend:
@@ -16,9 +16,11 @@ class MockBackend:
         self.created_jobs: list[dict] = []
 
     def derived_defaults(self) -> dict:
-        # No workspace in mock mode — show a representative ghost-fill so the
-        # derive behavior is visible in run-local.
-        return derived_from_email("first.last@example.com")
+        # No workspace identity in mock mode. The app prefers the viewer's
+        # forwarded email (st.context.headers) and only falls back here; return
+        # empty so we never show a misleading fake name — blank just means the
+        # job will derive it at run time.
+        return {}
 
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         # Fake but shaped like the real (child_id, parent_id) result.
