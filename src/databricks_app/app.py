@@ -366,10 +366,13 @@ with st.form("details"):
 
     # One footnote for the whole competitor section (not per-engine).
     if competitor_engines:
-        st.caption("🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
-                   "secret you already created; the app passes the path and the "
-                   "job reads the value at run time. Only passwords/keys/tokens "
-                   "are secrets — other fields are plain config.")
+        st.caption(
+            "🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
+            "secret you already created; the app passes the path and the "
+            "job reads the value at run time. Only passwords/keys/tokens "
+            "are secrets — other fields are plain config. "
+            "Requires Unity Catalog Secrets — for more information see "
+            "https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets")
 
     submitted = st.form_submit_button("Review & create")
 
