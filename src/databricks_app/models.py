@@ -36,10 +36,94 @@ def wh_db_prefix_from_email(email: str) -> str:
     return f"{string.capwords(user_name).replace(' ', '_')}_TPCDI"
 
 
+def name_prefix_from_email(email: str) -> str:
+    """The job-name prefix, matching the driver's default_job_name:
+    capwords(user_name).replace(' ','-') + '-TPCDI'  ->  First-Last-TPCDI."""
+    local = (email or "").split("@")[0]
+    user_name = re.sub(r"\W+", " ", local).lower().strip()
+    if not user_name:
+        return ""
+    return f"{string.capwords(user_name).replace(' ', '-')}-TPCDI"
+
+
 def derived_from_email(email: str) -> dict:
-    """Ghost-fill map for DERIVED fields. Currently just the wh_db prefix."""
-    prefix = wh_db_prefix_from_email(email)
-    return {"wh_db": prefix} if prefix else {}
+    """Ghost-fill map for DERIVED fields: the per-user schema prefix (wh_db)
+    and the job-name prefix (job_name_prefix)."""
+    out = {}
+    if wh_db_prefix_from_email(email):
+        out["wh_db"] = wh_db_prefix_from_email(email)
+    if name_prefix_from_email(email):
+        out["job_name_prefix"] = name_prefix_from_email(email)
+    return out
+
+
+def dbt_wh_size(scale_factor: int) -> str:
+    """DBSQL warehouse size for the dbt variant — mirrors _dbt_wh_size in
+    generate_benchmark_workflow.py (Small at SF=20000, one size per SF
+    doubling)."""
+    sizes = ["2X-Small", "X-Small", "Small", "Medium", "Large",
+             "X-Large", "2X-Large", "3X-Large", "4X-Large"]
+    ceiling = 5000
+    for size in sizes:
+        if scale_factor <= ceiling:
+            return size
+        ceiling *= 2
+    return sizes[-1]
+
+
+WH_SIZES = ["2X-Small", "X-Small", "Small", "Medium", "Large",
+            "X-Large", "2X-Large", "3X-Large", "4X-Large"]
+
+# Per-cloud ARM / local-NVMe node families (Graviton, Cobalt, Axion), keyed by
+# core count. Mirrors setup_context._init_compute_and_catalog_defaults. The
+# app sizes clusters from these; users can tweak the generated job afterward.
+#   4-core = driver / smallest single node; 8-core = standard worker.
+NODE_TYPES = {
+    "AWS":   {4: "m8gd.xlarge", 8: "m8gd.2xlarge", 16: "m8gd.4xlarge",
+              32: "m8gd.8xlarge"},
+    "GCP":   {4: "c4a-standard-4-lssd", 8: "c4a-standard-8-lssd",
+              16: "c4a-standard-16-lssd", 32: "c4a-standard-32-lssd"},
+    "Azure": {4: "Standard_D4pds_v6", 8: "Standard_D8pds_v6",
+              16: "Standard_D16pds_v6", 32: "Standard_D32pds_v6"},
+}
+
+
+def cluster_plan(cloud: str, scale_factor: int, augmented: bool) -> dict:
+    """Pick the compute topology for a Cluster/SDP run, matching the tuning
+    we've measured. Returns a dict describing the plan (for display + job spec).
+
+    Worker cores scale linearly with the scale factor:
+      - augmented incremental: 32 worker cores at SF=20000
+      - single-batch / incremental: 144 worker cores at SF=10000
+    Topology:
+      - <=32 total cores -> SINGLE NODE (a 64-core box loses enough perf to
+        cost more than a driver + 8x 8-core workers), snapped up to the next
+        node size (min 4 cores).
+      - >32 cores -> a cluster of 8-core workers + a 4-core driver, with
+        ceil(cores/8) workers.
+    """
+    nodes = NODE_TYPES.get(cloud, NODE_TYPES["AWS"])
+    cores = (32 * scale_factor / 20000) if augmented else (144 * scale_factor / 10000)
+    if cores <= 32:
+        # Single node: snap up to 4/8/16/32-core box.
+        for size in (4, 8, 16, 32):
+            if cores <= size:
+                node = nodes[size]
+                break
+        return {"mode": "single_node", "node_type": node, "node_cores": size,
+                "num_workers": 0}
+    import math
+    num_workers = math.ceil(cores / 8)
+    return {"mode": "cluster", "worker_type": nodes[8], "driver_type": nodes[4],
+            "num_workers": num_workers, "worker_cores": 8, "driver_cores": 4}
+
+
+def cluster_plan_summary(plan: dict) -> str:
+    """One-line human description of a cluster_plan() result."""
+    if plan["mode"] == "single_node":
+        return f"single node ({plan['node_type']}, {plan['node_cores']} cores)"
+    return (f"{plan['num_workers']}× 8-core workers ({plan['worker_type']}) "
+            f"+ 4-core driver ({plan['driver_type']})")
 
 
 # Fallback region per cloud when it can't be parsed from the workspace host.
@@ -203,10 +287,6 @@ REDSHIFT_SPEC = EngineSpec(
                         "must run in the same region as the Databricks data "
                         "(a different region incurs egress). To run elsewhere, "
                         "launch this app from Databricks in that cloud/region."),
-        InputField("catalog", "UC catalog", FieldKind.PARAM, default="main",
-                   help="Databricks UC catalog holding the external volume."),
-        InputField("wh_db", "Target schema prefix", FieldKind.DERIVED,
-                   help="Blank = derive from your username → {prefix}_{sf}."),
         InputField("rs_host", "Workgroup endpoint", FieldKind.PARAM, required=True,
                    help="<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
         InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True),
@@ -235,8 +315,6 @@ BIGQUERY_SPEC = EngineSpec(
                         "must run in the same region as the Databricks data "
                         "(a different region incurs egress). To run elsewhere, "
                         "launch this app from Databricks in that cloud/region."),
-        InputField("wh_db", "Target dataset prefix", FieldKind.DERIVED,
-                   help="Blank = derive from your username → {prefix}_{sf}."),
         _secret_path("sa_json_secret", "Service-account JSON (secret)",
                      "main.tpcdi_bigquery.sa_json",
                      "SA JSON key with BigQuery Data Editor + Job User."),
@@ -253,10 +331,10 @@ SNOWFLAKE_SPEC = EngineSpec(
         InputField("sf_user", "Snowflake user", FieldKind.PARAM, required=True),
         InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
                    required=True),
-        InputField("catalog", "Target database", FieldKind.PARAM, default="TPCDI_TEST",
-                   help="Snowflake database the models land in."),
-        InputField("wh_db", "Target schema prefix", FieldKind.DERIVED,
-                   help="Blank = derive from your username → {prefix}_{sf}."),
+        InputField("catalog", "Target database", FieldKind.PARAM,
+                   default="TPCDI_TEST",
+                   help="Snowflake database the models land in (not the UC "
+                        "catalog — that's shared above)."),
         InputField("snowflake_stage", "Stage", FieldKind.PARAM, required=True,
                    help="<db>.<schema>.<stage> for the per-batch file drops."),
         InputField("catalog_integration", "Catalog integration name",

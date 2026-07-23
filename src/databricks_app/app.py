@@ -18,10 +18,10 @@ import re
 import streamlit as st
 
 from models import (
-    Engine, SPECS, FieldKind, DATABRICKS_SPEC, derived_from_email,
-    wh_db_prefix_from_email, competitors_for_cloud, REGION_DEFAULT,
+    Engine, SPECS, FieldKind, derived_from_email,
+    competitors_for_cloud, REGION_DEFAULT,
+    dbt_wh_size, WH_SIZES, cluster_plan, cluster_plan_summary,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
-    COMPETITIVE_ENGINES,
 )
 from backend import backend, USE_MOCK
 
@@ -290,12 +290,12 @@ _email = _viewer_email()
 _derived = derived_from_email(_email) if _email else backend.derived_defaults()
 
 
-# The wh_db ghost-fill (per-user "First_Last_TPCDI" prefix) shown in the label.
-_WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
-
-
 def _render_field(eng_value: str, f) -> str:
-    """Render one InputField as a form control and return its value."""
+    """Render one competitor InputField as a form control and return its value.
+
+    Competitors only carry PARAM, SECRET_PATH, and REGION fields now — the UC
+    catalog and target-schema prefix are shared top-level fields.
+    """
     wkey = f"{eng_value}.{f.key}"
     if f.kind is FieldKind.SECRET_PATH:
         # A UC secret reference — the operator pastes catalog.schema.key. Not a
@@ -310,56 +310,88 @@ def _render_field(eng_value: str, f) -> str:
                       value=APP_REGION, disabled=True,
                       help=f.help or None, key=wkey)
         return APP_REGION
-    if f.kind is FieldKind.DERIVED:
-        ghost = _derived.get(f.key, "")
-        # wh_db shows the per-user derive hint right in the label.
-        label = (f"{f.label} (blank will derive as {_WH_DB_HINT})"
-                 if f.key == "wh_db" else f"{f.label} (blank = derive)")
-        val = st.text_input(label, placeholder=ghost or None,
-                            help=f.help or None, key=wkey)
-    else:
-        val = st.text_input(f.label, value=f.default,
-                            placeholder=f.placeholder or None,
-                            help=f.help or None, key=wkey)
-    # wh_db is a prefix — the run appends the scale factor to form the final
-    # schema, matching the driver's `{wh_db}_{scale_factor}` convention. Show
-    # that resolved name so it's clear the SF is included.
-    if f.key == "wh_db":
-        prefix = (val or ghost) if f.kind is FieldKind.DERIVED else (val or f.default)
-        if prefix:
-            st.caption(f"→ schema: `{prefix}_{scale_factor}`")
-    return val
+    return st.text_input(f.label, value=f.default,
+                         placeholder=f.placeholder or None,
+                         help=f.help or None, key=wkey)
 
+
+_WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
+_JOB_HINT = _derived.get("job_name_prefix", "{fname}-{lname}-TPCDI")
+_sf_int = int(scale_factor)
 
 with st.form("details"):
     st.markdown("**5. Confirm run defaults** _(edit if needed)_")
 
-    # One batch count for the whole run — every engine (Databricks + each
-    # competitor) uses the same count so the comparison is fair.
+    # --- Shared across Databricks + every competitor -------------------------
+    # One batch count for the whole run so the comparison is fair.
     batches = st.select_slider(
         "Batches to run (applies to every engine)",
         options=["30", "50", "100", "150", "365"], value="150",
         help="Lower it for a quick smoke run.")
+    catalog = st.text_input("UC catalog", value="main",
+                            help="Unity Catalog catalog for the run's tables + "
+                                 "the external volume.")
+    wh_db = st.text_input(
+        f"Target schema prefix (blank will derive as {_WH_DB_HINT})",
+        placeholder=_derived.get("wh_db") or None,
+        help="The run appends the scale factor → {prefix}_{sf}.")
+    _wh_db_eff = wh_db or _derived.get("wh_db", "")
+    if _wh_db_eff:
+        st.caption(f"→ schema: `{_wh_db_eff}_{scale_factor}`")
+    raw_schema = st.text_input("Raw data schema", value="tpcdi_raw_data",
+                               help="Schema holding the generated raw data + UC "
+                                    "volume, as in the driver notebook.")
+    job_name_prefix = st.text_input(
+        f"Job name prefix (blank will derive as {_JOB_HINT})",
+        placeholder=_derived.get("job_name_prefix") or None,
+        help="Suffixes (scale factor, SKU, competitor) are appended "
+             "automatically, matching the driver's naming.")
 
-    # Databricks baseline — its own catalog + target schema.
+    # --- Databricks details (SKU-specific compute) ---------------------------
     st.markdown("**Databricks details**")
-    dbx_values: dict[str, str] = {}
-    for f in DATABRICKS_SPEC.fields:
-        if f.key in ("scale_factor", "variant", "repo_src_path"):
-            continue
-        dbx_values[f.key] = _render_field("databricks", f)
+    dbx_wh_name = dbx_wh_size = None
+    if sku == "dbt":
+        # dbt runs on a DBSQL warehouse — name + size (size pre-set by scale
+        # factor via the driver's mapping, but editable).
+        _eff_prefix = job_name_prefix or _derived.get("job_name_prefix", "")
+        dbx_wh_name = st.text_input(
+            "Databricks SQL warehouse name",
+            value=(f"{_eff_prefix}-tpcdi-dbt" if _eff_prefix else ""),
+            placeholder="my-tpcdi-dbt-wh",
+            help="Reused if it already exists, else created.")
+        _size_default = dbt_wh_size(_sf_int)
+        dbx_wh_size = st.selectbox(
+            "Warehouse size", WH_SIZES, index=WH_SIZES.index(_size_default),
+            help=f"Pre-set from the scale factor ({_size_default} for "
+                 f"SF={scale_factor}); change if you need to.")
+    elif sku in ("Cluster", "SDP"):
+        # Cluster / SDP: we pick the compute (not editable here — tune the
+        # generated job if needed). Sized from measured tuning: worker cores
+        # scale linearly with SF, single-node at <=32 cores, else 8-core
+        # workers + a 4-core driver, on the ARM node family for this cloud.
+        _plan = cluster_plan(APP_CLOUD, _sf_int, _is_augmented)
+        st.text_input("Compute (auto-configured)",
+                      value=cluster_plan_summary(_plan), disabled=True,
+                      help="Latest DBR. Sized from SKU, scale factor, and cloud "
+                           f"({APP_CLOUD}).")
+        st.caption(
+            "We size the cluster for you from our tuning; you can change the "
+            "cluster config on the generated job afterward.")
 
-    # Per-competitor blocks — each has its own catalog / target schema and a
-    # single secret-scope name (the scope is created by the operator; the app
-    # only passes its name, never the credential values).
+    # --- Per-competitor blocks -----------------------------------------------
     comp_values: dict[Engine, dict] = {}
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
         cv: dict[str, str] = {"scale_factor": scale_factor,
-                              "incremental_batches_to_run": batches}
+                              "incremental_batches_to_run": batches,
+                              "catalog": catalog, "wh_db": _wh_db_eff}
         for f in cspec.fields:
-            if f.key == "scale_factor":
+            # scale_factor is chosen above; catalog/wh_db are shared top-level
+            # for engines that consume the UC catalog. Snowflake/BigQuery keep
+            # their own engine-specific `catalog` field (SF database / BQ
+            # project), so don't skip catalog for those.
+            if f.key in ("scale_factor", "wh_db"):
                 continue
             cv[f.key] = _render_field(eng.value, f)
         comp_values[eng] = cv
@@ -384,38 +416,46 @@ errors = []
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
     for f in cspec.fields:
-        if f.required and f.key != "scale_factor" and not cv.get(f.key):
+        if (f.required and f.key not in ("scale_factor", "wh_db")
+                and not cv.get(f.key)):
             errors.append(f"{cspec.label}: {f.label}")
 if errors:
     st.error("Missing required fields — " + "; ".join(errors))
     st.stop()
 
-# Blank wh_db → the per-user derived prefix (First_Last_TPCDI), so every engine
-# (Databricks + competitors) shares the driver's naming and stays user-unique
-# instead of falling back to each port's generic default.
-_wh_db_default = _derived.get("wh_db", "")
-if _wh_db_default:
-    for cv in comp_values.values():
-        if not cv.get("wh_db"):
-            cv["wh_db"] = _wh_db_default
+# Job-name suffixes, matching the driver + a new competitor suffix (the driver
+# doesn't generate competitor jobs today). Parent name per engine:
+#   {prefix}-SF{sf}-AugmentedIncremental-{variant}-Parent
+_eff_job_prefix = job_name_prefix or _derived.get("job_name_prefix") or "TPCDI"
+_AUG_VARIANT = {"dbt": "DBT", "SDP": "SDP", "Cluster": "Cluster"}
+_dbx_variant = _AUG_VARIANT.get(sku, sku)
+
+
+def _job_name(variant: str) -> str:
+    return f"{_eff_job_prefix}-SF{scale_factor}-AugmentedIncremental-{variant}-Parent"
+
 
 results = []
 
-# 1. Databricks baseline (native — always runs). Blank derived fields fall back
-# to the workspace-derived value (same as the driver), shown here so the result
-# reflects what the job will actually use.
+# 1. Databricks baseline (native — always runs).
 results.append({
     "engine": "databricks", "sku": sku, "edition": edition,
-    "scale_factor": scale_factor, "catalog": dbx_values.get("catalog", "main"),
-    "wh_db": (dbx_values.get("wh_db") or _derived.get("wh_db") or "(derived)"),
+    "scale_factor": scale_factor, "catalog": catalog,
+    "wh_db": _wh_db_eff or "(derived)", "raw_schema": raw_schema,
+    "job_name": _job_name(_dbx_variant),
+    **({"wh_name": dbx_wh_name, "wh_size": dbx_wh_size} if sku == "dbt" else {}),
     "batches": batches, "mock": USE_MOCK,
 })
 
 # 2. Each competitor: emit its workflow. No secret values are handled by the
 # app — the secret-path fields in cv (catalog.schema.key) point the job at the
-# operator's existing UC secrets, which it reads at run time.
+# operator's existing UC secrets, which it reads at run time. Competitor jobs
+# get a per-engine variant suffix (SF/Redshift/BigQuery/Snowflake).
+_COMP_VARIANT = {Engine.REDSHIFT: "Redshift", Engine.BIGQUERY: "BigQuery",
+                 Engine.SNOWFLAKE: "Snowflake"}
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
+    cv["job_name"] = _job_name(_COMP_VARIANT[eng])
     try:
         results.append(backend.create_workflow(cspec, cv))
     except NotImplementedError as e:

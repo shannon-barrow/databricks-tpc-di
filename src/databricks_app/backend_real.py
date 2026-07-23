@@ -98,16 +98,23 @@ class RealBackend:
     def _create_kwargs(self, spec: EngineSpec, values: dict) -> dict:
         """Map form values -> create() keyword args.
 
-        Every field the create() accepts flows through except the run-now
-        trigger param (incremental_batches_to_run): plain PARAMs, the inferred
-        REGION, the DERIVED wh_db (blank ones just don't override the port's
-        own default), and each secret's full UC path (catalog.schema.key),
-        which the port passes to the job for dbutils.secrets.get to resolve.
+        Spec fields (PARAM / REGION / SECRET_PATH) flow through by key. The
+        run-now trigger param (incremental_batches_to_run) is excluded — it's
+        set when the parent job is *triggered*, not built. The app-level
+        job_name is translated to parent_name (the port derives the child name
+        from it).
+
+        raw_schema is collected by the form but NOT passed here: the ports
+        currently hardcode the tpcdi_raw_data volume path, so there's no
+        create() param for it yet. Wiring a custom raw schema through the ports
+        is a follow-up.
         """
         skip = {"incremental_batches_to_run"}
         p = {f.key: values[f.key] for f in spec.fields
              if values.get(f.key) and f.key not in skip}
         p["scale_factor"] = int(p.pop("scale_factor"))
+        if values.get("job_name"):
+            p["parent_name"] = values["job_name"]
         return p
 
     def list_recent_runs(self, engine: Engine) -> list[dict]:
