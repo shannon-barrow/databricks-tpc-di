@@ -21,6 +21,7 @@ from models import (
     Engine, SPECS, FieldKind, derived_from_email,
     competitors_for_cloud, REGION_DEFAULT,
     dbt_wh_size, WH_SIZES, cluster_plan, cluster_plan_summary,
+    SNOWFLAKE_SUMMARY,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
 )
 from backend import backend, USE_MOCK
@@ -383,6 +384,8 @@ with st.form("details"):
     for eng in competitor_engines:
         cspec = SPECS[eng]
         st.markdown(f"**{cspec.label} details**")
+        if eng is Engine.SNOWFLAKE:
+            st.info(SNOWFLAKE_SUMMARY, icon="❄️")
         cv: dict[str, str] = {"scale_factor": scale_factor,
                               "incremental_batches_to_run": batches,
                               "catalog": catalog, "wh_db": _wh_db_eff}

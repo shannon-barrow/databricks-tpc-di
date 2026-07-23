@@ -321,35 +321,57 @@ BIGQUERY_SPEC = EngineSpec(
     ),
 )
 
+# How the Snowflake run executes — shown when Snowflake is selected so the
+# reason for its extra fields (stage, catalog integration, PAT) is clear.
+SNOWFLAKE_SUMMARY = (
+    "**How it runs:** the raw TPC-DI data is generated in **Databricks** and "
+    "written to a UC external storage location (S3). **Snowflake reads that "
+    "staged data through catalog federation** — a Snowflake *catalog "
+    "integration* points at Databricks' Unity Catalog Iceberg-REST endpoint "
+    "(authenticated with a Databricks PAT), and an *external stage* exposes the "
+    "per-batch files. That's why the fields below ask for a stage, a catalog "
+    "integration, and a Databricks PAT in addition to the usual account/user/"
+    "warehouse — they wire up that Databricks→Snowflake bridge.")
+
 SNOWFLAKE_SPEC = EngineSpec(
     engine=Engine.SNOWFLAKE,
     label="Snowflake",
     fields=(
         _SCALE_FACTOR,
         InputField("account", "Snowflake account", FieldKind.PARAM,
-                   required=True, help="<org>-<account>."),
-        InputField("sf_user", "Snowflake user", FieldKind.PARAM, required=True),
+                   required=True,
+                   help="<org>-<account>. The Snowflake account that runs the "
+                        "dbt models over the federated Databricks data."),
+        InputField("sf_user", "Snowflake user", FieldKind.PARAM, required=True,
+                   help="Snowflake login the run connects as."),
         InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
-                   required=True),
+                   required=True,
+                   help="Snowflake virtual warehouse that runs the dbt models."),
         InputField("catalog", "Target database", FieldKind.PARAM,
                    default="TPCDI_TEST",
                    help="Snowflake database the models land in (not the UC "
                         "catalog — that's shared above)."),
-        InputField("snowflake_stage", "Stage", FieldKind.PARAM, required=True,
-                   help="<db>.<schema>.<stage> for the per-batch file drops."),
+        InputField("snowflake_stage", "External stage", FieldKind.PARAM,
+                   required=True,
+                   help="<db>.<schema>.<stage> — the Snowflake external stage on "
+                        "the S3 location where Databricks drops each day's "
+                        "files, so Snowflake can read the staged raw data."),
         InputField("catalog_integration", "Catalog integration name",
                    FieldKind.PARAM, required=True,
-                   help="Snowflake CATALOG INTEGRATION pointing at the UC "
-                        "Iceberg-REST endpoint. Requires UniForm enabled on "
-                        "the Databricks source tables."),
+                   help="The Snowflake CATALOG INTEGRATION that federates to "
+                        "Databricks' Unity Catalog Iceberg-REST endpoint — how "
+                        "Snowflake reads the Databricks-generated tables. "
+                        "Requires UniForm enabled on the source tables."),
         _secret_path("sf_credential_secret", "Snowflake password / private key (secret)",
                      "main.tpcdi_snowflake.password",
                      "The Snowflake user's password, or a PEM private key for "
-                     "keypair auth."),
+                     "keypair auth — how the run authenticates to Snowflake."),
         _secret_path("dbx_pat_secret", "Databricks PAT for federation (secret)",
                      "main.tpcdi_snowflake.dbx_pat",
-                     "PAT Snowflake uses to auth to the UC Iceberg-REST "
-                     "endpoint (the catalog integration's bearer token)."),
+                     "The Databricks personal access token the catalog "
+                     "integration uses (its bearer token) to authenticate to "
+                     "Databricks' Iceberg-REST endpoint — this is what lets "
+                     "Snowflake read the federated data."),
     ),
 )
 
