@@ -22,6 +22,13 @@ from databricks.sdk import WorkspaceClient
 
 from models import Engine, EngineSpec, derived_from_email
 
+
+def _short(err: Exception, limit: int = 140) -> str:
+    """Compact a Databricks SDK exception to a single readable line."""
+    msg = str(err).strip().splitlines()[0] if str(err).strip() else type(err).__name__
+    return msg[:limit]
+
+
 def _find_dir(marker: str) -> Path:
     """Walk up from this file to find `marker` (a relative dir path).
 
@@ -83,6 +90,104 @@ class RealBackend:
         except Exception:
             return {}
         return derived_from_email(email)
+
+    # --- Existence checks (Databricks-side; SDK only, no egress) -------------
+    # Each returns {"exists": bool, "detail": str}. Errors are reported as
+    # exists=False with the reason, never raised — validation must not crash
+    # the form.
+
+    def check_catalog(self, name: str) -> dict:
+        if not name:
+            return {"exists": False, "detail": "no catalog given"}
+        try:
+            self.w.catalogs.get(name)
+            return {"exists": True, "detail": f"catalog `{name}` exists"}
+        except Exception as e:
+            return {"exists": False, "detail": _short(e)}
+
+    def check_schema(self, catalog: str, schema: str) -> dict:
+        if not (catalog and schema):
+            return {"exists": False, "detail": "catalog + schema required"}
+        full = f"{catalog}.{schema}"
+        try:
+            self.w.schemas.get(full)
+            return {"exists": True, "detail": f"schema `{full}` exists"}
+        except Exception as e:
+            return {"exists": False, "detail": _short(e)}
+
+    def check_warehouse(self, name: str) -> dict:
+        if not name:
+            return {"exists": False, "detail": "no warehouse name given"}
+        try:
+            for wh in self.w.warehouses.list():
+                if wh.name == name:
+                    return {"exists": True, "detail": f"warehouse `{name}` exists"}
+            return {"exists": False, "detail": f"no warehouse named `{name}`"}
+        except Exception as e:
+            return {"exists": False, "detail": _short(e)}
+
+    def check_external_location_for(self, url: str) -> dict:
+        """Tell-only: is `url` (s3://… / gs://…) covered by a UC external
+        location? We report but never offer to create one."""
+        if not url:
+            return {"exists": False, "detail": "no volume prefix given"}
+        try:
+            best = None
+            for loc in self.w.external_locations.list():
+                lu = (loc.url or "").rstrip("/")
+                if lu and url.rstrip("/").startswith(lu):
+                    if best is None or len(lu) > len(best):
+                        best = lu
+            if best:
+                return {"exists": True,
+                        "detail": f"covered by external location `{best}`"}
+            return {"exists": False,
+                    "detail": "no UC external location covers this prefix"}
+        except Exception as e:
+            return {"exists": False, "detail": _short(e)}
+
+    def check_secret(self, path: str) -> dict:
+        """Tell-only existence check for a UC secret at catalog.schema.key.
+        Never reads or writes the value (consumer-only)."""
+        parts = (path or "").split(".")
+        if len(parts) < 3:
+            return {"exists": False, "detail": "expected catalog.schema.key"}
+        catalog, schema, key = parts[0], parts[1], ".".join(parts[2:])
+        try:
+            # List secrets in the schema and match the key — never fetch value.
+            secrets = self.w.secrets.list_secrets(
+                scope=f"{catalog}.{schema}")  # UC secret scope form
+            for s in secrets:
+                if getattr(s, "key", None) == key:
+                    return {"exists": True, "detail": f"secret `{path}` exists"}
+            return {"exists": False, "detail": f"no secret `{key}` in {catalog}.{schema}"}
+        except Exception as e:
+            return {"exists": False, "detail": _short(e)}
+
+    # --- Create-if-missing (only the 3 objects we're allowed to create) ------
+
+    def create_catalog(self, name: str) -> dict:
+        try:
+            self.w.catalogs.create(name=name)
+            return {"ok": True, "detail": f"created catalog `{name}`"}
+        except Exception as e:
+            return {"ok": False, "detail": _short(e)}
+
+    def create_schema(self, catalog: str, schema: str) -> dict:
+        try:
+            self.w.schemas.create(name=schema, catalog_name=catalog)
+            return {"ok": True, "detail": f"created schema `{catalog}.{schema}`"}
+        except Exception as e:
+            return {"ok": False, "detail": _short(e)}
+
+    def create_warehouse(self, name: str, size: str) -> dict:
+        try:
+            w = self.w.warehouses.create(name=name, cluster_size=size,
+                                         enable_serverless_compute=True,
+                                         max_num_clusters=1).result()
+            return {"ok": True, "detail": f"created warehouse `{name}` ({w.id})"}
+        except Exception as e:
+            return {"ok": False, "detail": _short(e)}
 
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         """Emit the parent+child workflow for one engine via its create()."""

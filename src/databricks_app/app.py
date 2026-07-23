@@ -320,64 +320,105 @@ _WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
 _JOB_HINT = _derived.get("job_name_prefix", "{fname}-{lname}-TPCDI")
 _sf_int = int(scale_factor)
 
-with st.form("details"):
-    st.markdown("**5. Confirm run defaults** _(edit if needed)_")
 
-    # --- Shared across Databricks + every competitor -------------------------
+def _show_check(result: dict) -> None:
+    """Render an existence-check result as a status line."""
+    exists, detail = result.get("exists"), result.get("detail", "")
+    if exists is True:
+        st.success(detail, icon="✅")
+    elif exists is False:
+        st.warning(detail, icon="⚠️")
+    else:
+        st.caption(detail)   # None → unknown (mock / not checked)
+
+
+# --- Live validation section (outside st.form so buttons + inline checks work).
+# Databricks-side objects the app can reach via the SDK: check existence as the
+# user types, and offer to create the 3 we're allowed to (catalog, raw schema,
+# dbt warehouse). Secrets + external locations are check-and-tell only.
+st.divider()
+st.markdown("**5. Confirm run defaults** _(edit if needed)_")
+
+catalog = st.text_input("UC catalog", value="main",
+                        help="Unity Catalog catalog for the run's tables + the "
+                             "external volume.")
+_cat = backend.check_catalog(catalog)
+_show_check(_cat)
+if _cat.get("exists") is False and catalog:
+    if st.button(f"Create catalog `{catalog}`", key="mk_cat"):
+        _show_check_res = backend.create_catalog(catalog)
+        st.info(_show_check_res["detail"])
+        st.rerun()
+
+wh_db = st.text_input(
+    f"Target schema prefix (blank will derive as {_WH_DB_HINT})",
+    placeholder=_derived.get("wh_db") or None,
+    help="The run appends the scale factor → {prefix}_{sf}.")
+_wh_db_eff = wh_db or _derived.get("wh_db", "")
+if _wh_db_eff:
+    st.caption(f"→ schema: `{_wh_db_eff}_{scale_factor}`")
+
+raw_schema = st.text_input("Raw data schema", value="tpcdi_raw_data",
+                           help="Schema holding the generated raw data + UC "
+                                "volume, as in the driver notebook.")
+_rs = backend.check_schema(catalog, raw_schema)
+_show_check(_rs)
+if _rs.get("exists") is False and catalog and raw_schema:
+    if st.button(f"Create schema `{catalog}.{raw_schema}`", key="mk_raw"):
+        r = backend.create_schema(catalog, raw_schema)
+        st.info(r["detail"])
+        st.rerun()
+
+# --- Databricks details (SKU-specific compute) — outside the form so the dbt
+# warehouse can be checked + created inline.
+st.markdown("**Databricks details**")
+dbx_wh_name = dbx_wh_size = None
+if sku == "dbt":
+    # dbt runs on a DBSQL warehouse — size + name. Size is pre-set by the scale
+    # factor (driver mapping) but editable; the name defaults to the driver's
+    # non-augmented DBSQL convention: TPCDI_{size} (no username).
+    _size_default = dbt_wh_size(_sf_int)
+    dbx_wh_size = st.selectbox(
+        "Warehouse size", WH_SIZES, index=WH_SIZES.index(_size_default),
+        help=f"Pre-set from the scale factor ({_size_default} for "
+             f"SF={scale_factor}); change if you need to.")
+    dbx_wh_name = st.text_input(
+        "Databricks SQL warehouse name", value=f"TPCDI_{dbx_wh_size}",
+        help="Defaults to the driver's TPCDI_{size} naming.")
+    _wh = backend.check_warehouse(dbx_wh_name)
+    _show_check(_wh)
+    if _wh.get("exists") is False and dbx_wh_name:
+        if st.button(f"Create warehouse `{dbx_wh_name}` ({dbx_wh_size})",
+                     key="mk_wh"):
+            r = backend.create_warehouse(dbx_wh_name, dbx_wh_size)
+            st.info(r["detail"])
+            st.rerun()
+elif sku in ("Cluster", "SDP"):
+    # Cluster / SDP: we pick the compute (not editable here — tune the generated
+    # job if needed). Sized from measured tuning: worker cores scale linearly
+    # with SF, single-node at <=32 cores, else 8-core workers + a 4-core driver,
+    # on the ARM node family for this cloud.
+    _plan = cluster_plan(APP_CLOUD, _sf_int, _is_augmented)
+    st.text_input("Compute (auto-configured)",
+                  value=cluster_plan_summary(_plan), disabled=True,
+                  help="Latest DBR. Sized from SKU, scale factor, and cloud "
+                       f"({APP_CLOUD}).")
+    st.caption(
+        "We size the cluster for you from our tuning; you can change the "
+        "cluster config on the generated job afterward.")
+
+# --- The rest (batches, job name, competitor details) — inside the form.
+with st.form("details"):
     # One batch count for the whole run so the comparison is fair.
     batches = st.select_slider(
         "Batches to run (applies to every engine)",
         options=["30", "50", "100", "150", "365"], value="150",
         help="Lower it for a quick smoke run.")
-    catalog = st.text_input("UC catalog", value="main",
-                            help="Unity Catalog catalog for the run's tables + "
-                                 "the external volume.")
-    wh_db = st.text_input(
-        f"Target schema prefix (blank will derive as {_WH_DB_HINT})",
-        placeholder=_derived.get("wh_db") or None,
-        help="The run appends the scale factor → {prefix}_{sf}.")
-    _wh_db_eff = wh_db or _derived.get("wh_db", "")
-    if _wh_db_eff:
-        st.caption(f"→ schema: `{_wh_db_eff}_{scale_factor}`")
-    raw_schema = st.text_input("Raw data schema", value="tpcdi_raw_data",
-                               help="Schema holding the generated raw data + UC "
-                                    "volume, as in the driver notebook.")
     job_name_prefix = st.text_input(
         f"Job name prefix (blank will derive as {_JOB_HINT})",
         placeholder=_derived.get("job_name_prefix") or None,
         help="Suffixes (scale factor, SKU, competitor) are appended "
              "automatically, matching the driver's naming.")
-
-    # --- Databricks details (SKU-specific compute) ---------------------------
-    st.markdown("**Databricks details**")
-    dbx_wh_name = dbx_wh_size = None
-    if sku == "dbt":
-        # dbt runs on a DBSQL warehouse — size + name. Size is pre-set by the
-        # scale factor (driver mapping) but editable; the name defaults to the
-        # driver's non-augmented DBSQL convention: TPCDI_{size} (no username).
-        _size_default = dbt_wh_size(_sf_int)
-        dbx_wh_size = st.selectbox(
-            "Warehouse size", WH_SIZES, index=WH_SIZES.index(_size_default),
-            help=f"Pre-set from the scale factor ({_size_default} for "
-                 f"SF={scale_factor}); change if you need to.")
-        dbx_wh_name = st.text_input(
-            "Databricks SQL warehouse name",
-            value=f"TPCDI_{dbx_wh_size}",
-            help="Defaults to the driver's TPCDI_{size} naming. Reused if it "
-                 "already exists, else created.")
-    elif sku in ("Cluster", "SDP"):
-        # Cluster / SDP: we pick the compute (not editable here — tune the
-        # generated job if needed). Sized from measured tuning: worker cores
-        # scale linearly with SF, single-node at <=32 cores, else 8-core
-        # workers + a 4-core driver, on the ARM node family for this cloud.
-        _plan = cluster_plan(APP_CLOUD, _sf_int, _is_augmented)
-        st.text_input("Compute (auto-configured)",
-                      value=cluster_plan_summary(_plan), disabled=True,
-                      help="Latest DBR. Sized from SKU, scale factor, and cloud "
-                           f"({APP_CLOUD}).")
-        st.caption(
-            "We size the cluster for you from our tuning; you can change the "
-            "cluster config on the generated job afterward.")
 
     # --- Per-competitor blocks -----------------------------------------------
     comp_values: dict[Engine, dict] = {}
@@ -425,6 +466,30 @@ for eng, cv in comp_values.items():
 if errors:
     st.error("Missing required fields — " + "; ".join(errors))
     st.stop()
+
+# Secret existence — tell-only (the app never creates secrets). Warn if a
+# referenced UC secret can't be found, but don't block: the operator may be
+# creating it out-of-band, and we don't want a false negative to stop a run.
+for eng, cv in comp_values.items():
+    cspec = SPECS[eng]
+    for f in cspec.secret_path_fields():
+        path = cv.get(f.key)
+        if path:
+            res = backend.check_secret(path)
+            if res.get("exists") is False:
+                st.warning(f"{cspec.label} — {f.label}: {res['detail']} "
+                           "(create it in Unity Catalog before running)",
+                           icon="🔑")
+
+# External storage location — tell-only. The competitor's S3/GCS staging prefix
+# must be covered by a UC external location for the data to be readable.
+for eng, cv in comp_values.items():
+    prefix = cv.get("s3_volume_prefix") or cv.get("gcs_volume_prefix")
+    if prefix:
+        res = backend.check_external_location_for(prefix)
+        if res.get("exists") is False:
+            st.warning(f"{SPECS[eng].label} — storage prefix `{prefix}`: "
+                       f"{res['detail']}", icon="🪣")
 
 # Job-name suffixes, matching the driver + a new competitor suffix (the driver
 # doesn't generate competitor jobs today). Parent name per engine:

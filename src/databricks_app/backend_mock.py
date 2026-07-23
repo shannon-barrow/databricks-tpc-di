@@ -22,6 +22,33 @@ class MockBackend:
         # job will derive it at run time.
         return {}
 
+    # --- Validation stubs (no workspace in mock mode) -----------------------
+    # Report "unknown" so the UI shows a neutral state rather than a fake
+    # exists/missing verdict that could mislead in run-local.
+    def check_catalog(self, name):
+        return {"exists": None, "detail": "(mock — not checked)"}
+
+    def check_schema(self, catalog, schema):
+        return {"exists": None, "detail": "(mock — not checked)"}
+
+    def check_warehouse(self, name):
+        return {"exists": None, "detail": "(mock — not checked)"}
+
+    def check_external_location_for(self, url):
+        return {"exists": None, "detail": "(mock — not checked)"}
+
+    def check_secret(self, path):
+        return {"exists": None, "detail": "(mock — not checked)"}
+
+    def create_catalog(self, name):
+        return {"ok": True, "detail": f"(mock) would create catalog `{name}`"}
+
+    def create_schema(self, catalog, schema):
+        return {"ok": True, "detail": f"(mock) would create `{catalog}.{schema}`"}
+
+    def create_warehouse(self, name, size):
+        return {"ok": True, "detail": f"(mock) would create warehouse `{name}`"}
+
     def create_workflow(self, spec: EngineSpec, values: dict) -> dict:
         # Fake but shaped like the real (child_id, parent_id) result.
         n = len(self.created_jobs)
