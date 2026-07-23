@@ -98,15 +98,14 @@ class RealBackend:
     def _create_kwargs(self, spec: EngineSpec, values: dict) -> dict:
         """Map form values -> create() keyword args.
 
-        Includes PARAM fields plus each secret's full UC path
-        (catalog.schema.key), which the port's create() passes to the job,
-        where dbutils.secrets.get resolves it. incremental_batches_to_run is
-        excluded: it's a run-now parameter set when the parent job is
-        *triggered*, not a build-time create() arg.
+        Every field the create() accepts flows through except the run-now
+        trigger param (incremental_batches_to_run): plain PARAMs, the inferred
+        REGION, the DERIVED wh_db (blank ones just don't override the port's
+        own default), and each secret's full UC path (catalog.schema.key),
+        which the port passes to the job for dbutils.secrets.get to resolve.
         """
         skip = {"incremental_batches_to_run"}
-        pass_fields = list(spec.param_fields()) + list(spec.secret_path_fields())
-        p = {f.key: values[f.key] for f in pass_fields
+        p = {f.key: values[f.key] for f in spec.fields
              if values.get(f.key) and f.key not in skip}
         p["scale_factor"] = int(p.pop("scale_factor"))
         return p

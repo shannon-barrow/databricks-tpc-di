@@ -18,23 +18,32 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 
-def derived_from_email(email: str) -> dict:
-    """Reproduce the driver notebook's username-derived defaults from a
-    current_user() email. Mirrors setup_context._init_api_context /
-    _init_workflow_defaults exactly:
+def wh_db_prefix_from_email(email: str) -> str:
+    """The per-user schema prefix, reproducing the driver notebook exactly
+    (setup_context._init_api_context / _init_workflow_defaults):
 
         user_name  = lower(regexp_replace(local_part, '\\W+', ' '))
         wh_prefix  = capwords(user_name).replace(' ', '_')
-        wh_db      = f"{wh_prefix}_TPCDI"
+        wh_db      = f"{wh_prefix}_TPCDI"      ->  e.g. First_Last_TPCDI
 
-    Returns {} for a blank/invalid email so the form falls back to empty.
+    Returns "" for a blank/invalid email. Shared by the Databricks baseline
+    and every competitor so schemas are unique per user across all engines.
     """
     local = (email or "").split("@")[0]
     user_name = re.sub(r"\W+", " ", local).lower().strip()
     if not user_name:
-        return {}
-    wh_prefix = string.capwords(user_name).replace(" ", "_")
-    return {"wh_db": f"{wh_prefix}_TPCDI"}
+        return ""
+    return f"{string.capwords(user_name).replace(' ', '_')}_TPCDI"
+
+
+def derived_from_email(email: str) -> dict:
+    """Ghost-fill map for DERIVED fields. Currently just the wh_db prefix."""
+    prefix = wh_db_prefix_from_email(email)
+    return {"wh_db": prefix} if prefix else {}
+
+
+# Fallback region per cloud when it can't be parsed from the workspace host.
+REGION_DEFAULT = {"AWS": "us-west-2", "GCP": "us-central1", "Azure": "eastus2"}
 
 
 class Engine(str, Enum):
@@ -68,6 +77,25 @@ COMPETITIVE_ENGINES = [Engine.REDSHIFT, Engine.BIGQUERY, Engine.SNOWFLAKE]
 # Which batch types support a competitive run at all.
 COMPETITIVE_BATCH_TYPES = ["Augmented Incremental"]
 
+# TPC-DI data is generated in Databricks and read cross-service in the SAME
+# cloud/region (a different region incurs egress + likely code changes), so the
+# app pins the competitor region to where it runs and offers only the
+# competitors valid in that cloud. Snowflake runs in every cloud; the
+# warehouse-native competitor differs per cloud.
+_ENGINE_CLOUD = {
+    Engine.REDSHIFT: "AWS",
+    Engine.BIGQUERY: "GCP",
+    Engine.SNOWFLAKE: None,   # available in all clouds
+}
+
+
+def competitors_for_cloud(cloud: str) -> list[Engine]:
+    """Competitors valid in `cloud`: Snowflake everywhere, plus the one
+    warehouse native to that cloud. Enforces same-cloud runs (and, implicitly,
+    that BigQuery and Redshift are never both offered)."""
+    return [e for e in COMPETITIVE_ENGINES
+            if _ENGINE_CLOUD[e] in (None, cloud)]
+
 
 class FieldKind(str, Enum):
     PARAM = "param"      # a plain create()/job parameter (literal value)
@@ -77,6 +105,8 @@ class FieldKind(str, Enum):
                                  # path, and the job reads it via
                                  # dbutils.secrets.get(catalog, schema, key)
     DERIVED = "derived"  # filled from workspace context when left blank
+    REGION = "region"    # cloud region, inferred + shown read-only (pinned to
+                         # where the app runs; not user-editable)
 
 
 @dataclass(frozen=True)
@@ -149,8 +179,9 @@ DATABRICKS_SPEC = EngineSpec(
         InputField("repo_src_path", "Repo src path", FieldKind.DERIVED,
                    help="Derived from the current user if left blank."),
         InputField("catalog", "UC catalog", FieldKind.PARAM, default="main"),
-        InputField("wh_db", "Target schema", FieldKind.DERIVED,
-                   help="Blank = derive from your username, as the driver does."),
+        InputField("wh_db", "Target schema prefix", FieldKind.DERIVED,
+                   help="Blank = derive from your username, as the driver does. "
+                        "The run appends the scale factor → {prefix}_{sf}."),
     ),
 )
 
@@ -167,13 +198,15 @@ REDSHIFT_SPEC = EngineSpec(
                    required=True,
                    help="e.g. s3://your-bucket/tpcdi/ — the prefix backing the "
                         "UC external volume."),
-        InputField("aws_region", "AWS region", FieldKind.PARAM,
-                   default="us-west-2"),
+        InputField("aws_region", "AWS region", FieldKind.REGION,
+                   help="Pinned to the region this app runs in — the competitor "
+                        "must run in the same region as the Databricks data "
+                        "(a different region incurs egress). To run elsewhere, "
+                        "launch this app from Databricks in that cloud/region."),
         InputField("catalog", "UC catalog", FieldKind.PARAM, default="main",
                    help="Databricks UC catalog holding the external volume."),
-        InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
-                   default="tpcdi_aug_rs_dbt",
-                   help="Redshift target schema prefix → {wh_db}_{sf}."),
+        InputField("wh_db", "Target schema prefix", FieldKind.DERIVED,
+                   help="Blank = derive from your username → {prefix}_{sf}."),
         InputField("rs_host", "Workgroup endpoint", FieldKind.PARAM, required=True,
                    help="<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
         InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True),
@@ -197,11 +230,13 @@ BIGQUERY_SPEC = EngineSpec(
                    help="Your GCP/BigQuery project id."),
         InputField("gcs_volume_prefix", "GCS volume prefix", FieldKind.PARAM,
                    required=True, help="e.g. gs://your-bucket/tpcdi/"),
-        InputField("bq_location", "BQ location", FieldKind.PARAM,
-                   default="us-central1"),
-        InputField("wh_db", "Target dataset prefix", FieldKind.PARAM,
-                   default="tpcdi_aug_bq_dbt",
-                   help="BigQuery target dataset prefix → {wh_db}_sf{N}."),
+        InputField("bq_location", "BQ location", FieldKind.REGION,
+                   help="Pinned to the region this app runs in — the competitor "
+                        "must run in the same region as the Databricks data "
+                        "(a different region incurs egress). To run elsewhere, "
+                        "launch this app from Databricks in that cloud/region."),
+        InputField("wh_db", "Target dataset prefix", FieldKind.DERIVED,
+                   help="Blank = derive from your username → {prefix}_{sf}."),
         _secret_path("sa_json_secret", "Service-account JSON (secret)",
                      "main.tpcdi_bigquery.sa_json",
                      "SA JSON key with BigQuery Data Editor + Job User."),
@@ -220,9 +255,8 @@ SNOWFLAKE_SPEC = EngineSpec(
                    required=True),
         InputField("catalog", "Target database", FieldKind.PARAM, default="TPCDI_TEST",
                    help="Snowflake database the models land in."),
-        InputField("wh_db", "Target schema prefix", FieldKind.PARAM,
-                   default="tpcdi_aug_sf_dbt",
-                   help="Snowflake target schema prefix → {wh_db}_{sf}."),
+        InputField("wh_db", "Target schema prefix", FieldKind.DERIVED,
+                   help="Blank = derive from your username → {prefix}_{sf}."),
         InputField("snowflake_stage", "Stage", FieldKind.PARAM, required=True,
                    help="<db>.<schema>.<stage> for the per-batch file drops."),
         InputField("catalog_integration", "Catalog integration name",

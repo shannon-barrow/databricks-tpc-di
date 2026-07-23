@@ -12,10 +12,14 @@ workflow via each port's create_jobs.create().
 import base64
 from pathlib import Path
 
+import os
+import re
+
 import streamlit as st
 
 from models import (
     Engine, SPECS, FieldKind, DATABRICKS_SPEC, derived_from_email,
+    wh_db_prefix_from_email, competitors_for_cloud, REGION_DEFAULT,
     BATCH_TYPES, DBX_SKUS_BY_BATCH, SDP_EDITIONS,
     COMPETITIVE_ENGINES,
 )
@@ -77,6 +81,35 @@ st.markdown(
 if USE_MOCK:
     st.info("Mock mode — nothing is written or created. "
             "Set USE_MOCK_BACKEND=false to emit real workflows.", icon="🧪")
+
+
+def _infer_cloud_region() -> tuple[str, str]:
+    """Infer (cloud, region) from the environment — never ask the user. A
+    Databricks App runs in the same cloud/region as its workspace, and the
+    workspace host encodes both:
+      - AWS:   dbc-….cloud.databricks.com  / benchmarking-prod-aws-us-west-2.…
+      - Azure: adb-….azuredatabricks.net
+      - GCP:   ….gcp.databricks.com
+    Region is parsed from the host where present (AWS names often embed it),
+    else falls back to a per-cloud default.
+    """
+    host = (os.getenv("DATABRICKS_HOST")
+            or os.getenv("DATABRICKS_WORKSPACE_URL") or "").lower()
+    if ".azuredatabricks.net" in host or "azure" in host:
+        cloud = "Azure"
+    elif ".gcp.databricks.com" in host or "gcp" in host:
+        cloud = "GCP"
+    else:
+        cloud = "AWS"   # default cloud for *.cloud.databricks.com
+    # Try to pull a region token out of the host (e.g. "...-aws-us-west-2...").
+    region = ""
+    m = re.search(r"(us|eu|ap|ca|sa|af|me)-[a-z]+-\d", host)
+    if m:
+        region = m.group(0)
+    return cloud, (region or REGION_DEFAULT.get(cloud, ""))
+
+
+APP_CLOUD, APP_REGION = _infer_cloud_region()
 
 SF_OPTIONS = ["10", "100", "1000", "5000", "10000", "20000"]
 
@@ -151,10 +184,16 @@ if scope == "Databricks and Competitors":
     batch_type = "Augmented Incremental"
     sku = "dbt"
     st.markdown("**2. Which competitors?** _(pick one or more)_")
-    st.caption("Run type is Augmented Incremental and every engine runs dbt, "
-               "so the comparison is apples-to-apples.")
+    # Only competitors valid in the cloud this app runs in — the data is
+    # generated in Databricks and must be read in the same cloud/region.
+    # This also means BigQuery (GCP) and Redshift (AWS) are never both offered.
+    _cloud_competitors = competitors_for_cloud(APP_CLOUD)
+    st.caption(f"Running on **{APP_CLOUD}** ({APP_REGION}). Run type is "
+               "Augmented Incremental and every engine runs dbt, so the "
+               "comparison is apples-to-apples. Only same-cloud competitors "
+               "are shown — the data can't be read cross-cloud without egress.")
     competitor_engines = [
-        e for e in COMPETITIVE_ENGINES
+        e for e in _cloud_competitors
         if st.checkbox(SPECS[e].label, key=f"comp_{e.value}")
     ]
     if not competitor_engines:
@@ -251,6 +290,10 @@ _email = _viewer_email()
 _derived = derived_from_email(_email) if _email else backend.derived_defaults()
 
 
+# The wh_db ghost-fill (per-user "First_Last_TPCDI" prefix) shown in the label.
+_WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
+
+
 def _render_field(eng_value: str, f) -> str:
     """Render one InputField as a form control and return its value."""
     wkey = f"{eng_value}.{f.key}"
@@ -260,10 +303,19 @@ def _render_field(eng_value: str, f) -> str:
         return st.text_input(f"{f.label} 🔑", value=f.default,
                              placeholder=f.placeholder or None,
                              help=f.help or None, key=wkey)
+    if f.kind is FieldKind.REGION:
+        # Inferred from where the app runs; not editable (same-cloud/region
+        # constraint). disabled so the value is visible but locked.
+        st.text_input(f"{f.label} (fixed — same region as the Databricks run)",
+                      value=APP_REGION, disabled=True,
+                      help=f.help or None, key=wkey)
+        return APP_REGION
     if f.kind is FieldKind.DERIVED:
         ghost = _derived.get(f.key, "")
-        val = st.text_input(f"{f.label} (blank = derive)",
-                            placeholder=ghost or None,
+        # wh_db shows the per-user derive hint right in the label.
+        label = (f"{f.label} (blank will derive as {_WH_DB_HINT})"
+                 if f.key == "wh_db" else f"{f.label} (blank = derive)")
+        val = st.text_input(label, placeholder=ghost or None,
                             help=f.help or None, key=wkey)
     else:
         val = st.text_input(f.label, value=f.default,
@@ -273,7 +325,7 @@ def _render_field(eng_value: str, f) -> str:
     # schema, matching the driver's `{wh_db}_{scale_factor}` convention. Show
     # that resolved name so it's clear the SF is included.
     if f.key == "wh_db":
-        prefix = val or ghost if f.kind is FieldKind.DERIVED else (val or f.default)
+        prefix = (val or ghost) if f.kind is FieldKind.DERIVED else (val or f.default)
         if prefix:
             st.caption(f"→ schema: `{prefix}_{scale_factor}`")
     return val
@@ -334,6 +386,15 @@ for eng, cv in comp_values.items():
 if errors:
     st.error("Missing required fields — " + "; ".join(errors))
     st.stop()
+
+# Blank wh_db → the per-user derived prefix (First_Last_TPCDI), so every engine
+# (Databricks + competitors) shares the driver's naming and stays user-unique
+# instead of falling back to each port's generic default.
+_wh_db_default = _derived.get("wh_db", "")
+if _wh_db_default:
+    for cv in comp_values.values():
+        if not cv.get("wh_db"):
+            cv["wh_db"] = _wh_db_default
 
 results = []
 
