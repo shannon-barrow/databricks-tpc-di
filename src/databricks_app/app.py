@@ -262,12 +262,21 @@ def _render_field(eng_value: str, f) -> str:
                              help=f.help or None, key=wkey)
     if f.kind is FieldKind.DERIVED:
         ghost = _derived.get(f.key, "")
-        return st.text_input(f"{f.label} (blank = derive)",
-                             placeholder=ghost or None,
-                             help=f.help or None, key=wkey)
-    return st.text_input(f.label, value=f.default,
-                         placeholder=f.placeholder or None,
-                         help=f.help or None, key=wkey)
+        val = st.text_input(f"{f.label} (blank = derive)",
+                            placeholder=ghost or None,
+                            help=f.help or None, key=wkey)
+    else:
+        val = st.text_input(f.label, value=f.default,
+                            placeholder=f.placeholder or None,
+                            help=f.help or None, key=wkey)
+    # wh_db is a prefix — the run appends the scale factor to form the final
+    # schema, matching the driver's `{wh_db}_{scale_factor}` convention. Show
+    # that resolved name so it's clear the SF is included.
+    if f.key == "wh_db":
+        prefix = val or ghost if f.kind is FieldKind.DERIVED else (val or f.default)
+        if prefix:
+            st.caption(f"→ schema: `{prefix}_{scale_factor}`")
+    return val
 
 
 with st.form("details"):
