@@ -161,17 +161,20 @@ class SetupContext:
     # ---------- Cloud-specific compute + catalog default ----------
 
     def _init_compute_and_catalog_defaults(self):
+        # ARM-based, local-NVMe node families per cloud (Graviton / Cobalt /
+        # Axion). ARM gives the best price/perf for the TPC-DI gen + benchmark
+        # compute; the -d/-lssd suffixes provide local disk for shuffle/spill.
         if self.cloud_provider == "AWS":
-            self.default_worker_type = "m7gd.2xlarge"
-            self.default_driver_type = "m7gd.xlarge"
-            self.cust_mgmt_type = "m7gd.16xlarge"
+            self.default_worker_type = "m8gd.2xlarge"
+            self.default_driver_type = "m8gd.xlarge"
+            self.cust_mgmt_type = "m8gd.16xlarge"
         elif self.cloud_provider == "GCP":
-            self.default_worker_type = "n2-standard-8"
-            self.default_driver_type = "n2-standard-4"
-            self.cust_mgmt_type = "n2-standard-64"
+            self.default_worker_type = "c4a-standard-8-lssd"
+            self.default_driver_type = "c4a-standard-4-lssd"
+            self.cust_mgmt_type = "c4a-standard-64-lssd"
             self.worker_cores_mult = self.worker_cores_mult * 1.5
         elif self.cloud_provider == "Azure":
-            self.default_worker_type = "Standard_D8ads_v5"
-            self.default_driver_type = "Standard_D4as_v5"
-            self.cust_mgmt_type = "Standard_D64ads_v5"
+            self.default_worker_type = "Standard_D8pds_v6"
+            self.default_driver_type = "Standard_D4pds_v6"
+            self.cust_mgmt_type = "Standard_D64pds_v6"
         self.default_catalog = "tpcdi"
