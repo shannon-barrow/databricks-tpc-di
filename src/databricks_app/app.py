@@ -351,19 +351,19 @@ with st.form("details"):
     st.markdown("**Databricks details**")
     dbx_wh_name = dbx_wh_size = None
     if sku == "dbt":
-        # dbt runs on a DBSQL warehouse — name + size (size pre-set by scale
-        # factor via the driver's mapping, but editable).
-        _eff_prefix = job_name_prefix or _derived.get("job_name_prefix", "")
-        dbx_wh_name = st.text_input(
-            "Databricks SQL warehouse name",
-            value=(f"{_eff_prefix}-tpcdi-dbt" if _eff_prefix else ""),
-            placeholder="my-tpcdi-dbt-wh",
-            help="Reused if it already exists, else created.")
+        # dbt runs on a DBSQL warehouse — size + name. Size is pre-set by the
+        # scale factor (driver mapping) but editable; the name defaults to the
+        # driver's non-augmented DBSQL convention: TPCDI_{size} (no username).
         _size_default = dbt_wh_size(_sf_int)
         dbx_wh_size = st.selectbox(
             "Warehouse size", WH_SIZES, index=WH_SIZES.index(_size_default),
             help=f"Pre-set from the scale factor ({_size_default} for "
                  f"SF={scale_factor}); change if you need to.")
+        dbx_wh_name = st.text_input(
+            "Databricks SQL warehouse name",
+            value=f"TPCDI_{dbx_wh_size}",
+            help="Defaults to the driver's TPCDI_{size} naming. Reused if it "
+                 "already exists, else created.")
     elif sku in ("Cluster", "SDP"):
         # Cluster / SDP: we pick the compute (not editable here — tune the
         # generated job if needed). Sized from measured tuning: worker cores
