@@ -291,36 +291,6 @@ _email = _viewer_email()
 _derived = derived_from_email(_email) if _email else backend.derived_defaults()
 
 
-def _render_field(eng_value: str, f) -> str:
-    """Render one competitor InputField as a form control and return its value.
-
-    Competitors only carry PARAM, SECRET_PATH, and REGION fields now — the UC
-    catalog and target-schema prefix are shared top-level fields.
-    """
-    wkey = f"{eng_value}.{f.key}"
-    if f.kind is FieldKind.SECRET_PATH:
-        # A UC secret reference — the operator pastes catalog.schema.key. Not a
-        # password box: the value is a path, not the secret itself.
-        return st.text_input(f"{f.label} 🔑", value=f.default,
-                             placeholder=f.placeholder or None,
-                             help=f.help or None, key=wkey)
-    if f.kind is FieldKind.REGION:
-        # Inferred from where the app runs; not editable (same-cloud/region
-        # constraint). disabled so the value is visible but locked.
-        st.text_input(f"{f.label} (fixed — same region as the Databricks run)",
-                      value=APP_REGION, disabled=True,
-                      help=f.help or None, key=wkey)
-        return APP_REGION
-    return st.text_input(f.label, value=f.default,
-                         placeholder=f.placeholder or None,
-                         help=f.help or None, key=wkey)
-
-
-_WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
-_JOB_HINT = _derived.get("job_name_prefix", "{fname}-{lname}-TPCDI")
-_sf_int = int(scale_factor)
-
-
 def _show_check(result: dict) -> None:
     """Render an existence-check result as a status line."""
     exists, detail = result.get("exists"), result.get("detail", "")
@@ -330,6 +300,46 @@ def _show_check(result: dict) -> None:
         st.warning(detail, icon="⚠️")
     else:
         st.caption(detail)   # None → unknown (mock / not checked)
+
+
+def _render_field(eng_value: str, f) -> str:
+    """Render one competitor InputField as a form control and return its value.
+
+    Competitors only carry PARAM, SECRET_PATH, and REGION fields now — the UC
+    catalog and target-schema prefix are shared top-level fields.
+    """
+    wkey = f"{eng_value}.{f.key}"
+    if f.kind is FieldKind.SECRET_PATH:
+        # A UC secret reference — the operator pastes catalog.schema.key. Not a
+        # password box: the value is a path, not the secret itself. The UC
+        # secret lives in Databricks, so we can check existence inline via the
+        # SDK (no egress to the competitor engine).
+        val = st.text_input(f"{f.label} 🔑", value=f.default,
+                            placeholder=f.placeholder or None,
+                            help=f.help or None, key=wkey)
+        if val and len(val.split(".")) >= 3:   # looks like catalog.schema.key
+            _show_check(backend.check_secret(val))
+        return val
+    if f.kind is FieldKind.REGION:
+        # Inferred from where the app runs; not editable (same-cloud/region
+        # constraint). disabled so the value is visible but locked.
+        st.text_input(f"{f.label} (fixed — same region as the Databricks run)",
+                      value=APP_REGION, disabled=True,
+                      help=f.help or None, key=wkey)
+        return APP_REGION
+    val = st.text_input(f.label, value=f.default,
+                        placeholder=f.placeholder or None,
+                        help=f.help or None, key=wkey)
+    # S3/GCS staging prefix must be covered by a UC external location — a
+    # Databricks-side check, so do it inline too.
+    if f.key in ("s3_volume_prefix", "gcs_volume_prefix") and val.startswith(("s3://", "gs://")):
+        _show_check(backend.check_external_location_for(val))
+    return val
+
+
+_WH_DB_HINT = _derived.get("wh_db", "{fname}_{lname}_TPCDI")
+_JOB_HINT = _derived.get("job_name_prefix", "{fname}-{lname}-TPCDI")
+_sf_int = int(scale_factor)
 
 
 # --- Live validation section (outside st.form so buttons + inline checks work).
@@ -407,55 +417,59 @@ elif sku in ("Cluster", "SDP"):
         "We size the cluster for you from our tuning; you can change the "
         "cluster config on the generated job afterward.")
 
-# --- The rest (batches, job name, competitor details) — inside the form.
+# --- Batches, job name, competitor details — OUTSIDE st.form so the inline
+# Databricks-side checks (secret existence, external location) rerun live as the
+# user types. (A form batches inputs and won't rerun per-field.)
+batches = st.select_slider(
+    "Batches to run (applies to every engine)",
+    options=["30", "50", "100", "150", "365"], value="150",
+    help="Lower it for a quick smoke run.")
+job_name_prefix = st.text_input(
+    f"Job name prefix (blank will derive as {_JOB_HINT})",
+    placeholder=_derived.get("job_name_prefix") or None,
+    help="Suffixes (scale factor, SKU, competitor) are appended "
+         "automatically, matching the driver's naming.")
+
+# --- Per-competitor blocks ---------------------------------------------------
+comp_values: dict[Engine, dict] = {}
+for eng in competitor_engines:
+    cspec = SPECS[eng]
+    st.markdown(f"**{cspec.label} details**")
+    if eng is Engine.SNOWFLAKE:
+        st.info(SNOWFLAKE_SUMMARY, icon="❄️")
+    cv: dict[str, str] = {"scale_factor": scale_factor,
+                          "incremental_batches_to_run": batches,
+                          "catalog": catalog, "wh_db": _wh_db_eff}
+    for f in cspec.fields:
+        # scale_factor is chosen above; catalog/wh_db are shared top-level for
+        # engines that consume the UC catalog. Snowflake/BigQuery keep their own
+        # engine-specific `catalog` field (SF database / BQ project), so don't
+        # skip catalog for those.
+        if f.key in ("scale_factor", "wh_db"):
+            continue
+        cv[f.key] = _render_field(eng.value, f)
+    comp_values[eng] = cv
+
+# One footnote for the whole competitor section (not per-engine).
+if competitor_engines:
+    st.caption(
+        "🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
+        "secret you already created; the app passes the path and the "
+        "job reads the value at run time. Only passwords/keys/tokens "
+        "are secrets — other fields are plain config. "
+        "Requires Unity Catalog Secrets — for more information see "
+        "https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets")
+
+# Submit lives in a minimal form so all the above is collected on one click.
 with st.form("details"):
-    # One batch count for the whole run so the comparison is fair.
-    batches = st.select_slider(
-        "Batches to run (applies to every engine)",
-        options=["30", "50", "100", "150", "365"], value="150",
-        help="Lower it for a quick smoke run.")
-    job_name_prefix = st.text_input(
-        f"Job name prefix (blank will derive as {_JOB_HINT})",
-        placeholder=_derived.get("job_name_prefix") or None,
-        help="Suffixes (scale factor, SKU, competitor) are appended "
-             "automatically, matching the driver's naming.")
-
-    # --- Per-competitor blocks -----------------------------------------------
-    comp_values: dict[Engine, dict] = {}
-    for eng in competitor_engines:
-        cspec = SPECS[eng]
-        st.markdown(f"**{cspec.label} details**")
-        if eng is Engine.SNOWFLAKE:
-            st.info(SNOWFLAKE_SUMMARY, icon="❄️")
-        cv: dict[str, str] = {"scale_factor": scale_factor,
-                              "incremental_batches_to_run": batches,
-                              "catalog": catalog, "wh_db": _wh_db_eff}
-        for f in cspec.fields:
-            # scale_factor is chosen above; catalog/wh_db are shared top-level
-            # for engines that consume the UC catalog. Snowflake/BigQuery keep
-            # their own engine-specific `catalog` field (SF database / BQ
-            # project), so don't skip catalog for those.
-            if f.key in ("scale_factor", "wh_db"):
-                continue
-            cv[f.key] = _render_field(eng.value, f)
-        comp_values[eng] = cv
-
-    # One footnote for the whole competitor section (not per-engine).
-    if competitor_engines:
-        st.caption(
-            "🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
-            "secret you already created; the app passes the path and the "
-            "job reads the value at run time. Only passwords/keys/tokens "
-            "are secrets — other fields are plain config. "
-            "Requires Unity Catalog Secrets — for more information see "
-            "https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets")
-
     submitted = st.form_submit_button("Review & create")
 
 if not submitted:
     st.stop()
 
 # --- Validate all competitor blocks before creating anything -----------------
+# Secret + external-location existence are already surfaced inline (above) as
+# each field is filled; here we only block on genuinely missing required fields.
 errors = []
 for eng, cv in comp_values.items():
     cspec = SPECS[eng]
@@ -466,30 +480,6 @@ for eng, cv in comp_values.items():
 if errors:
     st.error("Missing required fields — " + "; ".join(errors))
     st.stop()
-
-# Secret existence — tell-only (the app never creates secrets). Warn if a
-# referenced UC secret can't be found, but don't block: the operator may be
-# creating it out-of-band, and we don't want a false negative to stop a run.
-for eng, cv in comp_values.items():
-    cspec = SPECS[eng]
-    for f in cspec.secret_path_fields():
-        path = cv.get(f.key)
-        if path:
-            res = backend.check_secret(path)
-            if res.get("exists") is False:
-                st.warning(f"{cspec.label} — {f.label}: {res['detail']} "
-                           "(create it in Unity Catalog before running)",
-                           icon="🔑")
-
-# External storage location — tell-only. The competitor's S3/GCS staging prefix
-# must be covered by a UC external location for the data to be readable.
-for eng, cv in comp_values.items():
-    prefix = cv.get("s3_volume_prefix") or cv.get("gcs_volume_prefix")
-    if prefix:
-        res = backend.check_external_location_for(prefix)
-        if res.get("exists") is False:
-            st.warning(f"{SPECS[eng].label} — storage prefix `{prefix}`: "
-                       f"{res['detail']}", icon="🪣")
 
 # Job-name suffixes, matching the driver + a new competitor suffix (the driver
 # doesn't generate competitor jobs today). Parent name per engine:
