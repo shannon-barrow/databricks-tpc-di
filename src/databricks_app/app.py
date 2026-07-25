@@ -170,8 +170,7 @@ scope = _radio(
     {
         "Databricks only": "Just the Databricks benchmark — pick any run type and SKU.",
         "Databricks and Competitors":
-            "Databricks vs one or more competitors, executed via dbt to "
-            "standardize execution (Augmented Incremental only).",
+            "Databricks vs one or more competitors, executed via dbt to standardize execution (Augmented Incremental only).",
     },
 )
 if not scope:
@@ -189,10 +188,7 @@ if scope == "Databricks and Competitors":
     # generated in Databricks and must be read in the same cloud/region.
     # This also means BigQuery (GCP) and Redshift (AWS) are never both offered.
     _cloud_competitors = competitors_for_cloud(APP_CLOUD)
-    st.caption(f"Running on **{APP_CLOUD}** ({APP_REGION}). Run type is "
-               "Augmented Incremental and every engine runs dbt, so the "
-               "comparison is apples-to-apples. Only same-cloud competitors "
-               "are shown — the data can't be read cross-cloud without egress.")
+    st.caption(f"Running on **{APP_CLOUD}** ({APP_REGION}). Run type is Augmented Incremental and every engine runs dbt, so the comparison is apples-to-apples. Only same-cloud competitors are shown — the data can't be read cross-cloud without egress.")
     competitor_engines = [
         e for e in _cloud_competitors
         if st.checkbox(SPECS[e].label, key=f"comp_{e.value}")
@@ -232,8 +228,7 @@ if _is_augmented:
         "**4. Scale factor?**",
         [_RECOMMENDED_SF, "Other…"],
         {_RECOMMENDED_SF: _SF_CAPTIONS_AUGMENTED[_RECOMMENDED_SF],
-         "Other…": "Pick a smaller scale factor (quicker/cheaper, but not the "
-                   "published benchmark size)."},
+         "Other…": "Pick a smaller scale factor (quicker/cheaper, but not the published benchmark size)."},
     )
     if not choice:
         st.stop()
@@ -245,14 +240,10 @@ if _is_augmented:
                               _SF_CAPTIONS_AUGMENTED)
         if not scale_factor:
             st.stop()
-    st.caption("Footprint is for the augmented-incremental workload (initial "
-               "tables + per-batch new data). TPC-DI data volume scales "
-               "linearly with the scale factor.")
+    st.caption("Footprint is for the augmented-incremental workload (initial tables + per-batch new data). TPC-DI data volume scales linearly with the scale factor.")
 else:
     scale_factor = _radio("**4. Scale factor?**", SF_OPTIONS, _sf_captions)
-    st.caption("Footprint is the full raw dataset processed by a single-batch / "
-               "incremental run. TPC-DI data volume scales linearly with the "
-               "scale factor.")
+    st.caption("Footprint is the full raw dataset processed by a single-batch / incremental run. TPC-DI data volume scales linearly with the scale factor.")
     if not scale_factor:
         st.stop()
 
@@ -359,8 +350,7 @@ st.divider()
 st.markdown("**5. Confirm run defaults** _(edit if needed)_")
 
 catalog = st.text_input("UC catalog", value="main",
-                        help="Unity Catalog catalog for the run's tables + the "
-                             "external volume.")
+                        help="Unity Catalog catalog for the run's tables + the external volume.")
 _cat = backend.check_catalog(catalog)
 _show_check(_cat)
 if _cat.get("exists") is False and catalog:
@@ -378,8 +368,7 @@ if _wh_db_eff:
     st.caption(f"→ schema: `{_wh_db_eff}_{scale_factor}`")
 
 raw_schema = st.text_input("Raw data schema", value="tpcdi_raw_data",
-                           help="Schema holding the generated raw data + UC "
-                                "volume, as in the driver notebook.")
+                           help="Schema holding the generated raw data + UC volume, as in the driver notebook.")
 _rs = backend.check_schema(catalog, raw_schema)
 _show_check(_rs)
 if _rs.get("exists") is False and catalog and raw_schema:
@@ -399,8 +388,7 @@ if sku == "dbt":
     _size_default = dbt_wh_size(_sf_int)
     dbx_wh_size = st.selectbox(
         "Warehouse size", WH_SIZES, index=WH_SIZES.index(_size_default),
-        help=f"Pre-set from the scale factor ({_size_default} for "
-             f"SF={scale_factor}); change if you need to.")
+        help=f"Pre-set from the scale factor ({_size_default} for SF={scale_factor}); change if you need to.")
     dbx_wh_name = st.text_input(
         "Databricks SQL warehouse name", value=f"TPCDI_{dbx_wh_size}",
         help="Defaults to the driver's TPCDI_{size} naming.")
@@ -420,11 +408,8 @@ elif sku in ("Cluster", "SDP"):
     _plan = cluster_plan(APP_CLOUD, _sf_int, _is_augmented)
     st.text_input("Compute (auto-configured)",
                   value=cluster_plan_summary(_plan), disabled=True,
-                  help="Latest DBR. Sized from SKU, scale factor, and cloud "
-                       f"({APP_CLOUD}).")
-    st.caption(
-        "We size the cluster for you from our tuning; you can change the "
-        "cluster config on the generated job afterward.")
+                  help=f"Latest DBR. Sized from SKU, scale factor, and cloud ({APP_CLOUD}).")
+    st.caption("We size the cluster for you from our tuning; you can change the cluster config on the generated job afterward.")
 
 # --- Batches, job name, competitor details — OUTSIDE st.form so the inline
 # Databricks-side checks (secret existence, external location) rerun live as the
@@ -436,8 +421,7 @@ batches = st.select_slider(
 job_name_prefix = st.text_input(
     f"Job name prefix (blank will derive as {_JOB_HINT})",
     placeholder=_derived.get("job_name_prefix") or None,
-    help="Suffixes (scale factor, SKU, competitor) are appended "
-         "automatically, matching the driver's naming.")
+    help="Suffixes (scale factor, SKU, competitor) are appended automatically, matching the driver's naming.")
 
 # --- Per-competitor blocks ---------------------------------------------------
 comp_values: dict[Engine, dict] = {}
@@ -462,12 +446,9 @@ for eng in competitor_engines:
 # One footnote for the whole competitor section (not per-engine).
 if competitor_engines:
     st.caption(
-        "🔑 = a Unity Catalog secret path (catalog.schema.key) to a "
-        "secret you already created; the app passes the path and the "
-        "job reads the value at run time. Only passwords/keys/tokens "
-        "are secrets — other fields are plain config. "
-        "Requires Unity Catalog Secrets — for more information see "
-        "https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets")
+        "🔑 = a Unity Catalog secret path (catalog.schema.key) to a secret you already created; the app passes the path and the job reads the value at run time. "
+        "Only passwords/keys/tokens are secrets — other fields are plain config. "
+        "Requires Unity Catalog Secrets — for more information see https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets")
 
 # Submit lives in a minimal form so all the above is collected on one click.
 with st.form("details"):

@@ -249,8 +249,7 @@ def _secret_path(key: str, label: str, example: str, help: str) -> InputField:
     pre-filling a value."""
     return InputField(key, label, FieldKind.SECRET_PATH, required=True,
                       placeholder=example,
-                      help=f"{help} Full Unity Catalog secret path "
-                           f"(catalog.schema.key).")
+                      help=f"{help} Full Unity Catalog secret path (catalog.schema.key).")
 
 DATABRICKS_SPEC = EngineSpec(
     engine=Engine.DATABRICKS,
@@ -274,31 +273,18 @@ REDSHIFT_SPEC = EngineSpec(
     label="Amazon Redshift Serverless",
     fields=(
         _SCALE_FACTOR,
-        InputField("profile", "Target workspace profile", FieldKind.PARAM,
-                   required=True,
-                   help="Databricks CLI profile for the workspace that owns the "
-                        "UC external volume backing the S3 bucket — this is where "
-                        "the benchmark jobs get created."),
-        InputField("s3_volume_prefix", "S3 volume prefix", FieldKind.PARAM,
-                   required=True,
-                   help="The s3:// prefix backing the UC external volume where "
-                        "Databricks stages the data Redshift reads, e.g. "
-                        "s3://your-bucket/tpcdi/."),
+        InputField("profile", "Target workspace profile", FieldKind.PARAM, required=True,
+                   help="Databricks CLI profile for the workspace that owns the UC external volume backing the S3 bucket — this is where the benchmark jobs get created."),
+        InputField("s3_volume_prefix", "S3 volume prefix", FieldKind.PARAM, required=True,
+                   help="The s3:// prefix backing the UC external volume where Databricks stages the data Redshift reads, e.g. s3://your-bucket/tpcdi/."),
         InputField("aws_region", "AWS region", FieldKind.REGION,
-                   help="Pinned to the region this app runs in — the competitor "
-                        "must run in the same region as the Databricks data "
-                        "(a different region incurs egress). To run elsewhere, "
-                        "launch this app from Databricks in that cloud/region."),
+                   help="Pinned to the region this app runs in — the competitor must run in the same region as the Databricks data (a different region incurs egress). To run elsewhere, launch this app from Databricks in that cloud/region."),
         InputField("rs_host", "Workgroup endpoint", FieldKind.PARAM, required=True,
-                   help="The Redshift Serverless workgroup's host the run connects "
-                        "to, e.g. <workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
+                   help="The Redshift Serverless workgroup's host the run connects to, e.g. <workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
         InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True,
                    help="Redshift database user the run authenticates as."),
-        InputField("rs_iam_role", "IAM role ARN (for COPY)", FieldKind.PARAM,
-                   required=True,
-                   help="IAM role attached to the workgroup that Redshift's COPY "
-                        "assumes to read the staged S3 files, e.g. "
-                        "arn:aws:iam::<account>:role/<role>."),
+        InputField("rs_iam_role", "IAM role ARN (for COPY)", FieldKind.PARAM, required=True,
+                   help="IAM role attached to the workgroup that Redshift's COPY assumes to read the staged S3 files, e.g. arn:aws:iam::<account>:role/<role>."),
         _secret_path("rs_password_secret", "Redshift password (secret)",
                      "main.tpcdi_redshift.password",
                      "The Redshift user's password."),
@@ -310,23 +296,14 @@ BIGQUERY_SPEC = EngineSpec(
     label="Google BigQuery",
     fields=(
         _SCALE_FACTOR,
-        InputField("profile", "Target workspace profile", FieldKind.PARAM,
-                   required=True,
-                   help="Databricks CLI profile for the GCP workspace that owns "
-                        "the UC external volume — where the benchmark jobs get "
-                        "created."),
+        InputField("profile", "Target workspace profile", FieldKind.PARAM, required=True,
+                   help="Databricks CLI profile for the GCP workspace that owns the UC external volume — where the benchmark jobs get created."),
         InputField("catalog", "BigQuery project", FieldKind.PARAM, required=True,
                    help="The GCP/BigQuery project id the dbt models run in."),
-        InputField("gcs_volume_prefix", "GCS volume prefix", FieldKind.PARAM,
-                   required=True,
-                   help="The gs:// prefix backing the UC external volume where "
-                        "Databricks stages the data BigQuery reads, e.g. "
-                        "gs://your-bucket/tpcdi/."),
+        InputField("gcs_volume_prefix", "GCS volume prefix", FieldKind.PARAM, required=True,
+                   help="The gs:// prefix backing the UC external volume where Databricks stages the data BigQuery reads, e.g. gs://your-bucket/tpcdi/."),
         InputField("bq_location", "BQ location", FieldKind.REGION,
-                   help="Pinned to the region this app runs in — the competitor "
-                        "must run in the same region as the Databricks data "
-                        "(a different region incurs egress). To run elsewhere, "
-                        "launch this app from Databricks in that cloud/region."),
+                   help="Pinned to the region this app runs in — the competitor must run in the same region as the Databricks data (a different region incurs egress). To run elsewhere, launch this app from Databricks in that cloud/region."),
         _secret_path("sa_json_secret", "Service-account JSON (secret)",
                      "main.tpcdi_bigquery.sa_json",
                      "SA JSON key with BigQuery Data Editor + Job User."),
@@ -336,54 +313,33 @@ BIGQUERY_SPEC = EngineSpec(
 # How the Snowflake run executes — shown when Snowflake is selected so the
 # reason for its extra fields (stage, catalog integration, PAT) is clear.
 SNOWFLAKE_SUMMARY = (
-    "**How it runs:** the raw TPC-DI data is generated in **Databricks** and "
-    "written to a UC external storage location (S3). **Snowflake reads that "
-    "staged data through catalog federation** — a Snowflake *catalog "
-    "integration* points at Databricks' Unity Catalog Iceberg-REST endpoint "
-    "(authenticated with a Databricks PAT), and an *external stage* exposes the "
-    "per-batch files. That's why the fields below ask for a stage, a catalog "
-    "integration, and a Databricks PAT in addition to the usual account/user/"
-    "warehouse — they wire up that Databricks→Snowflake bridge.")
+    "**How it runs:** the raw TPC-DI data is generated in **Databricks** and written to a UC external storage location (S3). "
+    "**Snowflake reads that staged data through catalog federation** — a Snowflake *catalog integration* points at Databricks' Unity Catalog Iceberg-REST endpoint (authenticated with a Databricks PAT), and an *external stage* exposes the per-batch files. "
+    "That's why the fields below ask for a stage, a catalog integration, and a Databricks PAT in addition to the usual account/user/warehouse — they wire up that Databricks→Snowflake bridge.")
 
 SNOWFLAKE_SPEC = EngineSpec(
     engine=Engine.SNOWFLAKE,
     label="Snowflake",
     fields=(
         _SCALE_FACTOR,
-        InputField("account", "Snowflake account", FieldKind.PARAM,
-                   required=True,
-                   help="<org>-<account>. The Snowflake account that runs the "
-                        "dbt models over the federated Databricks data."),
+        InputField("account", "Snowflake account", FieldKind.PARAM, required=True,
+                   help="The Snowflake account (<org>-<account>) that runs the dbt models over the federated Databricks data."),
         InputField("sf_user", "Snowflake user", FieldKind.PARAM, required=True,
                    help="Snowflake login the run connects as."),
-        InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM,
-                   required=True,
+        InputField("snowflake_warehouse", "Warehouse", FieldKind.PARAM, required=True,
                    help="Snowflake virtual warehouse that runs the dbt models."),
-        InputField("catalog", "Target database", FieldKind.PARAM,
-                   default="TPCDI_TEST",
-                   help="Snowflake database the models land in (not the UC "
-                        "catalog — that's shared above)."),
-        InputField("snowflake_stage", "External stage", FieldKind.PARAM,
-                   required=True,
-                   help="<db>.<schema>.<stage> — the Snowflake external stage on "
-                        "the S3 location where Databricks drops each day's "
-                        "files, so Snowflake can read the staged raw data."),
-        InputField("catalog_integration", "Catalog integration name",
-                   FieldKind.PARAM, required=True,
-                   help="The Snowflake CATALOG INTEGRATION that federates to "
-                        "Databricks' Unity Catalog Iceberg-REST endpoint — how "
-                        "Snowflake reads the Databricks-generated tables. "
-                        "Requires UniForm enabled on the source tables."),
+        InputField("catalog", "Target database", FieldKind.PARAM, default="TPCDI_TEST",
+                   help="Snowflake database the models land in (not the UC catalog — that's shared above)."),
+        InputField("snowflake_stage", "External stage", FieldKind.PARAM, required=True,
+                   help="The Snowflake external stage (<db>.<schema>.<stage>) on the S3 location where Databricks drops each day's files, so Snowflake can read the staged raw data."),
+        InputField("catalog_integration", "Catalog integration name", FieldKind.PARAM, required=True,
+                   help="The Snowflake CATALOG INTEGRATION that federates to Databricks' Unity Catalog Iceberg-REST endpoint — how Snowflake reads the Databricks-generated tables. Requires UniForm enabled on the source tables."),
         _secret_path("sf_credential_secret", "Snowflake password / private key (secret)",
                      "main.tpcdi_snowflake.password",
-                     "The Snowflake user's password, or a PEM private key for "
-                     "keypair auth — how the run authenticates to Snowflake."),
+                     "The Snowflake user's password, or a PEM private key for keypair auth — how the run authenticates to Snowflake."),
         _secret_path("dbx_pat_secret", "Databricks PAT for federation (secret)",
                      "main.tpcdi_snowflake.dbx_pat",
-                     "The Databricks personal access token the catalog "
-                     "integration uses (its bearer token) to authenticate to "
-                     "Databricks' Iceberg-REST endpoint — this is what lets "
-                     "Snowflake read the federated data."),
+                     "The Databricks personal access token the catalog integration uses (its bearer token) to authenticate to Databricks' Iceberg-REST endpoint — this is what lets Snowflake read the federated data."),
     ),
 )
 
