@@ -309,27 +309,36 @@ def _render_field(eng_value: str, f) -> str:
     catalog and target-schema prefix are shared top-level fields.
     """
     wkey = f"{eng_value}.{f.key}"
+    # Surface each field's description as a visible sublabel (a small caption
+    # under the label), not just the hover tooltip — so the operator sees what
+    # the field is and why it's needed without discovering the ? icon.
     if f.kind is FieldKind.SECRET_PATH:
         # A UC secret reference — the operator pastes catalog.schema.key. Not a
         # password box: the value is a path, not the secret itself. The UC
         # secret lives in Databricks, so we can check existence inline via the
         # SDK (no egress to the competitor engine).
-        val = st.text_input(f"{f.label} 🔑", value=f.default,
-                            placeholder=f.placeholder or None,
-                            help=f.help or None, key=wkey)
+        st.markdown(f"**{f.label}** 🔑")
+        if f.help:
+            st.caption(f.help)
+        val = st.text_input(f.label, value=f.default, label_visibility="collapsed",
+                            placeholder=f.placeholder or None, key=wkey)
         if val and len(val.split(".")) >= 3:   # looks like catalog.schema.key
             _show_check(backend.check_secret(val))
         return val
     if f.kind is FieldKind.REGION:
         # Inferred from where the app runs; not editable (same-cloud/region
         # constraint). disabled so the value is visible but locked.
-        st.text_input(f"{f.label} (fixed — same region as the Databricks run)",
-                      value=APP_REGION, disabled=True,
-                      help=f.help or None, key=wkey)
+        st.markdown(f"**{f.label}** _(fixed — same region as the Databricks run)_")
+        if f.help:
+            st.caption(f.help)
+        st.text_input(f.label, value=APP_REGION, disabled=True,
+                      label_visibility="collapsed", key=wkey)
         return APP_REGION
-    val = st.text_input(f.label, value=f.default,
-                        placeholder=f.placeholder or None,
-                        help=f.help or None, key=wkey)
+    st.markdown(f"**{f.label}**")
+    if f.help:
+        st.caption(f.help)
+    val = st.text_input(f.label, value=f.default, label_visibility="collapsed",
+                        placeholder=f.placeholder or None, key=wkey)
     # S3/GCS staging prefix must be covered by a UC external location — a
     # Databricks-side check, so do it inline too.
     if f.key in ("s3_volume_prefix", "gcs_volume_prefix") and val.startswith(("s3://", "gs://")):

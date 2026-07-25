@@ -276,23 +276,29 @@ REDSHIFT_SPEC = EngineSpec(
         _SCALE_FACTOR,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
                    required=True,
-                   help="Databricks CLI profile / workspace that owns the UC "
-                        "external volume backing the S3 bucket."),
+                   help="Databricks CLI profile for the workspace that owns the "
+                        "UC external volume backing the S3 bucket — this is where "
+                        "the benchmark jobs get created."),
         InputField("s3_volume_prefix", "S3 volume prefix", FieldKind.PARAM,
                    required=True,
-                   help="e.g. s3://your-bucket/tpcdi/ — the prefix backing the "
-                        "UC external volume."),
+                   help="The s3:// prefix backing the UC external volume where "
+                        "Databricks stages the data Redshift reads, e.g. "
+                        "s3://your-bucket/tpcdi/."),
         InputField("aws_region", "AWS region", FieldKind.REGION,
                    help="Pinned to the region this app runs in — the competitor "
                         "must run in the same region as the Databricks data "
                         "(a different region incurs egress). To run elsewhere, "
                         "launch this app from Databricks in that cloud/region."),
         InputField("rs_host", "Workgroup endpoint", FieldKind.PARAM, required=True,
-                   help="<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
-        InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True),
+                   help="The Redshift Serverless workgroup's host the run connects "
+                        "to, e.g. <workgroup>.<account>.<region>.redshift-serverless.amazonaws.com"),
+        InputField("rs_user", "Redshift user", FieldKind.PARAM, required=True,
+                   help="Redshift database user the run authenticates as."),
         InputField("rs_iam_role", "IAM role ARN (for COPY)", FieldKind.PARAM,
                    required=True,
-                   help="arn:aws:iam::<account>:role/<role> attached to the workgroup."),
+                   help="IAM role attached to the workgroup that Redshift's COPY "
+                        "assumes to read the staged S3 files, e.g. "
+                        "arn:aws:iam::<account>:role/<role>."),
         _secret_path("rs_password_secret", "Redshift password (secret)",
                      "main.tpcdi_redshift.password",
                      "The Redshift user's password."),
@@ -305,11 +311,17 @@ BIGQUERY_SPEC = EngineSpec(
     fields=(
         _SCALE_FACTOR,
         InputField("profile", "Target workspace profile", FieldKind.PARAM,
-                   required=True, help="GCP Databricks workspace CLI profile."),
+                   required=True,
+                   help="Databricks CLI profile for the GCP workspace that owns "
+                        "the UC external volume — where the benchmark jobs get "
+                        "created."),
         InputField("catalog", "BigQuery project", FieldKind.PARAM, required=True,
-                   help="Your GCP/BigQuery project id."),
+                   help="The GCP/BigQuery project id the dbt models run in."),
         InputField("gcs_volume_prefix", "GCS volume prefix", FieldKind.PARAM,
-                   required=True, help="e.g. gs://your-bucket/tpcdi/"),
+                   required=True,
+                   help="The gs:// prefix backing the UC external volume where "
+                        "Databricks stages the data BigQuery reads, e.g. "
+                        "gs://your-bucket/tpcdi/."),
         InputField("bq_location", "BQ location", FieldKind.REGION,
                    help="Pinned to the region this app runs in — the competitor "
                         "must run in the same region as the Databricks data "
