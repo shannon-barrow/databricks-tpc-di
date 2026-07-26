@@ -10,7 +10,7 @@ if _tools_dir not in _sys.path:
 
 for _m in ("setup_context", "_workflow_utils",
            "generate_datagen_workflow", "generate_benchmark_workflow",
-           "generate_competitor_workflow"):
+           "generate_competitor_workflow", "uc_secret_utils"):
     _sys.modules.pop(_m, None)
 
 from setup_context import SetupContext
@@ -18,5 +18,6 @@ from generate_datagen_workflow import generate_datagen_workflow
 from generate_benchmark_workflow import generate_benchmark_workflow
 from generate_competitor_workflow import (
     generate_competitor_workflow, competitors_for_cloud)
+from uc_secret_utils import default_secret_name, check_uc_secret
 
 tpcdi_config = SetupContext(spark, dbutils)

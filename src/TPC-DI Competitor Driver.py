@@ -83,10 +83,21 @@ elif competitor == "redshift":
     dbutils.widgets.text("rs_host", "", "RS: Workgroup endpoint")
     dbutils.widgets.text("rs_user", "", "RS: User")
     dbutils.widgets.text("rs_iam_role", "", "RS: IAM role ARN (for COPY)")
-    dbutils.widgets.text("rs_password_secret", "main.tpcdi_redshift.password",
-                         "RS: Password secret path (catalog.schema.key)")
     dbutils.widgets.text("rs_s3_volume_prefix", "", "RS: S3 volume prefix (s3://.../tpcdi/)")
     dbutils.widgets.text("rs_database", "dev", "RS: Database")
+    # UC secret for the password. Named for WHAT IT UNLOCKS (the Redshift user),
+    # so it's created once per deployment and reused by anyone on the team —
+    # collisions are intended. The name defaults from rs_user; set rs_user and
+    # re-run to see the default update. catalog/schema default to main.default.
+    dbutils.widgets.text("secret_catalog", "main", "RS: Secret catalog")
+    dbutils.widgets.text("secret_schema", "default", "RS: Secret schema")
+    try:
+        _rs_user_now = dbutils.widgets.get("rs_user")
+    except Exception:
+        _rs_user_now = ""
+    dbutils.widgets.text("rs_password_secret_name",
+                         default_secret_name("redshift", _rs_user_now, kind="pw"),
+                         "RS: Password secret name (in catalog.schema above)")
 elif competitor == "bigquery":
     dbutils.widgets.text("bq_project", "", "BQ: Project id")
     dbutils.widgets.text("bq_gcs_volume_prefix", "", "BQ: GCS volume prefix (gs://.../tpcdi/)")
@@ -117,11 +128,16 @@ if competitor == "snowflake":
         dbx_pat_secret=dbutils.widgets.get("sf_dbx_pat_secret"),
     )
 elif competitor == "redshift":
+    # Assemble the full UC secret path from catalog.schema.name.
+    _sec_cat = dbutils.widgets.get("secret_catalog")
+    _sec_sch = dbutils.widgets.get("secret_schema")
+    _sec_name = dbutils.widgets.get("rs_password_secret_name")
+    rs_password_secret = f"{_sec_cat}.{_sec_sch}.{_sec_name}"
     engine_params = dict(
         rs_host=dbutils.widgets.get("rs_host"),
         rs_user=dbutils.widgets.get("rs_user"),
         rs_iam_role=dbutils.widgets.get("rs_iam_role"),
-        rs_password_secret=dbutils.widgets.get("rs_password_secret"),
+        rs_password_secret=rs_password_secret,
         s3_volume_prefix=dbutils.widgets.get("rs_s3_volume_prefix"),
         aws_region=tpcdi_config.region if hasattr(tpcdi_config, "region") else "us-west-2",
         database=dbutils.widgets.get("rs_database"),
@@ -138,6 +154,27 @@ elif competitor == "bigquery":
 # BigQuery's engine `catalog` is the BQ project (distinct from the UC catalog).
 _effective_catalog = (engine_params.pop("catalog_project")
                       if competitor == "bigquery" else catalog)
+
+# Validate the UC secret(s) this run references. We DON'T block on a missing /
+# inaccessible secret — the job is still created referencing it (like the raw
+# data, the secret is created once per deployment and reused). We just tell the
+# user what they need to do before the job will actually run.
+_secret_paths = [v for k, v in engine_params.items() if k.endswith("_secret")]
+for _sp in _secret_paths:
+    _r = check_uc_secret(_sp, tpcdi_config.api_call)
+    if _r["state"] == "ok":
+        print(f"✅ UC secret {_sp} — exists and you can read it.")
+    elif _r["state"] == "no_access":
+        print(f"⚠️  UC secret {_sp} — EXISTS but you lack READ access. "
+              f"Request access from its owner: {_r['owner']}. "
+              f"The job will be created, but it will fail until you have access.")
+    elif _r["state"] == "missing":
+        print(f"⚠️  UC secret {_sp} — NOT created yet. The job will be created "
+              f"referencing this path; create the secret in Unity Catalog "
+              f"(Catalog Explorer → the schema → Create secret, or the "
+              f"/api/2.1/unity-catalog/secrets API) before running the job.")
+    else:
+        print(f"⚠️  UC secret path {_sp} — {_r['detail']}")
 
 parent_job_id = generate_competitor_workflow(
     engine=competitor,
