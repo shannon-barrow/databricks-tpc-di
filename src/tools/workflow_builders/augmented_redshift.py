@@ -257,7 +257,7 @@ def build_child(
             [{
                 "environment_key": "serverless_rs",
                 "spec": {
-                    "client": "3",
+                    "client": "4",
                     "dependencies": [
                         "dbt-core==1.11.8",
                         "dbt-redshift==1.10.1",
@@ -401,7 +401,7 @@ def build_parent(
         # load_bronze remain on the interactive cluster via build_child.
         "environments": [{
             "environment_key": "serverless_rs",
-            "spec": {"client": "3", "dependencies": ["psycopg2-binary"]},
+            "spec": {"client": "4", "dependencies": ["psycopg2-binary"]},
         }],
         "queue": {"enabled": True},
     }
