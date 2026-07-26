@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Branch: FactCashBalances.
 #
 # Thread A: COPY bronzecashtransaction (direct dep).

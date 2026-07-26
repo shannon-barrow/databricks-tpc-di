@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-batch refresh trigger for the Dynamic Tables variant. Replaces
 # `dbt run` in the per-batch loop.
 #

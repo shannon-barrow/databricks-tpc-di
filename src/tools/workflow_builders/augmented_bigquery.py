@@ -345,7 +345,7 @@ def build_parent(
         # pandas) so those remain on the interactive cluster via build_child.
         "environments": [{
             "environment_key": "serverless_bq",
-            "spec": {"client": "3", "dependencies": ["google-cloud-bigquery"]},
+            "spec": {"client": "5", "dependencies": ["google-cloud-bigquery"]},
         }],
         "queue": {"enabled": True},
     }

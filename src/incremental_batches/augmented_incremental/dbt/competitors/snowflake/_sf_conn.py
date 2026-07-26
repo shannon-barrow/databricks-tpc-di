@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Shared Snowflake connection helper for the TPC-DI augmented incremental
 # Snowflake workflow notebooks. Returns a live snowflake.connector connection.
 #

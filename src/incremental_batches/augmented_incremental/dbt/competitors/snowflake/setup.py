@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Snowflake-side setup for the TPC-DI augmented incremental benchmark.
 # Mirrors the dbt variant's setup_dbt.py — creates the per-run database
 # + schema, sets up the external stage pointing at the same S3 prefix

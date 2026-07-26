@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 sf_ls = ["10", "100", "1000", "5000", "10000", "20000"]
 dbutils.widgets.dropdown("scale_factor", sf_ls[0], sf_ls)
 dbutils.widgets.text("tpcdi_directory", "/Volumes/tpcdi/tpcdi_raw_data/tpcdi_volume/")

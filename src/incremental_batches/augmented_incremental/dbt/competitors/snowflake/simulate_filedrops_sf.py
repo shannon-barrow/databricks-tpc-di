@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-batch task: copies the day's pre-staged .txt files from `_staging/sf=N/`
 # to the per-(wh_db, sf, batch_date) directory under the UC external volume
 # (`tpcdi_directory`). Snowflake reads the same bytes via a STAGE backed by

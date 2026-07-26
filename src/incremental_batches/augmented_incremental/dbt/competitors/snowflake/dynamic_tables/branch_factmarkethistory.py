@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Branch: FactMarketHistory.
 #
 # Loads bronzedailymarket (only direct bronze dep), then ALTER DYNAMIC TABLE

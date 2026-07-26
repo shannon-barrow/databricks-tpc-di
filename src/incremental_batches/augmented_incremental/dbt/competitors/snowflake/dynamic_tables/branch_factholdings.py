@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Branch: FactHoldings.
 #
 # Thread A: COPY bronzeholdings (direct dep).

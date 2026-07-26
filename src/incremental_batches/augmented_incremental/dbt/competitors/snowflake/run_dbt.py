@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-batch dbt task. Runs `dbt run --target snowflake` for one batch_date.
 # Pinned to the same interactive cluster simulate_filedrops_sf runs on.
 #

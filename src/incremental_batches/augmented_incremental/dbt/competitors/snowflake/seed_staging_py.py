@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Serverless-compatible variant of seed_staging.py — uses the pure-Python
 # `snowflake-connector-python` library instead of the JVM-based
 # snowflake-spark connector (sc._jvm isn't available on serverless).

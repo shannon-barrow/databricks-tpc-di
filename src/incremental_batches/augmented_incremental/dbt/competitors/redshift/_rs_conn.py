@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Shared Redshift connection helper for the TPC-DI augmented incremental
 # Redshift workflow notebooks. Returns a live psycopg2 connection.
 #

@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # ONE-TIME (per scale factor) seed of the Snowflake "golden" staging schema.
 # Copies `main.tpcdi_incremental_staging_{sf}.{table}` from Databricks to
 # `TPCDI_TEST.STAGING_SF{sf}.{table}` on Snowflake via the Snowflake-Spark

@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-run Snowflake setup for the **Dynamic Tables** variant. No dbt.
 #
 # Self-bootstrapping: on first run for a given SF, calls the

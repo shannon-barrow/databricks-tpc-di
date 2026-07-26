@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-run Snowflake setup. Dispatches SQL to Snowflake from a Databricks
 # task (no Snowflake compute used here aside from instant zero-copy
 # CLONEs + tiny DDL).

@@ -257,7 +257,10 @@ def build_child(
             [{
                 "environment_key": "serverless_rs",
                 "spec": {
-                    "client": "4",
+                    # UC secret reads (dbutils.secrets.get) return an empty
+                    # value on this serverless env below v5 — v5 is the floor
+                    # that resolves them.
+                    "client": "5",
                     "dependencies": [
                         "dbt-core==1.11.8",
                         "dbt-redshift==1.10.1",
@@ -401,7 +404,8 @@ def build_parent(
         # load_bronze remain on the interactive cluster via build_child.
         "environments": [{
             "environment_key": "serverless_rs",
-            "spec": {"client": "4", "dependencies": ["psycopg2-binary"]},
+            # UC secret reads need serverless env v5+ (see build_child note).
+            "spec": {"client": "5", "dependencies": ["psycopg2-binary"]},
         }],
         "queue": {"enabled": True},
     }

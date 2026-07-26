@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 import dlt
 
 # Raise the broadcast threshold to 250 MB so factholdings_incremental gets a

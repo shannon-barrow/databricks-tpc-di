@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Per-batch raw-table load for the Dynamic Tables variant. Replaces the
 # dbt bronze ingestion step.
 #

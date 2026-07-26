@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Shared per-bronze COPY INTO templates used by the per-branch refresh
 # notebooks (branch_factwatches, branch_factcashbalances, branch_factholdings,
 # branch_factmarkethistory). Each branch sources this via `%run ../_seed_helpers`

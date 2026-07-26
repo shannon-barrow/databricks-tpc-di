@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 df = spark.sql("""
     SELECT table_name 
     FROM system.information_schema.tables 

@@ -184,7 +184,7 @@ def build_child(
         "environments": [{
             "environment_key": "dbt",
             "spec": {
-                "client": "2",
+                "client": "5",
                 # Latest stable dbt-databricks at the time of writing.
                 # Bump as new releases land; the dbt task installs into a
                 # fresh serverless env each run so version pinning matters

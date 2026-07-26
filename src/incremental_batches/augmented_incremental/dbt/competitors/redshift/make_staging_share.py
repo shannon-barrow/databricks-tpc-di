@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # One-time-per-benchmark setup: expose a producer workgroup's already-built
 # `tpcdi_staging_sf{sf}` schema to a (smaller/cheaper) consumer workgroup via a
 # Redshift datashare, then surface it on the consumer as local late-binding
