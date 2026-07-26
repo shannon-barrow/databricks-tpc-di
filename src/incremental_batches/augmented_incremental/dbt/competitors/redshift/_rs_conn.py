@@ -101,14 +101,29 @@ def rs_connect(*, database: str | None = None,
             f"path in rs_password_secret)"
         )
 
-    conn = psycopg2.connect(
-        host=host, port=int(port), user=user, password=password,
-        dbname=dbname, sslmode="require", connect_timeout=30,
-        # TCP keepalives (probe after 30s idle, 3x at 10s) so a long-idle
-        # socket isn't silently dropped mid-pipeline by Redshift Serverless.
-        keepalives=1, keepalives_idle=30,
-        keepalives_interval=10, keepalives_count=3,
-    )
+    # Redshift Serverless auto-suspends when idle; the first connection after
+    # a suspend has to wait out the workgroup resume, which can take longer
+    # than a single connect_timeout window (the socket times out before the
+    # workgroup finishes waking). Retry with backoff so a cold workgroup wakes
+    # on an early attempt and a later one connects, instead of failing the run.
+    import time as _time
+    last_err = None
+    for _attempt in range(5):
+        try:
+            conn = psycopg2.connect(
+                host=host, port=int(port), user=user, password=password,
+                dbname=dbname, sslmode="require", connect_timeout=60,
+                # TCP keepalives (probe after 30s idle, 3x at 10s) so a long-idle
+                # socket isn't silently dropped mid-pipeline by Redshift Serverless.
+                keepalives=1, keepalives_idle=30,
+                keepalives_interval=10, keepalives_count=3,
+            )
+            break
+        except psycopg2.OperationalError as e:
+            last_err = e
+            if _attempt == 4:
+                raise
+            _time.sleep(15)
     conn.autocommit = autocommit
 
     with conn.cursor() as cur:
