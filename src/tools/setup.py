@@ -9,11 +9,14 @@ if _tools_dir not in _sys.path:
     _sys.path.insert(0, _tools_dir)
 
 for _m in ("setup_context", "_workflow_utils",
-           "generate_datagen_workflow", "generate_benchmark_workflow"):
+           "generate_datagen_workflow", "generate_benchmark_workflow",
+           "generate_competitor_workflow"):
     _sys.modules.pop(_m, None)
 
 from setup_context import SetupContext
 from generate_datagen_workflow import generate_datagen_workflow
 from generate_benchmark_workflow import generate_benchmark_workflow
+from generate_competitor_workflow import (
+    generate_competitor_workflow, competitors_for_cloud)
 
 tpcdi_config = SetupContext(spark, dbutils)
