@@ -166,7 +166,7 @@ def build_child(
 
     file_drops = _make_task(
         task_key="simulate_filedrops_sf",
-        notebook_path=f"{aug}/snowflake/simulate_filedrops_sf",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/simulate_filedrops_sf",
         base_params=_BATCHED_PARAMS,
         existing_cluster_id=interactive_cluster_id,
     )
@@ -174,7 +174,7 @@ def build_child(
     branches = [
         _make_task(
             task_key=tk,
-            notebook_path=f"{aug}/snowflake/dynamic_tables/{tk}",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/{tk}",
             depends_on=["simulate_filedrops_sf"],
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
@@ -236,13 +236,13 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_sf_dt",
-        notebook_path=f"{aug}/snowflake/dynamic_tables/setup_sf_dt",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/setup_sf_dt",
         base_params={
             **_COMMON_PARAMS,
             "incremental_batches_to_run":
                 "{{job.parameters.incremental_batches_to_run}}",
             "dt_create_sql_path":
-                f"{aug}/snowflake/dynamic_tables/dt_create.sql",
+                f"{aug}/dbt/competitors/snowflake/dynamic_tables/dt_create.sql",
             "catalog_integration":
                 "{{job.parameters.catalog_integration}}",
             "dbx_pat_secret":

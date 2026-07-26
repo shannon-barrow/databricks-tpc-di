@@ -6,7 +6,7 @@ head-to-head against Databricks SDP (Spark Declarative Pipelines). The 16
 transformations from the dbt variant are expressed as CREATE OR REPLACE
 DYNAMIC TABLE statements that Snowflake auto-refreshes on TARGET_LAG.
 
-See `src/incremental_batches/augmented_incremental/snowflake/DYNAMIC_TABLES_DESIGN.md`
+See `src/incremental_batches/augmented_incremental/dbt/competitors/snowflake/DYNAMIC_TABLES_DESIGN.md`
 for the architecture rationale and per-model translation notes.
 
 Pre-requisites (one-time, manual, out-of-band — same as the dbt variant):
@@ -178,20 +178,20 @@ def build_child(
     tasks = [
         _make_task(
             task_key="simulate_filedrops_sf",
-            notebook_path=f"{aug}/snowflake/simulate_filedrops_sf",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/simulate_filedrops_sf",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
         ),
         _make_task(
             task_key="seed_raw",
-            notebook_path=f"{aug}/snowflake/dynamic_tables/seed_raw",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/seed_raw",
             depends_on=["simulate_filedrops_sf"],
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
         ),
         _make_task(
             task_key="dt_wait_refresh",
-            notebook_path=f"{aug}/snowflake/dynamic_tables/dt_wait_refresh",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/dt_wait_refresh",
             depends_on=["seed_raw"],
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
@@ -255,7 +255,7 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_sf_dt",
-        notebook_path=f"{aug}/snowflake/dynamic_tables/setup_sf_dt",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/setup_sf_dt",
         base_params={
             **_COMMON_PARAMS,
             "target_lag":                  "{{job.parameters.target_lag}}",
@@ -266,7 +266,7 @@ def build_parent(
             # convention) so it's directly usable by Python open() from
             # inside the notebook.
             "dt_create_sql_path":
-                f"{aug}/snowflake/dynamic_tables/dt_create.sql",
+                f"{aug}/dbt/competitors/snowflake/dynamic_tables/dt_create.sql",
             # Self-bootstrapping params — setup_sf_dt's first run for a new
             # SF refreshes the catalog integration token + creates the
             # federation. Subsequent runs no-op. Leave empty to skip token

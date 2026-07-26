@@ -1,7 +1,7 @@
-"""Create the Augmented Incremental BigQuery parent + child jobs on the
-GCP Databricks workspace.
+"""Create the Augmented Incremental Redshift parent + child jobs on the
+benchmarking workspace.
 
-Mirrors the Redshift / Snowflake variant launchers. Run once per scale
+Mirrors the BigQuery / Snowflake variant launchers. Run once per scale
 factor to register the parent + child Jobs; subsequent runs trigger the
 parent via `databricks jobs run-now`.
 
@@ -9,25 +9,22 @@ No personal identifiers are baked in. The caller supplies the workspace-
 specific values; anything omitted is derived at runtime:
   - repo_src_path : if omitted, derived from `databricks current-user me`
                     (-> /Workspace/Users/{you}/databricks-tpc-di-augmented/src)
-  - gcs_volume_prefix : REQUIRED — the gs:// prefix backing the UC external
+  - s3_volume_prefix : REQUIRED — the s3:// prefix backing the UC external
                     volume (no universal default; supply your own bucket)
-  - catalog       : REQUIRED — your BigQuery project id
   - name_prefix   : if omitted, derived from your username so job names are
                     unique per user
 
 Usage (standalone CLI):
 
-    python3 src/incremental_batches/augmented_incremental/bigquery/create_jobs.py \
-        10 --catalog my-bq-project --gcs-volume-prefix gs://my-bucket/tpcdi/ \
-        [--profile my-profile]
+    python3 src/incremental_batches/augmented_incremental/redshift/create_jobs.py \
+        10 --s3-volume-prefix s3://my-bucket/tpcdi/ [--profile my-profile]
 
 Or imported (e.g. from a driver notebook that already knows repo_src_path):
 
     from create_jobs import create
     create(scale_factor=10,
-           catalog="my-bq-project",
-           gcs_volume_prefix="gs://my-bucket/tpcdi/",
            repo_src_path=<workspace src path>,
+           s3_volume_prefix="s3://my-bucket/tpcdi/",
            profile="my-profile")
 
 Trigger the registered parent with:
@@ -40,21 +37,28 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "tools"))
+    os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "..", "tools"))
 
-from workflow_builders.augmented_bigquery import build_child, build_parent
+from workflow_builders.augmented_redshift import build_child, build_parent
 
 
-DEFAULT_PROFILE = "tpc-di-gcp"
+DEFAULT_PROFILE = "tpcdi-fresh"   # Databricks CLI profile for the workspace
+                                  # that owns the UC external volume.
 
-# Non-personal defaults. User/infra-specific values are parameters of
-# create() (catalog / gcs_volume_prefix / repo_src_path), NOT baked in here.
+# Non-personal defaults. Anything user/infra-specific is a parameter of
+# create() (see below), NOT baked in here.
 DEFAULTS = dict(
+    catalog="main",                                # Databricks UC catalog (for the external volume)
+    database="dev",                                # Redshift database
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
-    wh_db="tpcdi_aug_bq_dbt",                      # target dataset prefix -> {wh_db}_sf{N}
-    sa_json_secret="main.tpcdi_bigquery.sa_json",  # full UC secret path (catalog.schema.key)
-    bq_location="us-central1",
-    databricks_catalog="main",                     # for the bootstrap seed step
+    wh_db="tpcdi_aug_rs_dbt",                      # target schema prefix -> {wh_db}_{sf}
+    # Non-secrets — plain values. Empty by default; supply via overrides.
+    rs_host="",                                    # Redshift Serverless workgroup endpoint
+    rs_user="",                                    # Redshift user
+    rs_iam_role="",                                # IAM role ARN for COPY
+    # The only genuine secret — a full UC secret path (catalog.schema.key).
+    rs_password_secret="main.tpcdi_redshift.password",
+    aws_region="us-west-2",
 )
 
 
@@ -67,9 +71,12 @@ def _databricks_api(method: str, path: str, profile: str, body: dict | None = No
 
 
 def _current_user(profile: str) -> str:
-    """Return the caller's username (email) via the Databricks CLI, so
-    standalone runs derive repo_src_path / name_prefix without a hardcoded
-    identity. A notebook caller can pass those explicitly to skip this."""
+    """Return the caller's username (email) via the Databricks CLI.
+
+    Lets standalone runs derive repo_src_path / name_prefix without any
+    hardcoded identity. A notebook caller can bypass this by passing
+    repo_src_path and name_prefix explicitly.
+    """
     out = subprocess.run(
         ["databricks", "current-user", "me", "--profile", profile, "--output", "json"],
         capture_output=True, text=True, check=True,
@@ -83,8 +90,7 @@ def _create_job(spec: dict, profile: str) -> int:
 
 
 def create(scale_factor: int, *,
-           catalog: str,
-           gcs_volume_prefix: str,
+           s3_volume_prefix: str,
            repo_src_path: str | None = None,
            profile: str = DEFAULT_PROFILE,
            name_prefix: str | None = None,
@@ -92,18 +98,20 @@ def create(scale_factor: int, *,
            parent_name: str | None = None,
            interactive_cluster_id: str | None = None,
            **overrides) -> tuple[int, int]:
-    """Build + create the BQ parent + child jobs for one scale factor.
+    """Build + create the Redshift parent + child jobs for one scale factor.
 
     Args:
         scale_factor: TPC-DI scale factor.
-        catalog: REQUIRED. Your BigQuery project id.
-        gcs_volume_prefix: REQUIRED. gs:// prefix backing the UC external
-            volume (e.g. "gs://my-bucket/tpcdi/").
+        s3_volume_prefix: REQUIRED. s3:// prefix backing the UC external
+            volume (e.g. "s3://my-bucket/tpcdi/").
         repo_src_path: Workspace path to the repo `src` dir. If None,
             derived from the current user via the CLI.
         profile: Databricks CLI profile.
-        name_prefix: Job-name prefix. If None, derived from the username.
-        overrides: Any DEFAULTS key can be overridden.
+        name_prefix: Job-name prefix. If None, derived from the username
+            (so concurrent users don't collide).
+        overrides: Any DEFAULTS key (catalog, database, wh_db, rs_host,
+            rs_user, rs_iam_role, rs_password_secret, aws_region,
+            tpcdi_directory) can be overridden.
 
     Returns (child_id, parent_id).
     """
@@ -115,14 +123,13 @@ def create(scale_factor: int, *,
         _user = _user or _current_user(profile)
         name_prefix = _user.split("@")[0].replace(".", "-")
 
-    child_name = child_name or f"{name_prefix}-TPCDI-SF{scale_factor}-AugIncr-BQ-DBT-Child"
-    parent_name = parent_name or f"{name_prefix}-TPCDI-SF{scale_factor}-AugIncr-BQ-DBT-Parent"
+    child_name = child_name or f"{name_prefix}-TPCDI-SF{scale_factor}-AugIncr-RS-DBT-Child"
+    parent_name = parent_name or f"{name_prefix}-TPCDI-SF{scale_factor}-AugIncr-RS-DBT-Parent"
 
     common = dict(
         DEFAULTS,
-        catalog=catalog,
         repo_src_path=repo_src_path,
-        gcs_volume_prefix=gcs_volume_prefix,
+        s3_volume_prefix=s3_volume_prefix,
         scale_factor=scale_factor,
         interactive_cluster_id=interactive_cluster_id,
         **overrides,
@@ -144,11 +151,10 @@ def create(scale_factor: int, *,
 
 if __name__ == "__main__":
     import argparse
-    ap = argparse.ArgumentParser(description="Register BigQuery augmented-incremental jobs.")
+    ap = argparse.ArgumentParser(description="Register Redshift augmented-incremental jobs.")
     ap.add_argument("scale_factor", type=int)
-    ap.add_argument("--catalog", required=True, help="BigQuery project id")
-    ap.add_argument("--gcs-volume-prefix", required=True,
-                    help="gs:// prefix backing the UC external volume, e.g. gs://my-bucket/tpcdi/")
+    ap.add_argument("--s3-volume-prefix", required=True,
+                    help="s3:// prefix backing the UC external volume, e.g. s3://my-bucket/tpcdi/")
     ap.add_argument("--profile", default=DEFAULT_PROFILE)
     ap.add_argument("--repo-src-path", default=None,
                     help="Workspace src path; derived from current user if omitted")
@@ -157,8 +163,7 @@ if __name__ == "__main__":
     ap.add_argument("--interactive-cluster-id", default=None)
     a = ap.parse_args()
     create(a.scale_factor,
-           catalog=a.catalog,
-           gcs_volume_prefix=a.gcs_volume_prefix,
+           s3_volume_prefix=a.s3_volume_prefix,
            profile=a.profile,
            repo_src_path=a.repo_src_path,
            name_prefix=a.name_prefix,

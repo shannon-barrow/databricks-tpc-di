@@ -6,7 +6,7 @@ that runs the models is a Snowflake warehouse; Databricks just orchestrates
 and writes the per-batch files into a UC external volume whose underlying
 S3 prefix Snowflake reads from via a `STORAGE INTEGRATION` + `STAGE`.
 
-See `src/incremental_batches/augmented_incremental/snowflake/PLAN.md` for
+See `src/incremental_batches/augmented_incremental/dbt/competitors/snowflake/PLAN.md` for
 the full architecture.
 
 Pre-requisites (one-time, manual, out-of-band):
@@ -192,13 +192,13 @@ def build_child(
     tasks = [
         _make_task(
             task_key="simulate_filedrops_sf",
-            notebook_path=f"{aug}/snowflake/simulate_filedrops_sf",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/simulate_filedrops_sf",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
         ),
         _make_task(
             task_key="dbt_run",
-            notebook_path=f"{aug}/snowflake/run_dbt",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/run_dbt",
             depends_on=["simulate_filedrops_sf"],
             base_params=dict(
                 _BATCHED_PARAMS,
@@ -269,7 +269,7 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_sf",
-        notebook_path=f"{aug}/snowflake/setup_sf",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/setup_sf",
         base_params={
             **_COMMON_PARAMS,
             "dbx_pat_secret": "{{job.parameters.dbx_pat_secret}}",

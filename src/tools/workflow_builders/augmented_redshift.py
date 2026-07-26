@@ -35,7 +35,7 @@ then dbt_run. Bronze ingestion (COPY from S3) happens INSIDE the dbt run via
 `pre_hook`s on the 7 CSV-driven `rs_bronze/*.sql` models — keeps the bronze
 read on the same Redshift compute that runs silver+gold, so per-batch cost
 attribution is apples-to-apples with the other engines (decision documented
-in `incremental_batches/augmented_incremental/redshift/PORT_NOTES.md`).
+in `incremental_batches/augmented_incremental/dbt/competitors/redshift/PORT_NOTES.md`).
 """
 from __future__ import annotations
 
@@ -205,14 +205,14 @@ def build_child(
     tasks = [
         _make_task(
             task_key="simulate_filedrops_rs",
-            notebook_path=f"{aug}/redshift/simulate_filedrops_rs",
+            notebook_path=f"{aug}/dbt/competitors/redshift/simulate_filedrops_rs",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
             environment_key=env_key,
         ),
         _make_task(
             task_key="dbt_run",
-            notebook_path=f"{aug}/redshift/run_dbt",
+            notebook_path=f"{aug}/dbt/competitors/redshift/run_dbt",
             depends_on=["simulate_filedrops_rs"],
             base_params=dict(
                 _BATCHED_PARAMS,
@@ -298,7 +298,7 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_rs",
-        notebook_path=f"{aug}/redshift/setup_rs",
+        notebook_path=f"{aug}/dbt/competitors/redshift/setup_rs",
         base_params={
             **_COMMON_PARAMS,
             "incremental_batches_to_run":
@@ -362,7 +362,7 @@ def build_parent(
     }
     cleanup_task = _make_task(
         task_key="cleanup",
-        notebook_path=f"{aug}/redshift/teardown_rs",
+        notebook_path=f"{aug}/dbt/competitors/redshift/teardown_rs",
         base_params=_COMMON_PARAMS,
         environment_key="serverless_rs",
     )

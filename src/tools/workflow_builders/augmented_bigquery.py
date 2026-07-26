@@ -171,13 +171,13 @@ def build_child(
     tasks = [
         _make_task(
             task_key="simulate_filedrops_bq",
-            notebook_path=f"{aug}/bigquery/simulate_filedrops_bq",
+            notebook_path=f"{aug}/dbt/competitors/bigquery/simulate_filedrops_bq",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
         ),
         _make_task(
             task_key="dbt_run",
-            notebook_path=f"{aug}/bigquery/run_dbt",
+            notebook_path=f"{aug}/dbt/competitors/bigquery/run_dbt",
             depends_on=["simulate_filedrops_bq"],
             base_params=dict(
                 _BATCHED_PARAMS,
@@ -243,7 +243,7 @@ def build_parent(
     # in-process before creating the per-run target dataset.
     setup_task = _make_task(
         task_key="setup_bq",
-        notebook_path=f"{aug}/bigquery/setup_bq",
+        notebook_path=f"{aug}/dbt/competitors/bigquery/setup_bq",
         base_params={
             **_COMMON_PARAMS,
             "databricks_catalog":
@@ -308,7 +308,7 @@ def build_parent(
     # ../teardown.py does for the Databricks variant.
     cleanup_task = _make_task(
         task_key="cleanup",
-        notebook_path=f"{aug}/bigquery/teardown_bq",
+        notebook_path=f"{aug}/dbt/competitors/bigquery/teardown_bq",
         base_params=_COMMON_PARAMS,
         environment_key="serverless_bq",
     )
