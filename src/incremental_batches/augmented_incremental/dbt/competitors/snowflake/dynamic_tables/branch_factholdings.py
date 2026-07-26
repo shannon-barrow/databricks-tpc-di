@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Branch: FactHoldings.
 #

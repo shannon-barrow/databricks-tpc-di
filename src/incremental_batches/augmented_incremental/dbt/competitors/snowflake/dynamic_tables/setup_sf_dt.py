@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Per-run Snowflake setup for the **Dynamic Tables** variant. No dbt.
 #

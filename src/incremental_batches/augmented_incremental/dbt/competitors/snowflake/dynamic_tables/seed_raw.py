@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Per-batch raw-table load for the Dynamic Tables variant. Replaces the
 # dbt bronze ingestion step.

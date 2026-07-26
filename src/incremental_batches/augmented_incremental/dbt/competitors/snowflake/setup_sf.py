@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Per-run Snowflake setup. Dispatches SQL to Snowflake from a Databricks
 # task (no Snowflake compute used here aside from instant zero-copy

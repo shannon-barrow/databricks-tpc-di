@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Per-batch refresh trigger for the Dynamic Tables variant. Replaces
 # `dbt run` in the per-batch loop.

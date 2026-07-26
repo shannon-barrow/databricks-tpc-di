@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "psycopg2-binary",
+# ]
 # ///
 # One-time-per-benchmark setup: expose a producer workgroup's already-built
 # `tpcdi_staging_sf{sf}` schema to a (smaller/cheaper) consumer workgroup via a

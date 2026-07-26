@@ -2,6 +2,11 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+#   "pandas",
+#   "pyarrow",
+# ]
 # ///
 # Serverless-compatible variant of seed_staging.py — uses the pure-Python
 # `snowflake-connector-python` library instead of the JVM-based

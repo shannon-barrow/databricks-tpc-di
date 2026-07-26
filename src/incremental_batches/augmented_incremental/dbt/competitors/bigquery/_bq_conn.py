@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "google-cloud-bigquery",
+# ]
 # ///
 # Shared BigQuery client helper for the TPC-DI augmented incremental
 # BigQuery workflow notebooks. Reads a service-account key from a

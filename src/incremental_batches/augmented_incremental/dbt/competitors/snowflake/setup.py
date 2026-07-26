@@ -2,6 +2,9 @@
 # /// script
 # [tool.databricks.environment]
 # environment_version = "5"
+# dependencies = [
+#   "snowflake-connector-python",
+# ]
 # ///
 # Snowflake-side setup for the TPC-DI augmented incremental benchmark.
 # Mirrors the dbt variant's setup_dbt.py — creates the per-run database
