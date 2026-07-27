@@ -38,7 +38,7 @@
 # MAGIC Secret fields take a **full UC secret path** `catalog.schema.key` to a
 # MAGIC secret you already created (the job reads it at run time via
 # MAGIC `dbutils.secrets.get`). Requires a runtime that supports UC secrets
-# MAGIC (DBR 17.3 LTS+ or serverless env v4+). See
+# MAGIC (DBR 17.3 LTS+ or serverless env v5+). See
 # MAGIC https://docs.databricks.com/aws/en/security/secrets/unity-catalog-secrets
 
 # COMMAND ----------
@@ -88,10 +88,10 @@ if competitor == "snowflake":
     # created once per deployment and reused (collisions intended):
     #   - the login credential (password OR PEM key), named from the SF user
     #   - the Databricks PAT used for federation, named from the SF account
-    # catalog/schema default to main.default; set sf_user / sf_account and
+    # catalog/schema default to main.tpcdi_raw_data; set sf_user / sf_account and
     # re-run to see the defaults update.
     dbutils.widgets.text("secret_catalog", "main", "SF: Secret catalog")
-    dbutils.widgets.text("secret_schema", "default", "SF: Secret schema")
+    dbutils.widgets.text("secret_schema", "tpcdi_raw_data", "SF: Secret schema")
     try:
         _sf_user_now = dbutils.widgets.get("sf_user")
     except Exception:
@@ -115,9 +115,9 @@ elif competitor == "redshift":
     # UC secret for the password. Named for WHAT IT UNLOCKS (the Redshift user),
     # so it's created once per deployment and reused by anyone on the team —
     # collisions are intended. The name defaults from rs_user; set rs_user and
-    # re-run to see the default update. catalog/schema default to main.default.
+    # re-run to see the default update. catalog/schema default to main.tpcdi_raw_data.
     dbutils.widgets.text("secret_catalog", "main", "RS: Secret catalog")
-    dbutils.widgets.text("secret_schema", "default", "RS: Secret schema")
+    dbutils.widgets.text("secret_schema", "tpcdi_raw_data", "RS: Secret schema")
     try:
         _rs_user_now = dbutils.widgets.get("rs_user")
     except Exception:
@@ -131,9 +131,9 @@ elif competitor == "bigquery":
     # UC secret holding the service-account key JSON. Named for WHAT IT UNLOCKS
     # (the BQ project), so it's created once per deployment and reused —
     # collisions intended. Defaults from bq_project; set it and re-run to see
-    # the default update. catalog/schema default to main.default.
+    # the default update. catalog/schema default to main.tpcdi_raw_data.
     dbutils.widgets.text("secret_catalog", "main", "BQ: Secret catalog")
-    dbutils.widgets.text("secret_schema", "default", "BQ: Secret schema")
+    dbutils.widgets.text("secret_schema", "tpcdi_raw_data", "BQ: Secret schema")
     try:
         _bq_project_now = dbutils.widgets.get("bq_project")
     except Exception:
