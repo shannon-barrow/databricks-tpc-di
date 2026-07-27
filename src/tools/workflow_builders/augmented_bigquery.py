@@ -76,12 +76,10 @@ def _make_task(
 ) -> dict:
     """Build a notebook task. Pass EXACTLY ONE of existing_cluster_id (pin to
     a classic cluster) or environment_key (run on serverless against a
-    job-level `environments` entry). Setup/teardown notebooks belong on
-    serverless because all the heavy work is dispatched to BigQuery —
-    the Spark driver only orchestrates. The dbt + simulate_filedrops tasks
-    need a classic cluster (dbt-bigquery's google.cloud.bigquery imports
-    pandas unconditionally, which hits the numpy ABI mismatch baked into
-    serverless DBR's bundled pandas)."""
+    job-level `environments` entry). All notebooks default to serverless
+    because the heavy work is dispatched to BigQuery — the Spark driver only
+    orchestrates. A caller can pin any task to a classic cluster by passing
+    existing_cluster_id instead; both paths are supported."""
     nb: dict[str, Any] = {
         "notebook_path": notebook_path,
         "source": "WORKSPACE",
@@ -159,7 +157,8 @@ def build_child(
 ) -> dict:
     """Builds the per-date child job spec.
 
-    Two tasks, both pinned to the same interactive cluster:
+    Two tasks, both on serverless by default (or an interactive cluster if
+    interactive_cluster_id is passed):
       1. `simulate_filedrops_bq` — copies day's .txt files into the UC
          external volume (writes via UC; BigQuery reads the same bytes
          via external tables CREATE OR REPLACEd at the end of the same
@@ -168,12 +167,18 @@ def build_child(
          the UC secret, runs `dbt run --target bigquery --vars {...}`
     """
     aug = f"{repo_src_path}/{_AUG_PATH}"
+    # Default to serverless (no cluster setup needed); if the caller passes an
+    # interactive_cluster_id the child tasks pin to it instead. A customer can
+    # run this either way — serverless is just the zero-config default.
+    use_classic = bool(interactive_cluster_id)
+    env_key = None if use_classic else "serverless_bq"
     tasks = [
         _make_task(
             task_key="simulate_filedrops_bq",
             notebook_path=f"{aug}/dbt/competitors/bigquery/simulate_filedrops_bq",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
+            environment_key=env_key,
         ),
         _make_task(
             task_key="dbt_run",
@@ -184,6 +189,7 @@ def build_child(
                 dbt_project_dir=f"{aug}/dbt",
             ),
             existing_cluster_id=interactive_cluster_id,
+            environment_key=env_key,
         ),
     ]
 
@@ -209,6 +215,24 @@ def build_child(
             {"name": "batch_date",        "default": ""},
         ],
         "tasks": tasks,
+        # Serverless env for ALL child tasks when no interactive cluster is
+        # provided (the zero-config default). dbt-bigquery + the BQ Python
+        # client go here; run_dbt / simulate_filedrops still defensively
+        # pip-install if a customer runs them on a classic cluster instead.
+        "environments": (
+            [] if use_classic else
+            [{
+                "environment_key": "serverless_bq",
+                "spec": {
+                    # UC secret reads need serverless env v5+.
+                    "client": "5",
+                    "dependencies": [
+                        "dbt-bigquery==1.11.1",
+                        "google-cloud-bigquery",
+                    ],
+                },
+            }]
+        ),
         "queue": {"enabled": True},
     }
 
@@ -340,9 +364,9 @@ def build_parent(
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
         # Serverless env for setup_bq + cleanup. The BQ Python client is the
         # only runtime dep — both notebooks dispatch all heavy work to
-        # BigQuery; the Spark driver only orchestrates. dbt + simulate_filedrops
-        # CANNOT use serverless (numpy ABI mismatch with serverless DBR's
-        # pandas) so those remain on the interactive cluster via build_child.
+        # BigQuery; the Spark driver only orchestrates. (The child job's
+        # dbt + simulate_filedrops tasks declare their own serverless env in
+        # build_child; a customer can override to a classic cluster there.)
         "environments": [{
             "environment_key": "serverless_bq",
             "spec": {"client": "5", "dependencies": ["google-cloud-bigquery"]},

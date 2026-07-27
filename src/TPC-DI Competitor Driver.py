@@ -128,8 +128,19 @@ elif competitor == "redshift":
 elif competitor == "bigquery":
     dbutils.widgets.text("bq_project", "", "BQ: Project id")
     dbutils.widgets.text("bq_gcs_volume_prefix", "", "BQ: GCS volume prefix (gs://.../tpcdi/)")
-    dbutils.widgets.text("bq_sa_json_secret", "main.tpcdi_bigquery.sa_json",
-                         "BQ: Service-account JSON secret path")
+    # UC secret holding the service-account key JSON. Named for WHAT IT UNLOCKS
+    # (the BQ project), so it's created once per deployment and reused —
+    # collisions intended. Defaults from bq_project; set it and re-run to see
+    # the default update. catalog/schema default to main.default.
+    dbutils.widgets.text("secret_catalog", "main", "BQ: Secret catalog")
+    dbutils.widgets.text("secret_schema", "default", "BQ: Secret schema")
+    try:
+        _bq_project_now = dbutils.widgets.get("bq_project")
+    except Exception:
+        _bq_project_now = ""
+    dbutils.widgets.text("bq_sa_json_secret_name",
+                         default_secret_name("bigquery", _bq_project_now, kind="sa_json"),
+                         "BQ: Service-account JSON secret name")
 
 print(f"Cloud: {_cloud}  |  competitors available: {_valid}")
 print(f"Selected competitor: {competitor}")
@@ -178,10 +189,14 @@ elif competitor == "redshift":
         database=dbutils.widgets.get("rs_database"),
     )
 elif competitor == "bigquery":
+    _sec_cat = dbutils.widgets.get("secret_catalog")
+    _sec_sch = dbutils.widgets.get("secret_schema")
+    sa_json_secret = (f"{_sec_cat}.{_sec_sch}."
+                      f"{dbutils.widgets.get('bq_sa_json_secret_name')}")
     engine_params = dict(
         catalog_project=dbutils.widgets.get("bq_project"),
         gcs_volume_prefix=dbutils.widgets.get("bq_gcs_volume_prefix"),
-        sa_json_secret=dbutils.widgets.get("bq_sa_json_secret"),
+        sa_json_secret=sa_json_secret,
         bq_location="us-central1",
         databricks_catalog=catalog,
     )
