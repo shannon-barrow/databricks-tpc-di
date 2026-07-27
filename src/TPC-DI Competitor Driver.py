@@ -316,7 +316,7 @@ else:
 # user what they need to do before the job will actually run.
 _secret_paths = [v for k, v in engine_params.items() if k.endswith("_secret")]
 for _sp in _secret_paths:
-    _r = check_uc_secret(_sp, tpcdi_config.api_call)
+    _r = check_uc_secret(_sp, tpcdi_config.api_call_raw)
     if _r["state"] == "ok":
         print(f"✅ UC secret {_sp} — exists and you can read it.")
     elif _r["state"] == "no_access":

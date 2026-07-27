@@ -36,9 +36,11 @@ def default_secret_name(engine: str, target: str, kind: str = "pw") -> str:
 def check_uc_secret(path: str, api_call: Callable) -> dict:
     """Validate a UC secret at ``catalog.schema.name`` for the current user.
 
-    ``api_call(body, method, endpoint)`` is the notebook's own token-backed
-    caller (``tpcdi_config.api_call``); it returns a response object with
-    ``.status_code`` and ``.text``.
+    ``api_call(body, method, endpoint)`` must be a caller that returns the
+    response object for ANY status code — pass ``tpcdi_config.api_call_raw``,
+    NOT ``tpcdi_config.api_call`` (the latter calls ``dbutils.notebook.exit`` on
+    non-200, which would abort the notebook on the 404/403 this function is
+    specifically designed to detect and report).
 
     Returns a dict describing one of four states — the caller decides whether
     to warn or block:

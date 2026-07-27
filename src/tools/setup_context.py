@@ -91,6 +91,21 @@ class SetupContext:
         self.dbutils.notebook.exit(
             f"API call failed with status code {response.status_code}: {response.text}")
 
+    def api_call_raw(self, json_payload=None, request_type="GET", api_endpoint=None):
+        """Like ``api_call`` but returns the response for ANY status code instead
+        of exiting the notebook on non-200. Callers that need to branch on
+        404/403 (e.g. ``check_uc_secret``, which reports a missing / no-access
+        secret without aborting) must use this, not ``api_call``."""
+        headers = {
+            "Content-type": "application/json",
+            "Accept": "*/*",
+            "Authorization": f"Bearer {self.token}",
+        }
+        url = f"{self.api_url}{api_endpoint}"
+        if request_type == "POST":
+            return requests.post(url, json=json_payload, headers=headers)
+        return requests.get(url, json=json_payload, headers=headers)
+
     # ---------- Catalog/node/DBR lookups ----------
 
     def get_node_types(self):
