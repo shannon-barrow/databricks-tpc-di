@@ -13,7 +13,7 @@
 #   account / user / warehouse / role  — plain values (job params / widgets),
 #                                         NOT secrets.
 #   sf_credential_secret               — full UC secret PATH (e.g.
-#                                         "main.tpcdi_snowflake.password")
+#                                         "main.tpcdi_raw_data.snowflake_cred_secret")
 #                                         resolving to EITHER a PEM private key
 #                                         OR a password. Auth mode is decided
 #                                         by sniffing the resolved value.
@@ -22,7 +22,7 @@
 #   %run ./_sf_conn
 #   ctx = sf_connect(database=catalog, schema=f"{wh_db}_{scale_factor}",
 #                    account=account, user=sf_user, warehouse=warehouse,
-#                    sf_credential_secret="main.tpcdi_snowflake.password")
+#                    sf_credential_secret="main.tpcdi_raw_data.snowflake_cred_secret")
 #   with ctx.cursor() as cur:
 #       cur.execute("...")
 
@@ -75,8 +75,8 @@ def sf_connect(*, database: str | None = None, schema: str | None = None,
     if not sf_credential_secret:
         raise RuntimeError(
             "sf_credential_secret is required — pass the full UC secret path "
-            "(e.g. 'main.tpcdi_snowflake.password') to the password OR PEM "
-            "private key."
+            "(e.g. 'main.tpcdi_raw_data.snowflake_cred_secret') to the password "
+            "OR PEM private key."
         )
 
     credential = _secret_from_path(sf_credential_secret)

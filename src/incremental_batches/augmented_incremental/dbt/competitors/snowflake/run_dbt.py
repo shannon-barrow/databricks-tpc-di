@@ -35,7 +35,7 @@ dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
 dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
 dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
 dbutils.widgets.text("role", "", "Snowflake role to assume (plain value; empty = ACCOUNTADMIN)")
-dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_raw_data.snowflake_cred_secret",
                      "Full UC secret path to the Snowflake credential (password OR PEM private key)")
 dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse for the session (plain value)")
 dbutils.widgets.dropdown("table_format", "native", ["native","iceberg"], "Set by parent; stamped into Snowflake query_tag for attribution. 'native' = the actual current behavior (Snowflake-native tables); 'iceberg' is a reserved label for a future Iceberg-table path — no behavior switch today.")

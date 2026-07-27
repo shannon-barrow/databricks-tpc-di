@@ -33,7 +33,7 @@ dbutils.widgets.text("snowflake_stage","TPCDI_STAGE")
 dbutils.widgets.text("account", "", "Snowflake account identifier (plain value, not a secret)")
 dbutils.widgets.text("sf_user", "", "Snowflake user (plain value, not a secret)")
 dbutils.widgets.text("role", "", "Snowflake role to assume (plain value; empty = connector default)")
-dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
+dbutils.widgets.text("sf_credential_secret", "main.tpcdi_raw_data.snowflake_cred_secret",
                      "Full UC secret path to the Snowflake credential (password OR PEM private key)")
 dbutils.widgets.text("snowflake_warehouse", "BARROW_MED_GEN2")
 
