@@ -79,6 +79,11 @@ if competitor == "snowflake":
     dbutils.widgets.text("sf_user", "", "SF: User")
     dbutils.widgets.text("sf_warehouse", "", "SF: Warehouse")
     dbutils.widgets.text("sf_stage", "", "SF: External Stage (<db>.<schema>.<stage>)")
+    # Snowflake DATABASE the benchmark builds into. This is a Snowflake
+    # namespace, NOT the Databricks UC catalog above — the UC catalog (03)
+    # still drives the UC volume the staged files land in (same split as
+    # BigQuery's project vs databricks_catalog).
+    dbutils.widgets.text("sf_database", "TPCDI_TEST", "SF: Snowflake database")
     # Snowflake needs TWO UC secrets, both named for WHAT THEY UNLOCK so each is
     # created once per deployment and reused (collisions intended):
     #   - the login credential (password OR PEM key), named from the SF user
@@ -149,6 +154,7 @@ if competitor == "snowflake":
     dbx_pat_secret = (f"{_sec_cat}.{_sec_sch}."
                       f"{dbutils.widgets.get('sf_dbx_pat_secret_name')}")
     engine_params = dict(
+        sf_database=dbutils.widgets.get("sf_database"),
         account=dbutils.widgets.get("sf_account"),
         sf_user=dbutils.widgets.get("sf_user"),
         snowflake_warehouse=dbutils.widgets.get("sf_warehouse"),
@@ -180,9 +186,18 @@ elif competitor == "bigquery":
         databricks_catalog=catalog,
     )
 
-# BigQuery's engine `catalog` is the BQ project (distinct from the UC catalog).
-_effective_catalog = (engine_params.pop("catalog_project")
-                      if competitor == "bigquery" else catalog)
+# The engine `catalog` (the namespace the benchmark builds into) is NOT always
+# the Databricks UC catalog. UC catalog (`catalog`) always drives tpcdi_directory
+# above; the engine catalog can differ:
+#   - BigQuery:  the BQ project        (databricks_catalog carries the UC catalog)
+#   - Snowflake: the Snowflake database (TPCDI_TEST) — separate from UC catalog
+#   - Redshift:  same as the UC catalog
+if competitor == "bigquery":
+    _effective_catalog = engine_params.pop("catalog_project")
+elif competitor == "snowflake":
+    _effective_catalog = engine_params.pop("sf_database")
+else:
+    _effective_catalog = catalog
 
 # Validate the UC secret(s) this run references. We DON'T block on a missing /
 # inaccessible secret — the job is still created referencing it (like the raw
