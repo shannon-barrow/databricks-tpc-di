@@ -1,5 +1,15 @@
 # dbt-Redshift port — design notes
 
+> **Secret model (current, supersedes mentions below).** Only the **password**
+> is a UC secret; `rs_host` / `rs_user` / `rs_iam_role` / `rs_database` are plain
+> job parameters. The secret lives in **`main.tpcdi_raw_data`** (not the old
+> `main.tpcdi_redshift` scope this doc predates), is **named for what it unlocks**
+> (default `redshift_<user>_pw_secret`), and is created once + reused. See
+> [`../README.md`](../README.md) for the authoritative cross-engine secret model.
+> This file is retained as design history; where it says host/role/creds "come
+> from secrets," read that as "the password is a secret, the rest are plain
+> params."
+
 How the 16-model augmented-incremental dbt project is ported from Databricks / Snowflake / BigQuery to Amazon Redshift Serverless.
 
 Environment it expects:

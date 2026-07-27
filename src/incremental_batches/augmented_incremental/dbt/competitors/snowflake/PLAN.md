@@ -1,5 +1,13 @@
 # TPC-DI Augmented Incremental — Snowflake variant: architecture
 
+> **Secret home (current).** The two secrets below (`sf_credential_secret`,
+> `dbx_pat_secret`) now live in **`main.tpcdi_raw_data`**, not the old
+> `main.tpcdi_snowflake` scope this doc names. They're **named for what they
+> unlock** (defaults `snowflake_<user>_cred_secret` +
+> `snowflake_<account>_dbx_pat_secret`) and created once + reused. The two-secret
+> split and PEM/MFA sniffing described here are still accurate. See
+> [`../README.md`](../README.md) for the authoritative cross-engine secret model.
+
 Cross-platform benchmark of the TPC-DI Augmented Incremental workload running on
 Snowflake, driven by a Databricks workflow. The dbt project is the same one
 that powers the Databricks dbt variant; only the `--target` changes.

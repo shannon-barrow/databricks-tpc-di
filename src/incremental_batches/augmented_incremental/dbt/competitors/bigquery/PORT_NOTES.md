@@ -1,5 +1,12 @@
 # dbt-BigQuery port — research notes
 
+> **Secret model (current, supersedes mentions below).** The service-account
+> key JSON is the one UC secret; the BQ project / GCS prefix / location are plain
+> job parameters. The secret lives in **`main.tpcdi_raw_data`** (not the old
+> `main.tpcdi_bigquery` scope this doc predates), is **named for what it unlocks**
+> (default `bigquery_<project>_sa_json_secret`), and is created once + reused. See
+> [`../README.md`](../README.md) for the authoritative cross-engine secret model.
+
 Pre-implementation reference for porting the 16-model augmented-incremental
 dbt project from Databricks/Snowflake to BigQuery. Plumbing decisions
 (GCS staging, Databricks→BQ load, simulate_filedrops) are out of scope here.
