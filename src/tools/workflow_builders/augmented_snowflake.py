@@ -84,7 +84,12 @@ def _make_task(
     base_params: dict | None = None,
     run_if: str = "ALL_SUCCESS",
     existing_cluster_id: str | None = None,
+    environment_key: str | None = None,
 ) -> dict:
+    """Build a notebook task. Pass EXACTLY ONE of existing_cluster_id (pin to a
+    classic cluster) or environment_key (run on serverless against a job-level
+    `environments` entry). Serverless is the zero-config default; a caller can
+    pin to a classic cluster by passing existing_cluster_id instead."""
     nb: dict[str, Any] = {
         "notebook_path": notebook_path,
         "source": "WORKSPACE",
@@ -97,8 +102,14 @@ def _make_task(
         task["depends_on"] = [{"task_key": d} for d in depends_on]
     task["run_if"] = run_if
     task["notebook_task"] = nb
+    if existing_cluster_id and environment_key:
+        raise ValueError(
+            f"task {task_key}: pass existing_cluster_id OR environment_key, not both"
+        )
     if existing_cluster_id:
         task["existing_cluster_id"] = existing_cluster_id
+    elif environment_key:
+        task["environment_key"] = environment_key
     task["timeout_seconds"] = 0
     task["email_notifications"] = {}
     task["notification_settings"] = dict(_DEFAULT_NOTIF)
@@ -189,12 +200,18 @@ def build_child(
     if snowflake_warehouse is None:
         snowflake_warehouse = _default_sf_warehouse(scale_factor)
     aug = f"{repo_src_path}/{_AUG_PATH}"
+    # Default to serverless (no cluster setup needed); if the caller passes an
+    # interactive_cluster_id the child tasks pin to it instead. Both paths are
+    # supported so a customer can run this on serverless or classic.
+    use_classic = bool(interactive_cluster_id)
+    env_key = None if use_classic else "serverless_sf"
     tasks = [
         _make_task(
             task_key="simulate_filedrops_sf",
             notebook_path=f"{aug}/dbt/competitors/snowflake/simulate_filedrops_sf",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
+            environment_key=env_key,
         ),
         _make_task(
             task_key="dbt_run",
@@ -205,6 +222,7 @@ def build_child(
                 dbt_project_dir=f"{aug}/dbt",
             ),
             existing_cluster_id=interactive_cluster_id,
+            environment_key=env_key,
         ),
     ]
 
@@ -234,6 +252,25 @@ def build_child(
             {"name": "batch_date",                "default": ""},
         ],
         "tasks": tasks,
+        # Serverless env for ALL child tasks when no interactive cluster is
+        # provided (the zero-config default). dbt-snowflake + the pure-Python
+        # connector go here; UC secret reads need serverless env v5+ (below v5
+        # dbutils.secrets.get returns an empty value). run_dbt still defensively
+        # pip-installs when a customer runs it on a classic cluster instead.
+        "environments": (
+            [] if use_classic else
+            [{
+                "environment_key": "serverless_sf",
+                "spec": {
+                    "client": "5",
+                    "dependencies": [
+                        "dbt-core==1.9.*",
+                        "dbt-snowflake==1.9.*",
+                        "snowflake-connector-python",
+                    ],
+                },
+            }]
+        ),
         "queue": {"enabled": True},
     }
 
@@ -266,6 +303,12 @@ def build_parent(
     if snowflake_warehouse is None:
         snowflake_warehouse = _default_sf_warehouse(scale_factor)
     aug = f"{repo_src_path}/{_AUG_PATH}"
+    # setup_sf + cleanup default to serverless (env v5); pin to a classic
+    # cluster if interactive_cluster_id is passed. Both need the pure-Python
+    # Snowflake connector; UC secret reads (sf_credential_secret, dbx_pat_secret)
+    # need serverless env v5+.
+    use_classic = bool(interactive_cluster_id)
+    env_key = None if use_classic else "serverless_sf"
 
     setup_task = _make_task(
         task_key="setup_sf",
@@ -277,6 +320,7 @@ def build_parent(
                 "{{job.parameters.incremental_batches_to_run}}",
         },
         existing_cluster_id=interactive_cluster_id,
+        environment_key=env_key,
     )
 
     loop_task: dict[str, Any] = {
@@ -337,6 +381,7 @@ def build_parent(
         notebook_path=f"{aug}/teardown",
         base_params=_COMMON_PARAMS,
         existing_cluster_id=interactive_cluster_id,
+        environment_key=env_key,
     )
     cleanup_task["depends_on"] = [{"task_key": GATE, "outcome": "true"}]
 
@@ -368,5 +413,18 @@ def build_parent(
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],
+        # Serverless env for setup_sf + cleanup (the loop's child runs on its
+        # own job's env). Only the pure-Python Snowflake connector is needed
+        # here — both dispatch SQL to Snowflake; the driver only orchestrates.
+        "environments": (
+            [] if use_classic else
+            [{
+                "environment_key": "serverless_sf",
+                "spec": {
+                    "client": "5",
+                    "dependencies": ["snowflake-connector-python"],
+                },
+            }]
+        ),
         "queue": {"enabled": True},
     }

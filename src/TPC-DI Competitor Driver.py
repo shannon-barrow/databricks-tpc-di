@@ -194,6 +194,20 @@ elif competitor == "redshift":
     dbutils.widgets.text("rs_iam_role", "", "RS: IAM role ARN (for COPY)")
     dbutils.widgets.text("rs_s3_volume_prefix", "", "RS: S3 volume prefix (s3://.../tpcdi/)")
     dbutils.widgets.text("rs_database", "dev", "RS: Database")
+    # AWS region of the Redshift workgroup + S3 bucket (they must match for the
+    # COPY IAM-role assumption and to avoid cross-region egress). Defaults by
+    # sniffing the region out of the workgroup endpoint
+    # (<workgroup>.<account>.<region>.redshift-serverless.amazonaws.com);
+    # falls back to us-west-2 if the host isn't set yet or doesn't parse.
+    try:
+        _rs_host_now = dbutils.widgets.get("rs_host")
+    except Exception:
+        _rs_host_now = ""
+    _rs_parts = _rs_host_now.split(".")
+    _rs_region_default = (_rs_parts[2] if len(_rs_parts) > 3
+                          and _rs_parts[-3:] == ["redshift-serverless", "amazonaws", "com"]
+                          else "us-west-2")
+    dbutils.widgets.text("rs_region", _rs_region_default, "RS: AWS region")
     # UC secret for the password. Named for WHAT IT UNLOCKS (the Redshift user),
     # so it's created once per deployment and reused by anyone on the team —
     # collisions are intended. The name defaults from rs_user; set rs_user and
@@ -267,7 +281,7 @@ elif competitor == "redshift":
         rs_iam_role=dbutils.widgets.get("rs_iam_role"),
         rs_password_secret=rs_password_secret,
         s3_volume_prefix=dbutils.widgets.get("rs_s3_volume_prefix"),
-        aws_region=tpcdi_config.region if hasattr(tpcdi_config, "region") else "us-west-2",
+        aws_region=dbutils.widgets.get("rs_region"),
         database=dbutils.widgets.get("rs_database"),
     )
 elif competitor == "bigquery":
