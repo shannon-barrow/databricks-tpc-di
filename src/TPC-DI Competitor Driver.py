@@ -79,10 +79,28 @@ if competitor == "snowflake":
     dbutils.widgets.text("sf_user", "", "SF: User")
     dbutils.widgets.text("sf_warehouse", "", "SF: Warehouse")
     dbutils.widgets.text("sf_stage", "", "SF: External Stage (<db>.<schema>.<stage>)")
-    dbutils.widgets.text("sf_credential_secret", "main.tpcdi_snowflake.password",
-                         "SF: Credential secret path (catalog.schema.key)")
-    dbutils.widgets.text("sf_dbx_pat_secret", "main.tpcdi_snowflake.dbx_pat",
-                         "SF: Databricks PAT secret path (for federation)")
+    # Snowflake needs TWO UC secrets, both named for WHAT THEY UNLOCK so each is
+    # created once per deployment and reused (collisions intended):
+    #   - the login credential (password OR PEM key), named from the SF user
+    #   - the Databricks PAT used for federation, named from the SF account
+    # catalog/schema default to main.default; set sf_user / sf_account and
+    # re-run to see the defaults update.
+    dbutils.widgets.text("secret_catalog", "main", "SF: Secret catalog")
+    dbutils.widgets.text("secret_schema", "default", "SF: Secret schema")
+    try:
+        _sf_user_now = dbutils.widgets.get("sf_user")
+    except Exception:
+        _sf_user_now = ""
+    try:
+        _sf_account_now = dbutils.widgets.get("sf_account")
+    except Exception:
+        _sf_account_now = ""
+    dbutils.widgets.text("sf_credential_secret_name",
+                         default_secret_name("snowflake", _sf_user_now, kind="cred"),
+                         "SF: Credential secret name (password OR PEM key)")
+    dbutils.widgets.text("sf_dbx_pat_secret_name",
+                         default_secret_name("snowflake", _sf_account_now, kind="dbx_pat"),
+                         "SF: Databricks PAT secret name (for federation)")
 elif competitor == "redshift":
     dbutils.widgets.text("rs_host", "", "RS: Workgroup endpoint")
     dbutils.widgets.text("rs_user", "", "RS: User")
@@ -123,13 +141,20 @@ _cluster_id     = dbutils.widgets.get("interactive_cluster_id").strip() or None
 tpcdi_directory = f"/Volumes/{catalog}/tpcdi_raw_data/tpcdi_volume/"
 
 if competitor == "snowflake":
+    # Assemble both full UC secret paths from catalog.schema.name.
+    _sec_cat = dbutils.widgets.get("secret_catalog")
+    _sec_sch = dbutils.widgets.get("secret_schema")
+    sf_credential_secret = (f"{_sec_cat}.{_sec_sch}."
+                            f"{dbutils.widgets.get('sf_credential_secret_name')}")
+    dbx_pat_secret = (f"{_sec_cat}.{_sec_sch}."
+                      f"{dbutils.widgets.get('sf_dbx_pat_secret_name')}")
     engine_params = dict(
         account=dbutils.widgets.get("sf_account"),
         sf_user=dbutils.widgets.get("sf_user"),
         snowflake_warehouse=dbutils.widgets.get("sf_warehouse"),
         snowflake_stage=dbutils.widgets.get("sf_stage"),
-        sf_credential_secret=dbutils.widgets.get("sf_credential_secret"),
-        dbx_pat_secret=dbutils.widgets.get("sf_dbx_pat_secret"),
+        sf_credential_secret=sf_credential_secret,
+        dbx_pat_secret=dbx_pat_secret,
     )
 elif competitor == "redshift":
     # Assemble the full UC secret path from catalog.schema.name.
