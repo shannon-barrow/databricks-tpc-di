@@ -132,11 +132,25 @@ The **SDP variant** uses a library-swap trick (`update_pipeline_notebook`) to bu
 
 The **dbt variant** uses Databricks-native `dbt_task` against a DBSQL warehouse; the dbt project at `src/incremental_batches/augmented_incremental/dbt/` is a stock dbt-databricks project (no custom materializations) so it transplants to Snowflake/BigQuery for cross-CDW comparison.
 
+## Cross-CDW competitor benchmarks
+
+The same Augmented Incremental dbt workload can run against a non-Databricks cloud data warehouse — **Snowflake**, **Amazon Redshift Serverless**, or **Google BigQuery** — reading the same source data Databricks generated. Run a competitor next to the Databricks dbt variant to compare engines on identical data and business logic.
+
+Use the **`src/TPC-DI Competitor Driver`** notebook (the counterpart to `TPC-DI Driver`). It runs *as you* — no service principal — and creates a **parent + child** Databricks Jobs pair per engine: `setup_{engine}` self-bootstraps the engine's staging from the Databricks `tpcdi_incremental_staging_{sf}` schema, then a `for_each_task` loop drives one child per simulated day (`simulate_filedrops_{engine}` → `dbt_run`). It creates the jobs; you trigger the parent to run them.
+
+- **Prerequisite:** the Databricks Augmented Incremental Stage 0 must have run for this SF first (the competitor reads its staged files + staging schema).
+- **Same-cloud only:** the Competitor dropdown lists only engines valid for the workspace's cloud (AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake, Azure → Snowflake) to avoid cross-region egress.
+- **Credentials via Unity Catalog secrets:** only genuine secrets (passwords/keys/tokens) are UC secrets, referenced by full `catalog.schema.name` path and read at run time; hosts/users/accounts are plain params. Secrets live in `main.tpcdi_raw_data`, are named for what they unlock (created once, reused), and the driver validates but never creates them. UC secret reads require serverless env v5+.
+- **Compute:** serverless by default (zero cluster config); child tasks accept an `interactive_cluster_id` to run classic instead.
+
+See [`src/incremental_batches/augmented_incremental/dbt/competitors/README.md`](src/incremental_batches/augmented_incremental/dbt/competitors/README.md) for the cross-engine overview and the per-engine `PORT_NOTES.md` for design detail.
+
 ## Repo layout (high level)
 
 ```
 src/
-  TPC-DI Driver.py                            entry-point notebook
+  TPC-DI Driver.py                            entry-point notebook (Databricks benchmark)
+  TPC-DI Competitor Driver.py                 entry-point notebook (Snowflake/Redshift/BigQuery)
   tools/
     data_gen_tasks/data_gen.py                unified entry: digen inline; spark/augmented init+downstream gens
     data_gen_tasks/{gen,copy}_*.py            per-dataset task notebooks
@@ -147,7 +161,10 @@ src/
       workflows_{single_batch,incremental}.py
       sdp_{pipeline,workflow}.py
       augmented_{classic,sdp,dbt,staging}.py
+      augmented_{snowflake,redshift,bigquery}.py   competitor parent+child builders
       warehouse.py
+    generate_competitor_workflow.py           competitor driver's job generator
+    uc_secret_utils.py                        target-named UC secret naming + validation
     cleanup_after_benchmark.sql               final cleanup task
     tpcdi_gen/                                Spark data-generator modules
       static_audits/sf={sf}/                  pre-computed audit snapshots
@@ -159,6 +176,7 @@ src/
     bronze/ / silver/ / gold/ / audit_validation/
     augmented_incremental/                    Augmented benchmark (Cluster + SDP + dbt) — see its README
       dbt/                                    dbt variant (its own README)
+        competitors/                          cross-CDW ports (Snowflake/Redshift/BigQuery) — see its README
       DLT/                                    SDP variant (its own README)
   single_batch/
     SQL/                                      single-batch Cluster + DBSQL
@@ -177,6 +195,7 @@ CLAUDE.md                                     architecture context for AI agents
 - The native DIGen.jar path requires DBR 15.4 + Photon and a `SINGLE_USER` cluster access mode for `/local_disk0` scratch.
 - Augmented Incremental requires Stage 0 (the `augmented_staging` workflow) to run once per SF before the benchmark. Validated at SF=10/100/1000/5000/10000/20000.
 - Augmented Incremental — dbt variant additionally needs a DBSQL warehouse. The Driver auto-creates one sized by SF (Small at SF=20k, doubling SF moves up one size); see the per-SF sizing table above.
+- Cross-CDW competitor benchmarks need: the Databricks Stage 0 already run for the SF; a reachable competitor engine (Snowflake account / Redshift Serverless workgroup / BigQuery project) in the same cloud; the engine's credential stored as a Unity Catalog secret in `main.tpcdi_raw_data`; and serverless env v5+ (or DBR 17.3 LTS+) for UC secret reads. See the [competitors README](src/incremental_batches/augmented_incremental/dbt/competitors/README.md).
 
 ## Notes on scoring
 

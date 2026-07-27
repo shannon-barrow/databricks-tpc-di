@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # FactMarketHistory incremental phase. Defines factmarkethistory as a
 # streaming table via @dlt.table(replace_where=...) — the only API surface
 # that supports REPLACE WHERE in declarative pipelines. @dlt.materialized_view

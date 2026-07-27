@@ -1,0 +1,7 @@
+[theme]
+# Databricks brand palette.
+primaryColor = "#FF3621"            # Databricks lava red — accents, selected states
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F5F5" # light gray for cards/inputs
+textColor = "#1B3139"               # Databricks navy
+font = "sans serif"

@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 tbl_ls = ['account', 'cashtransaction', 'customer', 'dailymarket', 'holdings', 'trade', 'watches']
 sf_ls = ["10", "100", "1000", "5000", "10000", "20000"]
 

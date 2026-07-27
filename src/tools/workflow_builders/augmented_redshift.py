@@ -13,9 +13,11 @@ Pre-requisites (one-time, manual, out-of-band):
 - A Redshift Serverless workgroup in the same region
 - An IAM role attached to the workgroup (trust policy allows the workgroup
   to assume it; bucket policy grants the role s3:Get* on the prefix). The
-  role ARN + workgroup host are read from the `tpcdi_redshift` secret scope.
-- Databricks secret scope `tpcdi_redshift` with keys:
-  host, port, database, user, password, iam_role
+  role ARN + workgroup host + user are plain job parameters (rs_iam_role,
+  rs_host, rs_user).
+- The only genuine secret is the password: a Unity Catalog secret referenced
+  by full path in the rs_password_secret job parameter
+  (e.g. "main.tpcdi_redshift.password").
 - `tpcdi_staging_sf{N}` schema seeded in Redshift (one-time, via
   `onetime_stg_rs_tables.py` — paid once per scale_factor)
 - Interactive cluster with `dbt-redshift==1.10.0` + `psycopg2-binary`
@@ -33,7 +35,7 @@ then dbt_run. Bronze ingestion (COPY from S3) happens INSIDE the dbt run via
 `pre_hook`s on the 7 CSV-driven `rs_bronze/*.sql` models — keeps the bronze
 read on the same Redshift compute that runs silver+gold, so per-batch cost
 attribution is apples-to-apples with the other engines (decision documented
-in `incremental_batches/augmented_incremental/redshift/PORT_NOTES.md`).
+in `incremental_batches/augmented_incremental/dbt/competitors/redshift/PORT_NOTES.md`).
 """
 from __future__ import annotations
 
@@ -60,17 +62,21 @@ _AUG_PATH = "incremental_batches/augmented_incremental"
 
 # Job parameters every per-batch task needs. Redshift Serverless has no
 # warehouse-sizing knob at the per-task level — workgroup MaxRPU is set at
-# the workgroup level out-of-band. The IAM role for COPY comes from the
-# secret scope so it doesn't appear here.
+# the workgroup level out-of-band. host/user/iam_role are plain values; the
+# only genuine secret is the password, passed as a full UC secret path in
+# rs_password_secret.
 _COMMON_PARAMS = {
-    "catalog":           "{{job.parameters.catalog}}",
-    "database":          "{{job.parameters.database}}",
-    "scale_factor":      "{{job.parameters.scale_factor}}",
-    "tpcdi_directory":   "{{job.parameters.tpcdi_directory}}",
-    "wh_db":             "{{job.parameters.wh_db}}",
-    "secret_scope":      "{{job.parameters.secret_scope}}",
-    "s3_volume_prefix":  "{{job.parameters.s3_volume_prefix}}",
-    "aws_region":        "{{job.parameters.aws_region}}",
+    "catalog":            "{{job.parameters.catalog}}",
+    "database":           "{{job.parameters.database}}",
+    "scale_factor":       "{{job.parameters.scale_factor}}",
+    "tpcdi_directory":    "{{job.parameters.tpcdi_directory}}",
+    "wh_db":              "{{job.parameters.wh_db}}",
+    "rs_host":            "{{job.parameters.rs_host}}",
+    "rs_user":            "{{job.parameters.rs_user}}",
+    "rs_iam_role":        "{{job.parameters.rs_iam_role}}",
+    "rs_password_secret": "{{job.parameters.rs_password_secret}}",
+    "s3_volume_prefix":   "{{job.parameters.s3_volume_prefix}}",
+    "aws_region":         "{{job.parameters.aws_region}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
 
@@ -162,7 +168,10 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_scope: str = "tpcdi_redshift",
+    rs_host: str = "",
+    rs_user: str = "",
+    rs_iam_role: str = "",
+    rs_password_secret: str = "main.tpcdi_redshift.password",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -175,7 +184,7 @@ def build_child(
          external volume (writes via UC; Redshift reads the same bytes
          via COPY in the bronze pre_hooks)
       2. `dbt_run` — pip-checks dbt-redshift, writes profiles.yml from
-         the secret scope, runs `dbt run --target redshift --vars {...}`.
+         the UC secrets, runs `dbt run --target redshift --vars {...}`.
          Each rs_bronze model's pre_hook issues a `COPY ... FROM
          's3://.../{batch_date}/{Dataset}.txt' ... FORMAT AS CSV` into
          a temp table, then the model body appends to the persistent
@@ -196,14 +205,14 @@ def build_child(
     tasks = [
         _make_task(
             task_key="simulate_filedrops_rs",
-            notebook_path=f"{aug}/redshift/simulate_filedrops_rs",
+            notebook_path=f"{aug}/dbt/competitors/redshift/simulate_filedrops_rs",
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
             environment_key=env_key,
         ),
         _make_task(
             task_key="dbt_run",
-            notebook_path=f"{aug}/redshift/run_dbt",
+            notebook_path=f"{aug}/dbt/competitors/redshift/run_dbt",
             depends_on=["simulate_filedrops_rs"],
             base_params=dict(
                 _BATCHED_PARAMS,
@@ -226,15 +235,18 @@ def build_child(
         "max_concurrent_runs": 1000,
         "performance_target": "PERFORMANCE_OPTIMIZED",
         "parameters": [
-            {"name": "catalog",           "default": catalog},
-            {"name": "database",          "default": database},
-            {"name": "scale_factor",      "default": str(scale_factor)},
-            {"name": "tpcdi_directory",   "default": tpcdi_directory},
-            {"name": "wh_db",             "default": wh_db},
-            {"name": "secret_scope",      "default": secret_scope},
-            {"name": "s3_volume_prefix",  "default": s3_volume_prefix},
-            {"name": "aws_region",        "default": aws_region},
-            {"name": "batch_date",        "default": ""},
+            {"name": "catalog",            "default": catalog},
+            {"name": "database",           "default": database},
+            {"name": "scale_factor",       "default": str(scale_factor)},
+            {"name": "tpcdi_directory",    "default": tpcdi_directory},
+            {"name": "wh_db",              "default": wh_db},
+            {"name": "rs_host",            "default": rs_host},
+            {"name": "rs_user",            "default": rs_user},
+            {"name": "rs_iam_role",        "default": rs_iam_role},
+            {"name": "rs_password_secret", "default": rs_password_secret},
+            {"name": "s3_volume_prefix",   "default": s3_volume_prefix},
+            {"name": "aws_region",         "default": aws_region},
+            {"name": "batch_date",         "default": ""},
         ],
         "tasks": tasks,
         # Serverless env for ALL child tasks when no interactive cluster
@@ -245,7 +257,10 @@ def build_child(
             [{
                 "environment_key": "serverless_rs",
                 "spec": {
-                    "client": "3",
+                    # UC secret reads (dbutils.secrets.get) return an empty
+                    # value on this serverless env below v5 — v5 is the floor
+                    # that resolves them.
+                    "client": "5",
                     "dependencies": [
                         "dbt-core==1.11.8",
                         "dbt-redshift==1.10.1",
@@ -268,7 +283,10 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     database: str = "dev",
-    secret_scope: str = "tpcdi_redshift",
+    rs_host: str = "",
+    rs_user: str = "",
+    rs_iam_role: str = "",
+    rs_password_secret: str = "main.tpcdi_redshift.password",
     s3_volume_prefix: str = "s3://REPLACE-ME/tpcdi/",
     aws_region: str = "us-west-2",
     interactive_cluster_id: str | None = None,
@@ -283,7 +301,7 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_rs",
-        notebook_path=f"{aug}/redshift/setup_rs",
+        notebook_path=f"{aug}/dbt/competitors/redshift/setup_rs",
         base_params={
             **_COMMON_PARAMS,
             "incremental_batches_to_run":
@@ -304,15 +322,18 @@ def build_parent(
                 "run_job_task": {
                     "job_id": child_job_id,
                     "job_parameters": {
-                        "catalog":          "{{job.parameters.catalog}}",
-                        "database":         "{{job.parameters.database}}",
-                        "scale_factor":     "{{job.parameters.scale_factor}}",
-                        "tpcdi_directory":  "{{job.parameters.tpcdi_directory}}",
-                        "wh_db":            "{{job.parameters.wh_db}}",
-                        "secret_scope":     "{{job.parameters.secret_scope}}",
-                        "s3_volume_prefix": "{{job.parameters.s3_volume_prefix}}",
-                        "aws_region":       "{{job.parameters.aws_region}}",
-                        "batch_date":       "{{input}}",
+                        "catalog":            "{{job.parameters.catalog}}",
+                        "database":           "{{job.parameters.database}}",
+                        "scale_factor":       "{{job.parameters.scale_factor}}",
+                        "tpcdi_directory":    "{{job.parameters.tpcdi_directory}}",
+                        "wh_db":              "{{job.parameters.wh_db}}",
+                        "rs_host":            "{{job.parameters.rs_host}}",
+                        "rs_user":            "{{job.parameters.rs_user}}",
+                        "rs_iam_role":        "{{job.parameters.rs_iam_role}}",
+                        "rs_password_secret": "{{job.parameters.rs_password_secret}}",
+                        "s3_volume_prefix":   "{{job.parameters.s3_volume_prefix}}",
+                        "aws_region":         "{{job.parameters.aws_region}}",
+                        "batch_date":         "{{input}}",
                     },
                 },
                 "timeout_seconds": 0,
@@ -344,7 +365,7 @@ def build_parent(
     }
     cleanup_task = _make_task(
         task_key="cleanup",
-        notebook_path=f"{aug}/redshift/teardown_rs",
+        notebook_path=f"{aug}/dbt/competitors/redshift/teardown_rs",
         base_params=_COMMON_PARAMS,
         environment_key="serverless_rs",
     )
@@ -367,7 +388,10 @@ def build_parent(
             {"name": "scale_factor",                "default": str(scale_factor)},
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "rs_host",                     "default": rs_host},
+            {"name": "rs_user",                     "default": rs_user},
+            {"name": "rs_iam_role",                 "default": rs_iam_role},
+            {"name": "rs_password_secret",          "default": rs_password_secret},
             {"name": "s3_volume_prefix",            "default": s3_volume_prefix},
             {"name": "aws_region",                  "default": aws_region},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
@@ -380,7 +404,8 @@ def build_parent(
         # load_bronze remain on the interactive cluster via build_child.
         "environments": [{
             "environment_key": "serverless_rs",
-            "spec": {"client": "3", "dependencies": ["psycopg2-binary"]},
+            # UC secret reads need serverless env v5+ (see build_child note).
+            "spec": {"client": "5", "dependencies": ["psycopg2-binary"]},
         }],
         "queue": {"enabled": True},
     }

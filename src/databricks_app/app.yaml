@@ -1,0 +1,12 @@
+command:
+  - "streamlit"
+  - "run"
+  - "databricks_app/app.py"
+
+env:
+  # Flip to "false" once the app is deployed and you want it to emit real
+  # workflows. The app never writes secrets — it only references the operator's
+  # existing Unity Catalog secrets. "true" keeps the app inert (safe for
+  # run-local).
+  - name: USE_MOCK_BACKEND
+    value: "true"

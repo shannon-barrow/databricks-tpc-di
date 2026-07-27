@@ -6,7 +6,27 @@ task and cluster shapes.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
+
+
+def plan_worker_count(scale_factor: int, worker_cores: int) -> int:
+    """Worker count for a non-augmented (single-batch / incremental) run,
+    from measured tuning: worker cores scale linearly at 144 cores per
+    SF=10000. At <=32 total worker cores we return 0 (single node) — a big
+    single box loses enough per-core perf that a driver + 8-core workers is
+    cheaper, and below that a cluster isn't worth the overhead.
+
+        cores        = 144 * scale_factor / 10000
+        <= 32 cores  -> 0 (caller builds a single-node cluster)
+        >  32 cores  -> ceil(cores / worker_cores) workers
+
+    Mirrors models.cluster_plan in the benchmark app (non-augmented branch).
+    """
+    cores = 144 * scale_factor / 10000
+    if cores <= 32:
+        return 0
+    return math.ceil(cores / worker_cores)
 
 
 _DEFAULT_NOTIF = {

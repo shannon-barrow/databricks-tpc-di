@@ -48,7 +48,9 @@ _COMMON_PARAMS = {
     "scale_factor":        "{{job.parameters.scale_factor}}",
     "wh_db":               "{{job.parameters.wh_db}}",
     "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
-    "secret_scope":        "{{job.parameters.secret_scope}}",
+    "account":             "{{job.parameters.account}}",
+    "sf_user":             "{{job.parameters.sf_user}}",
+    "sf_credential_secret": "{{job.parameters.sf_credential_secret}}",
     "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
 }
 _BATCHED_PARAMS = dict(
@@ -142,7 +144,9 @@ def build_child(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    account: str = "",
+    sf_user: str = "",
+    sf_credential_secret: str = "main.tpcdi_snowflake.password",
     snowflake_warehouse: str | None = None,
     interactive_cluster_id: str | None = None,
     **_unused,
@@ -162,7 +166,7 @@ def build_child(
 
     file_drops = _make_task(
         task_key="simulate_filedrops_sf",
-        notebook_path=f"{aug}/snowflake/simulate_filedrops_sf",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/simulate_filedrops_sf",
         base_params=_BATCHED_PARAMS,
         existing_cluster_id=interactive_cluster_id,
     )
@@ -170,7 +174,7 @@ def build_child(
     branches = [
         _make_task(
             task_key=tk,
-            notebook_path=f"{aug}/snowflake/dynamic_tables/{tk}",
+            notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/{tk}",
             depends_on=["simulate_filedrops_sf"],
             base_params=_BATCHED_PARAMS,
             existing_cluster_id=interactive_cluster_id,
@@ -194,7 +198,9 @@ def build_child(
             {"name": "tpcdi_directory",     "default": tpcdi_directory},
             {"name": "wh_db",               "default": wh_db},
             {"name": "snowflake_stage",     "default": snowflake_stage},
-            {"name": "secret_scope",        "default": secret_scope},
+            {"name": "account",             "default": account},
+            {"name": "sf_user",             "default": sf_user},
+            {"name": "sf_credential_secret", "default": sf_credential_secret},
             {"name": "snowflake_warehouse", "default": snowflake_warehouse},
             {"name": "batch_date",          "default": ""},
         ],
@@ -213,7 +219,10 @@ def build_parent(
     tpcdi_directory: str,
     wh_db: str,
     snowflake_stage: str = "TPCDI_STAGE",
-    secret_scope: str = "tpcdi_snowflake",
+    account: str = "",
+    sf_user: str = "",
+    sf_credential_secret: str = "main.tpcdi_snowflake.password",
+    dbx_pat_secret: str = "main.tpcdi_snowflake.dbx_pat",
     snowflake_warehouse: str | None = None,
     interactive_cluster_id: str | None = None,
     **_unused,
@@ -227,17 +236,17 @@ def build_parent(
 
     setup_task = _make_task(
         task_key="setup_sf_dt",
-        notebook_path=f"{aug}/snowflake/dynamic_tables/setup_sf_dt",
+        notebook_path=f"{aug}/dbt/competitors/snowflake/dynamic_tables/setup_sf_dt",
         base_params={
             **_COMMON_PARAMS,
             "incremental_batches_to_run":
                 "{{job.parameters.incremental_batches_to_run}}",
             "dt_create_sql_path":
-                f"{aug}/snowflake/dynamic_tables/dt_create.sql",
+                f"{aug}/dbt/competitors/snowflake/dynamic_tables/dt_create.sql",
             "catalog_integration":
                 "{{job.parameters.catalog_integration}}",
-            "dbx_pat_secret_key":
-                "{{job.parameters.dbx_pat_secret_key}}",
+            "dbx_pat_secret":
+                "{{job.parameters.dbx_pat_secret}}",
             "backfill_warehouse":
                 "{{job.parameters.backfill_warehouse}}",
         },
@@ -261,7 +270,9 @@ def build_parent(
                         "tpcdi_directory":     "{{job.parameters.tpcdi_directory}}",
                         "wh_db":               "{{job.parameters.wh_db}}",
                         "snowflake_stage":     "{{job.parameters.snowflake_stage}}",
-                        "secret_scope":        "{{job.parameters.secret_scope}}",
+                        "account":             "{{job.parameters.account}}",
+                        "sf_user":             "{{job.parameters.sf_user}}",
+                        "sf_credential_secret": "{{job.parameters.sf_credential_secret}}",
                         "snowflake_warehouse": "{{job.parameters.snowflake_warehouse}}",
                         "batch_date":          "{{input}}",
                     },
@@ -317,12 +328,14 @@ def build_parent(
             {"name": "tpcdi_directory",             "default": tpcdi_directory},
             {"name": "wh_db",                       "default": wh_db},
             {"name": "snowflake_stage",             "default": snowflake_stage},
-            {"name": "secret_scope",                "default": secret_scope},
+            {"name": "account",                     "default": account},
+            {"name": "sf_user",                     "default": sf_user},
+            {"name": "sf_credential_secret",        "default": sf_credential_secret},
             {"name": "snowflake_warehouse",         "default": snowflake_warehouse},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
             {"name": "catalog_integration",         "default": "TPCDI_DBX_UC_SF10_INT"},
-            {"name": "dbx_pat_secret_key",          "default": "dbx_pat_workspace"},
+            {"name": "dbx_pat_secret",              "default": dbx_pat_secret},
             {"name": "backfill_warehouse",          "default": ""},
         ],
         "tasks": [setup_task, loop_task, gate_task, cleanup_task],

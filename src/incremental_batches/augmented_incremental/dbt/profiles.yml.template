@@ -29,8 +29,8 @@ dbt_augmented_incremental:
       # authenticator: username_password_mfa             # for MFA-enabled accounts
     bigquery:
       # GCP project + service-account auth. The augmented_bigquery workflow
-      # writes profiles.yml inline from the `tpcdi_bigquery.sa_json` Databricks
-      # secret scope — this template is for manual ad-hoc runs.
+      # writes profiles.yml inline from the UC secret `main.tpcdi_bigquery`
+      # key `sa_json` (catalog.schema) — this template is for manual ad-hoc runs.
       type: bigquery
       method: service-account
       keyfile: /tmp/bq_sa/sa.json                        # path to a service-account JSON key

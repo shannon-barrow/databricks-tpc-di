@@ -9,6 +9,7 @@ import json
 from typing import Callable, Optional
 
 from _workflow_utils import submit_dag
+from workflow_builders import _workflow_common
 from workflow_builders import sdp_pipeline as _sdp_pipeline_builder
 from workflow_builders import sdp_workflow as _sdp_workflow_builder
 from workflow_builders import warehouse as _warehouse_builder
@@ -193,7 +194,8 @@ def generate_benchmark_workflow(
     default_dbr_version: Optional[str] = None,
     default_worker_type: Optional[str] = None,
     cust_mgmt_type: Optional[str] = None,
-    worker_cores_mult: Optional[float] = None,
+    worker_cores_mult: Optional[float] = None,  # deprecated: sizing now uses
+                                                # _workflow_common.plan_worker_count
     node_types: Optional[dict] = None,
 ) -> int:
     """Render the benchmark workflow template and submit it.
@@ -265,13 +267,14 @@ def generate_benchmark_workflow(
     # --- Compute selection ---
     if sku[0] == "CLUSTER" and serverless != "YES":
         if not all([worker_node_type, driver_node_type, dbr_version_id,
-                    worker_cores_mult, node_types]):
+                    node_types]):
             raise ValueError(
                 "Non-serverless CLUSTER workflow requires worker_node_type, "
-                "driver_node_type, dbr_version_id, worker_cores_mult, and "
-                "node_types")
-        worker_node_count = round(
-            scale_factor * worker_cores_mult / node_types[worker_node_type]["num_cores"])
+                "driver_node_type, dbr_version_id, and node_types")
+        # Linear sizing from measured tuning (144 worker cores at SF=10000);
+        # <=32 total cores => single node. See _workflow_common.plan_worker_count.
+        worker_node_count = _workflow_common.plan_worker_count(
+            scale_factor, node_types[worker_node_type]["num_cores"])
         if worker_node_count == 0:
             driver_node_type = worker_node_type
         dag_args["worker_node_type"] = worker_node_type
@@ -315,13 +318,14 @@ def generate_benchmark_workflow(
             f"creation will potentially fail. If it does, select 'NO' for the "
             f"Serverless widget.")
     elif sku[0] == "SDP":
-        if not all([worker_node_type, driver_node_type, worker_cores_mult,
-                    node_types]):
+        if not all([worker_node_type, driver_node_type, node_types]):
             raise ValueError(
                 "SDP workflow requires worker_node_type, driver_node_type, "
-                "worker_cores_mult, and node_types")
-        sdp_count = max(1, round(
-            scale_factor * worker_cores_mult / node_types[worker_node_type]["num_cores"]))
+                "and node_types")
+        # Same linear tuning as CLUSTER (144 worker cores at SF=10000), but SDP
+        # always needs >=1 worker (no true single-node), so floor the count.
+        sdp_count = max(1, _workflow_common.plan_worker_count(
+            scale_factor, node_types[worker_node_type]["num_cores"]))
         dag_args["sdp_worker_node_type"] = worker_node_type
         dag_args["sdp_driver_node_type"] = driver_node_type
         dag_args["sdp_worker_node_count"] = sdp_count

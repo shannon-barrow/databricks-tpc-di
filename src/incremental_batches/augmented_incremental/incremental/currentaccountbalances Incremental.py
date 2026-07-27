@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "5"
+# ///
 # Serverless rejects most spark.conf.set() calls with CONFIG_NOT_AVAILABLE — wrap in try/except so the runtime's own defaults take over there.
 try:
     spark.conf.set("spark.sql.autoBroadcastJoinThreshold", 262144000)
