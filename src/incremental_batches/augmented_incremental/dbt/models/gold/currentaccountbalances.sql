@@ -8,19 +8,12 @@
   )
 }}
 
-{# Per-account cumulative cash balance. Mirrors the Classic build's
-   INSERT OVERWRITE pattern (incremental/currentaccountbalances Incremental.py):
+{# Per-account cumulative cash balance.
    union new bronze transactions with the existing target rows, aggregate
    per accountid taking max(ct_date) + sum(ct_amt) + max(latest_batch),
    then INSERT OVERWRITE the entire table.
 
-   No `partition_by` (the legacy boolean `latest_batch` partition is gone —
-   it was useless as a Liquid cluster key and is no longer needed for
-   downstream pruning). Without `partition_by`, insert_overwrite degrades
-   to CREATE OR REPLACE TABLE AS SELECT — which is exactly what this
-   model already does (its body reads {{ this }} BEFORE the replace via
-   the prior CTE, so balances carry through the union). The table is
-   small (one row per touched account) so unclustered is fine. #}
+   The table is small (one row per touched account) so unclustered is fine. #}
 
 with new_txns as (
   select

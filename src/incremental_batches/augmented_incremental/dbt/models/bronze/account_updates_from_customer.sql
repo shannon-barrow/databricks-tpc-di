@@ -8,25 +8,14 @@
 }}
 
 {# Per-batch "cust_update" rows derived from bronzecustomer SCD2 events that
-   also touch an account. Mirrors:
-     * Cluster's `bronze/account_updates_from_customer.py` (which inserts
-       directly into bronzeaccount)
-     * SDP's `account_updates_from_customers` flow (which writes straight
-       to dimaccount)
+   also touch an account. Staged here (rather than in bronzeaccount) to keep
+   bronzeaccount pure; silver/dimaccount UNIONs them with new_events from
+   bronzeaccount before applying SCD2. Depends only on bronzecustomer + an
+   AS-OF read of dimaccount, so it runs in parallel with dimcustomer.
 
-   We keep bronzeaccount pure (Account.txt drops only) and stage these
-   derived rows here. silver/dimaccount UNIONs them with new_events
-   from bronzeaccount before applying SCD2.
-
-   DAG benefit: this model only depends on bronzecustomer + a source-read
-   of the dimaccount AS-OF-batch-start, so it can start as soon as
-   bronzecustomer finishes — in parallel with dimcustomer. dimaccount
-   waits for both to complete.
-
-   Table is pre-created by setup_dbt.py with CLUSTER BY (update_dt) +
-   delta.dataSkippingNumIndexedCols=34 ("setup-owns-layout" — dbt
-   model configs intentionally omit liquid_clustered_by/tblproperties
-   so dbt-databricks doesn't issue ALTER TABLE noise on every batch). #}
+   Liquid clustered on update_dt (+ dataSkippingNumIndexedCols=34) — defined in
+   setup_dbt.py (which pre-creates the table), not here, so dbt-databricks
+   doesn't re-issue ALTER TABLE CLUSTER BY every batch ("setup-owns-layout"). #}
 
 select
   'cust_update' as cdc_flag,

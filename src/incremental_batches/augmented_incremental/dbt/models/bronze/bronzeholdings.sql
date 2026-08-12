@@ -8,11 +8,9 @@
 }}
 
 
-{# Table is liquid clustered on event_dt (plus delta.dataSkippingNumIndexedCols=34), but that layout is defined in
-   setup_dbt.py, which pre-creates the table — NOT in this dbt model. If we
-   declared liquid_clustered_by here, dbt-databricks would re-issue an
-   ALTER TABLE CLUSTER BY (and ALTER TABLE SET TBLPROPERTIES) on every batch
-   even when the layout already matches ("setup-owns-layout" pattern). #}
+{# Liquid clustered on event_dt (+ dataSkippingNumIndexedCols=34) — defined
+   in setup_dbt.py (which pre-creates the table), not here, so dbt-databricks
+   doesn't re-issue ALTER TABLE CLUSTER BY every batch ("setup-owns-layout"). #}
 
 {%- set schema_str -%}
 cdc_flag STRING, cdc_dsn BIGINT, hh_h_t_id BIGINT, hh_t_id BIGINT,

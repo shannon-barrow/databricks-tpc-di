@@ -9,19 +9,13 @@
   )
 }}
 
-{# merge on the composite key (sk_accountid, sk_dateid): each batch writes one
-   row per touched account at today's sk_dateid, and merge inserts new
-   (account, date) pairs without updating existing ones.
+{# merge on (sk_accountid, sk_dateid): each batch writes one (sk_customerid,
+   sk_accountid, sk_dateid, cash) row per touched account at today's sk_dateid;
+   new (account, date) pairs are inserted and prior dates are left intact.
 
-   The table is liquid clustered on sk_dateid, but that is defined in
-   setup_dbt.py (which pre-creates the table), NOT in this dbt model. If we
-   declared liquid_clustered_by here, dbt-databricks would re-issue an
-   ALTER TABLE CLUSTER BY on every batch even when the layout already matches
-   ("setup-owns-layout" pattern). #}
-
-{# For each account touched this batch, write its (sk_customerid,
-   sk_accountid, sk_dateid, cash) row at the latest sk_dateid. Old
-   partitions for prior dates stay intact. #}
+   Liquid clustered on sk_dateid — defined in setup_dbt.py (which pre-creates
+   the table), not here, so dbt-databricks doesn't re-issue ALTER TABLE
+   CLUSTER BY every batch ("setup-owns-layout"). #}
 
 select
   a.sk_customerid,

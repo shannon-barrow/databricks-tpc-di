@@ -9,15 +9,12 @@
   )
 }}
 
-{# merge (not insert_overwrite) so the model isn't tied to partition-replacement
-   semantics — Liquid tables have no partitions. The composite unique key
-   (sk_securityid, sk_dateid) yields one row per (security, date).
+{# merge (not insert_overwrite) — Liquid tables have no partitions. Composite
+   unique key (sk_securityid, sk_dateid) yields one row per (security, date).
 
-   The table is liquid clustered on sk_dateid, but that is defined in
-   setup_dbt.py (which pre-creates the table), NOT in this dbt model. If we
-   declared liquid_clustered_by here, dbt-databricks would re-issue an
-   ALTER TABLE CLUSTER BY on every batch even when the layout already matches
-   ("setup-owns-layout" pattern). #}
+   Liquid clustered on sk_dateid — defined in setup_dbt.py (which pre-creates
+   the table), not here, so dbt-databricks doesn't re-issue ALTER TABLE
+   CLUSTER BY every batch ("setup-owns-layout"). #}
 
 {# Daily market history with rolling 365-day high/low. Each batch:
    1. Compute per-symbol min_by/max_by(low, high) over the 365 days
