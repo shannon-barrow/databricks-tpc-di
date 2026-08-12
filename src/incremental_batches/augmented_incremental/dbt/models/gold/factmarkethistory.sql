@@ -1,22 +1,23 @@
 {{
   config(
     materialized = 'incremental',
+    incremental_strategy = 'merge',
+    unique_key = ['sk_securityid', 'sk_dateid'],
     on_schema_change = 'ignore',
     file_format = 'delta',
     full_refresh = false,
   )
 }}
 
-{# `merge` (not `insert_overwrite`) so the model isn't tied to partition
-   replacement semantics — Liquid tables have no partitions. Unique key
-   is composite (sk_securityid, sk_dateid) — one row per (security, date).
-   No `liquid_clustered_by` here on purpose — the table is pre-created in
-   setup_dbt.py with CLUSTER BY (sk_dateid). Declaring it in dbt config
-   would force per-batch ALTER TABLE CLUSTER BY. #}
-{{ config(
-    incremental_strategy='merge',
-    unique_key=['sk_securityid','sk_dateid'],
-) }}
+{# merge (not insert_overwrite) so the model isn't tied to partition-replacement
+   semantics — Liquid tables have no partitions. The composite unique key
+   (sk_securityid, sk_dateid) yields one row per (security, date).
+
+   The table is liquid clustered on sk_dateid, but that is defined in
+   setup_dbt.py (which pre-creates the table), NOT in this dbt model. If we
+   declared liquid_clustered_by here, dbt-databricks would re-issue an
+   ALTER TABLE CLUSTER BY on every batch even when the layout already matches
+   ("setup-owns-layout" pattern). #}
 
 {# Daily market history with rolling 365-day high/low. Each batch:
    1. Compute per-symbol min_by/max_by(low, high) over the 365 days
