@@ -23,11 +23,15 @@ vars:
   # _dailybatches S3 prefix the Databricks Volume reads. Used by the
   # snowflake_models/bronze/* models. Override via --vars per invocation.
   snowflake_stage: 'tpcdi_stage'
+  # Fabric-only — OneLake Files base URL the fabric bronze OPENROWSET(BULK)
+  # reads the per-day CSV drops from. Override via --vars per invocation, e.g.
+  # https://onelake.dfs.fabric.microsoft.com/{ws}/{lh}/Files/_dailybatches
+  fabric_files_url: ''
 
 # Three parallel model trees — the active one is selected by target.type at
 # parse time via +enabled flags below. Same dbt_project.yml drives Databricks,
 # Snowflake, and BigQuery runs; CLI controls which engine via --target.
-model-paths: ["models/", "competitors/snowflake_models/", "competitors/bigquery_models/", "competitors/redshift_models/"]
+model-paths: ["models/", "competitors/snowflake_models/", "competitors/bigquery_models/", "competitors/redshift_models/", "competitors/fabric_models/"]
 macro-paths: ["macros/"]
 seed-paths: ["seeds/"]
 test-paths: ["tests/"]
@@ -138,5 +142,27 @@ models:
       +on_schema_change: ignore
     rs_gold:
       +enabled: "{{ target.type == 'redshift' }}"
+      +materialized: incremental
+      +on_schema_change: ignore
+
+    # Fabric DW tree (fabric_models/fab_{bronze,silver,gold}/) — active only
+    # when --target=fabric. dbt-fabric (T-SQL/Polaris) adapter. Translated from
+    # the Redshift tree: like Fabric DW, Redshift has no MAX_BY/MIN_BY/STRUCT,
+    # so its ROW_NUMBER()=1 rewrites for dimtrade/factmarkethistory carry over
+    # directly. Fabric DW is autonomous (no DISTKEY/SORTKEY/CLUSTER BY), so
+    # setup just does plain CREATE TABLE. Bronze reads the day's OneLake CSV in
+    # place via OPENROWSET(BULK) (fabric__read_daily_csv) — no COPY pre_hook.
+    fab_bronze:
+      +enabled: "{{ target.type == 'fabric' }}"
+      +materialized: incremental
+      +incremental_strategy: append
+      +on_schema_change: ignore
+    fab_silver:
+      +enabled: "{{ target.type == 'fabric' }}"
+      +materialized: incremental
+      +incremental_strategy: merge
+      +on_schema_change: ignore
+    fab_gold:
+      +enabled: "{{ target.type == 'fabric' }}"
       +materialized: incremental
       +on_schema_change: ignore

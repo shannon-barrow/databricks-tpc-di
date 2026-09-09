@@ -63,6 +63,57 @@
   (select null::varchar(1) as not_a_real_bronze_row where 1=0)
 {%- endmacro %}
 
+{% macro _fabric_tsql_type(spark_type) %}
+  {#- Map the portable type token in schema_str to a Fabric DW T-SQL type for
+     the OPENROWSET WITH clause. Unknown -> varchar(8000). -#}
+  {%- set t = spark_type.strip().upper() -%}
+  {%- if t == 'STRING' -%}varchar(8000)
+  {%- elif t == 'BIGINT' or t == 'LONG' -%}bigint
+  {%- elif t in ['INT','INTEGER'] -%}int
+  {%- elif t == 'TINYINT' -%}tinyint
+  {%- elif t == 'SMALLINT' -%}smallint
+  {%- elif t == 'DATE' -%}date
+  {%- elif t in ['TIMESTAMP','DATETIME'] -%}datetime2
+  {%- elif t in ['DOUBLE','FLOAT'] -%}float
+  {%- elif t == 'BOOLEAN' -%}bit
+  {%- elif t.startswith('DECIMAL') or t.startswith('NUMERIC') -%}{{ t.lower() }}
+  {%- else -%}varchar(8000)
+  {%- endif -%}
+{% endmacro %}
+
+{% macro fabric__read_daily_csv(filename, schema_str) %}
+  {# Fabric Data Warehouse reads the day's CSV in place via OPENROWSET(BULK).
+     Fabric DW requires an ABSOLUTE path — var('fabric_files_url') is the
+     OneLake Files base the fabric simulate_filedrops drops per-day files under.
+     The WITH clause binds CSV columns BY ORDINAL, so we emit the declared names
+     + T-SQL types in schema order (mirrors the Snowflake @stage $N::T
+     projection). NOTE: OneLake OPENROWSET is in preview; schema_str must not
+     contain scale-commas (e.g. decimal(10,2)) since it is comma-split. #}
+  {%- set parts = schema_str.split(',') -%}
+  {%- set with_cols -%}
+    {%- for part in parts -%}
+      {%- set toks = part.strip().split() -%}
+      {{ toks[0] }} {{ dbt_augmented_incremental._fabric_tsql_type(toks[1]) }}{% if not loop.last %}, {% endif %}
+    {%- endfor -%}
+  {%- endset -%}
+  {%- set col_names -%}
+    {%- for part in parts -%}
+      {%- set toks = part.strip().split() -%}
+      {{ toks[0] }}{% if not loop.last %}, {% endif %}
+    {%- endfor -%}
+  {%- endset -%}
+  (
+    select {{ col_names }}
+    from openrowset(
+      bulk '{{ var("fabric_files_url") }}/{{ tgt_db() }}/{{ var("batch_date") }}/{{ filename }}',
+      format = 'csv',
+      fieldterminator = '|',
+      rowterminator = '0x0a',
+      firstrow = 1
+    ) with ( {{ with_cols }} ) as data
+  )
+{%- endmacro %}
+
 {% macro snowflake__read_daily_csv(filename, schema_str) %}
   {# Snowflake reads from an external stage. The {{ var('snowflake_stage') }}
      variable controls which stage; default 'tpcdi_stage'. The stage URL
