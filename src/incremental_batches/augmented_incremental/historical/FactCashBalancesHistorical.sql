@@ -25,7 +25,7 @@ CREATE OR REPLACE TABLE cashtransactionhistorical (
 )
 CLUSTER BY (event_dt)  -- liquid: per-batch ingest filter is on event_dt (matches bronze layout the Liquid variants use)
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS factcashbalances (
 )
 CLUSTER BY (sk_dateid)  -- liquid: per-batch insert filter is on sk_dateid (matches setup_dbt pre-create + Liquid dbt model unique key)
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'
@@ -67,7 +67,7 @@ CREATE OR REPLACE TABLE currentaccountbalances (
 -- Liquid cluster key. dbt-Liquid recreates this table each batch anyway
 -- (CREATE OR REPLACE TABLE AS SELECT) so any cluster_by would be wiped.
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'

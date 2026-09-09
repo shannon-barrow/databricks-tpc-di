@@ -23,7 +23,7 @@ CREATE OR REPLACE TABLE factwatches (
 )
 CLUSTER BY (sk_dateid_dateremoved)  -- liquid: matches setup choice. NOT the `removed` boolean — the same sk_dateid_dateremoved the SDP/cluster liquid variants cluster on
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'
