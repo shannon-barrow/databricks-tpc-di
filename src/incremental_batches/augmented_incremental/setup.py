@@ -53,7 +53,12 @@ checkpoint_dir  = f"{tpcdi_directory}augmented_incremental/_checkpoints/{tgt_db}
 
 display(spark.sql(f"DROP SCHEMA if exists {catalog}.{tgt_db} cascade"))
 display(spark.sql(f"CREATE SCHEMA {catalog}.{tgt_db}"))
-display(spark.sql(f"ALTER SCHEMA {catalog}.{tgt_db} ENABLE PREDICTIVE OPTIMIZATION"))
+# Predictive Optimization — best-effort: needs schema ownership + account enablement.
+try:
+    spark.sql(f"ALTER SCHEMA {catalog}.{tgt_db} ENABLE PREDICTIVE OPTIMIZATION")
+    print(f"Predictive Optimization ENABLED on {catalog}.{tgt_db}")
+except Exception as _po_e:
+    print(f"[warn] could not enable Predictive Optimization on {catalog}.{tgt_db} (not owner / account-disabled?): {_po_e}")
 
 # COMMAND ----------
 
@@ -79,8 +84,17 @@ def clone_table(table_name, clone_type):
               'delta.universalFormat.enabledFormats',
               'delta.enableIcebergCompatV2'
             )""")
+        # Explicit working-table properties (do not rely on account defaults):
+        # optimizeWrite on / autoCompact off, deletion vectors + row tracking on,
+        # Parquet v2 (new writes; DBR 18.1+). Baseline files stay v1 unless REORG'd.
         spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
-            SET TBLPROPERTIES ('delta.enableDeletionVectors' = 'true')""")
+            SET TBLPROPERTIES (
+              'delta.autoOptimize.optimizeWrite' = 'true',
+              'delta.autoOptimize.autoCompact'   = 'false',
+              'delta.enableDeletionVectors'      = 'true',
+              'delta.enableRowTracking'          = 'true',
+              'delta.parquet.format.version'     = '2.12.0'
+            )""")
     spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # COMMAND ----------
@@ -222,7 +236,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------
@@ -243,7 +260,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------
@@ -262,7 +282,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------
@@ -281,7 +304,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------
@@ -310,7 +336,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------
@@ -329,7 +358,10 @@ for tbl in incr_tbls:
 # MAGIC TBLPROPERTIES (
 # MAGIC   'delta.autoOptimize.autoCompact' = 'false',
 # MAGIC   'delta.autoOptimize.optimizeWrite' = 'true',
-# MAGIC   'delta.dataSkippingNumIndexedCols' = '34'
+# MAGIC   'delta.dataSkippingNumIndexedCols' = '34',
+# MAGIC   'delta.enableDeletionVectors' = 'true',
+# MAGIC   'delta.enableRowTracking' = 'true',
+# MAGIC   'delta.parquet.format.version' = '2.12.0'
 # MAGIC )
 
 # COMMAND ----------

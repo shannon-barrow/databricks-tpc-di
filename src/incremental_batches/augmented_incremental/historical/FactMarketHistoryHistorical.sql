@@ -38,7 +38,7 @@ CREATE OR REPLACE TABLE factmarkethistory (
 )
 CLUSTER BY (sk_dateid)  -- liquid: matches setup choice
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'

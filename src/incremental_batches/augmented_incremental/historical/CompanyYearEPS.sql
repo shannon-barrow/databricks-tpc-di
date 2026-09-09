@@ -15,7 +15,7 @@ CREATE OR REPLACE TABLE CompanyYearEPS (
   CONSTRAINT company_eps_fk FOREIGN KEY (sk_companyid) REFERENCES DimCompany(sk_companyid)
 ) CLUSTER BY (qtr_start_date)  -- liquid: matches the column we'd previously partition on (FMH per-batch joins filter by qtr_start_date)
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'
