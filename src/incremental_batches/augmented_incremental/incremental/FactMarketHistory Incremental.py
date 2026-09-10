@@ -44,7 +44,7 @@ spark.sql(f"""
     where dm_date > date_sub('{batch_date}', 365)
     group by all
   )
-  SELECT /*+ BROADCAST(f) */
+  SELECT
     s.sk_securityid,
     s.sk_companyid,
     bigint(date_format(dm.dm_date, 'yyyyMMdd')) sk_dateid,
