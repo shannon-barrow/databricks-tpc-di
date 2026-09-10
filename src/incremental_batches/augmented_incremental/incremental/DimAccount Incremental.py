@@ -1,7 +1,7 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
-# environment_version = "5"
+# environment_version = "6"
 # ///
 sf_ls = ["10", "100", "1000", "5000", "10000", "20000"]
 dbutils.widgets.dropdown("scale_factor", sf_ls[0], sf_ls)

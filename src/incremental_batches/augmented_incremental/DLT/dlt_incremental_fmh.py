@@ -1,7 +1,7 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
-# environment_version = "5"
+# environment_version = "6"
 # ///
 # FactMarketHistory incremental phase. Defines factmarkethistory as a
 # streaming table via @dlt.table(replace_where=...) — the only API surface
