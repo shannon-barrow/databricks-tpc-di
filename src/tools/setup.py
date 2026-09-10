@@ -1,7 +1,7 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
-# environment_version = "5"
+# environment_version = "6"
 # ///
 # DBTITLE 1,Put tools/ on sys.path, import the TPC-DI entry points, bootstrap tpcdi_config
 # This cell does the pieces that can't cleanly live inside an importable Python module — sys.path manipulation, %pip install, and module-cache reset so that edits to tools/*.py pick up without a cluster restart. All actual logic and data lives in setup_context.py / generate_*_workflow.py and is callable standalone (importable, testable).
