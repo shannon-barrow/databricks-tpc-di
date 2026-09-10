@@ -165,7 +165,7 @@ def _fq(t):
 # 1. FOREIGN KEYs first (child -> parent references).
 for r in spark.sql(f"""
     SELECT table_name, constraint_name FROM {catalog}.information_schema.table_constraints
-    WHERE table_schema = '{tgt_db}' AND constraint_type = 'FOREIGN KEY'""").collect():
+    WHERE table_schema = '{tgt_db.lower()}' AND constraint_type = 'FOREIGN KEY'""").collect():
     try:
         spark.sql(f"ALTER TABLE {_fq(r.table_name)} DROP CONSTRAINT `{r.constraint_name}`")
         print(f"[drop FK] {r.table_name}.{r.constraint_name}")
@@ -175,7 +175,7 @@ for r in spark.sql(f"""
 # 2. PRIMARY KEYs (now unreferenced). CASCADE as a safety net for any missed FK.
 for r in spark.sql(f"""
     SELECT table_name, constraint_name FROM {catalog}.information_schema.table_constraints
-    WHERE table_schema = '{tgt_db}' AND constraint_type = 'PRIMARY KEY'""").collect():
+    WHERE table_schema = '{tgt_db.lower()}' AND constraint_type = 'PRIMARY KEY'""").collect():
     try:
         spark.sql(f"ALTER TABLE {_fq(r.table_name)} DROP PRIMARY KEY CASCADE")
         print(f"[drop PK] {r.table_name}.{r.constraint_name}")
@@ -185,7 +185,7 @@ for r in spark.sql(f"""
 # 3. Relax NOT NULL on every remaining non-nullable column (PKs are gone now).
 for r in spark.sql(f"""
     SELECT table_name, column_name FROM {catalog}.information_schema.columns
-    WHERE table_schema = '{tgt_db}' AND is_nullable = 'NO'""").collect():
+    WHERE table_schema = '{tgt_db.lower()}' AND is_nullable = 'NO'""").collect():
     try:
         spark.sql(f"ALTER TABLE {_fq(r.table_name)} ALTER COLUMN `{r.column_name}` DROP NOT NULL")
         print(f"[drop NN] {r.table_name}.{r.column_name}")
