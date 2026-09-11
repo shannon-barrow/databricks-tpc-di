@@ -161,6 +161,45 @@ print(f"[ok] schema [{run_schema}] ready")
 
 # COMMAND ----------
 
+# 2.5 Force the SQL analytics endpoint to sync the freshly-materialized OneLake
+# tables BEFORE the cross-DB CTAS. Delta tables written straight to OneLake show
+# up in the Spark metastore at once but LAG the SQL analytics endpoint (its
+# background sync only runs while the endpoint is active and halts after ~15 min
+# idle), so the cross-DB CTAS fails 42S02 "Invalid object name" until the endpoint
+# discovers them. The Fabric refreshMetadata REST API forces an on-demand sync.
+import msal as _msal, requests as _rq, time as _rt
+_fapp = _msal.ConfidentialClientApplication(
+    dbutils.secrets.get(secret_scope, "client_id"),
+    authority=f"https://login.microsoftonline.com/{tenant_id}",
+    client_credential=dbutils.secrets.get(secret_scope, "client_secret"))
+_ftok = _fapp.acquire_token_for_client(scopes=["https://api.fabric.microsoft.com/.default"])
+if "access_token" not in _ftok:
+    raise RuntimeError(f"Fabric API token failed: {_ftok.get('error_description', _ftok)}")
+_FH = {"Authorization": f"Bearer {_ftok['access_token']}", "Content-Type": "application/json"}
+_FBASE = "https://api.fabric.microsoft.com/v1"
+_lhr = _rq.get(f"{_FBASE}/workspaces/{ws_id}/lakehouses/{lh_id}", headers=_FH); _lhr.raise_for_status()
+_sqlep = _lhr.json()["properties"]["sqlEndpointProperties"]["id"]
+print(f"[sync] refreshing SQL-endpoint metadata for schema {src_schema} (endpoint {_sqlep})")
+_rr = _rq.post(f"{_FBASE}/workspaces/{ws_id}/sqlEndpoints/{_sqlep}/refreshMetadata",
+               headers=_FH, json={"tables": [{"schema": src_schema, "tableNames": list(STAGING_TABLES)}]})
+if _rr.status_code == 202:                      # long-running op — poll Location until done
+    _loc = _rr.headers.get("Location")
+    for _ in range(40):
+        _rt.sleep(15)
+        _pr = _rq.get(_loc, headers=_FH)
+        if _pr.status_code == 200 or (_pr.headers.get("Content-Type", "").startswith("application/json")
+                                      and (_pr.json() or {}).get("status") in ("Succeeded", "Completed", "Failed")):
+            _rr = _pr; break
+print(f"[sync] refreshMetadata -> HTTP {_rr.status_code}")
+try:
+    _v = _rr.json().get("value", [])
+    _bad = [s.get("tableName") for s in _v if s.get("status") != "Success"]
+    print(f"[sync] {len(_v)-len(_bad)}/{len(_v)} tables synced" + (f"; not-ok: {_bad}" if _bad else ""))
+except Exception:
+    pass
+
+# COMMAND ----------
+
 # 3. CTAS the 22 tables cross-DB, clustered where applicable, IN PARALLEL.
 # Each worker opens its OWN warehouse connection — pyodbc can't run concurrent
 # statements on one connection, and Fabric DW happily serves concurrent queries.
