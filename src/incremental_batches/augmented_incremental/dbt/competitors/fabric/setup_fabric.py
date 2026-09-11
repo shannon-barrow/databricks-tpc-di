@@ -160,35 +160,38 @@ print(f"[ok] schema [{run_schema}] ready")
 
 # COMMAND ----------
 
-# 3. CTAS the 22 tables cross-DB, clustered where applicable. Idempotent: skip a
-# table whose row count already matches the Lakehouse source.
-import time as _t
+# 3. CTAS the 22 tables cross-DB, clustered where applicable, IN PARALLEL.
+# Each worker opens its OWN warehouse connection — pyodbc can't run concurrent
+# statements on one connection, and Fabric DW happily serves concurrent queries.
+# Idempotent: skip a table whose row count already matches the Lakehouse source.
+import time as _t, concurrent.futures
 
-def _src_count(t):
-    cur.execute(f"SELECT COUNT_BIG(*) FROM [{lh_name}].[{src_schema}].[{t}]")
-    return cur.fetchone()[0]
+def _ctas_one(t):
+    c = fab_connect(host=wh_host, database=wh_name, tenant_id=tenant_id,
+                    label={"task": "setup_fabric_ctas", "table": t, "scale_factor": scale_factor})
+    cu = c.cursor()
+    try:
+        t0 = _t.time()
+        cu.execute("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE table_schema=? AND table_name=?",
+                   run_schema, t)
+        if cu.fetchone() is not None:
+            cu.execute(f"SELECT COUNT_BIG(*) FROM [{run_schema}].[{t}]")
+            tgt_rows = cu.fetchone()[0]
+            cu.execute(f"SELECT COUNT_BIG(*) FROM [{lh_name}].[{src_schema}].[{t}]")
+            if tgt_rows > 0 and tgt_rows == cu.fetchone()[0]:
+                return f"[ctas] {t:28s} skip ({tgt_rows:,} rows present)"
+            cu.execute(f"DROP TABLE [{run_schema}].[{t}]")
+        key = CLUSTER_KEY[t]
+        with_clause = f" WITH (CLUSTER BY ([{key}]))" if key else ""
+        cu.execute(f"CREATE TABLE [{run_schema}].[{t}]{with_clause} AS "
+                   f"SELECT * FROM [{lh_name}].[{src_schema}].[{t}]")
+        return f"[ctas] {t:28s} {'CLUSTER BY '+key if key else '(unclustered)':22s} {_t.time()-t0:6.1f}s"
+    finally:
+        c.close()
 
-def _tgt_exists(t):
-    cur.execute("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE table_schema=? AND table_name=?",
-                run_schema, t)
-    return cur.fetchone() is not None
-
-for t in STAGING_TABLES:
-    t0 = _t.time()
-    if _tgt_exists(t):
-        cur.execute(f"SELECT COUNT_BIG(*) FROM [{run_schema}].[{t}]")
-        tgt_rows = cur.fetchone()[0]
-        if tgt_rows > 0 and tgt_rows == _src_count(t):
-            print(f"[ctas] {t:28s} skip ({tgt_rows:,} rows present)")
-            continue
-        cur.execute(f"DROP TABLE [{run_schema}].[{t}]")
-    key = CLUSTER_KEY[t]
-    with_clause = f" WITH (CLUSTER BY ([{key}]))" if key else ""
-    cur.execute(
-        f"CREATE TABLE [{run_schema}].[{t}]{with_clause} AS "
-        f"SELECT * FROM [{lh_name}].[{src_schema}].[{t}]"
-    )
-    print(f"[ctas] {t:28s} {'CLUSTER BY '+key if key else '(unclustered)':22s} {_t.time()-t0:6.1f}s")
+with concurrent.futures.ThreadPoolExecutor(max_workers=8) as _ex:
+    for _r in _ex.map(_ctas_one, STAGING_TABLES):
+        print(_r)
 
 # COMMAND ----------
 
