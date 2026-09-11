@@ -35,7 +35,11 @@ DEFAULTS = dict(
     fabric_wh_host="skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com",
     fabric_wh_name="tpcdi_fabric_dw",
     fabric_workspace_id="e0a370b6-0279-4bc2-92ef-0a3f001e068b",
-    fabric_lakehouse_id="54963c1f-bb06-4acd-8db3-b8b5056e81c3",
+    # tpcdi_fabric_v2 — created after enabling new-metadata-sync so its SQL endpoint
+    # discovers freshly-materialized OneLake staging tables fast (the original
+    # tpcdi_fabric endpoint never registered staging_sf10). Cross-DB name set via
+    # setup_fabric's fabric_lakehouse_name widget default (also tpcdi_fabric_v2).
+    fabric_lakehouse_id="e61ac2d6-f74c-4317-904a-c0417302aae7",
     tenant_id="9f37a392-f0ae-4280-9796-f1864a10effc",
     file_ext="txt",
 )

@@ -41,8 +41,8 @@
 dbutils.widgets.text("wh_db",            "", "wh_db prefix; run schema = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("fabric_workspace_id",  "e0a370b6-0279-4bc2-92ef-0a3f001e068b")
-dbutils.widgets.text("fabric_lakehouse_id",  "54963c1f-bb06-4acd-8db3-b8b5056e81c3")
-dbutils.widgets.text("fabric_lakehouse_name","tpcdi_fabric", "Lakehouse item name (cross-DB source db)")
+dbutils.widgets.text("fabric_lakehouse_id",  "e61ac2d6-f74c-4317-904a-c0417302aae7")
+dbutils.widgets.text("fabric_lakehouse_name","tpcdi_fabric_v2", "Lakehouse item name (cross-DB source db)")
 dbutils.widgets.text("lakehouse_src_schema", "", "Cross-DB schema of the staging tables; default staging_sf{sf}")
 dbutils.widgets.text("fabric_wh_host",  "skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com",
                      "Warehouse SQL analytics endpoint")
