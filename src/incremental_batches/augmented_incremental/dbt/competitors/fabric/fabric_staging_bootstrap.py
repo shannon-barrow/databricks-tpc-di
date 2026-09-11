@@ -19,14 +19,17 @@ from __future__ import annotations
 
 import time as _time
 
-# Canonical 22 staging tables (matches setup_fabric.CLUSTER_KEY / the RS side).
+# Canonical 20 staging tables the DW dbt models actually use (merge targets +
+# reference sources/lookups). batchdate + cashtransactionhistorical are dropped:
+# no fab_* model references them (batch_date is passed as a var; the cash-history
+# seed already lives in the seeded currentaccountbalances/factcashbalances).
 STAGING_TABLES: tuple[str, ...] = (
     "bronzedailymarket", "factmarkethistory", "factwatches", "dimtrade",
-    "factholdings", "factcashbalances", "cashtransactionhistorical",
+    "factholdings", "factcashbalances",
     "financial", "companyyeareps", "dimaccount", "dimcustomer",
     "currentaccountbalances", "dimbroker", "dimsecurity", "dimcompany",
     "dimtime", "dimdate", "taxrate", "industry", "tradetype",
-    "statustype", "batchdate",
+    "statustype",
 )
 
 

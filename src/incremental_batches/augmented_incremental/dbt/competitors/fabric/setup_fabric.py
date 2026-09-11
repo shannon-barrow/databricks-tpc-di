@@ -120,8 +120,10 @@ print(f"[bootstrap] {boot}")
 
 # COMMAND ----------
 
-# Canonical 22 staging tables + their cluster key (None = unclustered reference).
-# DISTKEY dropped (Fabric has no distribution). SORTKEY -> CLUSTER BY (<=4 cols).
+# Canonical 20 staging tables the DW dbt models use + their cluster key
+# (None = unclustered reference). batchdate + cashtransactionhistorical dropped:
+# no fab_* model references them. DISTKEY dropped (Fabric has no distribution).
+# SORTKEY -> CLUSTER BY (<=4 cols).
 CLUSTER_KEY = {
     "dimcustomer":            "enddate",
     "dimaccount":             "enddate",
@@ -132,11 +134,10 @@ CLUSTER_KEY = {
     "factcashbalances":       "sk_dateid",
     "bronzedailymarket":      "dm_date",
     "companyyeareps":         "qtr_start_date",       # FMH joins/prunes on year/quarter(qtr_start_date)
-    "cashtransactionhistorical": "event_dt",          # matches staging (FactCashBalancesHistorical.sql)
     # reference / small / low-cardinality -> unclustered
     "currentaccountbalances": None, "dimbroker": None, "dimsecurity": None,
     "dimcompany": None, "dimtime": None, "dimdate": None, "taxrate": None,
-    "industry": None, "tradetype": None, "statustype": None, "batchdate": None,
+    "industry": None, "tradetype": None, "statustype": None,
     "financial": None,
 }
 STAGING_TABLES = sorted(CLUSTER_KEY)
