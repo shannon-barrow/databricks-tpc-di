@@ -131,11 +131,13 @@ CLUSTER_KEY = {
     "factholdings":           "sk_dateid",
     "factcashbalances":       "sk_dateid",
     "bronzedailymarket":      "dm_date",
+    "companyyeareps":         "qtr_start_date",       # FMH joins/prunes on year/quarter(qtr_start_date)
+    "cashtransactionhistorical": "event_dt",          # matches staging (FactCashBalancesHistorical.sql)
     # reference / small / low-cardinality -> unclustered
     "currentaccountbalances": None, "dimbroker": None, "dimsecurity": None,
     "dimcompany": None, "dimtime": None, "dimdate": None, "taxrate": None,
     "industry": None, "tradetype": None, "statustype": None, "batchdate": None,
-    "financial": None, "companyyeareps": None, "cashtransactionhistorical": None,
+    "financial": None,
 }
 STAGING_TABLES = sorted(CLUSTER_KEY)
 
