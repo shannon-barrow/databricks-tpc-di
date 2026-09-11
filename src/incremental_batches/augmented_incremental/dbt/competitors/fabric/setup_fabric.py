@@ -169,9 +169,9 @@ print(f"[ok] schema [{run_schema}] ready")
 # discovers them. The Fabric refreshMetadata REST API forces an on-demand sync.
 import msal as _msal, requests as _rq, time as _rt
 _fapp = _msal.ConfidentialClientApplication(
-    dbutils.secrets.get(secret_scope, "client_id"),
+    dbutils.secrets.get("tpcdi_fabric", "client_id"),
     authority=f"https://login.microsoftonline.com/{tenant_id}",
-    client_credential=dbutils.secrets.get(secret_scope, "client_secret"))
+    client_credential=dbutils.secrets.get("tpcdi_fabric", "client_secret"))
 _ftok = _fapp.acquire_token_for_client(scopes=["https://api.fabric.microsoft.com/.default"])
 if "access_token" not in _ftok:
     raise RuntimeError(f"Fabric API token failed: {_ftok.get('error_description', _ftok)}")
