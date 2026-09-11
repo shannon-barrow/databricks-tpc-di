@@ -173,20 +173,30 @@ def _ctas_one(t):
     cu = c.cursor()
     try:
         t0 = _t.time()
-        cu.execute("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE table_schema=? AND table_name=?",
-                   run_schema, t)
-        if cu.fetchone() is not None:
-            cu.execute(f"SELECT COUNT_BIG(*) FROM [{run_schema}].[{t}]")
-            tgt_rows = cu.fetchone()[0]
-            cu.execute(f"SELECT COUNT_BIG(*) FROM [{lh_name}].[{src_schema}].[{t}]")
-            if tgt_rows > 0 and tgt_rows == cu.fetchone()[0]:
-                return f"[ctas] {t:28s} skip ({tgt_rows:,} rows present)"
-            cu.execute(f"DROP TABLE [{run_schema}].[{t}]")
-        key = CLUSTER_KEY[t]
-        with_clause = f" WITH (CLUSTER BY ([{key}]))" if key else ""
-        cu.execute(f"CREATE TABLE [{run_schema}].[{t}]{with_clause} AS "
-                   f"SELECT * FROM [{lh_name}].[{src_schema}].[{t}]")
-        return f"[ctas] {t:28s} {'CLUSTER BY '+key if key else '(unclustered)':22s} {_t.time()-t0:6.1f}s"
+        # The OneLake DEEP CLONE the bootstrap just wrote can lag the Fabric SQL
+        # analytics endpoint by up to a few minutes; the cross-DB source read then
+        # fails 42S02 "Invalid object name" until the endpoint syncs. Retry until it
+        # catches up (~20 x 15s = 5 min ceiling), then give up.
+        for _attempt in range(20):
+            try:
+                cu.execute("SELECT 1 FROM INFORMATION_SCHEMA.TABLES WHERE table_schema=? AND table_name=?",
+                           run_schema, t)
+                if cu.fetchone() is not None:
+                    cu.execute(f"SELECT COUNT_BIG(*) FROM [{run_schema}].[{t}]")
+                    tgt_rows = cu.fetchone()[0]
+                    cu.execute(f"SELECT COUNT_BIG(*) FROM [{lh_name}].[{src_schema}].[{t}]")
+                    if tgt_rows > 0 and tgt_rows == cu.fetchone()[0]:
+                        return f"[ctas] {t:28s} skip ({tgt_rows:,} rows present)"
+                    cu.execute(f"DROP TABLE [{run_schema}].[{t}]")
+                key = CLUSTER_KEY[t]
+                with_clause = f" WITH (CLUSTER BY ([{key}]))" if key else ""
+                cu.execute(f"CREATE TABLE [{run_schema}].[{t}]{with_clause} AS "
+                           f"SELECT * FROM [{lh_name}].[{src_schema}].[{t}]")
+                return f"[ctas] {t:28s} {'CLUSTER BY '+key if key else '(unclustered)':22s} {_t.time()-t0:6.1f}s (try {_attempt+1})"
+            except Exception as _e:
+                if "42S02" in str(_e) and _attempt < 19:
+                    _t.sleep(15); continue
+                raise
     finally:
         c.close()
 
