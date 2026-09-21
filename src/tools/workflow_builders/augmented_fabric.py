@@ -50,6 +50,7 @@ _COMMON_PARAMS = {
     "fabric_wh_name":       "{{job.parameters.fabric_wh_name}}",
     "fabric_workspace_id":  "{{job.parameters.fabric_workspace_id}}",
     "fabric_lakehouse_id":  "{{job.parameters.fabric_lakehouse_id}}",
+    "fabric_lakehouse_name":"{{job.parameters.fabric_lakehouse_name}}",
     "tenant_id":            "{{job.parameters.tenant_id}}",
     "file_ext":             "{{job.parameters.file_ext}}",
 }
@@ -80,8 +81,17 @@ def _job_cluster(*, repo_src_path: str, spark_version: str, node_type_id: str,
 
 
 def _make_task(*, task_key: str, notebook_path: str, base_params: dict,
-               depends_on: list[str] | None = None, run_if: str = "ALL_SUCCESS") -> dict:
-    task: dict[str, Any] = {"task_key": task_key, "job_cluster_key": _CLUSTER_KEY}
+               depends_on: list[str] | None = None, run_if: str = "ALL_SUCCESS",
+               interactive_cluster_id: str | None = None) -> dict:
+    # Pin to a pre-existing interactive cluster when given (it carries the working
+    # dbt-fabric + msodbcsql18 env); otherwise fall back to the ephemeral job
+    # cluster. A fresh job cluster lacks the dbt deps and hits
+    # ImportError: evaluate_forward_ref from typing_extensions on the pip install.
+    task: dict[str, Any] = {"task_key": task_key}
+    if interactive_cluster_id:
+        task["existing_cluster_id"] = interactive_cluster_id
+    else:
+        task["job_cluster_key"] = _CLUSTER_KEY
     if depends_on:
         task["depends_on"] = [{"task_key": d} for d in depends_on]
     task["run_if"] = run_if
@@ -99,19 +109,22 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
                 tpcdi_directory: str, wh_db: str,
                 fabric_wh_host: str, fabric_wh_name: str = "tpcdi_fabric_dw",
                 fabric_workspace_id: str, fabric_lakehouse_id: str,
+                fabric_lakehouse_name: str = "tpcdi_fabric_v2",
                 tenant_id: str, file_ext: str = "txt",
                 spark_version: str = "15.4.x-scala2.12",
                 node_type_id: str = "Standard_D8ds_v5",
+                interactive_cluster_id: str | None = None,
                 single_user_name: str | None = None, **_unused) -> dict:
     aug = f"{repo_src_path}/{_AUG_PATH}"
     tasks = [
         _make_task(task_key="simulate_filedrops_fabric",
                    notebook_path=f"{aug}/dbt/competitors/fabric/simulate_filedrops_fabric",
-                   base_params=_BATCHED_PARAMS),
+                   base_params=_BATCHED_PARAMS, interactive_cluster_id=interactive_cluster_id),
         _make_task(task_key="dbt_run",
                    notebook_path=f"{aug}/dbt/competitors/fabric/run_dbt",
                    depends_on=["simulate_filedrops_fabric"],
-                   base_params=dict(_BATCHED_PARAMS, dbt_project_dir=f"{aug}/dbt")),
+                   base_params=dict(_BATCHED_PARAMS, dbt_project_dir=f"{aug}/dbt"),
+                   interactive_cluster_id=interactive_cluster_id),
     ]
     return {
         "name": job_name,
@@ -122,8 +135,9 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
         "tags": {"data_generator": "spark", "engine": "fabric_dw"},
         "timeout_seconds": 0,
         "max_concurrent_runs": 1000,
-        "job_clusters": [_job_cluster(repo_src_path=repo_src_path, spark_version=spark_version,
-                                      node_type_id=node_type_id, single_user_name=single_user_name)],
+        **({} if interactive_cluster_id else
+           {"job_clusters": [_job_cluster(repo_src_path=repo_src_path, spark_version=spark_version,
+                                          node_type_id=node_type_id, single_user_name=single_user_name)]}),
         "parameters": [
             {"name": "catalog",             "default": catalog},
             {"name": "scale_factor",        "default": str(scale_factor)},
@@ -133,6 +147,7 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
             {"name": "fabric_wh_name",      "default": fabric_wh_name},
             {"name": "fabric_workspace_id", "default": fabric_workspace_id},
             {"name": "fabric_lakehouse_id", "default": fabric_lakehouse_id},
+            {"name": "fabric_lakehouse_name","default": fabric_lakehouse_name},
             {"name": "tenant_id",           "default": tenant_id},
             {"name": "file_ext",            "default": file_ext},
             {"name": "batch_date",          "default": ""},
@@ -146,9 +161,11 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
                  scale_factor: int, tpcdi_directory: str, wh_db: str,
                  fabric_wh_host: str, fabric_wh_name: str = "tpcdi_fabric_dw",
                  fabric_workspace_id: str, fabric_lakehouse_id: str,
+                 fabric_lakehouse_name: str = "tpcdi_fabric_v2",
                  tenant_id: str, file_ext: str = "txt",
                  spark_version: str = "15.4.x-scala2.12",
                  node_type_id: str = "Standard_D8ds_v5",
+                 interactive_cluster_id: str | None = None,
                  single_user_name: str | None = None, **_unused) -> dict:
     aug = f"{repo_src_path}/{_AUG_PATH}"
 
@@ -156,7 +173,8 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
         task_key="setup_fabric",
         notebook_path=f"{aug}/dbt/competitors/fabric/setup_fabric",
         base_params={**_COMMON_PARAMS,
-                     "incremental_batches_to_run": "{{job.parameters.incremental_batches_to_run}}"})
+                     "incremental_batches_to_run": "{{job.parameters.incremental_batches_to_run}}"},
+        interactive_cluster_id=interactive_cluster_id)
 
     child_params = {k: v for k, v in _COMMON_PARAMS.items()}
     child_params["batch_date"] = "{{input}}"
@@ -197,7 +215,8 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
     }
     cleanup_task = _make_task(task_key="cleanup",
                               notebook_path=f"{aug}/dbt/competitors/fabric/teardown_fabric",
-                              base_params=_COMMON_PARAMS)
+                              base_params=_COMMON_PARAMS,
+                              interactive_cluster_id=interactive_cluster_id)
     cleanup_task["depends_on"] = [{"task_key": GATE, "outcome": "true"}]
 
     return {
@@ -210,8 +229,9 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
         "tags": {"data_generator": "spark", "engine": "fabric_dw"},
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
-        "job_clusters": [_job_cluster(repo_src_path=repo_src_path, spark_version=spark_version,
-                                      node_type_id=node_type_id, single_user_name=single_user_name)],
+        **({} if interactive_cluster_id else
+           {"job_clusters": [_job_cluster(repo_src_path=repo_src_path, spark_version=spark_version,
+                                          node_type_id=node_type_id, single_user_name=single_user_name)]}),
         "parameters": [
             {"name": "catalog",                     "default": catalog},
             {"name": "scale_factor",                "default": str(scale_factor)},
@@ -221,6 +241,7 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
             {"name": "fabric_wh_name",              "default": fabric_wh_name},
             {"name": "fabric_workspace_id",         "default": fabric_workspace_id},
             {"name": "fabric_lakehouse_id",         "default": fabric_lakehouse_id},
+            {"name": "fabric_lakehouse_name",       "default": fabric_lakehouse_name},
             {"name": "tenant_id",                   "default": tenant_id},
             {"name": "file_ext",                    "default": file_ext},
             {"name": "delete_tables_when_finished", "default": "TRUE"},

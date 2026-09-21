@@ -112,8 +112,12 @@ print(f"wrote profiles.yml to {profile_path} (target=fabric, schema={run_schema}
 
 # COMMAND ----------
 
+# The dbt `catalog` var feeds ONLY sources.yml's run_schema.database on the
+# Fabric path (fabric bronze reads via OPENROWSET(BULK), not catalog; ref()/this
+# resolve to the profile's database). The CTAS'd historical tables live in the
+# Fabric WH database, so the source database must be the WH name, not UC `main`.
 vars_payload = {
-    "catalog":          catalog,
+    "catalog":          wh_name,
     "wh_db":            wh_db,
     "scale_factor":     str(scale_factor),
     "batch_date":       batch_date,
@@ -161,7 +165,13 @@ except Exception as e:
     print(f"[log] failed to persist dbt summary: {e}")
 
 if not result.success:
+    # RAISE (don't exit): dbutils.notebook.exit() returns a value and the task
+    # counts as SUCCESS, silently greening the workflow while dbt failed. Failing
+    # loudly here is what surfaces model errors to the parent for_each loop.
     err = result.exception or "see dbt results above"
-    dbutils.notebook.exit(f"FAILED success={result.success}\nlog={log_path}\n"
-                          f"err={type(err).__name__}: {err}")
+    failed = [f"{nr.node.unique_id}: {getattr(nr,'message','')}"
+              for nr in getattr(result.result, "results", [])
+              if getattr(nr, "status", "") == "error"]
+    raise RuntimeError(f"dbt run FAILED (batch {batch_date}); log={log_path}\n"
+                       f"err={type(err).__name__}: {err}\n" + "\n".join(failed))
 print(f"[done] dbt run --target fabric batch_date={batch_date} complete.")

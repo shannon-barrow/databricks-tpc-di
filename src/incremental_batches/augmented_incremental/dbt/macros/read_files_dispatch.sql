@@ -70,10 +70,9 @@
   {%- if t == 'STRING' -%}varchar(8000)
   {%- elif t == 'BIGINT' or t == 'LONG' -%}bigint
   {%- elif t in ['INT','INTEGER'] -%}int
-  {%- elif t == 'TINYINT' -%}tinyint
-  {%- elif t == 'SMALLINT' -%}smallint
+  {%- elif t in ['TINYINT','SMALLINT'] -%}smallint  {#- Fabric DW edition rejects tinyint (24574) -#}
   {%- elif t == 'DATE' -%}date
-  {%- elif t in ['TIMESTAMP','DATETIME'] -%}datetime2
+  {%- elif t in ['TIMESTAMP','DATETIME'] -%}datetime2(6)  {#- Fabric DW requires an explicit precision 0-6 (24597) -#}
   {%- elif t in ['DOUBLE','FLOAT'] -%}float
   {%- elif t == 'BOOLEAN' -%}bit
   {%- elif t.startswith('DECIMAL') or t.startswith('NUMERIC') -%}{{ t.lower() }}

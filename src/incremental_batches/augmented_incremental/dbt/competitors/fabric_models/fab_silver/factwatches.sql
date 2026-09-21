@@ -31,8 +31,8 @@ w as (
   select
     w_c_id   as customerid,
     w_s_symb as symbol,
-    CAST(MIN(CASE WHEN w_action <> 'CNCL' THEN w_dts ELSE CAST(NULL AS DATETIME2) END) AS DATE) as dateplaced,
-    CAST(MAX(CASE WHEN w_action  = 'CNCL' THEN w_dts ELSE CAST(NULL AS DATETIME2) END) AS DATE) as dateremoved
+    CAST(MIN(CASE WHEN w_action <> 'CNCL' THEN w_dts ELSE CAST(NULL AS DATETIME2(6)) END) AS DATE) as dateplaced,
+    CAST(MAX(CASE WHEN w_action  = 'CNCL' THEN w_dts ELSE CAST(NULL AS DATETIME2(6)) END) AS DATE) as dateremoved
   from new_events
   group by w_c_id, w_s_symb
 )

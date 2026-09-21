@@ -161,6 +161,27 @@ print(f"[ok] schema [{run_schema}] ready")
 
 # COMMAND ----------
 
+# 2b. Reset the dbt-managed tables that are NOT staging-backed, so every
+# benchmark run starts clean. The dim/fact tables reset themselves via the CTAS
+# row-count drift check below (dbt writes drift their counts from staging, which
+# forces a re-clone), but these two kinds have no such safety net and otherwise
+# accumulate across re-runs:
+#   * account_updates_from_customer — dbt append model, no since_last_load guard
+#     and not staging-backed, so each re-run appended another copy of the day's
+#     rows (a re-run's duplicate cust_update rows survive far enough to collide
+#     in the dimaccount SCD2 merge, e.g. 8672 "matched more than one source row").
+#   * the 6 streaming bronze tables — must start EMPTY; a stale bronze left from
+#     a prior run makes since_last_load skip re-ingestion, under-measuring load.
+# (They are re-created empty in step 4 / rebuilt per-batch by dbt.)
+_RESET_TABLES = ["account_updates_from_customer",
+                 "bronzecustomer", "bronzeaccount", "bronzecashtransaction",
+                 "bronzeholdings", "bronzetrade", "bronzewatches"]
+for _t in _RESET_TABLES:
+    cur.execute(f"DROP TABLE IF EXISTS [{run_schema}].[{_t}]")
+print(f"[reset] dropped {len(_RESET_TABLES)} non-staging append/bronze tables for a clean run")
+
+# COMMAND ----------
+
 # 2.5 Force the SQL analytics endpoint to sync the freshly-materialized OneLake
 # tables BEFORE the cross-DB CTAS. Delta tables written straight to OneLake show
 # up in the Spark metastore at once but LAG the SQL analytics endpoint (its
@@ -268,7 +289,7 @@ BRONZE_DDL = {
         status VARCHAR(10), update_dt DATE
     """, "update_dt"),
     "bronzecashtransaction": ("""
-        cdc_flag VARCHAR(1), cdc_dsn BIGINT, accountid BIGINT, ct_dts DATETIME2,
+        cdc_flag VARCHAR(1), cdc_dsn BIGINT, accountid BIGINT, ct_dts DATETIME2(6),
         ct_amt FLOAT, ct_name VARCHAR(100), event_dt DATE
     """, "event_dt"),
     "bronzeholdings": ("""
@@ -276,14 +297,14 @@ BRONZE_DDL = {
         hh_before_qty INT, hh_after_qty INT, event_dt DATE
     """, "event_dt"),
     "bronzetrade": ("""
-        cdc_flag VARCHAR(1), cdc_dsn BIGINT, tradeid BIGINT, t_dts DATETIME2,
+        cdc_flag VARCHAR(1), cdc_dsn BIGINT, tradeid BIGINT, t_dts DATETIME2(6),
         status VARCHAR(10), t_tt_id VARCHAR(10), cashflag SMALLINT, t_s_symb VARCHAR(20),
         quantity INT, bidprice FLOAT, t_ca_id BIGINT, executedby VARCHAR(80),
         tradeprice FLOAT, fee FLOAT, commission FLOAT, tax FLOAT, event_dt DATE
     """, "event_dt"),
     "bronzewatches": ("""
         cdc_flag VARCHAR(1), cdc_dsn BIGINT, w_c_id BIGINT, w_s_symb VARCHAR(20),
-        w_dts DATETIME2, w_action VARCHAR(10), event_dt DATE
+        w_dts DATETIME2(6), w_action VARCHAR(10), event_dt DATE
     """, "event_dt"),
 }
 for tbl, (cols, key) in BRONZE_DDL.items():

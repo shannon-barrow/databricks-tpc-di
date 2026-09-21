@@ -40,6 +40,11 @@ DEFAULTS = dict(
     # tpcdi_fabric endpoint never registered staging_sf10). Cross-DB name set via
     # setup_fabric's fabric_lakehouse_name widget default (also tpcdi_fabric_v2).
     fabric_lakehouse_id="e61ac2d6-f74c-4317-904a-c0417302aae7",
+    # Cross-DB CTAS source db name; must match fabric_lakehouse_id. SF=10 uses
+    # tpcdi_fabric_v2 (new-metadata-sync); SF=20000's staging lives in tpcdi_fabric
+    # (9f303259) whose SQL endpoint already resolves staging_sf20000 — override
+    # both id+name per SF via --fabric-lakehouse-id / --fabric-lakehouse-name.
+    fabric_lakehouse_name="tpcdi_fabric_v2",
     tenant_id="9f37a392-f0ae-4280-9796-f1864a10effc",
     file_ext="txt",
 )
@@ -98,6 +103,16 @@ if __name__ == "__main__":
     ap.add_argument("--profile", default=DEFAULT_PROFILE)
     ap.add_argument("--repo-src-path", default=None)
     ap.add_argument("--name-prefix", default=None)
+    ap.add_argument("--fabric-lakehouse-id", default=None,
+                    help="OneLake lakehouse id holding staging_sf{sf} (overrides DEFAULTS)")
+    ap.add_argument("--fabric-lakehouse-name", default=None,
+                    help="Lakehouse item name = cross-DB CTAS source db (must match the id)")
+    ap.add_argument("--interactive-cluster-id", default=None,
+                    help="Existing interactive cluster to pin all tasks to (overrides DEFAULTS)")
     a = ap.parse_args()
+    overrides = {}
+    if a.fabric_lakehouse_id:   overrides["fabric_lakehouse_id"] = a.fabric_lakehouse_id
+    if a.fabric_lakehouse_name: overrides["fabric_lakehouse_name"] = a.fabric_lakehouse_name
+    if a.interactive_cluster_id: overrides["interactive_cluster_id"] = a.interactive_cluster_id
     create(a.scale_factor, repo_src_path=a.repo_src_path, profile=a.profile,
-           name_prefix=a.name_prefix)
+           name_prefix=a.name_prefix, **overrides)
