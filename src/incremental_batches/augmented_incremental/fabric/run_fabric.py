@@ -16,6 +16,7 @@ dbutils.widgets.text("fabric_workspace_id",   "4f119fd7-d1f7-48bc-be77-6c41c782b
 dbutils.widgets.text("fabric_runner_notebook","batch_runner", "Fabric driver notebook display name (notebooks/batch_runner.py)")
 dbutils.widgets.text("secret_scope",          "tpcdi_fabric", "Databricks secret scope holding the Fabric SPN")
 dbutils.widgets.text("batch_timeout_secs",    "3600", "Max wait for the Fabric batch run")
+dbutils.widgets.text("enable_nee",            "true", "Fabric NEE toggle forwarded to batch_runner: 'true'=Native Execution Engine, 'false'=plain Spark (same code)")
 
 wh_db         = dbutils.widgets.get("wh_db")
 scale_factor  = dbutils.widgets.get("scale_factor")
@@ -24,6 +25,7 @@ workspace_id  = dbutils.widgets.get("fabric_workspace_id")
 runner_name   = dbutils.widgets.get("fabric_runner_notebook")
 secret_scope  = dbutils.widgets.get("secret_scope")
 timeout_secs  = int(dbutils.widgets.get("batch_timeout_secs"))
+enable_nee    = dbutils.widgets.get("enable_nee")
 if not wh_db:
     raise ValueError("wh_db is required")
 
@@ -43,10 +45,11 @@ if not nb:
 
 # COMMAND ----------
 
-print(f"[fabric] batch {batch_date}: triggering {runner_name} (wh_db={wh_db}, sf={scale_factor})...")
+print(f"[fabric] batch {batch_date}: triggering {runner_name} (wh_db={wh_db}, sf={scale_factor}, enable_nee={enable_nee})...")
 inst = fab.run_and_wait(
     token, workspace_id, nb["id"],
-    parameters={"wh_db": wh_db, "scale_factor": scale_factor, "batch_date": batch_date},
+    parameters={"wh_db": wh_db, "scale_factor": scale_factor, "batch_date": batch_date,
+                "enable_nee": enable_nee},
     timeout_secs=timeout_secs,
 )
 # exitValue from batch_runner is "batch_ok:{date}"; wait_for_job already

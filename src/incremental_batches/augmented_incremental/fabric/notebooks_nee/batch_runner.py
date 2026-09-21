@@ -19,6 +19,10 @@ scale_factor    = "10"
 batch_date      = ""       # NEE: bronze loads exactly this date's files; FMH keys its
                            #      52-week lookback off it
 concurrency     = 8        # runMultiple max parallel activities in the shared session
+enable_nee      = "true"   # "true" = Native Execution Engine (Velox/Gluten offload);
+                           # "false" = plain JVM Spark on the SAME code, so the
+                           # fabric_nee and fabric-Spark-batch variants are byte-identical
+                           # code and differ only by this toggle (apples-to-apples).
 # -----------------------------------------------------------
 
 import time
@@ -42,10 +46,13 @@ except Exception as _e:
 # run via runMultiple in THIS session, they inherit it. This is what makes the variant
 # "NEE" — the batch transforms offload to the vectorized C++ path. Verify offload via the
 # Spark UI (*Transformer / NativeFileScan / VeloxColumnarToRowExec) or df.explain().
+# Parameterized so the SAME notebooks run as the plain-Spark batch variant (enable_nee=
+# "false") — identical DAG/transforms, native offload the only difference.
 try:
-    spark.conf.set("spark.native.enabled", "true")
+    spark.conf.set("spark.native.enabled", enable_nee)
+    print(f"[nee] spark.native.enabled = {enable_nee}")
 except Exception as _e:
-    print(f"[warn] could not enable NEE: {_e}")
+    print(f"[warn] could not set spark.native.enabled={enable_nee}: {_e}")
 
 # Use the catalog statistics setup's ANALYZE computed (else the CBO mis-estimates the
 # cloned dims and broadcasts an oversized side — same failure class as fabric_ss #18/#20).

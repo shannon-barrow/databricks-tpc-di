@@ -55,6 +55,12 @@ _COMMON_PARAMS = {
     "fabric_workspace_id": "{{job.parameters.fabric_workspace_id}}",
     "fabric_lakehouse_id": "{{job.parameters.fabric_lakehouse_id}}",
     "secret_scope":        "{{job.parameters.secret_scope}}",
+    # Fabric NEE toggle; only run_fabric forwards it to batch_runner, the other
+    # notebooks ignore it. "true" = NEE (fabric_nee), "false" = plain-Spark batch.
+    "enable_nee":          "{{job.parameters.enable_nee}}",
+    # Fabric driver notebook name run_fabric triggers. The plain-Spark-batch variant
+    # points at a batch_runner deployed on the non-NEE env, so this is overridable.
+    "fabric_runner_notebook": "{{job.parameters.fabric_runner_notebook}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
 
@@ -144,6 +150,8 @@ def build_child(
             {"name": "fabric_workspace_id", "default": _unused.get("fabric_workspace_id", "")},
             {"name": "fabric_lakehouse_id", "default": _unused.get("fabric_lakehouse_id", "")},
             {"name": "secret_scope",        "default": _unused.get("secret_scope", "tpcdi_fabric")},
+            {"name": "enable_nee",          "default": _unused.get("enable_nee", "true")},
+            {"name": "fabric_runner_notebook", "default": _unused.get("fabric_runner_notebook", "batch_runner")},
             {"name": "batch_date",          "default": ""},
         ],
         "tasks": tasks,
@@ -200,6 +208,8 @@ def build_parent(
                         "fabric_workspace_id": "{{job.parameters.fabric_workspace_id}}",
                         "fabric_lakehouse_id": "{{job.parameters.fabric_lakehouse_id}}",
                         "secret_scope":        "{{job.parameters.secret_scope}}",
+                        "enable_nee":          "{{job.parameters.enable_nee}}",
+                        "fabric_runner_notebook": "{{job.parameters.fabric_runner_notebook}}",
                         "batch_date":          "{{input}}",
                     },
                 },
@@ -262,6 +272,8 @@ def build_parent(
             {"name": "fabric_workspace_id",         "default": _unused.get("fabric_workspace_id", "")},
             {"name": "fabric_lakehouse_id",         "default": _unused.get("fabric_lakehouse_id", "")},
             {"name": "secret_scope",                "default": _unused.get("secret_scope", "tpcdi_fabric")},
+            {"name": "enable_nee",                  "default": _unused.get("enable_nee", "true")},
+            {"name": "fabric_runner_notebook",      "default": _unused.get("fabric_runner_notebook", "batch_runner")},
             {"name": "delete_tables_when_finished", "default": "FALSE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
         ],
@@ -307,7 +319,11 @@ def main():
     ap.add_argument("--fabric-lakehouse-id", default="3f5b1c43-a52c-4a2e-90d7-4de7504e6122")
     ap.add_argument("--secret-scope", default="tpcdi_fabric")
     ap.add_argument("--base-name", default="TPC-DI")
-    ap.add_argument("--variant", default="FabricSS", help="job-name token (FabricSS / FabricNEE / SynapseSS)")
+    ap.add_argument("--variant", default="FabricSS", help="job-name token (FabricSS / FabricNEE / FabricSparkBatch / SynapseSS)")
+    ap.add_argument("--enable-nee", default="true",
+                    help="'true' = NEE (fabric_nee); 'false' = plain-Spark batch on the same code")
+    ap.add_argument("--fabric-runner-notebook", default="batch_runner",
+                    help="Fabric driver notebook name run_fabric triggers (e.g. batch_runner_spark for the no-NEE variant)")
     args = ap.parse_args()
 
     from databricks.sdk import WorkspaceClient
@@ -323,6 +339,8 @@ def main():
         fabric_workspace_id=args.fabric_workspace_id,
         fabric_lakehouse_id=args.fabric_lakehouse_id,
         secret_scope=args.secret_scope,
+        enable_nee=args.enable_nee,
+        fabric_runner_notebook=args.fabric_runner_notebook,
     )
     stem = f"{args.base_name}-SF{args.scale_factor}-AugmentedIncremental-{args.variant}"
 
