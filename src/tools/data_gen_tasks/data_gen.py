@@ -94,18 +94,31 @@ cfg = ctx["cfg"]
 
 # Schemas first.
 # tpcdi_raw_data + its volume are SHARED resources: every user in the
-# workspace should be able to read existing data AND write new scale
-# factors. Grant ALL PRIVILEGES to `account users` so the first creator
-# doesn't lock everyone else out. The GRANT is idempotent — it runs on
-# every data_gen invocation but only takes effect once.
-spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
-          f"COMMENT 'Shared TPC-DI raw files schema'")
-spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
-          f"TO `account users`")
-spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
-          f"COMMENT 'Shared TPC-DI raw files volume'")
-spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
-          f"TO `account users`")
+# workspace should be able to read existing data AND write new scale factors.
+# Only the FIRST creator runs CREATE + GRANT — they own the object and can
+# grant to `account users`. Everyone after must skip both: GRANT needs MANAGE,
+# so a non-owner re-running data_gen against an existing schema/volume hits
+# PERMISSION_DENIED. Existence is checked with SHOW, which only returns objects
+# the caller can already see.
+def _schema_exists(cat, sch):
+    return len(spark.sql(f"SHOW SCHEMAS IN {cat} LIKE '{sch}'").collect()) > 0
+
+def _volume_exists(cat, sch, vol):
+    try:
+        return len(spark.sql(f"SHOW VOLUMES IN {cat}.{sch} LIKE '{vol}'").collect()) > 0
+    except Exception:
+        return False
+
+if not _schema_exists(catalog, "tpcdi_raw_data"):
+    spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.tpcdi_raw_data "
+              f"COMMENT 'Shared TPC-DI raw files schema'")
+    spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.tpcdi_raw_data "
+              f"TO `account users`")
+if not _volume_exists(catalog, "tpcdi_raw_data", "tpcdi_volume"):
+    spark.sql(f"CREATE VOLUME IF NOT EXISTS {catalog}.tpcdi_raw_data.tpcdi_volume "
+              f"COMMENT 'Shared TPC-DI raw files volume'")
+    spark.sql(f"GRANT ALL PRIVILEGES ON VOLUME {catalog}.tpcdi_raw_data.tpcdi_volume "
+              f"TO `account users`")
 
 stage_schema = stage_schema_fq(catalog, wh_db, scale_factor)
 print(f"[data_gen] ensuring {stage_schema} exists")
@@ -113,14 +126,14 @@ spark.sql(f"CREATE SCHEMA IF NOT EXISTS {stage_schema} "
           f"COMMENT 'data_gen + benchmark interim temp tables'")
 
 if augmented_incremental:
-    # The augmented benchmark also reads from these schemas. Open this one
-    # up to `account users` for the same reasons as tpcdi_raw_data above.
-    spark.sql(f"CREATE DATABASE IF NOT EXISTS "
-              f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
-              f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
-    spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA "
-              f"{catalog}.tpcdi_incremental_staging_{scale_factor} "
-              f"TO `account users`")
+    # Same guard as tpcdi_raw_data: only the first creator grants, so a
+    # non-owner re-running data_gen doesn't fail on the GRANT.
+    _incr_staging = f"tpcdi_incremental_staging_{scale_factor}"
+    if not _schema_exists(catalog, _incr_staging):
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {catalog}.{_incr_staging} "
+                  f"COMMENT 'Shared TPC-DI augmented_incremental staging schema'")
+        spark.sql(f"GRANT ALL PRIVILEGES ON SCHEMA {catalog}.{_incr_staging} "
+                  f"TO `account users`")
 
 # COMMAND ----------
 
