@@ -39,3 +39,18 @@ dbt_augmented_incremental:
       location: us-central1                              # must match the GCS bucket region
       threads: 8
       priority: interactive
+    fabric:
+      # Fabric Data Warehouse (T-SQL). dbt-fabric uses pyodbc + the msodbcsql18
+      # ODBC driver over TDS to the warehouse's SQL analytics endpoint. Entra ID
+      # auth only (no SQL auth); use a service principal for automation. The
+      # augmented_fabric workflow writes profiles.yml inline from a UC secret.
+      type: fabric
+      driver: 'ODBC Driver 18 for SQL Server'
+      host: {ENTER_SQL_ANALYTICS_ENDPOINT_HERE}          # e.g. xxxxxxxx.datawarehouse.fabric.microsoft.com
+      database: {ENTER_WAREHOUSE_NAME_HERE}              # the Fabric Warehouse item name
+      schema: dbo                                        # overridden per-model via generate_schema_name macro
+      authentication: ServicePrincipal                   # or CLI for interactive az-login dev
+      tenant_id: {ENTER_TENANT_ID_HERE}
+      client_id: {ENTER_SP_CLIENT_ID_HERE}
+      client_secret: {ENTER_SP_CLIENT_SECRET_HERE}
+      threads: 8
