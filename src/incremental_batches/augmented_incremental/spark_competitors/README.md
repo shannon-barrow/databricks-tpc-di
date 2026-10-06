@@ -103,6 +103,16 @@ Running), not the Databricks task duration (which includes the job-cluster
 start and REST polling). TCO at fixed capacity = running hours × the capacity's
 hourly rate (F64 pay-as-you-go: 64 CU × $0.18/CU-hr = $11.52/hr).
 
+## Validation status
+
+Both variants passed a `scale_factor=10`, 2-batch smoke test end to end from
+jobs created by the Competitor Driver, on default job clusters (no interactive
+cluster), with setup provisioning the environment and deploying the notebooks
+as the service principal. Checked on the Fabric side: the batch sessions ran
+on Runtime 2.0 on the custom pool (15 executors x 8 cores, dynamic allocation
+off), and the NEE run's plans were native (`*Transformer`,
+`VeloxColumnarToRow`, `ColumnarExchange`).
+
 ## Layout
 
 ```

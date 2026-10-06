@@ -134,7 +134,7 @@ project itself (models, macros, adapter dispatch) is documented in
 
 ## Validation status
 
-Each engine has passed a `scale_factor=10`, 2-batch smoke test on serverless
+Each engine has passed a `scale_factor=10`, 2-batch smoke test (serverless unless noted)
 (`setup_{engine}` + both batch iterations SUCCESS):
 
 | Engine | Workspace | Notes |
@@ -142,6 +142,7 @@ Each engine has passed a `scale_factor=10`, 2-batch smoke test on serverless
 | Redshift | AWS (serverless-only) | connection retry absorbs workgroup cold-start |
 | Snowflake | AWS | dual secret (keypair + PAT), external-stage federation |
 | BigQuery | GCP | serverless-default child tasks; no numpy ABI issue on env v5 |
+| Fabric DW | Azure (classic job cluster, DBR 18 LTS) | created via the Competitor Driver; dbt-fabric installed with `%pip` + Python restart |
 
 See each engine's `PORT_NOTES.md` for design decisions and the SQL-dialect
 translation detail.
