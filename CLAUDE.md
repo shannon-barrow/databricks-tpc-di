@@ -533,6 +533,7 @@ Active variants on the cross-cloud benchmark dashboard:
 | Cluster Jobs (PERF-OPT / STD) | `setup.py`                              | DEEP CLONE staging (Liquid layout inherited) + 6 streaming bronze CREATEs |
 | SDP (PERF-OPT / STD)          | `DLT/pipelines_setup.py`                | pipeline-managed CLUSTER BY |
 | dbt (Small WH anchor at SF=20k) | `setup_dbt.py`                          | dbt-databricks 1.11.7 against premium SQL warehouse; setup-owns-layout pattern |
+| Cluster batch / "NonSS" (PERF-OPT / STD) | `non_ss_workflow/setup.py`   | no Structured Streaming: `read_files` bronze + `new_events` CTE per batch_date; setup also strips NOT NULL + PK/FK. The Databricks side of the Fabric Spark/NEE comparison. Jobs are hand-built (no builder / Driver path yet) |
 
 A small number of historical "Partitioned" variants (from before the
 Liquid consolidation) remain in the Run-History sheet for reference but
@@ -696,6 +697,7 @@ src/
       setup.py / setup_dbt.py / teardown.py    # Stage 1 setup/cleanup
       simulate_filedrops.py       # per-batch cp from _staging into auto-loader watch dir
       bronze/ historical/ incremental/ DLT/ dbt/  # variant-specific code
+      non_ss_workflow/            # batch (non-streaming) port of the Cluster loop
       dbt/competitors/            # dbt warehouse competitors (see its README)
       spark_competitors/          # Spark-engine competitors (Fabric Spark/NEE; see its README)
   single_batch/

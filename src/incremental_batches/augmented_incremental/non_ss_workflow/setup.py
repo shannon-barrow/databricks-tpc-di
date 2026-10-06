@@ -78,23 +78,26 @@ def clone_table(table_name, clone_type):
     files with staging and DV state on a shallow clone is moot.
     """
     spark.sql(f"CREATE OR REPLACE TABLE {catalog}.{tgt_db}.{table_name} {clone_type} CLONE {catalog}.{staging_db}.{table_name}")
-    # if clone_type == "DEEP":
-    #     spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
-    #         UNSET TBLPROPERTIES IF EXISTS (
-    #           'delta.universalFormat.enabledFormats',
-    #           'delta.enableIcebergCompatV2'
-    #         )""")
-    #     # Explicit working-table properties (do not rely on account defaults):
-    #     # optimizeWrite on / autoCompact off, deletion vectors + row tracking on,
-    #     # Parquet v2 (new writes; DBR 18.1+). Baseline files stay v1 unless REORG'd.
-    #     spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
-    #         SET TBLPROPERTIES (
-    #           'delta.autoOptimize.optimizeWrite' = 'true',
-    #           'delta.autoOptimize.autoCompact'   = 'false',
-    #           'delta.enableDeletionVectors'      = 'true',
-    #           'delta.enableRowTracking'          = 'true',
-    #           'delta.parquet.format.version'     = '2.12.0'
-    #         )""")
+    # Set on the working clone, not in staging: staging keeps deletion
+    # vectors off + Iceberg compat on for the Snowflake federation, so these
+    # properties have to be applied per clone to come from code.
+    if clone_type == "DEEP":
+        spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
+            UNSET TBLPROPERTIES IF EXISTS (
+              'delta.universalFormat.enabledFormats',
+              'delta.enableIcebergCompatV2'
+            )""")
+        # Explicit working-table properties (do not rely on account defaults):
+        # optimizeWrite on / autoCompact off, deletion vectors + row tracking on,
+        # Parquet v2 (new writes; DBR 18.1+). Baseline files stay v1 unless REORG'd.
+        spark.sql(f"""ALTER TABLE {catalog}.{tgt_db}.{table_name}
+            SET TBLPROPERTIES (
+              'delta.autoOptimize.optimizeWrite' = 'true',
+              'delta.autoOptimize.autoCompact'   = 'false',
+              'delta.enableDeletionVectors'      = 'true',
+              'delta.enableRowTracking'          = 'true',
+              'delta.parquet.format.version'     = '2.12.0'
+            )""")
     spark.sql(f"ANALYZE TABLE {catalog}.{tgt_db}.{table_name} COMPUTE STATISTICS FOR ALL COLUMNS")
 
 # COMMAND ----------
