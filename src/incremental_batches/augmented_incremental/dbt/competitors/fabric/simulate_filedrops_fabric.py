@@ -23,9 +23,11 @@ dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volu
 dbutils.widgets.text("batch_date",      "")
 dbutils.widgets.text("wh_db",           "")
 dbutils.widgets.text("file_ext",        "txt")
-dbutils.widgets.text("fabric_workspace_id", "e0a370b6-0279-4bc2-92ef-0a3f001e068b")
-dbutils.widgets.text("fabric_lakehouse_id", "54963c1f-bb06-4acd-8db3-b8b5056e81c3")
-dbutils.widgets.text("tenant_id",       "9f37a392-f0ae-4280-9796-f1864a10effc")
+dbutils.widgets.text("fabric_workspace_id", "", "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id", "", "Lakehouse id holding the daily file drops")
+dbutils.widgets.text("tenant_id",       "", "Entra tenant id")
+dbutils.widgets.text("client_id",       "", "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret", "", "UC secret path of the SP client secret (catalog.schema.key)")
 
 scale_factor    = dbutils.widgets.get("scale_factor")
 tpcdi_directory = dbutils.widgets.get("tpcdi_directory")
@@ -35,6 +37,8 @@ file_ext        = dbutils.widgets.get("file_ext").strip()
 ws_id           = dbutils.widgets.get("fabric_workspace_id")
 lh_id           = dbutils.widgets.get("fabric_lakehouse_id")
 tenant_id       = dbutils.widgets.get("tenant_id")
+client_id       = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
 
 # Spark CSV files end in .csv on disk regardless of the bronze file_ext we want.
 read_file_ext = "csv" if file_ext == "txt" else file_ext
@@ -49,23 +53,13 @@ DATASETS = ["Customer", "Account", "Trade", "CashTransaction",
 
 # COMMAND ----------
 
-# OneLake OAuth (SP) on spark.conf AND the JVM hadoop conf — dbutils.fs.cp uses
-# the JVM conf, so both must be set for the write to authenticate.
-_oauth = {
-    "fs.azure.account.auth.type.onelake.dfs.fabric.microsoft.com": "OAuth",
-    "fs.azure.account.oauth.provider.type.onelake.dfs.fabric.microsoft.com":
-        "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
-    "fs.azure.account.oauth2.client.id.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_id"),
-    "fs.azure.account.oauth2.client.secret.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_secret"),
-    "fs.azure.account.oauth2.client.endpoint.onelake.dfs.fabric.microsoft.com":
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/token",
-}
-_hconf = spark._jsc.hadoopConfiguration()
-for k, v in _oauth.items():
-    spark.conf.set(k, v)
-    _hconf.set(k, v)
+# MAGIC %run ./_fab_conn
+
+# COMMAND ----------
+
+# OneLake OAuth (SP) for the dbutils.fs.cp writes below.
+fab_onelake_conf(spark, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
 
 # COMMAND ----------
 

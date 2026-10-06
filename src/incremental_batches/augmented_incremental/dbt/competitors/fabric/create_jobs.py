@@ -4,16 +4,21 @@ orchestration workspace (Azure `tpc-di`). Mirrors redshift/create_jobs.py.
 Run once per scale factor to register the parent + child Jobs; trigger the
 parent thereafter via `databricks jobs run-now`.
 
-The SP creds are NOT passed here — the notebooks read client_id/client_secret
-from the `tpcdi_fabric` UC secret scope. Only plain values (WH host/name,
-workspace/lakehouse ids, tenant) are job parameters.
+Only the SP client secret is a secret — pass its full UC path
+(catalog.schema.key) as client_secret_secret. Everything else (WH host/name,
+workspace/lakehouse ids, tenant, client id) is a plain job parameter. The
+Competitor Driver notebook is the OOTB path; this is the headless equivalent.
 
 Usage:
-    python3 .../dbt/competitors/fabric/create_jobs.py 10 [--profile tpc-di]
+    python3 .../dbt/competitors/fabric/create_jobs.py 10 --profile <azure-profile> \
+        --fabric-wh-host <...>.datawarehouse.fabric.microsoft.com --fabric-wh-name <wh> \
+        --fabric-workspace-id <guid> --fabric-lakehouse-id <guid> --fabric-lakehouse-name <lh> \
+        --tenant-id <guid> --client-id <guid> \
+        --client-secret-secret main.tpcdi_raw_data.fabric_<client_id>_sp_secret
 
 Or imported:
     from create_jobs import create
-    create(scale_factor=10, repo_src_path=<workspace src>, profile="tpc-di")
+    create(scale_factor=10, repo_src_path=<workspace src>, profile=<profile>, **inputs)
 """
 import json
 import os
@@ -27,25 +32,21 @@ from workflow_builders.augmented_fabric import build_child, build_parent
 
 DEFAULT_PROFILE = "tpc-di"
 
+# Non-personal defaults. Anything user/infra-specific is an override of
+# create() (CLI flags below), NOT baked in here.
 DEFAULTS = dict(
     catalog="main",
     tpcdi_directory="/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
-    wh_db="shannon_aug_fabric_dbt",
-    # Fabric DW (dedicated e0a370b6 workspace) — plain values.
-    fabric_wh_host="skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com",
-    fabric_wh_name="tpcdi_fabric_dw",
-    fabric_workspace_id="e0a370b6-0279-4bc2-92ef-0a3f001e068b",
-    # tpcdi_fabric_v2 — created after enabling new-metadata-sync so its SQL endpoint
-    # discovers freshly-materialized OneLake staging tables fast (the original
-    # tpcdi_fabric endpoint never registered staging_sf10). Cross-DB name set via
-    # setup_fabric's fabric_lakehouse_name widget default (also tpcdi_fabric_v2).
-    fabric_lakehouse_id="e61ac2d6-f74c-4317-904a-c0417302aae7",
-    # Cross-DB CTAS source db name; must match fabric_lakehouse_id. SF=10 uses
-    # tpcdi_fabric_v2 (new-metadata-sync); SF=20000's staging lives in tpcdi_fabric
-    # (9f303259) whose SQL endpoint already resolves staging_sf20000 — override
-    # both id+name per SF via --fabric-lakehouse-id / --fabric-lakehouse-name.
-    fabric_lakehouse_name="tpcdi_fabric_v2",
-    tenant_id="9f37a392-f0ae-4280-9796-f1864a10effc",
+    wh_db="tpcdi_aug_fabric_dbt",                 # target schema prefix -> {wh_db}_{sf}
+    fabric_wh_host="",                            # Warehouse SQL analytics endpoint
+    fabric_wh_name="",                            # Warehouse item name
+    fabric_workspace_id="",
+    fabric_lakehouse_id="",                       # schema-enabled; staging_sf{sf} + file drops
+    fabric_lakehouse_name="",                     # cross-DB CTAS source db (must match the id)
+    tenant_id="",
+    client_id="",
+    # The only genuine secret — a full UC secret path (catalog.schema.key).
+    client_secret_secret="",
     file_ext="txt",
 )
 
@@ -103,16 +104,15 @@ if __name__ == "__main__":
     ap.add_argument("--profile", default=DEFAULT_PROFILE)
     ap.add_argument("--repo-src-path", default=None)
     ap.add_argument("--name-prefix", default=None)
-    ap.add_argument("--fabric-lakehouse-id", default=None,
-                    help="OneLake lakehouse id holding staging_sf{sf} (overrides DEFAULTS)")
-    ap.add_argument("--fabric-lakehouse-name", default=None,
-                    help="Lakehouse item name = cross-DB CTAS source db (must match the id)")
-    ap.add_argument("--interactive-cluster-id", default=None,
-                    help="Existing interactive cluster to pin all tasks to (overrides DEFAULTS)")
+    for k in ("wh_db", "catalog", "fabric_wh_host", "fabric_wh_name", "fabric_workspace_id",
+              "fabric_lakehouse_id", "fabric_lakehouse_name", "tenant_id", "client_id",
+              "client_secret_secret", "interactive_cluster_id"):
+        ap.add_argument("--" + k.replace("_", "-"), default=None)
     a = ap.parse_args()
-    overrides = {}
-    if a.fabric_lakehouse_id:   overrides["fabric_lakehouse_id"] = a.fabric_lakehouse_id
-    if a.fabric_lakehouse_name: overrides["fabric_lakehouse_name"] = a.fabric_lakehouse_name
-    if a.interactive_cluster_id: overrides["interactive_cluster_id"] = a.interactive_cluster_id
+    overrides = {k: v for k, v in vars(a).items()
+                 if k not in ("scale_factor", "profile", "repo_src_path", "name_prefix") and v}
+    missing = [k for k, v in dict(DEFAULTS, **overrides).items() if v == ""]
+    if missing:
+        ap.error(f"missing required inputs: {missing}")
     create(a.scale_factor, repo_src_path=a.repo_src_path, profile=a.profile,
            name_prefix=a.name_prefix, **overrides)

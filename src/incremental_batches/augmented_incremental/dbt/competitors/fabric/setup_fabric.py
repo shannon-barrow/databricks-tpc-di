@@ -30,24 +30,24 @@
 # only, no ALTER. Supported key types incl. date/bigint (all our keys qualify);
 # NOT bit/varchar(max). No dataSkippingNumIndexedCols (Delta-only).
 #
-# ⚠ VERIFY AT SMOKE TIME: the cross-DB source schema. The DEEP CLONE writes to
-# OneLake Tables/staging_sf{sf}/<t>; in a schema-enabled lakehouse that surfaces
-# to the SQL endpoint as schema [staging_sf{sf}]. If cross-DB resolution fails,
-# check the actual schema name via the Lakehouse SQL endpoint and set
-# `lakehouse_src_schema`.
+# Cross-DB source schema: the DEEP CLONE writes OneLake Tables/staging_sf{sf}/<t>,
+# which a schema-enabled lakehouse surfaces to the SQL endpoint as schema
+# [staging_sf{sf}]. Override with `lakehouse_src_schema` only if the lakehouse
+# exposes it under a different name.
 
 # COMMAND ----------
 
 dbutils.widgets.text("wh_db",            "", "wh_db prefix; run schema = {wh_db}_{scale_factor}")
 dbutils.widgets.dropdown("scale_factor", "10", ["10","100","1000","5000","10000","20000"])
-dbutils.widgets.text("fabric_workspace_id",  "e0a370b6-0279-4bc2-92ef-0a3f001e068b")
-dbutils.widgets.text("fabric_lakehouse_id",  "e61ac2d6-f74c-4317-904a-c0417302aae7")
-dbutils.widgets.text("fabric_lakehouse_name","tpcdi_fabric_v2", "Lakehouse item name (cross-DB source db)")
+dbutils.widgets.text("fabric_workspace_id",  "", "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id",  "", "Lakehouse id (OneLake staging + file drops)")
+dbutils.widgets.text("fabric_lakehouse_name","", "Lakehouse item name (cross-DB source db)")
 dbutils.widgets.text("lakehouse_src_schema", "", "Cross-DB schema of the staging tables; default staging_sf{sf}")
-dbutils.widgets.text("fabric_wh_host",  "skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com",
-                     "Warehouse SQL analytics endpoint")
-dbutils.widgets.text("fabric_wh_name",  "tpcdi_fabric_dw", "Warehouse item name (= DW database)")
-dbutils.widgets.text("tenant_id",       "9f37a392-f0ae-4280-9796-f1864a10effc")
+dbutils.widgets.text("fabric_wh_host",  "", "Warehouse SQL analytics endpoint")
+dbutils.widgets.text("fabric_wh_name",  "", "Warehouse item name (= DW database)")
+dbutils.widgets.text("tenant_id",       "", "Entra tenant id")
+dbutils.widgets.text("client_id",       "", "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret", "", "UC secret path of the SP client secret (catalog.schema.key)")
 dbutils.widgets.text("databricks_catalog", "main", "UC catalog holding tpcdi_incremental_staging_{sf}")
 dbutils.widgets.text("incremental_batches_to_run", "365")
 dbutils.widgets.dropdown("force_reset", "NO", ["NO","YES"],
@@ -61,13 +61,20 @@ lh_name          = dbutils.widgets.get("fabric_lakehouse_name")
 wh_host          = dbutils.widgets.get("fabric_wh_host")
 wh_name          = dbutils.widgets.get("fabric_wh_name")
 tenant_id        = dbutils.widgets.get("tenant_id")
+client_id        = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
 db_catalog       = dbutils.widgets.get("databricks_catalog")
 incremental_n    = int(dbutils.widgets.get("incremental_batches_to_run"))
 force_reset      = dbutils.widgets.get("force_reset").upper() == "YES"
 src_schema       = dbutils.widgets.get("lakehouse_src_schema") or f"staging_sf{scale_factor}"
 
-if not wh_db:
-    raise ValueError("wh_db is required")
+_required = dict(wh_db=wh_db, fabric_workspace_id=ws_id, fabric_lakehouse_id=lh_id,
+                 fabric_lakehouse_name=lh_name, fabric_wh_host=wh_host,
+                 fabric_wh_name=wh_name, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
+_missing = [k for k, v in _required.items() if not v]
+if _missing:
+    raise ValueError(f"missing required params: {_missing}")
 
 run_schema = f"{wh_db}_{scale_factor}".lower()
 print(f"warehouse   = {wh_name} (host {wh_host})")
@@ -76,26 +83,14 @@ print(f"cross-DB    = [{lh_name}].[{src_schema}].<table>")
 
 # COMMAND ----------
 
-# OneLake OAuth (SP) so the Spark DEEP CLONE in the bootstrap can write OneLake.
-# Same confs the fabric_ss/nee setup used. Reads UC `main` for the clone source.
-for k, v in {
-    "fs.azure.account.auth.type.onelake.dfs.fabric.microsoft.com": "OAuth",
-    "fs.azure.account.oauth.provider.type.onelake.dfs.fabric.microsoft.com":
-        "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
-    "fs.azure.account.oauth2.client.id.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_id"),
-    "fs.azure.account.oauth2.client.secret.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_secret"),
-    "fs.azure.account.oauth2.client.endpoint.onelake.dfs.fabric.microsoft.com":
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/token",
-}.items():
-    spark.conf.set(k, v)
-
-# COMMAND ----------
-
 # MAGIC %run ./_fab_conn
 
 # COMMAND ----------
+
+# OneLake OAuth (SP) so the Spark DEEP CLONE in the bootstrap can write OneLake.
+# Reads UC `main` for the clone source.
+fab_onelake_conf(spark, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
 
 import sys, os
 try:
@@ -145,6 +140,7 @@ STAGING_TABLES = sorted(CLUSTER_KEY)
 # COMMAND ----------
 
 conn = fab_connect(host=wh_host, database=wh_name, tenant_id=tenant_id,
+                   client_id=client_id, client_secret_secret=client_secret_secret,
                    label={"task": "setup_fabric", "wh_db": wh_db, "scale_factor": scale_factor})
 cur = conn.cursor()
 
@@ -190,9 +186,9 @@ print(f"[reset] dropped {len(_RESET_TABLES)} non-staging append/bronze tables fo
 # discovers them. The Fabric refreshMetadata REST API forces an on-demand sync.
 import msal as _msal, requests as _rq, time as _rt
 _fapp = _msal.ConfidentialClientApplication(
-    dbutils.secrets.get("tpcdi_fabric", "client_id"),
+    client_id,
     authority=f"https://login.microsoftonline.com/{tenant_id}",
-    client_credential=dbutils.secrets.get("tpcdi_fabric", "client_secret"))
+    client_credential=_secret_from_path(client_secret_secret))
 _ftok = _fapp.acquire_token_for_client(scopes=["https://api.fabric.microsoft.com/.default"])
 if "access_token" not in _ftok:
     raise RuntimeError(f"Fabric API token failed: {_ftok.get('error_description', _ftok)}")
@@ -229,6 +225,7 @@ import time as _t, concurrent.futures
 
 def _ctas_one(t):
     c = fab_connect(host=wh_host, database=wh_name, tenant_id=tenant_id,
+                    client_id=client_id, client_secret_secret=client_secret_secret,
                     label={"task": "setup_fabric_ctas", "table": t, "scale_factor": scale_factor})
     cu = c.cursor()
     try:

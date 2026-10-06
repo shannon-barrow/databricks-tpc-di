@@ -10,10 +10,10 @@ the fabric_ss / fabric_nee setup used).
 
 `ensure_onelake_staging(...)` is idempotent — it clones only missing tables
 (unless force=True). Requires the OneLake OAuth confs to be set on the Spark
-session already (setup_fabric sets them from the tpcdi_fabric SP secrets), and a
-UC-enabled single-user cluster to read `main`.
+session already (setup_fabric sets them via _fab_conn.fab_onelake_conf), and a
+UC-enabled dedicated cluster to read `main`.
 
-Cross-DB read path for the warehouse: [tpcdi_fabric].[staging_sf{sf}].[<table>].
+Cross-DB read path for the warehouse: [<lakehouse>].[staging_sf{sf}].[<table>].
 """
 from __future__ import annotations
 

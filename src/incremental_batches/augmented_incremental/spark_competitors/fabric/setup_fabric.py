@@ -9,7 +9,7 @@
 # MAGIC | Cluster `setup.py` step | Fabric equivalent | Where it runs |
 # MAGIC |---|---|---|
 # MAGIC | clone 20 staging tables into the run schema | **materialize** (DEEP CLONE staging → OneLake, once per SF) + **per-run SHALLOW CLONE** within OneLake | materialize here (Databricks); SHALLOW clone in `notebooks/setup.py` (Fabric) |
-# MAGIC | create 6 bronze tables, reset checkpoints | same | `notebooks/setup.py` (Fabric) |
+# MAGIC | create 6 bronze tables | same | `notebooks/setup.py` (Fabric) |
 # MAGIC | reset Autoloader batch dir | `simulate_file_drops` owns raw file dirs | (not here) |
 # MAGIC | emit `batch_date_ls` | same | here (Databricks) |
 # MAGIC
@@ -20,36 +20,66 @@
 # MAGIC Fabric side. The materialize is idempotent — it self-bootstraps
 # MAGIC `staging_sf{sf}` in OneLake and no-ops when it already exists (analogous
 # MAGIC to the Cluster setup cloning from an already-built staging schema).
+# MAGIC
+# MAGIC Before any of that it provisions the Fabric side so a fresh workspace works
+# MAGIC out of the box: a fixed-size custom Spark pool, an Environment pinned to the
+# MAGIC Fabric runtime on that pool, and the repo's `notebooks/` deployed as Fabric
+# MAGIC notebooks bound to the lakehouse + environment. All of it is idempotent and
+# MAGIC re-deploys the notebooks every run so Fabric stays in lockstep with the repo.
 
 # COMMAND ----------
 
 import concurrent.futures
+import os
+import sys
 import time
+
+# _fabric_conn.py sits next to this notebook in the repo.
+_nb = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_here = os.path.dirname(_nb if _nb.startswith("/Workspace") else "/Workspace" + _nb)
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+import _fabric_conn as fab
 
 # COMMAND ----------
 
-dbutils.widgets.text("catalog",                   "main",  "Databricks catalog holding tpcdi_incremental_staging_{sf} (tpc-di ws uses main)")
-dbutils.widgets.dropdown("scale_factor",          "10", ["10","100","1000","5000","10000","20000"])
-dbutils.widgets.text("wh_db",                     "",   "wh_db prefix; Fabric working schema = {wh_db}_{scale_factor}")
-dbutils.widgets.text("fabric_workspace_id",       "4f119fd7-d1f7-48bc-be77-6c41c782b541", "pmt_fabric_ws GUID")
-dbutils.widgets.text("fabric_lakehouse_id",       "3f5b1c43-a52c-4a2e-90d7-4de7504e6122", "tpcdi_fabric lakehouse GUID (OneLake materialize target)")
-dbutils.widgets.text("fabric_setup_notebook",     "setup", "Fabric notebook display name for the per-run reset (notebooks/setup.py)")
-dbutils.widgets.text("secret_scope",              "tpcdi_fabric", "Databricks secret scope holding the Fabric SPN (tenant_id/client_id/client_secret)")
-dbutils.widgets.dropdown("force_materialize",     "false", ["true","false"], "Re-DEEP-CLONE staging → OneLake even if it already exists")
-dbutils.widgets.text("incremental_batches_to_run","365", "Number of batches the for_each loop runs")
+dbutils.widgets.text("catalog",                    "main", "Databricks catalog holding tpcdi_incremental_staging_{sf}")
+dbutils.widgets.dropdown("scale_factor",           "10", ["10","100","1000","5000","10000","20000"])
+dbutils.widgets.text("wh_db",                      "",   "wh_db prefix; Fabric working schema = {wh_db}_{scale_factor}")
+dbutils.widgets.text("fabric_workspace_id",        "",   "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id",        "",   "Schema-enabled lakehouse id (OneLake staging + file drops)")
+dbutils.widgets.text("tenant_id",                  "",   "Entra tenant id")
+dbutils.widgets.text("client_id",                  "",   "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret",       "",   "UC secret path of the SP client secret (catalog.schema.key)")
+dbutils.widgets.text("fabric_pool_name",           "tpcdi_spark_pool", "Custom Spark pool (created/resized to the size below)")
+dbutils.widgets.dropdown("fabric_node_size",       "Medium", list(fab._NODE_SHAPE), "Pool node size")
+dbutils.widgets.text("fabric_node_count",          "16", "Pool node count (16 Medium = one F64)")
+dbutils.widgets.text("fabric_runtime",             "2.0", "Fabric Spark runtime version")
+dbutils.widgets.text("fabric_environment_name",    "tpcdi_spark_env", "Environment item the notebooks run on")
+dbutils.widgets.dropdown("force_materialize",      "false", ["true","false"], "Re-DEEP-CLONE staging → OneLake even if it already exists")
+dbutils.widgets.text("incremental_batches_to_run", "365", "Number of batches the for_each loop runs")
 
 catalog        = dbutils.widgets.get("catalog")
 scale_factor   = dbutils.widgets.get("scale_factor")
 wh_db          = dbutils.widgets.get("wh_db")
 workspace_id   = dbutils.widgets.get("fabric_workspace_id")
 lakehouse_id   = dbutils.widgets.get("fabric_lakehouse_id")
-setup_nb_name  = dbutils.widgets.get("fabric_setup_notebook")
-secret_scope   = dbutils.widgets.get("secret_scope")
+tenant_id      = dbutils.widgets.get("tenant_id")
+client_id      = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
+pool_name      = dbutils.widgets.get("fabric_pool_name")
+node_size      = dbutils.widgets.get("fabric_node_size")
+node_count     = int(dbutils.widgets.get("fabric_node_count"))
+runtime        = dbutils.widgets.get("fabric_runtime")
+env_name       = dbutils.widgets.get("fabric_environment_name")
 force_mat      = dbutils.widgets.get("force_materialize").strip().lower() == "true"
 n_batches      = max(1, min(365, int(dbutils.widgets.get("incremental_batches_to_run").strip())))
 
-if not wh_db:
-    raise ValueError("wh_db is required")
+_required = dict(wh_db=wh_db, fabric_workspace_id=workspace_id, fabric_lakehouse_id=lakehouse_id,
+                 tenant_id=tenant_id, client_id=client_id, client_secret_secret=client_secret_secret)
+_missing = [k for k, v in _required.items() if not v]
+if _missing:
+    raise ValueError(f"missing required params: {_missing}")
 
 sf             = scale_factor
 staging_db     = f"{catalog}.tpcdi_incremental_staging_{sf}"
@@ -76,27 +106,36 @@ STAGING_TABLES = [
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # 1. Materialize staging → OneLake (idempotent, once per SF)
-# MAGIC
-# MAGIC Distributed Delta DEEP CLONE onto the OneLake ABFS path — no pandas, no
-# MAGIC driver collection. Requires a standard/UC-enabled cluster (serverless
-# MAGIC can't set `fs.azure.*` for the Spark→OneLake ABFS write); the interactive
-# MAGIC cluster the job pins is UC-enabled + SINGLE_USER (needed to read `main`).
+# MAGIC # 0. Provision the Fabric side (capacity check, pool, environment, notebooks)
 
 # COMMAND ----------
 
-# OneLake OAuth via the Fabric SPN (secret scope). Bare-GUID ABFS path — the
-# `.lakehouse` suffix triggers 400 FriendlyNameSupportDisabled in GUID mode.
-tenant = dbutils.secrets.get(secret_scope, "tenant_id")
-spark.conf.set(f"fs.azure.account.auth.type.{onelake_acct}", "OAuth")
-spark.conf.set(f"fs.azure.account.oauth.provider.type.{onelake_acct}",
-               "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider")
-spark.conf.set(f"fs.azure.account.oauth2.client.id.{onelake_acct}",
-               dbutils.secrets.get(secret_scope, "client_id"))
-spark.conf.set(f"fs.azure.account.oauth2.client.secret.{onelake_acct}",
-               dbutils.secrets.get(secret_scope, "client_secret"))
-spark.conf.set(f"fs.azure.account.oauth2.client.endpoint.{onelake_acct}",
-               f"https://login.microsoftonline.com/{tenant}/oauth2/token")
+token = fab.get_token(dbutils=dbutils, tenant_id=tenant_id, client_id=client_id,
+                      client_secret_secret=client_secret_secret)
+fab.check_capacity(token, workspace_id)
+fab.ensure_pool(token, workspace_id, name=pool_name, node_size=node_size, node_count=node_count)
+env_id = fab.ensure_environment(token, workspace_id, name=env_name, runtime=runtime,
+                                pool_name=pool_name, node_size=node_size)
+lh_name = fab.lakehouse_name(token, workspace_id, lakehouse_id)
+nb_ids = fab.deploy_notebooks(token, workspace_id, os.path.join(_here, "notebooks"),
+                              lakehouse_id=lakehouse_id, lakehouse_name=lh_name,
+                              environment_id=env_id)
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # 1. Materialize staging → OneLake (idempotent, once per SF)
+# MAGIC
+# MAGIC Distributed Delta DEEP CLONE onto the OneLake ABFS path — no pandas, no
+# MAGIC driver collection. Needs classic UC compute: serverless can't set
+# MAGIC `fs.azure.*` for the Spark→OneLake ABFS write, and the clone reads `main`.
+
+# COMMAND ----------
+
+# OneLake OAuth as the SP. Bare-GUID ABFS path — the `.lakehouse` suffix
+# triggers 400 FriendlyNameSupportDisabled in GUID mode.
+fab.onelake_conf(spark, dbutils, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
 
 def _onelake_path(t):
     return f"abfss://{workspace_id}@{onelake_acct}/{lakehouse_id}/Tables/{staging_schema}/{t}"
@@ -136,27 +175,17 @@ else:
 # MAGIC # 2. Trigger the Fabric-side per-run reset and block until it completes
 # MAGIC
 # MAGIC `notebooks/setup.py` runs IN Fabric: DROP+CREATE the working schema,
-# MAGIC SHALLOW CLONE the 20 tables from OneLake `staging_sf{sf}`, create the 6
-# MAGIC empty bronze tables, and reset the streaming checkpoints (Fabric-side).
+# MAGIC SHALLOW CLONE the 20 tables from OneLake `staging_sf{sf}`, and create the
+# MAGIC 6 empty bronze tables.
 
 # COMMAND ----------
 
-# _fabric_conn.py sits alongside this notebook in the repo; add its dir to path.
-import sys, os
-_here = os.path.dirname(os.path.abspath("__file__")) if "__file__" in dir() else os.getcwd()
-for p in {_here, os.path.dirname(_here)}:
-    if p not in sys.path:
-        sys.path.insert(0, p)
-import _fabric_conn as fab
-
-token = fab.get_token(dbutils=dbutils, secret_scope=secret_scope)
-nb = fab.find_item(token, workspace_id, setup_nb_name, item_type="Notebook")
-if not nb:
-    raise RuntimeError(f"Fabric notebook {setup_nb_name!r} not found in workspace {workspace_id}")
-
-print(f"[fabric] triggering {setup_nb_name} (wh_db={wh_db}, sf={sf})...")
+# Fresh token: the provisioning above can outlast a token's lifetime.
+token = fab.get_token(dbutils=dbutils, tenant_id=tenant_id, client_id=client_id,
+                      client_secret_secret=client_secret_secret)
+print(f"[fabric] triggering setup (wh_db={wh_db}, sf={sf})...")
 inst = fab.run_and_wait(
-    token, workspace_id, nb["id"],
+    token, workspace_id, nb_ids["setup"],
     parameters={"wh_db": wh_db, "scale_factor": sf, "staging_schema": staging_schema},
     default_lakehouse_id=lakehouse_id,
     timeout_secs=3600,

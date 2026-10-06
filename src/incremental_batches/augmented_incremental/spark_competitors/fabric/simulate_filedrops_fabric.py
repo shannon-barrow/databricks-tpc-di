@@ -1,19 +1,18 @@
 # Databricks notebook source
-# Per-batch file drop — Fabric variant. Runs ON Databricks (interactive cluster
-# 0905-212234-wq3cjc8j), the CHILD job's first task, ordered before run_fabric.
+# Per-batch file drop — Fabric Spark/NEE variant. Runs ON Databricks (classic
+# compute — the OneLake write needs fs.azure.* confs), the CHILD job's first
+# task, ordered before run_fabric.
 #
 # Port of augmented_incremental/simulate_filedrops.py. Identical logic — find the
-# single pre-staged part file per dataset for this batch_date and drop it into the
-# streaming watch dir, renamed to {Dataset}.{file_ext} — EXCEPT the destination is
-# **OneLake Files** (where the Fabric ingest_bronze readStream watches) instead of
-# the UC volume Autoloader dir. Source part files still come from the UC external
-# volume staging tree (Databricks-generated); we copy across to OneLake.
+# single pre-staged part file per dataset for this batch_date and drop it,
+# renamed to {Dataset}.{file_ext} — EXCEPT the destination is **OneLake Files**
+# (where the Fabric ingest_bronze reads it) instead of the UC volume. Source part
+# files still come from the UC volume staging tree (Databricks-generated); we
+# copy across to OneLake.
 #
-# Layout mirrors the Databricks original (agreed design): one file per dataset in a
-# per-batch subdir `{batches_dir}/{batch_date}/{Dataset}.{file_ext}`. The Fabric
-# native file source lists the watch dir per trigger and picks up the new subdir's
-# file; pathGlobFilter matches the leaf filename. Per-batch subdir = unique path per
-# day, so the checkpoint (full-path identity, fileNameOnly=false) reprocesses it.
+# Layout mirrors the Databricks original: one file per dataset in a per-batch
+# subdir `{batches_dir}/{batch_date}/{Dataset}.{file_ext}`; ingest_bronze reads
+# exactly that batch_date's subdir.
 
 import os
 import concurrent.futures
@@ -27,9 +26,11 @@ dbutils.widgets.text("catalog", "main")
 dbutils.widgets.text("batch_date", "")
 dbutils.widgets.text("wh_db", "")
 dbutils.widgets.text("file_ext", "txt")
-dbutils.widgets.text("fabric_workspace_id", "4f119fd7-d1f7-48bc-be77-6c41c782b541", "pmt_fabric_ws GUID")
-dbutils.widgets.text("fabric_lakehouse_id", "3f5b1c43-a52c-4a2e-90d7-4de7504e6122", "tpcdi_fabric lakehouse GUID")
-dbutils.widgets.text("secret_scope", "tpcdi_fabric", "Databricks secret scope holding the Fabric SPN")
+dbutils.widgets.text("fabric_workspace_id", "", "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id", "", "Lakehouse id holding the daily file drops")
+dbutils.widgets.text("tenant_id", "", "Entra tenant id")
+dbutils.widgets.text("client_id", "", "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret", "", "UC secret path of the SP client secret (catalog.schema.key)")
 
 catalog         = dbutils.widgets.get("catalog")
 scale_factor    = dbutils.widgets.get("scale_factor")
@@ -39,9 +40,15 @@ wh_db           = dbutils.widgets.get("wh_db")
 file_ext        = dbutils.widgets.get("file_ext").strip()
 workspace_id    = dbutils.widgets.get("fabric_workspace_id")
 lakehouse_id    = dbutils.widgets.get("fabric_lakehouse_id")
-secret_scope    = dbutils.widgets.get("secret_scope")
-if not batch_date:
-    raise ValueError("batch_date is required")
+tenant_id       = dbutils.widgets.get("tenant_id")
+client_id       = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
+_required = dict(batch_date=batch_date, wh_db=wh_db, fabric_workspace_id=workspace_id,
+                 fabric_lakehouse_id=lakehouse_id, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
+_missing = [k for k, v in _required.items() if not v]
+if _missing:
+    raise ValueError(f"missing required params: {_missing}")
 
 # stage_to_files writes Spark CSV part files (*.csv); the benchmark wants *.txt.
 read_file_ext = "csv" if file_ext == "txt" else file_ext
@@ -61,23 +68,16 @@ DATASETS = [
 
 # COMMAND ----------
 
-# OneLake OAuth via the Fabric SPN. Set on BOTH the session conf (for any Spark
-# access) and the JVM Hadoop conf so dbutils.fs (FileSystem) honors it for the
-# cross-filesystem copy into abfss OneLake.
-tenant = dbutils.secrets.get(secret_scope, "tenant_id")
-_oauth = {
-    f"fs.azure.account.auth.type.{acct}": "OAuth",
-    f"fs.azure.account.oauth.provider.type.{acct}":
-        "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
-    f"fs.azure.account.oauth2.client.id.{acct}": dbutils.secrets.get(secret_scope, "client_id"),
-    f"fs.azure.account.oauth2.client.secret.{acct}": dbutils.secrets.get(secret_scope, "client_secret"),
-    f"fs.azure.account.oauth2.client.endpoint.{acct}":
-        f"https://login.microsoftonline.com/{tenant}/oauth2/token",
-}
-_hadoop = spark._jsc.hadoopConfiguration()
-for k, v in _oauth.items():
-    spark.conf.set(k, v)
-    _hadoop.set(k, v)
+# OneLake OAuth as the SP, on both the session conf and the JVM Hadoop conf
+# (dbutils.fs uses the latter for the cross-filesystem copy into OneLake).
+import sys
+_nb = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
+_here = os.path.dirname(_nb if _nb.startswith("/Workspace") else "/Workspace" + _nb)
+if _here not in sys.path:
+    sys.path.insert(0, _here)
+import _fabric_conn as fab
+fab.onelake_conf(spark, dbutils, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
 
 # COMMAND ----------
 

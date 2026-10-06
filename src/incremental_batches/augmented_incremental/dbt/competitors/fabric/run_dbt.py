@@ -7,8 +7,9 @@
 # ODBC driver, which only the classic-cluster init script can provide. The
 # cluster libraries should pin dbt-fabric; a defensive pip install is below.
 #
-# Auth: Entra service principal (client_id/client_secret from the `tpcdi_fabric`
-# UC secret scope; tenant + host + database are plain params). No SQL logins.
+# Auth: Entra service principal. tenant_id / client_id / host / database are
+# plain params; only the SP client secret is a UC secret, passed as its full
+# path (client_secret_secret = "catalog.schema.key"). No SQL logins.
 #
 # Vars passed to dbt match what the fabric_models expect, plus fabric_files_url
 # (the OneLake Files base the fabric__read_daily_csv OPENROWSET(BULK) reads).
@@ -23,11 +24,13 @@ dbutils.widgets.text("batch_date",       "")
 dbutils.widgets.text("catalog",          "main")
 dbutils.widgets.text("tpcdi_directory",  "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
 dbutils.widgets.text("dbt_project_dir",  "", "Workspace-repo path to the dbt project")
-dbutils.widgets.text("fabric_wh_host",   "skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com")
-dbutils.widgets.text("fabric_wh_name",   "tpcdi_fabric_dw")
-dbutils.widgets.text("tenant_id",        "9f37a392-f0ae-4280-9796-f1864a10effc")
-dbutils.widgets.text("fabric_workspace_id", "e0a370b6-0279-4bc2-92ef-0a3f001e068b")
-dbutils.widgets.text("fabric_lakehouse_id", "54963c1f-bb06-4acd-8db3-b8b5056e81c3")
+dbutils.widgets.text("fabric_wh_host",   "", "Warehouse SQL endpoint host")
+dbutils.widgets.text("fabric_wh_name",   "", "Warehouse item name")
+dbutils.widgets.text("tenant_id",        "", "Entra tenant id")
+dbutils.widgets.text("client_id",        "", "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret", "", "UC secret path of the SP client secret (catalog.schema.key)")
+dbutils.widgets.text("fabric_workspace_id", "", "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id", "", "Lakehouse id holding the daily file drops")
 dbutils.widgets.text("file_ext",         "txt")
 
 wh_db            = dbutils.widgets.get("wh_db")
@@ -39,21 +42,27 @@ dbt_project_dir  = dbutils.widgets.get("dbt_project_dir")
 wh_host          = dbutils.widgets.get("fabric_wh_host")
 wh_name          = dbutils.widgets.get("fabric_wh_name")
 tenant_id        = dbutils.widgets.get("tenant_id")
+client_id        = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
 ws_id            = dbutils.widgets.get("fabric_workspace_id")
 lh_id            = dbutils.widgets.get("fabric_lakehouse_id")
 file_ext         = dbutils.widgets.get("file_ext").strip()
 
-if not (wh_db and batch_date and dbt_project_dir):
-    raise ValueError("wh_db, batch_date, and dbt_project_dir are required")
+_required = dict(wh_db=wh_db, batch_date=batch_date, dbt_project_dir=dbt_project_dir,
+                 fabric_wh_host=wh_host, fabric_wh_name=wh_name, tenant_id=tenant_id,
+                 client_id=client_id, client_secret_secret=client_secret_secret,
+                 fabric_workspace_id=ws_id, fabric_lakehouse_id=lh_id)
+_missing = [k for k, v in _required.items() if not v]
+if _missing:
+    raise ValueError(f"missing required params: {_missing}")
 
 run_schema = f"{wh_db}_{scale_factor}".lower()
 
 # OneLake Files base the fabric bronze OPENROWSET(BULK) reads from. The macro
 # appends /{run_schema}/{batch_date}/{Dataset}.txt; simulate_filedrops_fabric
 # writes the day's files to the matching OneLake path.
-# ⚠ VERIFY: OneLake OPENROWSET is in preview and wants an absolute URL. This dfs
-# GUID form is the candidate; if OPENROWSET rejects it, try the
-# https://onelake.blob.fabric.microsoft.com/... or the <ws>/<lh>.Lakehouse form.
+# OPENROWSET(BULK) wants an absolute URL; the dfs GUID form below is the one
+# Fabric DW accepts.
 fabric_files_url = (f"https://onelake.dfs.fabric.microsoft.com/{ws_id}/{lh_id}"
                     f"/Files/augmented_incremental/_dailybatches")
 
@@ -81,8 +90,13 @@ except ImportError:
 
 # COMMAND ----------
 
-client_id     = dbutils.secrets.get(scope="tpcdi_fabric", key="client_id")
-client_secret = dbutils.secrets.get(scope="tpcdi_fabric", key="client_secret")
+def _secret_from_path(path):
+    """Resolve a full UC secret path "catalog.schema.key" to its value."""
+    catalog, schema, key = path.split(".", 2)
+    return dbutils.secrets.get(catalog=catalog, schema=schema, key=key)  # noqa: F821
+
+
+client_secret = _secret_from_path(client_secret_secret)
 
 profiles_dir = tempfile.mkdtemp(prefix="dbt_profiles_")
 profile_path = os.path.join(profiles_dir, "profiles.yml")

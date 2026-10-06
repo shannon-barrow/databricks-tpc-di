@@ -16,10 +16,11 @@ the init script, shared by all tasks via `job_cluster_key`.
 
 Pre-requisites (one-time, out-of-band):
   - Fabric Warehouse item (host/name are plain params).
-  - Entra service principal (tpcdi-fabric-sp) with a login/user IN the WH, its
-    client_id/client_secret in the `tpcdi_fabric` UC secret scope.
-  - The `tpcdi_fabric` Lakehouse in the same workspace (staging_sf{sf} is DEEP
-    CLONE'd there by setup if missing).
+  - A schema-enabled Lakehouse in the same workspace (staging_sf{sf} is DEEP
+    CLONE'd there by setup if missing; the daily CSVs land in its Files).
+  - An Entra service principal that is a member (Contributor+) of the
+    workspace. tenant_id / client_id are plain params; its client secret is a
+    UC secret whose full path is passed as client_secret_secret.
 
 Two builders:
   - build_child(...)  — 2-task per-date job: simulate_filedrops_fabric -> run_dbt
@@ -38,9 +39,13 @@ _RETRY_POLICY = {"max_retries": 0, "min_retry_interval_millis": 0, "retry_on_tim
 _AUG_PATH = "incremental_batches/augmented_incremental"
 _FAB_DIR = f"{_AUG_PATH}/dbt/competitors/fabric"
 _CLUSTER_KEY = "fabric_dbt_cluster"
+# Classic DBR for the job cluster. 17.3 LTS is the floor for reading UC secrets
+# on classic compute; the init script picks the matching Ubuntu apt repo.
+_SPARK_VERSION = "18.x-scala2.13"
+_NODE_TYPE = "Standard_D8ds_v5"
 
-# Plain (non-secret) params every task needs. SP client_id/secret are NOT here —
-# the notebooks read them from the `tpcdi_fabric` UC secret scope directly.
+# Params every task needs. All plain values except client_secret_secret, which
+# is the full UC path of the SP client secret (the notebooks resolve it).
 _COMMON_PARAMS = {
     "catalog":              "{{job.parameters.catalog}}",
     "scale_factor":         "{{job.parameters.scale_factor}}",
@@ -52,6 +57,8 @@ _COMMON_PARAMS = {
     "fabric_lakehouse_id":  "{{job.parameters.fabric_lakehouse_id}}",
     "fabric_lakehouse_name":"{{job.parameters.fabric_lakehouse_name}}",
     "tenant_id":            "{{job.parameters.tenant_id}}",
+    "client_id":            "{{job.parameters.client_id}}",
+    "client_secret_secret": "{{job.parameters.client_secret_secret}}",
     "file_ext":             "{{job.parameters.file_ext}}",
 }
 _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}")
@@ -59,8 +66,8 @@ _BATCHED_PARAMS = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}
 
 def _job_cluster(*, repo_src_path: str, spark_version: str, node_type_id: str,
                  single_user_name: str | None) -> dict:
-    """Shared classic single-node cluster: UC single-user (reads `main`) +
-    the msodbcsql18 init script (ODBC for dbt-fabric/pyodbc)."""
+    """Shared classic single-node cluster: UC dedicated access (reads `main`
+    and UC secrets) + the msodbcsql18 init script (ODBC for dbt-fabric)."""
     nc: dict[str, Any] = {
         "spark_version": spark_version,
         "node_type_id": node_type_id,
@@ -83,10 +90,8 @@ def _job_cluster(*, repo_src_path: str, spark_version: str, node_type_id: str,
 def _make_task(*, task_key: str, notebook_path: str, base_params: dict,
                depends_on: list[str] | None = None, run_if: str = "ALL_SUCCESS",
                interactive_cluster_id: str | None = None) -> dict:
-    # Pin to a pre-existing interactive cluster when given (it carries the working
-    # dbt-fabric + msodbcsql18 env); otherwise fall back to the ephemeral job
-    # cluster. A fresh job cluster lacks the dbt deps and hits
-    # ImportError: evaluate_forward_ref from typing_extensions on the pip install.
+    # Pin to a pre-existing interactive cluster when given (it must carry the
+    # msodbcsql18 init script); otherwise run on the shared job cluster.
     task: dict[str, Any] = {"task_key": task_key}
     if interactive_cluster_id:
         task["existing_cluster_id"] = interactive_cluster_id
@@ -107,12 +112,13 @@ def _make_task(*, task_key: str, notebook_path: str, base_params: dict,
 
 def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor: int,
                 tpcdi_directory: str, wh_db: str,
-                fabric_wh_host: str, fabric_wh_name: str = "tpcdi_fabric_dw",
+                fabric_wh_host: str, fabric_wh_name: str,
                 fabric_workspace_id: str, fabric_lakehouse_id: str,
-                fabric_lakehouse_name: str = "tpcdi_fabric_v2",
-                tenant_id: str, file_ext: str = "txt",
-                spark_version: str = "15.4.x-scala2.12",
-                node_type_id: str = "Standard_D8ds_v5",
+                fabric_lakehouse_name: str,
+                tenant_id: str, client_id: str, client_secret_secret: str,
+                file_ext: str = "txt",
+                spark_version: str = _SPARK_VERSION,
+                node_type_id: str = _NODE_TYPE,
                 interactive_cluster_id: str | None = None,
                 single_user_name: str | None = None, **_unused) -> dict:
     aug = f"{repo_src_path}/{_AUG_PATH}"
@@ -149,6 +155,8 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
             {"name": "fabric_lakehouse_id", "default": fabric_lakehouse_id},
             {"name": "fabric_lakehouse_name","default": fabric_lakehouse_name},
             {"name": "tenant_id",           "default": tenant_id},
+            {"name": "client_id",           "default": client_id},
+            {"name": "client_secret_secret","default": client_secret_secret},
             {"name": "file_ext",            "default": file_ext},
             {"name": "batch_date",          "default": ""},
         ],
@@ -159,12 +167,13 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
 
 def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalog: str,
                  scale_factor: int, tpcdi_directory: str, wh_db: str,
-                 fabric_wh_host: str, fabric_wh_name: str = "tpcdi_fabric_dw",
+                 fabric_wh_host: str, fabric_wh_name: str,
                  fabric_workspace_id: str, fabric_lakehouse_id: str,
-                 fabric_lakehouse_name: str = "tpcdi_fabric_v2",
-                 tenant_id: str, file_ext: str = "txt",
-                 spark_version: str = "15.4.x-scala2.12",
-                 node_type_id: str = "Standard_D8ds_v5",
+                 fabric_lakehouse_name: str,
+                 tenant_id: str, client_id: str, client_secret_secret: str,
+                 file_ext: str = "txt",
+                 spark_version: str = _SPARK_VERSION,
+                 node_type_id: str = _NODE_TYPE,
                  interactive_cluster_id: str | None = None,
                  single_user_name: str | None = None, **_unused) -> dict:
     aug = f"{repo_src_path}/{_AUG_PATH}"
@@ -173,6 +182,8 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
         task_key="setup_fabric",
         notebook_path=f"{aug}/dbt/competitors/fabric/setup_fabric",
         base_params={**_COMMON_PARAMS,
+                     # setup_fabric names the UC source catalog databricks_catalog
+                     "databricks_catalog": "{{job.parameters.catalog}}",
                      "incremental_batches_to_run": "{{job.parameters.incremental_batches_to_run}}"},
         interactive_cluster_id=interactive_cluster_id)
 
@@ -243,6 +254,8 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
             {"name": "fabric_lakehouse_id",         "default": fabric_lakehouse_id},
             {"name": "fabric_lakehouse_name",       "default": fabric_lakehouse_name},
             {"name": "tenant_id",                   "default": tenant_id},
+            {"name": "client_id",                   "default": client_id},
+            {"name": "client_secret_secret",        "default": client_secret_secret},
             {"name": "file_ext",                    "default": file_ext},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},

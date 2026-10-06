@@ -21,17 +21,21 @@
 dbutils.widgets.text("wh_db",           "")
 dbutils.widgets.dropdown("scale_factor","10", ["10","100","1000","5000","10000","20000"])
 dbutils.widgets.text("tpcdi_directory", "/Volumes/main/tpcdi_raw_data/tpcdi_volume/")
-dbutils.widgets.text("fabric_wh_host",  "skrtph5o6caeff4w6gdeuehp7q-wzykhydzalbexexpbi7qahqgrm.datawarehouse.fabric.microsoft.com")
-dbutils.widgets.text("fabric_wh_name",  "tpcdi_fabric_dw")
-dbutils.widgets.text("tenant_id",       "9f37a392-f0ae-4280-9796-f1864a10effc")
-dbutils.widgets.text("fabric_workspace_id", "e0a370b6-0279-4bc2-92ef-0a3f001e068b")
-dbutils.widgets.text("fabric_lakehouse_id", "54963c1f-bb06-4acd-8db3-b8b5056e81c3")
+dbutils.widgets.text("fabric_wh_host",  "", "Warehouse SQL endpoint host")
+dbutils.widgets.text("fabric_wh_name",  "", "Warehouse item name")
+dbutils.widgets.text("tenant_id",       "", "Entra tenant id")
+dbutils.widgets.text("client_id",       "", "Service principal application (client) id")
+dbutils.widgets.text("client_secret_secret", "", "UC secret path of the SP client secret (catalog.schema.key)")
+dbutils.widgets.text("fabric_workspace_id", "", "Fabric workspace id")
+dbutils.widgets.text("fabric_lakehouse_id", "", "Lakehouse id holding the daily file drops")
 
 wh_db        = dbutils.widgets.get("wh_db")
 scale_factor = dbutils.widgets.get("scale_factor")
 wh_host      = dbutils.widgets.get("fabric_wh_host")
 wh_name      = dbutils.widgets.get("fabric_wh_name")
 tenant_id    = dbutils.widgets.get("tenant_id")
+client_id    = dbutils.widgets.get("client_id")
+client_secret_secret = dbutils.widgets.get("client_secret_secret")
 ws_id        = dbutils.widgets.get("fabric_workspace_id")
 lh_id        = dbutils.widgets.get("fabric_lakehouse_id")
 
@@ -46,6 +50,7 @@ run_schema = f"{wh_db}_{scale_factor}".lower()
 # COMMAND ----------
 
 conn = fab_connect(host=wh_host, database=wh_name, tenant_id=tenant_id,
+                   client_id=client_id, client_secret_secret=client_secret_secret,
                    label={"task": "teardown_fabric", "wh_db": wh_db, "scale_factor": scale_factor})
 cur = conn.cursor()
 try:
@@ -64,20 +69,8 @@ finally:
 # COMMAND ----------
 
 # Wipe the per-batch OneLake drop zone (needs OneLake OAuth on the JVM conf).
-_oauth = {
-    "fs.azure.account.auth.type.onelake.dfs.fabric.microsoft.com": "OAuth",
-    "fs.azure.account.oauth.provider.type.onelake.dfs.fabric.microsoft.com":
-        "org.apache.hadoop.fs.azurebfs.oauth2.ClientCredsTokenProvider",
-    "fs.azure.account.oauth2.client.id.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_id"),
-    "fs.azure.account.oauth2.client.secret.onelake.dfs.fabric.microsoft.com":
-        dbutils.secrets.get("tpcdi_fabric", "client_secret"),
-    "fs.azure.account.oauth2.client.endpoint.onelake.dfs.fabric.microsoft.com":
-        f"https://login.microsoftonline.com/{tenant_id}/oauth2/token",
-}
-_hconf = spark._jsc.hadoopConfiguration()
-for k, v in _oauth.items():
-    spark.conf.set(k, v); _hconf.set(k, v)
+fab_onelake_conf(spark, tenant_id=tenant_id, client_id=client_id,
+                 client_secret_secret=client_secret_secret)
 
 batch_dir = (f"abfss://{ws_id}@onelake.dfs.fabric.microsoft.com/{lh_id}"
              f"/Files/augmented_incremental/_dailybatches/{run_schema}")
