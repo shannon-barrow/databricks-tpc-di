@@ -4,8 +4,11 @@
 # (init_msodbcsql18.sh) installed the ODBC Driver 18 that pyodbc/dbt-fabric need.
 #
 # NO PEP-723 serverless env block here on purpose: dbt-fabric needs the system
-# ODBC driver, which only the classic-cluster init script can provide. The
-# cluster libraries should pin dbt-fabric; a defensive pip install is below.
+# ODBC driver, which only the classic-cluster init script can provide.
+# dbt-fabric is %pip-installed notebook-scoped below, then Python restarts:
+# its mashumaro dep needs a newer typing_extensions than the DBR image ships,
+# and the image's copy is already imported in this process, so installing
+# without a restart fails at `import dbt` (evaluate_forward_ref ImportError).
 #
 # Auth: Entra service principal. tenant_id / client_id / host / database are
 # plain params; only the SP client secret is a UC secret, passed as its full
@@ -13,6 +16,16 @@
 #
 # Vars passed to dbt match what the fabric_models expect, plus fabric_files_url
 # (the OneLake Files base the fabric__read_daily_csv OPENROWSET(BULK) reads).
+
+# COMMAND ----------
+
+# MAGIC %pip install --quiet dbt-fabric==1.10.0 pyodbc
+
+# COMMAND ----------
+
+dbutils.library.restartPython()
+
+# COMMAND ----------
 
 import os, subprocess, sys, json, tempfile
 
@@ -67,15 +80,6 @@ fabric_files_url = (f"https://onelake.dfs.fabric.microsoft.com/{ws_id}/{lh_id}"
                     f"/Files/augmented_incremental/_dailybatches")
 
 # COMMAND ----------
-
-# Defensive install — no-op if the cluster library already provides dbt-fabric.
-try:
-    import dbt.adapters.fabric  # noqa: F401
-    print("[ok] dbt-fabric already installed")
-except ImportError:
-    print("[install] dbt-fabric not found, pip-installing...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-                           "dbt-fabric==1.10.0", "pyodbc"])
 
 # Confirm the ODBC driver the init script installed is visible.
 try:
