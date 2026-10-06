@@ -97,14 +97,17 @@ augmented_incremental/
 │   ├── FactCashBalances Incremental.py
 │   ├── FactHoldings Incremental.py
 │   ├── FactWatches Incremental.py
-│   ├── FactMarketHistory Incremental.py
+│   ├── FactMarketHistory Incremental.py   # batch query on batch_date (no stream / checkpoint)
 │   └── currentaccountbalances Incremental.py
+├── non_ss_workflow/               # Cluster variant without Structured Streaming: read_files bronze +
+│                                  # per-batch_date queries; its setup.py also strips NOT NULL + PK/FK
+├── spark_competitors/             # competitor Spark engines (Fabric Spark / NEE) — see its README
 ├── DLT/                           # SDP variants — see DLT/README.md for the deep-dive
 │   ├── pipelines_setup.py                  # canonical SDP setup (Liquid)
 │   ├── update_pipeline_notebook.py         # Library-swap helper: historical → incremental
 │   ├── dlt_ingest_bronze.py                # bronze auto-loader ingest
 │   └── dlt_historical.sql / dlt_incremental.sql  # canonical SDP variant
-└── dbt/                           # dbt variant — see dbt/README.md for the deep-dive
+└── dbt/                           # dbt variant — see dbt/README.md; dbt/competitors/ = warehouse competitors
     ├── dbt_project.yml / profiles.yml.template
     ├── macros/
     └── models/                    # bronze / silver / gold (16 dbt-managed models)
@@ -116,7 +119,8 @@ Each benchmark variant pairs with a specific setup notebook:
 
 | Benchmark variant | Setup notebook | What it does |
 |---|---|---|
-| Cluster Jobs    | `setup.py`                          | DEEP CLONE 8 dim/fact + bronzedailymarket from staging; SHALLOW CLONE 12 reference tables; 6 streaming bronze tables left for Auto Loader to populate |
+| Cluster Jobs    | `setup.py`                          | DEEP CLONE 8 dim/fact + bronzedailymarket from staging, then set explicit working-table properties (optimizeWrite on, autoCompact off, deletion vectors, row tracking, Parquet v2); SHALLOW CLONE 12 reference tables; 6 streaming bronze tables left for Auto Loader to populate |
+| Cluster batch (NonSS) | `non_ss_workflow/setup.py`    | Same clones as `setup.py`, then drops FK/PK constraints and relaxes NOT NULL; bronze is plain append (no Auto Loader). Databricks side of the Fabric Spark/NEE comparison |
 | dbt             | `setup_dbt.py`                      | Same DEEP/SHALLOW CLONE shape as `setup.py`, plus 6 streaming bronze pre-creates with `CLUSTER BY` + `dataSkippingNumIndexedCols=34` (setup-owns-layout pattern — dbt model configs declare no `liquid_clustered_by` / `tblproperties`) |
 | SDP             | `DLT/pipelines_setup.py`            | pipeline-managed CLUSTER BY |
 

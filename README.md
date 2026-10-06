@@ -132,25 +132,28 @@ The **SDP variant** uses a library-swap trick (`update_pipeline_notebook`) to bu
 
 The **dbt variant** uses Databricks-native `dbt_task` against a DBSQL warehouse; the dbt project at `src/incremental_batches/augmented_incremental/dbt/` is a stock dbt-databricks project (no custom materializations) so it transplants to Snowflake/BigQuery for cross-CDW comparison.
 
-## Cross-CDW competitor benchmarks
+## Competitor benchmarks
 
-The same Augmented Incremental dbt workload can run against a non-Databricks cloud data warehouse — **Snowflake**, **Amazon Redshift Serverless**, or **Google BigQuery** — reading the same source data Databricks generated. Run a competitor next to the Databricks dbt variant to compare engines on identical data and business logic.
+The same Augmented Incremental workload can run on a non-Databricks engine, reading the same source data Databricks generated:
 
-Use the **`src/TPC-DI Competitor Driver`** notebook (the counterpart to `TPC-DI Driver`). It runs *as you* — no service principal — and creates a **parent + child** Databricks Jobs pair per engine: `setup_{engine}` self-bootstraps the engine's staging from the Databricks `tpcdi_incremental_staging_{sf}` schema, then a `for_each_task` loop drives one child per simulated day (`simulate_filedrops_{engine}` → `dbt_run`). It creates the jobs; you trigger the parent to run them.
+- **Warehouses, via the dbt project:** Snowflake, Amazon Redshift Serverless, Google BigQuery, Microsoft Fabric Data Warehouse. Compare against the Databricks dbt variant.
+- **Spark engines, via the repo's PySpark notebooks:** Microsoft Fabric Spark and Fabric NEE (Native Execution Engine). Same notebooks for both; NEE on/off is the only difference. Compare against the Databricks Cluster variants.
+
+Use the **`src/TPC-DI Competitor Driver`** notebook (the counterpart to `TPC-DI Driver`). It runs *as you* — no service principal — and creates a **parent + child** Databricks Jobs pair per engine: `setup_{engine}` self-bootstraps the engine's staging from the Databricks `tpcdi_incremental_staging_{sf}` schema, then a `for_each_task` loop drives one child per simulated day (`simulate_filedrops_{engine}` → `dbt_run`, or `run_fabric` for the Spark engines). It creates the jobs; you trigger the parent to run them.
 
 - **Prerequisite:** the Databricks Augmented Incremental Stage 0 must have run for this SF first (the competitor reads its staged files + staging schema).
-- **Same-cloud only:** the Competitor dropdown lists only engines valid for the workspace's cloud (AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake, Azure → Snowflake) to avoid cross-region egress.
+- **Same-cloud only:** the Competitor dropdown lists only engines valid for the workspace's cloud (AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake, Azure → Snowflake + Fabric DW + Fabric Spark + Fabric NEE) to avoid cross-region egress.
 - **Credentials via Unity Catalog secrets:** only genuine secrets (passwords/keys/tokens) are UC secrets, referenced by full `catalog.schema.name` path and read at run time; hosts/users/accounts are plain params. Secrets live in `main.tpcdi_raw_data`, are named for what they unlock (created once, reused), and the driver validates but never creates them. UC secret reads require serverless env v5+.
-- **Compute:** serverless by default (zero cluster config); child tasks accept an `interactive_cluster_id` to run classic instead.
+- **Compute:** serverless by default (zero cluster config); child tasks accept an `interactive_cluster_id` to run classic instead. Fabric is the exception: its tasks need classic compute (OneLake writes, plus the ODBC driver for Fabric DW), so they default to a single-node DBR 18 LTS job cluster.
 
-See [`src/incremental_batches/augmented_incremental/dbt/competitors/README.md`](src/incremental_batches/augmented_incremental/dbt/competitors/README.md) for the cross-engine overview and the per-engine `PORT_NOTES.md` for design detail.
+See [`dbt/competitors/README.md`](src/incremental_batches/augmented_incremental/dbt/competitors/README.md) (warehouses) and [`spark_competitors/README.md`](src/incremental_batches/augmented_incremental/spark_competitors/README.md) (Spark engines) for the per-engine setup, and each engine's `PORT_NOTES.md` for design detail.
 
 ## Repo layout (high level)
 
 ```
 src/
   TPC-DI Driver.py                            entry-point notebook (Databricks benchmark)
-  TPC-DI Competitor Driver.py                 entry-point notebook (Snowflake/Redshift/BigQuery)
+  TPC-DI Competitor Driver.py                 entry-point notebook (Snowflake/Redshift/BigQuery/Fabric)
   tools/
     data_gen_tasks/data_gen.py                unified entry: digen inline; spark/augmented init+downstream gens
     data_gen_tasks/{gen,copy}_*.py            per-dataset task notebooks
@@ -161,7 +164,8 @@ src/
       workflows_{single_batch,incremental}.py
       sdp_{pipeline,workflow}.py
       augmented_{classic,sdp,dbt,staging}.py
-      augmented_{snowflake,redshift,bigquery}.py   competitor parent+child builders
+      augmented_{snowflake,redshift,bigquery,fabric}.py   dbt competitor parent+child builders
+      augmented_fabric_spark.py              Fabric Spark + Fabric NEE builder
       warehouse.py
     generate_competitor_workflow.py           competitor driver's job generator
     uc_secret_utils.py                        target-named UC secret naming + validation
@@ -176,7 +180,9 @@ src/
     bronze/ / silver/ / gold/ / audit_validation/
     augmented_incremental/                    Augmented benchmark (Cluster + SDP + dbt) — see its README
       dbt/                                    dbt variant (its own README)
-        competitors/                          cross-CDW ports (Snowflake/Redshift/BigQuery) — see its README
+        competitors/                          dbt competitor ports (Snowflake/Redshift/BigQuery/Fabric DW) — see its README
+      spark_competitors/                      Spark-engine competitors (Fabric Spark/NEE) — see its README
+      non_ss_workflow/                        batch (non-streaming) port of the Cluster loop
       DLT/                                    SDP variant (its own README)
   single_batch/
     SQL/                                      single-batch Cluster + DBSQL
@@ -195,7 +201,7 @@ CLAUDE.md                                     architecture context for AI agents
 - The native DIGen.jar path requires DBR 15.4 + Photon and a `SINGLE_USER` cluster access mode for `/local_disk0` scratch.
 - Augmented Incremental requires Stage 0 (the `augmented_staging` workflow) to run once per SF before the benchmark. Validated at SF=10/100/1000/5000/10000/20000.
 - Augmented Incremental — dbt variant additionally needs a DBSQL warehouse. The Driver auto-creates one sized by SF (Small at SF=20k, doubling SF moves up one size); see the per-SF sizing table above.
-- Cross-CDW competitor benchmarks need: the Databricks Stage 0 already run for the SF; a reachable competitor engine (Snowflake account / Redshift Serverless workgroup / BigQuery project) in the same cloud; the engine's credential stored as a Unity Catalog secret in `main.tpcdi_raw_data`; and serverless env v5+ (or DBR 17.3 LTS+) for UC secret reads. See the [competitors README](src/incremental_batches/augmented_incremental/dbt/competitors/README.md).
+- Cross-CDW competitor benchmarks need: the Databricks Stage 0 already run for the SF; a reachable competitor engine (Snowflake account / Redshift Serverless workgroup / BigQuery project / Fabric workspace on a running capacity) in the same cloud; the engine's credential stored as a Unity Catalog secret in `main.tpcdi_raw_data`; and serverless env v5+ (or DBR 17.3 LTS+) for UC secret reads. See the [competitors README](src/incremental_batches/augmented_incremental/dbt/competitors/README.md) and the [Spark competitors README](src/incremental_batches/augmented_incremental/spark_competitors/README.md).
 
 ## Notes on scoring
 

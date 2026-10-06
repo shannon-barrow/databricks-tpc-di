@@ -6,7 +6,8 @@ business logic — expressed as a dbt project so we can compare:
 
 - **dbt vs SDP** on Databricks
 - **dbt incremental vs SDP MV/ST** materializations on Databricks
-- **Cross-CDW** dbt performance (Databricks DBSQL vs Snowflake / BigQuery / Redshift)
+- **Cross-CDW** dbt performance (Databricks DBSQL vs Snowflake / BigQuery / Redshift / Fabric DW) —
+  see [`competitors/README.md`](competitors/README.md)
 
 dbt's scope is **per-batch incremental only**. Stage 0 (data generation)
 and Stage 1 setup (CLONE staging schema, reset `_dailybatches/`,
@@ -19,10 +20,10 @@ enters when the daily loop starts.
 ```
 src/incremental_batches/augmented_incremental/dbt/
 ├── dbt_project.yml             # vars + per-folder materialization defaults
-├── profiles.yml.template       # databricks + snowflake outputs (template)
+├── profiles.yml.template       # databricks + competitor outputs (template)
 ├── macros/
 │   ├── _helpers.sql            # tgt_db(), since_last_load(), staging_fq()
-│   └── read_files_dispatch.sql # adapter dispatch: read_files vs Snowflake stage
+│   └── read_files_dispatch.sql # adapter dispatch: read_files / Snowflake stage / Fabric OPENROWSET
 └── models/
     ├── sources.yml             # 12 read-only reference tables (cloned from staging)
     ├── bronze/                 # 7 incremental-append models (daily file ingest)
