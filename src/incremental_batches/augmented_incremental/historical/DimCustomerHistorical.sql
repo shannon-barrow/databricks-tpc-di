@@ -39,7 +39,7 @@ CREATE OR REPLACE TABLE IDENTIFIER(:catalog || '.' || :wh_db || '_' || :scale_fa
 ) 
 CLUSTER BY (enddate)  -- liquid: matches setup / setup_dbt choice; current rows (enddate=9999-12-31) cluster together
 TBLPROPERTIES (
-  'delta.autoOptimize.autoCompact' = 'true',
+  'delta.autoOptimize.autoCompact' = 'false',
   'delta.autoOptimize.optimizeWrite' = 'true',
   'delta.columnMapping.mode' = 'name',
   'delta.enableDeletionVectors' = 'false'

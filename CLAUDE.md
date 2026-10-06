@@ -456,6 +456,34 @@ business logic — expressed as a stock dbt project (no custom materializations)
   scale factor (Small for SF=20k anchor, doubling SF moves up one size).
   See `_dbt_wh_size()` in `generate_benchmark_workflow.py`.
 
+### Augmented Incremental — competitor benchmarks
+
+`src/TPC-DI Competitor Driver.py` creates parent + child jobs for a
+non-Databricks engine via `tools/generate_competitor_workflow.py`, which
+dispatches to `workflow_builders/augmented_{engine}.py`. The dropdown only
+offers engines native to the workspace's cloud (`COMPETITOR_CLOUD`): AWS →
+Snowflake + Redshift, GCP → Snowflake + BigQuery, Azure → Snowflake + Fabric
+DW + Fabric Spark + Fabric NEE.
+
+- **Warehouses (dbt):** `augmented_incremental/dbt/competitors/{snowflake,
+  redshift,bigquery,fabric}/` + `{engine}_models/`. Fabric DW = dbt-fabric.
+- **Spark engines (PySpark notebooks):** `augmented_incremental/
+  spark_competitors/fabric/` — `fabric_spark` and `fabric_nee` share one
+  builder (`augmented_fabric_spark.py`) and byte-identical notebooks; the
+  `enable_nee` job param (→ `spark.native.enabled` per session in
+  `batch_runner`) is the only difference. `setup_fabric` provisions the Fabric
+  side every run (fixed-size custom pool, Runtime 2.0 Environment, notebook
+  deploy). EMR / Dataproc would land next to `fabric/`.
+- **Credentials:** UC secrets in `main.tpcdi_raw_data`, named for what they
+  unlock (`default_secret_name`), passed to tasks as full `catalog.schema.key`
+  paths; everything else is a plain param. Fabric: plain tenant/client ids +
+  `client_secret_secret` = `fabric_<client_id>_sp_secret`.
+- **Compute:** Snowflake/Redshift/BigQuery default to serverless env v5.
+  **Fabric needs classic** (OneLake writes via `fs.azure.*` confs; Fabric DW's
+  dbt needs the msodbcsql18 init script), on DBR 17.3 LTS+ dedicated access
+  for UC secrets — job cluster by default, interactive cluster recommended for
+  long runs.
+
 ### Augmented Incremental — Liquid clustering
 
 Liquid clustering is the **only path** across the whole Augmented
@@ -505,6 +533,7 @@ Active variants on the cross-cloud benchmark dashboard:
 | Cluster Jobs (PERF-OPT / STD) | `setup.py`                              | DEEP CLONE staging (Liquid layout inherited) + 6 streaming bronze CREATEs |
 | SDP (PERF-OPT / STD)          | `DLT/pipelines_setup.py`                | pipeline-managed CLUSTER BY |
 | dbt (Small WH anchor at SF=20k) | `setup_dbt.py`                          | dbt-databricks 1.11.7 against premium SQL warehouse; setup-owns-layout pattern |
+| Cluster batch / "NonSS" (PERF-OPT / STD) | `non_ss_workflow/setup.py`   | no Structured Streaming: `read_files` bronze + `new_events` CTE per batch_date; setup also strips NOT NULL + PK/FK. The Databricks side of the Fabric Spark/NEE comparison. Jobs are hand-built (no builder / Driver path yet) |
 
 A small number of historical "Partitioned" variants (from before the
 Liquid consolidation) remain in the Run-History sheet for reference but
@@ -606,6 +635,7 @@ This is non-negotiable BEFORE triggering any job. Workspace repo id
 ```
 src/
   TPC-DI Driver.py                # entry-point notebook the user runs
+  TPC-DI Competitor Driver.py     # creates competitor (non-Databricks) benchmark jobs
   tools/
     digen_runner.py               # DIGen.jar wrapper (called inline from data_gen task in native mode)
     setup_context.py              # tpcdi_config bootstrap (api, cloud, defaults)
@@ -626,6 +656,8 @@ src/
       augmented_classic.py        # Augmented Incremental Cluster benchmark parent
       augmented_sdp.py            # Augmented Incremental SDP benchmark parent
       augmented_dbt.py            # Augmented Incremental dbt benchmark parent
+      augmented_{snowflake,redshift,bigquery,fabric}.py  # dbt competitor builders
+      augmented_fabric_spark.py   # Fabric Spark + Fabric NEE builder (Spark competitor)
       warehouse.py                # DBSQL warehouse spec
     augmented_staging/            # Stage 0 notebooks for Augmented Incremental
       _stage_ingestion.py         # stage_to_files() helper — partitioned-CSV writer
@@ -665,6 +697,9 @@ src/
       setup.py / setup_dbt.py / teardown.py    # Stage 1 setup/cleanup
       simulate_filedrops.py       # per-batch cp from _staging into auto-loader watch dir
       bronze/ historical/ incremental/ DLT/ dbt/  # variant-specific code
+      non_ss_workflow/            # batch (non-streaming) port of the Cluster loop
+      dbt/competitors/            # dbt warehouse competitors (see its README)
+      spark_competitors/          # Spark-engine competitors (Fabric Spark/NEE; see its README)
   single_batch/
     SQL/                          # all-batches-in-one variant (Cluster + DBSQL)
     spark_declarative_pipelines/  # SDP notebooks (was delta_live_tables/)

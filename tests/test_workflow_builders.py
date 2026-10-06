@@ -16,6 +16,7 @@ from workflow_builders import (
     sdp_pipeline, sdp_workflow,
     augmented_classic, augmented_sdp, augmented_dbt,
     augmented_staging,
+    augmented_fabric, augmented_fabric_spark,
 )
 
 
@@ -539,6 +540,98 @@ def test_augmented_staging_dag():
     _ok("ingest_FinWire → copy_finwire only")
 
 
+
+FABRIC = {
+    "repo_src_path": "/Workspace/Users/test@test.com/repo/src",
+    "catalog": "main",
+    "scale_factor": 10,
+    "tpcdi_directory": "/Volumes/main/tpcdi_raw_data/tpcdi_volume/",
+    "wh_db": "test_aug",
+    "fabric_workspace_id": "ws-guid",
+    "fabric_lakehouse_id": "lh-guid",
+    "tenant_id": "tenant-guid",
+    "client_id": "client-guid",
+    "client_secret_secret": "main.tpcdi_raw_data.fabric_client_guid_sp_secret",
+}
+
+
+def _all_tasks(job):
+    out = []
+    for t in job["tasks"]:
+        out.append(t)
+        inner = t.get("for_each_task", {}).get("task")
+        if inner:
+            out.append(inner)
+    return out
+
+
+def _assert_classic(job):
+    """Fabric tasks need classic compute (OneLake fs.azure.* confs)."""
+    assert "environments" not in job, "Fabric jobs must not use serverless environments"
+    for t in _all_tasks(job):
+        if "notebook_task" in t:
+            assert t.get("job_cluster_key") or t.get("existing_cluster_id"), t["task_key"]
+    for jc in job.get("job_clusters", []):
+        nc = jc["new_cluster"]
+        assert nc["data_security_mode"] == "SINGLE_USER"
+        major = int(nc["spark_version"].split(".")[0])
+        assert major >= 18 or nc["spark_version"].startswith("17.3"), \
+            "UC secrets on classic need DBR 17.3 LTS+"
+
+
+def test_fabric_competitors_offered_on_azure_only():
+    import generate_competitor_workflow as g
+    assert {"fabric_dw", "fabric_spark", "fabric_nee"} <= set(g.competitors_for_cloud("Azure"))
+    for cloud in ("AWS", "GCP"):
+        assert not any(c.startswith("fabric") for c in g.competitors_for_cloud(cloud))
+    print("  fabric competitors: Azure only")
+
+
+def test_fabric_dw_jobs():
+    kw = dict(FABRIC, fabric_wh_host="h.datawarehouse.fabric.microsoft.com",
+              fabric_wh_name="wh", fabric_lakehouse_name="lh")
+    child = augmented_fabric.build_child(job_name="c", **kw)
+    parent = augmented_fabric.build_parent(job_name="p", child_job_id=1, **kw)
+    assert [t["task_key"] for t in child["tasks"]] == ["simulate_filedrops_fabric", "dbt_run"]
+    for job in (child, parent):
+        _assert_classic(job)
+        init = job["job_clusters"][0]["new_cluster"]["init_scripts"][0]["workspace"]["destination"]
+        assert init.endswith("dbt/competitors/fabric/init_msodbcsql18.sh")
+        names = {p["name"] for p in job["parameters"]}
+        assert {"tenant_id", "client_id", "client_secret_secret"} <= names
+        assert "secret_scope" not in names
+    setup = parent["tasks"][0]["notebook_task"]["base_parameters"]
+    assert setup["databricks_catalog"] == "{{job.parameters.catalog}}"
+    print("  fabric_dw: classic + init script + UC-secret params")
+
+
+def test_fabric_spark_vs_nee_differ_only_by_toggle():
+    jobs = {}
+    for nee in (False, True):
+        child = augmented_fabric_spark.build_child(job_name="c", enable_nee=nee, **FABRIC)
+        parent = augmented_fabric_spark.build_parent(job_name="p", child_job_id=1,
+                                                     enable_nee=nee, **FABRIC)
+        for job in (child, parent):
+            _assert_classic(job)
+            for t in _all_tasks(job):
+                nb = t.get("notebook_task", {}).get("notebook_path", "")
+                if nb:
+                    assert "/spark_competitors/fabric/" in nb, nb
+        jobs[nee] = (child, parent)
+    for i in (0, 1):
+        a, b = json.loads(json.dumps(jobs[False][i])), json.loads(json.dumps(jobs[True][i]))
+        for job in (a, b):
+            job.pop("description"); job.pop("tags")
+            for p in job["parameters"]:
+                if p["name"] == "enable_nee":
+                    p["default"] = "X"
+        assert a == b, "Fabric Spark and NEE jobs must differ only by enable_nee"
+    parent_nee = jobs[True][1]
+    assert {p["name"]: p["default"] for p in parent_nee["parameters"]}["enable_nee"] == "true"
+    loop = parent_nee["tasks"][1]["for_each_task"]["task"]["run_job_task"]["job_parameters"]
+    assert loop["enable_nee"] == "{{job.parameters.enable_nee}}"
+    print("  fabric_spark / fabric_nee: identical except enable_nee")
+
 def main():
     tests = [
         test_datagen_spark,
@@ -558,6 +651,9 @@ def main():
         test_augmented_dbt_child,
         test_augmented_dbt_parent,
         test_augmented_staging_dag,
+        test_fabric_competitors_offered_on_azure_only,
+        test_fabric_dw_jobs,
+        test_fabric_spark_vs_nee_differ_only_by_toggle,
     ]
     for t in tests:
         t()

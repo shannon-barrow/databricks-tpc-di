@@ -1,7 +1,7 @@
 # Databricks notebook source
 # /// script
 # [tool.databricks.environment]
-# environment_version = "5"
+# environment_version = "6"
 # dependencies = [
 #   "dbt-core==1.9.*",
 #   "dbt-snowflake==1.9.*",
