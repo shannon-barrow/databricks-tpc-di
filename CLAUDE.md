@@ -711,8 +711,10 @@ tests/
 
 ## Active branch
 
-`data-gen-decomposition`. Carries the V6 trade-decomposition + V8
-customer scheduler + V8 Spark-distributed rename. Targets `main`.
+`main`. The benchmark workspace Git folders (`databricks-tpc-di-augmented`
+on the Azure `tpc-di` and AWS `tpc-di-aws` workspaces) track `main`; small
+follow-up changes are pushed straight to `main`, larger multi-commit work goes
+through a feature branch + PR.
 
 ## Status of validated scale factors
 
@@ -722,6 +724,10 @@ finishes in ~19 m on serverless (down from ~105 m pre-V8). End-to-end
 smoke (SF=10 × {Cluster/Inc, DBSQL/Single, SDP-CORE} × Spark, plus
 Augmented at SF=10) all SUCCEED. Audit `*_audit.csv` snapshots were
 regenerated against V8 output and committed at every SF tier.
+
+Competitor engines (created via the Competitor Driver) pass the SF=10,
+2-batch smoke test: Redshift / Snowflake / BigQuery on serverless, and Fabric
+DW / Fabric Spark / Fabric NEE on classic job clusters (2026-10).
 
 ## DLT → SDP rename
 

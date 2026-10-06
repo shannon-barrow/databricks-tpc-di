@@ -128,6 +128,42 @@ PAT). Plus a pre-flight that confirms UniForm is enabled on the sources.
 
 ---
 
+## Microsoft Fabric — DW, Spark, NEE (one service principal)
+
+Maps to `workflow_builders/augmented_fabric.py` (Fabric DW, dbt) and
+`workflow_builders/augmented_fabric_spark.py` (Fabric Spark / NEE, the PySpark
+notebooks) via `generate_competitor_workflow()`; headless equivalents are
+`dbt/competitors/fabric/create_jobs.py` and
+`spark_competitors/fabric/create_jobs.py --variant spark|nee`. Azure only.
+
+**Prerequisites that must exist before a run** (the app should verify each):
+
+- A Fabric **workspace on a running capacity** (a paused capacity fails every
+  run; Spark/NEE setup checks it when the SP can see the capacity).
+- A **schema-enabled Lakehouse** in that workspace — OneLake staging
+  (`staging_sf{sf}`, DEEP CLONE'd from UC once per SF) and the daily file drops
+  land there. Fabric DW also needs a **Warehouse** item (SQL endpoint host +
+  name) and the lakehouse's display name (cross-DB CTAS source).
+- An Entra **service principal** that is a workspace member: Contributor for
+  all three; Admin only if Spark/NEE setup must create the custom Spark pool.
+- A **UC secret** for the SP client secret, referenced by full path
+  `client_secret_secret` (default `main.tpcdi_raw_data.fabric_<client_id>_sp_secret`).
+  Tenant id and client id are plain params.
+- **Classic compute** for the Databricks-side tasks (OneLake `fs.azure.*`
+  confs; msodbcsql18 for DW): DBR 17.3 LTS+ dedicated access. Job clusters by
+  default; an interactive cluster avoids a cluster start per batch.
+
+Nothing has to be deployed in Fabric by hand: Spark/NEE `setup_fabric`
+provisions the pool, Runtime 2.0 Environment and notebooks every run.
+
+**App form fields:** scale_factor; wh_db/catalog; fab_workspace_id,
+fab_lakehouse_id, fab_tenant_id, fab_client_id (plain); client secret (full UC
+secret path); DW adds fab_wh_host, fab_wh_name, fab_lakehouse_name; Spark/NEE
+add pool name, node size, node count (default 16 x Medium = one F64);
+interactive_cluster_id (optional).
+
+---
+
 ## Adjust & diagnose modes
 
 - **Adjust:** distinguish a **param override** (e.g. `incremental_batches_to_run

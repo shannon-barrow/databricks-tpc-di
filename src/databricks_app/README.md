@@ -52,6 +52,10 @@ principal via the SDK `Config()`.
   Native Databricks and Snowflake wire-ups, plus **Adjust** (param overrides
   like "run 50 batches") and **Diagnose** (read run state + explain failures),
   are later phases.
+- **Fabric (DW / Spark / NEE) is not in the app yet** — create those through
+  the `TPC-DI Competitor Driver` notebook. The engine list here
+  (`models.COMPETITIVE_ENGINES`) still covers Redshift / BigQuery / Snowflake;
+  the Fabric prerequisites and form fields are in `COMPETITIVE_APP_CONTEXT.md`.
 - **Single-workspace** for now: the app targets the workspace it authenticates
   to. Cross-workspace runs use the `profile` seam in `create_jobs` (later).
 
