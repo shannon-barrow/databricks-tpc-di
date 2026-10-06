@@ -1,5 +1,20 @@
 # Augmented TPC-DI → Microsoft Fabric — porting notes
 
+> **Current state (read first).** This file is the design log from the port.
+> Since it was written:
+> - Only the **batch** notebooks remain (`notebooks/`, formerly
+>   `notebooks_nee/`), shared by the `fabric_spark` and `fabric_nee` variants
+>   via the `enable_nee` toggle. The Structured Streaming `fabric_ss` variant
+>   was dropped, so the streaming-specific gotchas below are history.
+> - `deploy_notebooks.py` / `create_environment.py` are gone: the parent's
+>   `setup_fabric` task provisions the pool + environment and deploys the
+>   notebooks as the service principal on every run.
+> - Credentials moved from the `tpcdi_fabric` secret scope to the UC-secret
+>   contract (plain tenant/client ids + `client_secret_secret` path).
+> - Jobs are created by the Competitor Driver; see `../README.md`.
+> Workspace/lakehouse/cluster IDs below are from our runs, not defaults.
+
+
 Living design + porting record for the Fabric port of the Augmented Incremental TPC-DI
 benchmark. Started 2026-08-27; **`fabric_ss` (structured-streaming) variant validated
 end-to-end at SF=10 on 2026-09-05.** Extend this doc as the Native-Execution-Engine

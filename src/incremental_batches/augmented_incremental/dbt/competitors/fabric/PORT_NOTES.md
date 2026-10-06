@@ -38,8 +38,9 @@ COPY-into-temp pre_hook.
 2. **Auth = Entra service principal only** (no SQL logins). `_fab_conn.py`
    mints an SP token via MSAL and hands it to ODBC via
    `SQL_COPT_SS_ACCESS_TOKEN`; `run_dbt` writes a dbt-fabric profile with
-   `authentication: ServicePrincipal`. SP creds live in the `tpcdi_fabric` UC
-   secret scope (client_id/client_secret); never job params.
+   `authentication: ServicePrincipal`. tenant_id / client_id are plain job
+   params; the SP client secret is a UC secret passed as its full path
+   (`client_secret_secret`, default `main.tpcdi_raw_data.fabric_<client_id>_sp_secret`).
 
 3. **No datashare / COPY.** Redshift needed a Delta→parquet→COPY seed + a
    datashare. Fabric's staging is already Delta in OneLake, read in place via

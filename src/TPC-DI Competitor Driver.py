@@ -7,18 +7,24 @@
 # MAGIC %md
 # MAGIC # TPC-DI Competitor Benchmark Driver
 # MAGIC
-# MAGIC Creates the **competitor** (non-Databricks) TPC-DI benchmark workflows —
-# MAGIC Snowflake, Amazon Redshift Serverless, or Google BigQuery — that run the
-# MAGIC same Augmented Incremental workload via dbt, reading the same source data
-# MAGIC Databricks generated. This is the counterpart to the Databricks
-# MAGIC `TPC-DI Driver`; run the two side by side to compare Databricks vs a
-# MAGIC competitor CDW on identical data + business logic.
+# MAGIC Creates the **competitor** (non-Databricks) TPC-DI benchmark workflows,
+# MAGIC reading the same source data Databricks generated:
+# MAGIC - **Warehouses, via dbt** — Snowflake, Amazon Redshift Serverless, Google
+# MAGIC   BigQuery, Microsoft Fabric Data Warehouse.
+# MAGIC - **Spark engines, via the repo's PySpark notebooks** — Microsoft Fabric
+# MAGIC   Spark and Fabric NEE (Native Execution Engine). Same notebooks for both;
+# MAGIC   NEE on/off is the only difference.
+# MAGIC
+# MAGIC This is the counterpart to the Databricks `TPC-DI Driver`; run the two
+# MAGIC side by side to compare Databricks vs a competitor on identical data +
+# MAGIC business logic.
 # MAGIC
 # MAGIC ## What this notebook does (and doesn't)
 # MAGIC It **creates two Databricks Jobs** (it does not run them):
 # MAGIC - a **child** job — one batch's work: `simulate_filedrops_<engine>` drops
-# MAGIC   that day's pre-staged files into the shared UC volume, then `dbt_run`
-# MAGIC   executes the dbt models against the competitor engine for that batch date.
+# MAGIC   that day's pre-staged files where the competitor reads them, then
+# MAGIC   `dbt_run` (warehouses) or `run_fabric` (Spark engines) runs that batch
+# MAGIC   date on the competitor engine.
 # MAGIC - a **parent** job — `setup_<engine>` (self-bootstraps the competitor's
 # MAGIC   staging + per-run schema) → a `for_each_task` loop that triggers the
 # MAGIC   child once per simulated business day → a gated `cleanup`/teardown.
@@ -59,6 +65,8 @@
 # MAGIC | **Redshift** | `rs_host`, `rs_user`, `rs_iam_role`, `rs_s3_volume_prefix`, `rs_database` | password |
 # MAGIC | **Snowflake** | `sf_account`, `sf_user`, `sf_warehouse`, `sf_stage`, `sf_database` | login credential (password OR PEM key) + Databricks PAT (federation) |
 # MAGIC | **BigQuery** | `bq_project`, `bq_gcs_volume_prefix` | service-account key JSON |
+# MAGIC | **Fabric DW** | `fab_workspace_id`, `fab_lakehouse_id`, `fab_lakehouse_name`, `fab_wh_host`, `fab_wh_name`, `fab_tenant_id`, `fab_client_id` | service principal client secret |
+# MAGIC | **Fabric Spark / NEE** | `fab_workspace_id`, `fab_lakehouse_id`, `fab_tenant_id`, `fab_client_id`, plus the Spark pool size (`fab_node_size`, `fab_node_count`) | service principal client secret |
 # MAGIC
 # MAGIC Note `sf_database` / `bq_project` are the *engine's* namespace and are
 # MAGIC distinct from the Databricks UC `catalog` (which stays `main` and drives
@@ -74,7 +82,8 @@
 # MAGIC - **Named for what they unlock.** Secret-name defaults are derived from the
 # MAGIC   target login/account/project (e.g. `redshift_admin_pw_secret`,
 # MAGIC   `snowflake_<user>_cred_secret`, `snowflake_<account>_dbx_pat_secret`,
-# MAGIC   `bigquery_<project>_sa_json_secret`). This is intentional — the secret is
+# MAGIC   `bigquery_<project>_sa_json_secret`, `fabric_<client_id>_sp_secret`).
+# MAGIC   This is intentional — the secret is
 # MAGIC   **created once per deployment and reused** by anyone on the team, exactly
 # MAGIC   like the shared staged data. Name collisions across users are the point.
 # MAGIC - **This notebook never creates secrets** — it only consumes them. Create
@@ -99,14 +108,27 @@
 # MAGIC TPC-DI data is generated in Databricks and read by the competitor in the
 # MAGIC **same cloud/region** (a different region incurs egress). So the
 # MAGIC Competitor dropdown only lists engines valid for this workspace's cloud:
-# MAGIC AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake, Azure → Snowflake.
+# MAGIC AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake,
+# MAGIC Azure → Snowflake + Fabric DW + Fabric Spark + Fabric NEE.
 # MAGIC
 # MAGIC ## Compute
-# MAGIC All tasks default to **serverless** (env v5) — no cluster config needed.
-# MAGIC The child tasks accept an `interactive_cluster_id` to run on classic
-# MAGIC compute instead; both paths are supported. Notebooks that need engine
-# MAGIC client libraries declare them in their serverless env and still
-# MAGIC defensively `pip install` when run on a classic cluster.
+# MAGIC Snowflake / Redshift / BigQuery tasks default to **serverless** (env v5) —
+# MAGIC no cluster config needed. The child tasks accept an
+# MAGIC `interactive_cluster_id` to run on classic compute instead; both paths are
+# MAGIC supported. Notebooks that need engine client libraries declare them in
+# MAGIC their serverless env and still defensively `pip install` when run on a
+# MAGIC classic cluster.
+# MAGIC
+# MAGIC **Fabric is the exception: it needs classic compute.** Its tasks write
+# MAGIC OneLake through `fs.azure.*` Spark confs (not allowed on serverless) and
+# MAGIC Fabric DW's dbt needs the msodbcsql18 system driver. With
+# MAGIC `interactive_cluster_id` blank, each job gets a single-node DBR 18 LTS job
+# MAGIC cluster (dedicated access, plus the ODBC init script for Fabric DW). That
+# MAGIC cluster starts once per child run — several minutes per batch, outside the
+# MAGIC Fabric-measured time but real wall-clock over 365 batches — so for long
+# MAGIC runs pass an interactive cluster: DBR 17.3 LTS+, dedicated access, and for
+# MAGIC Fabric DW the init script
+# MAGIC `incremental_batches/augmented_incremental/dbt/competitors/fabric/init_msodbcsql18.sh`.
 # MAGIC
 # MAGIC ## Per-engine specifics
 # MAGIC - **Redshift** — password-only auth over the PG wire protocol; COPY from S3
@@ -119,9 +141,22 @@
 # MAGIC   staged data through an external stage.
 # MAGIC - **BigQuery** — one service-account-key secret; reads staged files from the
 # MAGIC   GCS-backed external volume.
+# MAGIC - **Fabric (all three)** — one Entra service principal (client-credentials)
+# MAGIC   that is a member of the Fabric workspace: Contributor for Fabric DW,
+# MAGIC   and Admin for Spark / NEE if setup has to create the custom Spark pool
+# MAGIC   (Contributor is enough when the pool already exists). Staging is DEEP
+# MAGIC   CLONE'd into the schema-enabled lakehouse once per SF; each day's files
+# MAGIC   are copied into its OneLake Files.
+# MAGIC - **Fabric Spark / NEE** — the parent's `setup_fabric` provisions the
+# MAGIC   Fabric side itself: a fixed-size custom Spark pool (default 16 x Medium =
+# MAGIC   one F64), an Environment pinned to Fabric Runtime 2.0 on that pool, and
+# MAGIC   the repo's `spark_competitors/fabric/notebooks/` deployed as Fabric
+# MAGIC   notebooks. Don't run the Spark and NEE jobs at the same time in one
+# MAGIC   workspace — they share the pool and the deployed notebooks.
 # MAGIC
-# MAGIC See `dbt/competitors/README.md` for the cross-engine overview and the
-# MAGIC per-engine `PORT_NOTES.md` for design detail.
+# MAGIC See `dbt/competitors/README.md` (warehouses) and
+# MAGIC `spark_competitors/README.md` (Spark engines) for the cross-engine
+# MAGIC overview, and the per-engine `PORT_NOTES.md` for design detail.
 
 # COMMAND ----------
 
@@ -152,7 +187,7 @@ dbutils.widgets.text("wh_db", tpcdi_config.default_wh,
 dbutils.widgets.text("job_name_prefix", tpcdi_config.default_job_name,
                      "05 Job Name Prefix")
 dbutils.widgets.text("interactive_cluster_id", "",
-                     "06 Interactive Cluster ID (blank = serverless)")
+                     "06 Interactive Cluster ID (blank = serverless; Fabric: blank = job cluster)")
 
 # Per-competitor inputs. Each engine's widgets are prefixed so they don't
 # collide; only the selected competitor's are read in the Create cell.
@@ -237,6 +272,41 @@ elif competitor == "bigquery":
     dbutils.widgets.text("bq_sa_json_secret_name",
                          default_secret_name("bigquery", _bq_project_now, kind="sa_json"),
                          "BQ: Service-account JSON secret name")
+elif competitor.startswith("fabric_"):
+    # All three Fabric variants authenticate as one Entra service principal.
+    # Ids are plain values (copy them from the Fabric item URLs); only the SP
+    # client secret is a UC secret.
+    dbutils.widgets.text("fab_workspace_id", "", "FAB: Workspace id")
+    dbutils.widgets.text("fab_lakehouse_id", "", "FAB: Lakehouse id (schema-enabled)")
+    dbutils.widgets.text("fab_tenant_id", "", "FAB: Entra tenant id")
+    dbutils.widgets.text("fab_client_id", "", "FAB: Service principal client id")
+    if competitor == "fabric_dw":
+        dbutils.widgets.text("fab_lakehouse_name", "", "FAB: Lakehouse name (cross-DB source)")
+        dbutils.widgets.text("fab_wh_host", "", "FAB: Warehouse SQL endpoint host")
+        dbutils.widgets.text("fab_wh_name", "", "FAB: Warehouse name")
+    else:
+        # Fabric's equivalent of picking a warehouse size: setup creates (or
+        # resizes) a fixed-size custom pool. 16 x Medium = one F64's base vCores.
+        # Reusing an existing pool by name only needs Contributor; creating
+        # a new one needs workspace Admin.
+        dbutils.widgets.text("fab_pool_name", "tpcdi_spark_pool",
+                             "FAB: Spark pool name (created/resized to the size below)")
+        dbutils.widgets.dropdown("fab_node_size", "Medium",
+                                 ["Small", "Medium", "Large", "XLarge", "XXLarge"],
+                                 "FAB: Spark pool node size")
+        dbutils.widgets.text("fab_node_count", "16", "FAB: Spark pool node count (16 Medium = F64)")
+    # UC secret for the SP client secret. Named for WHAT IT UNLOCKS (the SP),
+    # so it's created once per deployment and reused — collisions intended.
+    # Defaults from fab_client_id; set it and re-run to see the default update.
+    dbutils.widgets.text("secret_catalog", "main", "FAB: Secret catalog")
+    dbutils.widgets.text("secret_schema", "tpcdi_raw_data", "FAB: Secret schema")
+    try:
+        _fab_client_now = dbutils.widgets.get("fab_client_id")
+    except Exception:
+        _fab_client_now = ""
+    dbutils.widgets.text("fab_client_secret_secret_name",
+                         default_secret_name("fabric", _fab_client_now, kind="sp"),
+                         "FAB: SP client secret name")
 
 print(f"Cloud: {_cloud}  |  competitors available: {_valid}")
 print(f"Selected competitor: {competitor}")
@@ -296,6 +366,32 @@ elif competitor == "bigquery":
         bq_location="us-central1",
         databricks_catalog=catalog,
     )
+elif competitor.startswith("fabric_"):
+    _sec_cat = dbutils.widgets.get("secret_catalog")
+    _sec_sch = dbutils.widgets.get("secret_schema")
+    engine_params = dict(
+        fabric_workspace_id=dbutils.widgets.get("fab_workspace_id").strip(),
+        fabric_lakehouse_id=dbutils.widgets.get("fab_lakehouse_id").strip(),
+        tenant_id=dbutils.widgets.get("fab_tenant_id").strip(),
+        client_id=dbutils.widgets.get("fab_client_id").strip(),
+        client_secret_secret=(f"{_sec_cat}.{_sec_sch}."
+                              f"{dbutils.widgets.get('fab_client_secret_secret_name')}"),
+    )
+    if competitor == "fabric_dw":
+        engine_params.update(
+            fabric_lakehouse_name=dbutils.widgets.get("fab_lakehouse_name").strip(),
+            fabric_wh_host=dbutils.widgets.get("fab_wh_host").strip(),
+            fabric_wh_name=dbutils.widgets.get("fab_wh_name").strip(),
+        )
+    else:
+        engine_params.update(
+            fabric_pool_name=dbutils.widgets.get("fab_pool_name").strip(),
+            fabric_node_size=dbutils.widgets.get("fab_node_size"),
+            fabric_node_count=int(dbutils.widgets.get("fab_node_count")),
+        )
+    _blank = [k for k, v in engine_params.items() if v in ("", None)]
+    if _blank:
+        raise ValueError(f"Fill these Fabric inputs first: {_blank}")
 
 # The engine `catalog` (the namespace the benchmark builds into) is NOT always
 # the Databricks UC catalog. UC catalog (`catalog`) always drives tpcdi_directory
@@ -303,6 +399,8 @@ elif competitor == "bigquery":
 #   - BigQuery:  the BQ project        (databricks_catalog carries the UC catalog)
 #   - Snowflake: the Snowflake database (TPCDI_TEST) — separate from UC catalog
 #   - Redshift:  same as the UC catalog
+#   - Fabric:    the UC catalog — the Fabric namespaces (warehouse, lakehouse)
+#                are their own inputs, and setup reads UC staging from `catalog`
 if competitor == "bigquery":
     _effective_catalog = engine_params.pop("catalog_project")
 elif competitor == "snowflake":
@@ -343,4 +441,6 @@ parent_job_id = generate_competitor_workflow(
     interactive_cluster_id=_cluster_id,
     engine_params=engine_params,
 )
-displayHTML(f"<h2><a href=/#job/{parent_job_id}>{competitor.title()} Benchmark Workflow (parent)</a></h2>")
+_title = {"fabric_dw": "Fabric DW", "fabric_spark": "Fabric Spark",
+          "fabric_nee": "Fabric NEE"}.get(competitor, competitor.title())
+displayHTML(f"<h2><a href=/#job/{parent_job_id}>{_title} Benchmark Workflow (parent)</a></h2>")

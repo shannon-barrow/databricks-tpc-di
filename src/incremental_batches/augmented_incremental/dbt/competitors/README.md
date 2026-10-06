@@ -4,14 +4,20 @@ The competitor benchmarks run the **same Augmented Incremental TPC-DI workload**
 (365-day daily-streaming dbt project) against a non-Databricks cloud data
 warehouse, reading the **same source data** Databricks generated. Run a
 competitor next to the Databricks Augmented Incremental dbt variant to compare
-Databricks vs Snowflake / Amazon Redshift Serverless / Google BigQuery on
-identical data and business logic.
+Databricks vs Snowflake / Amazon Redshift Serverless / Google BigQuery /
+Microsoft Fabric Data Warehouse on identical data and business logic.
+
+The Spark-engine competitors (Fabric Spark, Fabric NEE) run the PySpark
+notebooks instead of dbt and live in
+[`../../spark_competitors/`](../../spark_competitors/README.md); the same
+Competitor Driver creates them.
 
 | Engine | Cloud | Auth | Data access |
 |---|---|---|---|
 | **Snowflake** | any | PEM keypair (or password/MFA) + Databricks PAT for UC federation | external stage over the UC volume |
 | **Redshift Serverless** | AWS | password over PG wire (port 5439) | `COPY` from S3 via an IAM role |
 | **BigQuery** | GCP | service-account key JSON | external tables over the GCS-backed volume |
+| **Fabric DW** | Azure | Entra service principal (client credentials) | staging DEEP CLONE'd into a lakehouse, cross-DB CTAS into the warehouse; daily CSVs read from OneLake via `OPENROWSET(BULK)` |
 
 ## How they're created and run
 
@@ -57,6 +63,8 @@ accounts, warehouses, ARNs, and project ids are plain job parameters.
   - Redshift: `redshift_<user>_pw_secret`
   - Snowflake: `snowflake_<user>_cred_secret` + `snowflake_<account>_dbx_pat_secret`
   - BigQuery: `bigquery_<project>_sa_json_secret`
+  - Fabric: `fabric_<client_id>_sp_secret` (the SP client secret; shared by
+    Fabric DW, Spark and NEE)
 - **Consumer-only.** The driver/notebooks never create secrets. Create them once
   via Catalog Explorer (schema → Create secret) or
   `POST /api/2.1/unity-catalog/secrets`. The driver validates each referenced
@@ -73,9 +81,17 @@ run on a classic cluster instead; both paths are supported. Notebooks that need
 an engine client library declare it in their serverless env **and** defensively
 `pip install` when run on a classic cluster, so either compute works OOTB.
 
+**Fabric DW is the exception — classic compute only.** `dbt-fabric` needs the
+msodbcsql18 system driver (serverless can't apt-install it) and setup writes
+OneLake through `fs.azure.*` confs. With no `interactive_cluster_id` each job
+gets a single-node DBR 18 LTS job cluster with dedicated access plus
+`fabric/init_msodbcsql18.sh` (17.3 LTS is the floor for UC secrets on classic).
+That cluster starts once per child run, so pass an interactive cluster (same
+DBR / access mode / init script) for long runs.
+
 dbt adapter pins (in the builders' serverless env specs): `dbt-redshift==1.10.1`
 + `dbt-core==1.11.8`, `dbt-snowflake==1.9.*` + `dbt-core==1.9.*`,
-`dbt-bigquery==1.11.1`.
+`dbt-bigquery==1.11.1`; `dbt-fabric==1.10.0` (pip-installed by `fabric/run_dbt.py`).
 
 ## Layout
 
@@ -101,7 +117,14 @@ dbt/competitors/
 │   ├── _bq_conn.py               google.cloud.bigquery client factory
 │   ├── setup_bq.py / bq_staging_bootstrap.py
 │   └── simulate_filedrops_bq.py / run_dbt.py / teardown_bq.py
-└── {snowflake,redshift,bigquery}_models/   per-engine dbt model trees
+├── fabric/
+│   ├── PORT_NOTES.md
+│   ├── _fab_conn.py              pyodbc + MSAL token factory, OneLake conf helper
+│   ├── setup_fabric.py / fabric_staging_bootstrap.py
+│   ├── simulate_filedrops_fabric.py / run_dbt.py / teardown_fabric.py
+│   ├── init_msodbcsql18.sh       cluster init script (ODBC Driver 18)
+│   └── fabric_metrics.py         laptop CLI over queryinsights.exec_requests_history
+└── {snowflake,redshift,bigquery,fabric}_models/   per-engine dbt model trees
 ```
 
 The workflow builders live in `src/tools/workflow_builders/augmented_{engine}.py`;
