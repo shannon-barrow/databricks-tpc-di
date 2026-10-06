@@ -61,6 +61,12 @@ ws_id            = dbutils.widgets.get("fabric_workspace_id")
 lh_id            = dbutils.widgets.get("fabric_lakehouse_id")
 file_ext         = dbutils.widgets.get("file_ext").strip()
 
+# The builder passes the workspace path (/Users/...); on classic compute only
+# the /Workspace mount of it exists on the filesystem dbt reads.
+if dbt_project_dir and not os.path.isdir(dbt_project_dir) \
+        and os.path.isdir("/Workspace" + dbt_project_dir):
+    dbt_project_dir = "/Workspace" + dbt_project_dir
+
 _required = dict(wh_db=wh_db, batch_date=batch_date, dbt_project_dir=dbt_project_dir,
                  fabric_wh_host=wh_host, fabric_wh_name=wh_name, tenant_id=tenant_id,
                  client_id=client_id, client_secret_secret=client_secret_secret,
