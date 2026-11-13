@@ -115,8 +115,17 @@ def materialize(spark, *, src_db: str, tables: Iterable[str], roots: list[str],
 
     def clone(t: str) -> str:
         s = time.time()
-        on_root(run(lambda r: deep_clone_sql(path_ref(r, t), f"{src_db}.{t}"),
-                    lambda r: purge_sql(path_ref(r, t))))
+        try:
+            on_root(run(lambda r: deep_clone_sql(path_ref(r, t), f"{src_db}.{t}"),
+                        lambda r: purge_sql(path_ref(r, t))))
+        except RuntimeError as e:
+            # A UniForm (Iceberg) staging table can't be DEEP CLONEd to a path
+            # outside Unity Catalog (DELTA_UNIFORM_NOT_SUPPORTED): its copy is
+            # the plain rewrite instead, written once per SF like a clone.
+            if "DELTA_UNIFORM_NOT_SUPPORTED" not in str(e):
+                raise
+            on_root(run(lambda r: rewrite_sql(path_ref(r, t), f"{src_db}.{t}")))
+            return f"[rewrite] {t:24s} {time.time() - s:6.1f}s (UniForm source)"
         return f"[clone] {t:24s} {time.time() - s:6.1f}s"
 
     def detail(t: str) -> dict:
