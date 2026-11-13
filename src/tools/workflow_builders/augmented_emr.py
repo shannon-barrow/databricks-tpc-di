@@ -58,7 +58,7 @@ _COMMON_PARAMS = {
     "concurrency":            "{{job.parameters.concurrency}}",
     "shuffle_partitions":     "{{job.parameters.shuffle_partitions}}",
 }
-_CLUSTER_PARAMS = ("emr_cluster_id", "emr_subnet_id", "emr_master_sg", "emr_slave_sg",
+_CLUSTER_PARAMS = ("emr_cluster_mode", "emr_cluster_id", "emr_subnet_id", "emr_master_sg", "emr_slave_sg",
                    "emr_instance_type", "emr_core_count", "emr_release_label",
                    "emr_service_role", "emr_instance_profile")
 _SETUP_PARAMS = dict(_COMMON_PARAMS,
@@ -124,8 +124,8 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
                 file_ext: str = "txt", concurrency: int = 8, shuffle_partitions: int = 1000,
                 interactive_cluster_id: str | None = None, **_unused) -> dict:
     run_params = dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}",
-                      emr_cluster_id="{{job.parameters.emr_cluster_id}}",
-                      run_id="{{job.parameters.run_id}}")
+                      run_id="{{job.parameters.run_id}}",
+                      **{k: f"{{{{job.parameters.{k}}}}}" for k in _CLUSTER_PARAMS})
     tasks = [
         _make_task(task_key="simulate_filedrops_emr", notebook_path=f"{repo_src_path}/{_DROPS_NB}",
                    base_params=dict(_COMMON_PARAMS, batch_date="{{job.parameters.batch_date}}"),
@@ -150,9 +150,9 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
             aws_service_credential=aws_service_credential, file_ext=file_ext,
             concurrency=concurrency, shuffle_partitions=shuffle_partitions) + [
             {"name": "batch_date", "default": ""},
-            {"name": "emr_cluster_id", "default": ""},
             {"name": "run_id", "default": ""},
-        ],
+        ] + [{"name": k, "default": "job" if k == "emr_cluster_mode" else ""}
+             for k in _CLUSTER_PARAMS],
         "tasks": tasks,
         "queue": {"enabled": True},
     }
@@ -161,7 +161,7 @@ def build_child(*, job_name: str, repo_src_path: str, catalog: str, scale_factor
 def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalog: str,
                  scale_factor: int, tpcdi_directory: str, wh_db: str, s3_volume_prefix: str,
                  emr_subnet_id: str = "", emr_master_sg: str = "", emr_slave_sg: str = "",
-                 emr_cluster_id: str = "",
+                 emr_cluster_id: str = "", emr_cluster_mode: str = "job",
                  emr_instance_type: str = "m8gd.2xlarge", emr_core_count: int = 16,
                  emr_release_label: str = "emr-7.14.0",
                  emr_service_role: str = "EMR_DefaultRole",
@@ -174,7 +174,10 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
                             base_params=_SETUP_PARAMS,
                             interactive_cluster_id=interactive_cluster_id)
     child_params = dict({k: v for k, v in _COMMON_PARAMS.items()},
-                        batch_date="{{input}}", **_SETUP_OUT)
+                        batch_date="{{input}}",
+                        **{k: f"{{{{job.parameters.{k}}}}}" for k in _CLUSTER_PARAMS
+                           if k not in _SETUP_OUT},
+                        **_SETUP_OUT)
     # Sequential for_each: each batch builds on the prior batch's SCD2 state.
     loop_task: dict[str, Any] = {
         "task_key": "loop_incremental_tpcdi",
@@ -208,12 +211,15 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
     return {
         "name": job_name,
         "description": (f"TPC-DI Augmented Incremental (Amazon EMR, parent) SF={scale_factor}. "
-                        f"setup_emr DEEP CLONEs the Delta staging (once per SF), creates a "
-                        f"fixed-size on-demand EMR cluster ({emr_core_count} x "
-                        f"{emr_instance_type} core + 1 primary, {emr_release_label}) unless "
-                        f"emr_cluster_id is given, and resets the Glue database; the loop runs "
-                        f"the child per simulated day (2016-07-06 ->); teardown_emr always runs "
-                        f"(report, cleanup when delete_tables_when_finished, terminate)."),
+                        f"setup_emr DEEP CLONEs the Delta staging (once per SF) and resets the "
+                        f"Glue database; the loop runs the child per simulated day "
+                        f"(2016-07-06 ->). Fixed-size on-demand EMR ({emr_core_count} x "
+                        f"{emr_instance_type} core + 1 primary, {emr_release_label}): with "
+                        f"emr_cluster_mode=job (default) setup and every batch each start their "
+                        f"own job cluster that EMR terminates when its steps end, like a daily "
+                        f"classic job cluster; emr_cluster_mode=shared uses one cluster for the "
+                        f"run. teardown_emr always runs (report, cleanup when "
+                        f"delete_tables_when_finished, terminate a shared cluster)."),
         "tags": _tags(),
         "timeout_seconds": 0,
         "max_concurrent_runs": 1,
@@ -223,6 +229,7 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
             wh_db=wh_db, s3_volume_prefix=s3_volume_prefix, aws_region=aws_region,
             aws_service_credential=aws_service_credential, file_ext=file_ext,
             concurrency=concurrency, shuffle_partitions=shuffle_partitions) + [
+            {"name": "emr_cluster_mode",            "default": emr_cluster_mode},
             {"name": "emr_cluster_id",              "default": emr_cluster_id},
             {"name": "emr_subnet_id",               "default": emr_subnet_id},
             {"name": "emr_master_sg",               "default": emr_master_sg},

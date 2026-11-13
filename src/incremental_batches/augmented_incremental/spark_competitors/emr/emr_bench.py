@@ -13,7 +13,13 @@ no AWS identity that may call EMR.
   report     write the cost report for a cluster
   terminate  terminate a cluster
   cleanup    drop the Glue database and the run's S3 tables + file drops
-  smoke      create -> setup -> run N -> report -> terminate     (needs --yes)
+  smoke      setup + N batches                                    (needs --yes)
+
+`smoke` defaults to --cluster-mode job: setup and every batch each run on
+their own EMR job cluster, created with its steps and terminated by EMR when
+they end, as a daily Databricks classic job cluster would. A batch's cost is
+then its whole cluster's (boot + step + shutdown). --cluster-mode shared runs
+setup and all batches on one cluster (create -> setup -> run N -> terminate).
 
 Every command takes the same infrastructure flags; nothing account-specific
 is defaulted. Example (plan only):
@@ -66,6 +72,8 @@ def _args(argv=None):
     ap.add_argument("--tag", action="append", default=[], help="Key=Value, repeatable")
     ap.add_argument("--service-model", help="newer emr service-2.json for `plan` validation")
     # run
+    ap.add_argument("--cluster-mode", choices=["job", "shared"], default="job",
+                    help="smoke: a job cluster per setup/batch (default) or one shared cluster")
     ap.add_argument("--batches", type=int, default=2)
     ap.add_argument("--start-batch", type=int, default=0, help="0-based index of the first batch")
     ap.add_argument("--concurrency", type=int, default=8)
@@ -217,6 +225,86 @@ def cmd_report(a, sess, cid: str, run_id: str) -> dict:
     return rep
 
 
+def _job_cluster(a, sess, prices: dict, name: str, steps: list[dict]):
+    """Run `steps` on a fresh job cluster; return (result, cost, error)."""
+    emr = sess.client("emr")
+    spec = emr_c.job_cluster_spec(_spec(a), steps)
+    spec["Name"] = name
+    emr_c.validate_cluster_spec(spec, a.service_model)
+    err = None
+    try:
+        res = emr_c.run_job_cluster(emr, spec)
+    except emr_c.StepFailed as e:
+        err, res = e, e.result
+    cost = emr_c.cluster_cost(emr, res["cluster_id"], prices, root_gb=a.root_gb)
+    return res, cost, err
+
+
+def cmd_smoke_jobs(a, sess, run_id: str) -> list[dict]:
+    """Setup, then each batch, on its own job cluster."""
+    s3 = sess.client("s3")
+    p = emr_c.paths(a.s3_root, a.wh_db, a.sf, run_id)
+    missing = emr_c.staging_missing(s3, p, tpcdi_sql.STAGING_TABLES)
+    if missing:
+        raise SystemExit(f"Delta staging {p['staging_delta']} lacks {missing}; run the "
+                         f"Databricks materialize_staging_emr notebook once for SF={a.sf}")
+    print(f"[setup] upload jobs -> {p['code']}: "
+          f"{emr_c.upload_code(s3, p['code'], os.path.join(_HERE, 'jobs'))}", flush=True)
+    counts = emr_c.instance_counts(_spec(a))
+    prices = _prices(a, sess, counts)
+    rate = emr_c.fleet_rate(prices, counts, a.root_gb)
+    base = f"tpcdi-emr-{p['db']}"
+    costs = {}
+    # One retry: a transient S3 filesystem error must not fail the run.
+    for attempt in (1, 2):
+        res, cost, err = _job_cluster(a, sess, prices, f"{base}-setup", [
+            emr_c.sync_code_step(p["code"]), emr_c.setup_step(p, a.shuffle_partitions)])
+        costs[f"setup{'' if attempt == 1 else '_retry'}"] = cost
+        t = emr_c.cluster_timing(res["cluster"])
+        print(f"[setup] {res['cluster_id']}: boot {t['boot_sec']}s, cluster {t['cluster_sec']}s, "
+              f"${cost['total_cost']}{'' if not err else ' FAILED: ' + str(err)[:200]}", flush=True)
+        if not err:
+            break
+    else:
+        raise SystemExit(f"[setup] failed twice: {err}")
+    print(f"[run] {counts} at ${rate:.4f}/hr while up; metrics -> {p['metrics']}", flush=True)
+    batches, tasks = [], []
+    for d in emr_c.batch_dates(a.batches, a.start_batch):
+        t0 = time.time()
+        drops = emr_c.drop_files(s3, p, d)
+        drop_sec = time.time() - t0
+        res, cost, err = _job_cluster(a, sess, prices, f"{base}-{d}", [
+            emr_c.sync_code_step(p["code"]),
+            emr_c.batch_step(p, d, concurrency=a.concurrency,
+                             shuffle_partitions=a.shuffle_partitions)])
+        costs[d] = cost
+        step = res["steps"][-1] if res["steps"] else err.step
+        try:
+            metrics = emr_c.read_json(s3, emr_c.metrics_uri(p, d))
+        except s3.exceptions.NoSuchKey:
+            metrics = None  # the runner died before writing its metrics
+        row = emr_c.batch_row(d, step, metrics, drop_sec=drop_sec, rate=rate,
+                              cluster=res["cluster"], cost=cost)
+        batches.append(row)
+        tasks += emr_c.task_rows(metrics) if metrics else []
+        print(f"[run] {d}: {len(drops)} files in {drop_sec:.1f}s, {row['cluster_id']} boot "
+              f"{row['boot_sec']}s, step {row['step_sec']}s, cluster {row['cluster_sec']}s, "
+              f"${row['batch_cost_usd']} (step alone ${row['step_cost_usd']}) {row['status']}",
+              flush=True)
+        emr_c.put_text(s3, f"{p['metrics']}/batches.csv", emr_c.to_csv(batches, emr_c.BATCH_FIELDS))
+        emr_c.put_text(s3, f"{p['metrics']}/task_times.csv", emr_c.to_csv(tasks, emr_c.TASK_FIELDS))
+        if err:
+            break
+    total = round(sum(c["total_cost"] for c in costs.values()), 4)
+    emr_c.put_text(s3, f"{p['metrics']}/cluster_cost.json",
+                   json.dumps({"mode": "job", "clusters": costs, "total_cost": total},
+                              indent=1, default=str))
+    print(f"[report] {len(costs)} job clusters, ${total} -> {p['metrics']}", flush=True)
+    if err:
+        raise SystemExit(f"[run] batch {d} failed: {err}")
+    return batches
+
+
 def cmd_cleanup(a, sess):
     s3, glue = sess.client("s3"), sess.client("glue")
     p = emr_c.paths(a.s3_root, a.wh_db, a.sf)
@@ -237,7 +325,10 @@ def main(argv=None):
         cmd_cleanup(a, sess)
     elif a.command == "smoke":
         if not a.yes:
-            raise SystemExit("smoke creates a billable cluster; re-run with --yes")
+            raise SystemExit("smoke creates billable clusters; re-run with --yes")
+        if a.cluster_mode == "job":
+            cmd_smoke_jobs(a, sess, run_id)
+            return
         cid = cmd_create(a, sess)
         try:
             cmd_setup(a, sess, cid)

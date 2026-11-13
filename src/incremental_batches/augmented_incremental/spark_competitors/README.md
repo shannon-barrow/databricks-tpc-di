@@ -164,6 +164,32 @@ How EMR still differs from Fabric:
 - Don't force a re-clone while a run is using that SF: its shallow clones read
   the staging's files. Nothing VACUUMs the staging.
 
+**A cluster per batch (`emr_cluster_mode`, default `job`).** The benchmark
+simulates daily runs, so no batch reuses a warm cluster. `setup_emr` runs
+the code sync and the run-database reset on an EMR job cluster: one created
+with its steps (`KeepJobFlowAliveWhenNoSteps=false`) and terminated by EMR as
+soon as they end or one fails. Each child's `run_emr` then starts that day's
+own job cluster the same way, as a Databricks classic job cluster would for
+each child run. A batch's cost is that whole cluster's (boot + steps +
+shutdown, from ListInstances), so `batch_cost_usd` includes the cold start;
+`step_cost_usd` is the step alone at the fleet rate, and `boot_sec` /
+`cluster_sec` give the cluster's create-to-ready and create-to-terminated
+times. Tables live in S3 + Glue, so each day's cluster picks up the previous
+day's state. `teardown_emr` drops the Glue database from the workspace (no
+cluster needed) and sums the job clusters' `clustercost=*.json` into
+`cluster_cost.json`. `emr_cluster_mode=shared` keeps the old shape: one
+cluster (or `emr_cluster_id`) for setup and every batch.
+
+**Workspace identity (required for the Databricks-driven path).** The tasks
+call EMR through `aws_service_credential`, a UC service credential for an
+IAM role in the EMR account, or a classic cluster's instance profile. The
+role needs `elasticmapreduce:RunJobFlow`, `DescribeCluster`, `ListSteps`,
+`DescribeStep`, `AddJobFlowSteps`, `ListInstances`, `ListInstanceGroups`,
+`TerminateJobFlows` and `AddTags`; `iam:PassRole` on the EMR service role and
+EC2 instance profile; and `glue:GetDatabase` / `DeleteDatabase` /
+`GetTables` / `DeleteTable` for the cleanup. Its S3 access goes through the
+UC volume.
+
 **Two ways to drive it** (same `emr/_emr_conn.py` underneath):
 
 | | Databricks jobs (Competitor Driver → `emr`) | Laptop driver `emr/emr_bench.py` |

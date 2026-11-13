@@ -12,7 +12,11 @@
 #      + its Delta files) and remove the run's file drops
 #   2. batches.csv + task_times.csv from the per-batch metrics
 #   3. terminate the cluster if setup created it, then write cluster_cost.json
-#      from every instance's lifetime (EC2 + EMR uplift + EBS, on demand)
+#      from every instance's lifetime (EC2 + EMR uplift + EBS, on demand).
+#      In emr_cluster_mode=job there is no shared cluster: EMR has already
+#      terminated each job cluster, the cleanup drops the Glue database and
+#      its files from here, and cluster_cost.json sums the job clusters'
+#      clustercost=*.json written by setup_emr and run_emr.
 # The Delta staging and the uploaded code are kept for the next run.
 
 import json
@@ -37,20 +41,25 @@ w = {k: dbutils.widgets.get(k).strip() for k in (
     "scale_factor", "wh_db", "tpcdi_directory", "s3_volume_prefix", "aws_region",
     "aws_service_credential", "emr_cluster_id", "emr_created", "run_id",
     "delete_tables_when_finished")}
-if not w["emr_cluster_id"]:
-    dbutils.notebook.exit("no cluster: setup_emr did not get that far")
+if not w["run_id"]:
+    dbutils.notebook.exit("no run: setup_emr did not get that far")
 
 p = emr_c.paths(w["s3_volume_prefix"], w["wh_db"], w["scale_factor"], w["run_id"])
 vol = lambda uri: emr_c.to_volume(uri, w["s3_volume_prefix"], w["tpcdi_directory"])
-emr = emr_c.boto3_session(w["aws_region"], dbutils=dbutils,
-                          service_credential=w["aws_service_credential"]).client("emr")
+sess = emr_c.boto3_session(w["aws_region"], dbutils=dbutils,
+                           service_credential=w["aws_service_credential"])
+emr = sess.client("emr")
 cid = w["emr_cluster_id"]
 
 # COMMAND ----------
 
 try:
     if w["delete_tables_when_finished"].upper() == "TRUE":
-        emr_c.run_step(emr, cid, emr_c.drop_step(p))
+        if cid:
+            emr_c.run_step(emr, cid, emr_c.drop_step(p))
+        else:  # job mode: no cluster to run the drop step on
+            emr_c.drop_glue_database(sess.client("glue"), p["db"])
+            dbutils.fs.rm(vol(p["db_location"]), recurse=True)
         dbutils.fs.rm(vol(p["dailybatches"]), recurse=True)
         print(f"[cleanup] dropped {p['db']} and {p['dailybatches']}")
 
@@ -70,14 +79,24 @@ try:
     dbutils.fs.put(f"{vol(p['metrics'])}/task_times.csv", emr_c.to_csv(tasks, emr_c.TASK_FIELDS), overwrite=True)
     print(f"[report] {len(batches)} batches, {len(tasks)} task rows -> {p['metrics']}")
 finally:
-    if w["emr_created"] == "true":
+    if cid and w["emr_created"] == "true":
         emr_c.terminate(emr, cid)
         emr.get_waiter("cluster_terminated").wait(ClusterId=cid)
         print(f"[emr] {cid} terminated")
 
 with open(os.path.join(_here, "prices_snapshot.json")) as f:
     prices = json.load(f)
-rep = emr_c.cluster_cost(emr, cid, prices)
+if cid:
+    rep = emr_c.cluster_cost(emr, cid, prices)
+else:
+    clusters = {}
+    for e in entries:
+        if e.name.startswith("clustercost="):
+            with open(e.path.replace("dbfs:", "")) as f:
+                clusters[e.name[len("clustercost="):-len(".json")]] = json.load(f)
+    rep = {"mode": "job", "clusters": clusters, "cluster_id": f"{len(clusters)} job clusters",
+           **{k: round(sum(c[k] for c in clusters.values()), 4) for k in
+              ("instance_hours", "ec2_cost", "emr_cost", "ebs_cost", "total_cost")}}
 dbutils.fs.put(f"{vol(p['metrics'])}/cluster_cost.json", json.dumps(rep, indent=1, default=str), overwrite=True)
 print(f"[report] {cid}: {rep['instance_hours']} instance-hours, ${rep['total_cost']} "
       f"(EC2 {rep['ec2_cost']} + EMR {rep['emr_cost']} + EBS {rep['ebs_cost']})")

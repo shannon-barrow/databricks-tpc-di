@@ -582,6 +582,68 @@ def test_emr_builder_shape_and_paths():
     assert all(t["existing_cluster_id"] == "0101-x" for t in classic["tasks"])
 
 
+def test_job_cluster_spec_runs_its_steps_then_terminates():
+    steps = [c.sync_code_step(P["code"]), c.batch_step(P, D)]
+    spec = c.job_cluster_spec(_spec(), steps)
+    c.validate_cluster_spec(spec)
+    assert spec["Instances"]["KeepJobFlowAliveWhenNoSteps"] is False
+    assert [s["Name"] for s in spec["Steps"]] == [s["Name"] for s in steps]
+    assert {s["ActionOnFailure"] for s in spec["Steps"]} == {"TERMINATE_CLUSTER"}
+    assert _spec()["Instances"]["KeepJobFlowAliveWhenNoSteps"] is True  # base spec untouched
+
+
+def _fake_emr(step_states, cluster_state="TERMINATED"):
+    t0 = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    emr = mock.Mock()
+    emr.run_job_flow.return_value = {"JobFlowId": "j-1"}
+    emr.describe_cluster.return_value = {"Cluster": {"Id": "j-1", "Status": {
+        "State": cluster_state, "StateChangeReason": {"Message": "Steps completed"},
+        "Timeline": {"CreationDateTime": t0, "ReadyDateTime": t0 + timedelta(seconds=220),
+                     "EndDateTime": t0 + timedelta(seconds=600)}}}}
+    ids = [f"s-{i}" for i in range(len(step_states))]
+    emr.get_paginator.return_value.paginate.return_value = [{"Steps": [{"Id": i} for i in ids[::-1]]}]
+    by_id = {i: {"Id": i, "Name": i, "Status": {"State": st, "Timeline": {
+        "StartDateTime": t0 + timedelta(seconds=230), "EndDateTime": t0 + timedelta(seconds=510)}}}
+        for i, st in zip(ids, step_states)}
+    emr.describe_step.side_effect = lambda ClusterId, StepId: {"Step": by_id[StepId]}
+    return emr
+
+
+def test_run_job_cluster_and_its_batch_row():
+    emr = _fake_emr(["COMPLETED", "COMPLETED"])
+    res = c.run_job_cluster(emr, {"Name": "x"}, sleep=lambda s: None)
+    assert res["cluster_id"] == "j-1" and [x["Id"] for x in res["steps"]] == ["s-0", "s-1"]
+    assert c.cluster_timing(res["cluster"]) == {"boot_sec": 220.0, "cluster_sec": 600.0}
+    row = c.batch_row(D, res["steps"][-1], None, drop_sec=1.0, rate=3.6,
+                      cluster=res["cluster"], cost={"total_cost": 0.61})
+    assert row["batch_cost_usd"] == 0.61  # the whole job cluster, not just the step
+    assert row["step_cost_usd"] == round(280 / 3600 * 3.6, 6)
+    assert row["cluster_id"] == "j-1" and row["boot_sec"] == 220.0
+    assert set(row) == set(c.BATCH_FIELDS)
+    bad = _fake_emr(["COMPLETED", "FAILED"], "TERMINATED_WITH_ERRORS")
+    try:
+        c.run_job_cluster(bad, {"Name": "x"}, sleep=lambda s: None)
+    except c.StepFailed as e:
+        assert e.step["Id"] == "s-1" and e.result["cluster_id"] == "j-1"
+    else:
+        raise AssertionError("a failed step must raise")
+
+
+def test_emr_builder_defaults_to_a_job_cluster_per_batch():
+    from workflow_builders import augmented_emr as b
+    parent = b.build_parent(job_name="p", child_job_id=7, emr_subnet_id="subnet-1",
+                            emr_master_sg="sg-m", emr_slave_sg="sg-s", **EMR_JOB)
+    child = b.build_child(job_name="c", **EMR_JOB)
+    defaults = {p["name"]: p["default"] for p in parent["parameters"]}
+    assert defaults["emr_cluster_mode"] == "job"
+    loop = parent["tasks"][1]["for_each_task"]["task"]["run_job_task"]["job_parameters"]
+    for k in ("emr_cluster_mode", "emr_subnet_id", "emr_core_count", "emr_instance_type"):
+        assert loop[k] == f"{{{{job.parameters.{k}}}}}", k
+    run = child["tasks"][1]["notebook_task"]["base_parameters"]
+    assert run["emr_cluster_mode"] == "{{job.parameters.emr_cluster_mode}}"
+    assert run["emr_subnet_id"] == "{{job.parameters.emr_subnet_id}}"
+
+
 def test_competitor_dispatch_offers_emr_on_aws():
     import generate_competitor_workflow as g
     assert "emr" in g.competitors_for_cloud("AWS")

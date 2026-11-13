@@ -17,6 +17,7 @@ S3 layout under `s3_root` (the bucket prefix behind the UC volume, e.g.
 """
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import json
@@ -316,6 +317,59 @@ def terminate(emr, cluster_id: str) -> None:
     emr.terminate_job_flows(JobFlowIds=[cluster_id])
 
 
+# --- job clusters (one cluster per task, like a Databricks job cluster) -----
+
+def job_cluster_spec(spec: dict, steps: list[dict]) -> dict:
+    """`spec` as a job cluster: created with its steps, and terminated by EMR
+    as soon as the last step ends or any step fails. Each simulated day then
+    pays for its own cold start, as a classic Databricks job cluster does,
+    instead of reusing a warm cluster across batches."""
+    s = copy.deepcopy(spec)
+    s["Instances"]["KeepJobFlowAliveWhenNoSteps"] = False
+    s["Steps"] = [dict(st, ActionOnFailure="TERMINATE_CLUSTER") for st in steps]
+    return s
+
+
+def run_job_cluster(emr, spec: dict, *, timeout_secs: int = 14400, interval_secs: float = 20,
+                    sleep=time.sleep) -> dict:
+    """Create a job cluster and block until EMR has terminated it. Returns
+    {cluster_id, cluster (DescribeCluster), steps (DescribeStep, in order)}.
+    Raises StepFailed (with .step and .result) when a step didn't complete."""
+    cid = create_cluster(emr, spec)
+
+    def poll():
+        c = emr.describe_cluster(ClusterId=cid)["Cluster"]
+        return c["Status"]["State"].startswith("TERMINATED"), c
+    try:
+        c = _wait(poll, timeout_secs=timeout_secs, interval_secs=interval_secs,
+                  what=f"job cluster {cid}", sleep=sleep)
+    except TimeoutError:
+        terminate(emr, cid)
+        raise
+    ids = [x["Id"] for page in emr.get_paginator("list_steps").paginate(ClusterId=cid)
+           for x in page["Steps"]][::-1]  # ListSteps is newest first
+    steps = [emr.describe_step(ClusterId=cid, StepId=i)["Step"] for i in ids]
+    res = {"cluster_id": cid, "cluster": c, "steps": steps}
+    bad = next((st for st in steps if st["Status"]["State"] != "COMPLETED"), None)
+    if bad is not None or not steps:
+        why = c["Status"].get("StateChangeReason", {})
+        err = StepFailed(f"job cluster {cid} {c['Status']['State']} ({why.get('Message', '')}); "
+                         f"step {bad['Name'] if bad else '-'} "
+                         f"{bad['Status']['State'] if bad else 'never ran'}",
+                         bad or {"Id": None, "Status": {"State": "NOT_RUN"}})
+        err.result = res
+        raise err
+    return res
+
+
+def cluster_timing(cluster: dict) -> dict:
+    """Seconds from create to ready (boot) and from create to terminated."""
+    tl = cluster["Status"].get("Timeline", {})
+    c, r, e = (tl.get(k) for k in ("CreationDateTime", "ReadyDateTime", "EndDateTime"))
+    return {"boot_sec": (r - c).total_seconds() if c and r else None,
+            "cluster_sec": (e - c).total_seconds() if c and e else None}
+
+
 # --- code upload / file drops ------------------------------------------------
 
 def upload_code(s3, code_uri: str, jobs_dir: str) -> list[str]:
@@ -468,15 +522,24 @@ def cluster_cost(emr, cluster_id: str, prices: dict, *, root_gb: int = DEFAULT_R
 # --- reports -----------------------------------------------------------------
 
 BATCH_FIELDS = ["batch_date", "step_id", "step_start", "step_end", "step_sec",
-                "runner_sec", "drop_sec", "status", "fleet_usd_per_hr", "batch_cost_usd"]
+                "runner_sec", "drop_sec", "status", "fleet_usd_per_hr", "batch_cost_usd",
+                "step_cost_usd", "cluster_id", "boot_sec", "cluster_sec"]
 TASK_FIELDS = ["batch_date", "table_name", "status", "task_sec", "start", "end", "error"]
 
 
 def batch_row(batch_date: str, step: dict, metrics: dict | None, *, drop_sec: float | None,
-              rate: float) -> dict:
+              rate: float, cluster: dict | None = None, cost: dict | None = None) -> dict:
+    """One batch's report row. With a job cluster (`cluster` + its `cost`),
+    the batch's cost is the whole cluster's: boot, the step and shutdown.
+    On a shared cluster it is the step's seconds at the fleet rate."""
     tl = step["Status"].get("Timeline", {})
     secs = step_seconds(step)
+    step_cost = None if secs is None else round(secs / 3600 * rate, 6)
+    timing = cluster_timing(cluster) if cluster else {"boot_sec": None, "cluster_sec": None}
     return {
+        "step_cost_usd": step_cost,
+        "cluster_id": cluster.get("Id") if cluster else None,
+        **timing,
         "batch_date": batch_date, "step_id": step.get("Id"),
         "step_start": tl.get("StartDateTime").isoformat() if tl.get("StartDateTime") else None,
         "step_end": tl.get("EndDateTime").isoformat() if tl.get("EndDateTime") else None,
@@ -484,7 +547,7 @@ def batch_row(batch_date: str, step: dict, metrics: dict | None, *, drop_sec: fl
         "drop_sec": None if drop_sec is None else round(drop_sec, 3),
         "status": (metrics or {}).get("status", step["Status"]["State"]),
         "fleet_usd_per_hr": round(rate, 6),
-        "batch_cost_usd": None if secs is None else round(secs / 3600 * rate, 6),
+        "batch_cost_usd": cost["total_cost"] if cost else step_cost,
     }
 
 
