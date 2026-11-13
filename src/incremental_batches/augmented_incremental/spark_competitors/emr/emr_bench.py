@@ -158,7 +158,13 @@ def cmd_setup(a, sess, cid: str):
                          f"Databricks setup_emr task (or setup_rs) once for SF={a.sf}")
     print(f"[setup] upload jobs -> {p['code']}: {emr_c.upload_code(s3, p['code'], os.path.join(_HERE, 'jobs'))}")
     emr_c.run_step(emr, cid, emr_c.sync_code_step(p["code"]))
-    st = emr_c.run_step(emr, cid, emr_c.setup_step(p, a.shuffle_partitions))
+    # One retry: a transient S3 filesystem error (e.g. "Audit Manager Service
+    # ... STOPPED") must not cost a whole cluster start.
+    try:
+        st = emr_c.run_step(emr, cid, emr_c.setup_step(p, a.shuffle_partitions))
+    except emr_c.StepFailed as e:
+        print(f"[setup] retrying once after: {str(e)[:200]}", flush=True)
+        st = emr_c.run_step(emr, cid, emr_c.setup_step(p, a.shuffle_partitions))
     print(f"[setup] {p['db']} reset in {emr_c.step_seconds(st)}s (step {st['Id']})")
 
 

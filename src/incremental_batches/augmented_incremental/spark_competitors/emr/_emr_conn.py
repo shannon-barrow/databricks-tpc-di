@@ -131,6 +131,12 @@ def cluster_spec(*, name: str, subnet_id: str, master_sg: str, slave_sg: str,
                 "spark.dynamicAllocation.enabled": "false",
                 "spark.executor.instances": str(int(core_count)),
                 "spark.scheduler.mode": "FAIR",
+                # A cached S3 filesystem closed by one thread (Hive's DROP
+                # DATABASE CASCADE) and reused by the parallel clones failed
+                # setup with "Audit Manager Service ... STOPPED"; uncached
+                # filesystems cost a little per open and never go stale.
+                "spark.hadoop.fs.s3a.impl.disable.cache": "true",
+                "spark.hadoop.fs.s3.impl.disable.cache": "true",
             }},
             {"Classification": "spark-hive-site", "Properties": {
                 "hive.metastore.client.factory.class":
