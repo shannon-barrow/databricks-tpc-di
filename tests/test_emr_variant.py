@@ -285,7 +285,9 @@ def test_steps():
         with mock.patch.object(emr_runner, "_spark", return_value=FakeSpark()), \
              mock.patch.object(emr_runner, "_delete_path"), \
              mock.patch.object(emr_runner, "_write_text"):
-            assert emr_runner.main(step["HadoopJarStep"]["Args"][4:]) == 0
+            args = step["HadoopJarStep"]["Args"]
+            script = next(i for i, x in enumerate(args) if x.endswith("emr_runner.py"))
+            assert emr_runner.main(args[script + 1:]) == 0
 
 
 def _emr_client():
@@ -627,6 +629,23 @@ def test_run_job_cluster_and_its_batch_row():
         assert e.step["Id"] == "s-1" and e.result["cluster_id"] == "j-1"
     else:
         raise AssertionError("a failed step must raise")
+
+
+def test_s3_cache_off_only_for_setup_and_drop_and_only_reruns_nodes():
+    conf = "spark.hadoop.fs.s3a.impl.disable.cache=true"
+    assert conf in c.setup_step(P)["HadoopJarStep"]["Args"]
+    assert conf in c.drop_step(P)["HadoopJarStep"]["Args"]
+    assert conf not in c.batch_step(P, D)["HadoopJarStep"]["Args"]
+    props = {x["Classification"]: x.get("Properties") for x in _spec()["Configurations"]}
+    assert "spark.hadoop.fs.s3a.impl.disable.cache" not in props["spark-defaults"]
+    args = c.batch_step(P, D, only="factmarkethistory")["HadoopJarStep"]["Args"]
+    assert args[args.index("--only") + 1] == "factmarkethistory"
+    ran = []
+    with mock.patch.object(emr_runner, "node_runner", return_value=ran.append), \
+         mock.patch.object(emr_runner, "_write_text"):
+        res = emr_runner.run_batch(None, db="d", batch_date=D, batch_dir="x", concurrency=2,
+                                   metrics_path=None, only=["factmarkethistory"])
+    assert ran == ["factmarkethistory"] and res["status"] == "SUCCESS"
 
 
 def test_emr_builder_defaults_to_a_job_cluster_per_batch():

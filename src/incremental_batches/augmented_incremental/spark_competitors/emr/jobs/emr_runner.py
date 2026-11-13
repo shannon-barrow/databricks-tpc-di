@@ -135,10 +135,20 @@ def node_runner(spark, *, db: str, batch_date: str, batch_dir: str):
 
 
 def run_batch(spark, *, db: str, batch_date: str, batch_dir: str,
-              concurrency: int, metrics_path: str | None) -> dict:
+              concurrency: int, metrics_path: str | None, only: list[str] | None = None) -> dict:
+    """Run the batch's DAG. `only` re-runs just those nodes (their
+    dependencies already committed for this date): for recovering a batch
+    where one node failed, since the bronze appends and factholdings INSERT
+    are not idempotent and a whole-batch re-run would duplicate them."""
+    dag = tpcdi_dag.DAG
+    if only:
+        unknown = sorted(set(only) - set(dag))
+        if unknown:
+            raise ValueError(f"unknown nodes {unknown}")
+        dag = {n: [d for d in deps if d in only] for n, deps in dag.items() if n in only}
     t0 = time.time()
     records = tpcdi_dag.run_dag(
-        tpcdi_dag.DAG, node_runner(spark, db=db, batch_date=batch_date, batch_dir=batch_dir),
+        dag, node_runner(spark, db=db, batch_date=batch_date, batch_dir=batch_dir),
         concurrency=concurrency)
     t1 = time.time()
     for r in records:
@@ -172,6 +182,7 @@ def main(argv=None) -> int:
     b.add_argument("--batch-dir", required=True, help="s3 dir holding this day's {Dataset}.txt files")
     b.add_argument("--concurrency", type=int, default=8)
     b.add_argument("--metrics-path", default=None)
+    b.add_argument("--only", default="", help="comma list: re-run just these nodes")
     a = ap.parse_args(argv)
 
     spark = _spark(f"tpcdi-emr-{a.mode}-{a.db}", a.shuffle_partitions)
@@ -182,7 +193,8 @@ def main(argv=None) -> int:
         run_drop(spark, db=a.db, db_location=a.db_location)
         return 0
     res = run_batch(spark, db=a.db, batch_date=a.batch_date, batch_dir=a.batch_dir,
-                    concurrency=a.concurrency, metrics_path=a.metrics_path)
+                    concurrency=a.concurrency, metrics_path=a.metrics_path,
+                    only=[n for n in a.only.split(",") if n] or None)
     return 0 if res["status"] == "SUCCESS" else 1
 
 

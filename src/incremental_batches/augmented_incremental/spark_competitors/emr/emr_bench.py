@@ -77,6 +77,9 @@ def _args(argv=None):
     ap.add_argument("--continue-run", action="store_true",
                     help="job mode: skip setup and continue the existing database's batches "
                          "(use with --start-batch)")
+    ap.add_argument("--only", default="",
+                    help="job mode: re-run just these DAG nodes (comma list) of the batches, "
+                         "for recovering a batch where only they failed")
     ap.add_argument("--batches", type=int, default=2)
     ap.add_argument("--start-batch", type=int, default=0, help="0-based index of the first batch")
     ap.add_argument("--concurrency", type=int, default=8)
@@ -281,8 +284,8 @@ def cmd_smoke_jobs(a, sess, run_id: str) -> list[dict]:
         res, cost, err = _job_cluster(a, sess, prices, f"{base}-{d}", [
             emr_c.sync_code_step(p["code"]),
             emr_c.batch_step(p, d, concurrency=a.concurrency,
-                             shuffle_partitions=a.shuffle_partitions)])
-        costs[d] = cost
+                             shuffle_partitions=a.shuffle_partitions, only=a.only)])
+        costs[d if not a.only else f"{d}_rerun"] = cost
         step = res["steps"][-1] if res["steps"] else err.step
         try:
             metrics = emr_c.read_json(s3, emr_c.metrics_uri(p, d))

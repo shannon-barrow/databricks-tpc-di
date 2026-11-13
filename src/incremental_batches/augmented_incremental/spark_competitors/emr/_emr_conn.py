@@ -132,12 +132,6 @@ def cluster_spec(*, name: str, subnet_id: str, master_sg: str, slave_sg: str,
                 "spark.dynamicAllocation.enabled": "false",
                 "spark.executor.instances": str(int(core_count)),
                 "spark.scheduler.mode": "FAIR",
-                # A cached S3 filesystem closed by one thread (Hive's DROP
-                # DATABASE CASCADE) and reused by the parallel clones failed
-                # setup with "Audit Manager Service ... STOPPED"; uncached
-                # filesystems cost a little per open and never go stale.
-                "spark.hadoop.fs.s3a.impl.disable.cache": "true",
-                "spark.hadoop.fs.s3.impl.disable.cache": "true",
             }},
             {"Classification": "spark-hive-site", "Properties": {
                 "hive.metastore.client.factory.class":
@@ -186,10 +180,19 @@ def sync_code_step(code_uri: str) -> dict:
                  f"mkdir -p {REMOTE_CODE_DIR} && aws s3 sync --delete {code_uri} {REMOTE_CODE_DIR}/"])
 
 
-def _spark_submit(mode: str, args: list[str]) -> list[str]:
+# Setup and drop only: a cached S3 filesystem closed by one thread (Hive's
+# DROP DATABASE CASCADE) and reused by the parallel clones failed setup with
+# "Audit Manager Service ... STOPPED". Batches keep the cache: uncached, every
+# file open re-fetches the instance credentials, and a fresh cluster's
+# metadata service then throttles them ("Unable to load credentials").
+_UNCACHED_S3 = ["--conf", "spark.hadoop.fs.s3a.impl.disable.cache=true",
+                "--conf", "spark.hadoop.fs.s3.impl.disable.cache=true"]
+
+
+def _spark_submit(mode: str, args: list[str], conf: list[str] | None = None) -> list[str]:
     # Client mode: the driver runs on the primary node, leaving every core
     # node's single executor to the transforms.
-    return ["spark-submit", "--deploy-mode", "client",
+    return ["spark-submit", "--deploy-mode", "client", *(conf or []),
             f"{REMOTE_CODE_DIR}/emr_runner.py", mode, *args]
 
 
@@ -197,17 +200,19 @@ def setup_step(p: dict, shuffle_partitions: str = "1000") -> dict:
     return _step(f"tpcdi setup {p['db']}", _spark_submit("setup", [
         "--db", p["db"], "--db-location", p["db_location"],
         "--staging-delta", p["staging_delta"],
-        "--shuffle-partitions", shuffle_partitions]))
+        "--shuffle-partitions", shuffle_partitions], _UNCACHED_S3))
 
 
 def drop_step(p: dict) -> dict:
     return _step(f"tpcdi drop {p['db']}", _spark_submit("drop", [
-        "--db", p["db"], "--db-location", p["db_location"]]))
+        "--db", p["db"], "--db-location", p["db_location"]], _UNCACHED_S3))
 
 
 def batch_step(p: dict, batch_date: str, *, concurrency: int = 8,
-               shuffle_partitions: str = "1000") -> dict:
-    return _step(f"tpcdi batch {p['db']} {batch_date}", _spark_submit("batch", [
+               shuffle_partitions: str = "1000", only: str = "") -> dict:
+    extra = ["--only", only] if only else []
+    return _step(f"tpcdi batch {p['db']} {batch_date}{' ' + only if only else ''}",
+                 _spark_submit("batch", extra + [
         "--db", p["db"], "--batch-date", batch_date,
         "--batch-dir", f"{p['dailybatches']}/{batch_date}",
         "--concurrency", str(concurrency),
