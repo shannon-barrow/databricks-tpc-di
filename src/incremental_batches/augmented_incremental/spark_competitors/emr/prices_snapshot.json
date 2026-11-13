@@ -1,0 +1,20 @@
+{
+ "region": "us-west-2",
+ "ec2": {
+  "m7gd.2xlarge": 0.4271,
+  "m8gd.2xlarge": 0.46128,
+  "m8gd.4xlarge": 0.92256,
+  "m8gd.8xlarge": 1.84512,
+  "r8gd.2xlarge": 0.58784
+ },
+ "emr": {
+  "m7gd.2xlarge": 0.106775,
+  "m8gd.2xlarge": 0.11532,
+  "m8gd.4xlarge": 0.23064,
+  "m8gd.8xlarge": 0.46128,
+  "r8gd.2xlarge": 0.14696
+ },
+ "source": "AWS Pricing API (on-demand)",
+ "fetched_at": "2026-11-13",
+ "ebs_gp3_gb_month": 0.08
+}

@@ -10,6 +10,7 @@ competitors in [`../dbt/competitors/`](../dbt/competitors/README.md); the same
 | Engine | Cloud | Variants | Auth |
 |---|---|---|---|
 | **Microsoft Fabric Spark** | Azure | `fabric_spark` (JVM Spark), `fabric_nee` (Native Execution Engine: Velox via Gluten) | Entra service principal (client credentials) |
+| **Amazon EMR (on EC2)** | AWS | `emr` (EMR Spark 3.5, Delta via delta-spark, Glue catalog) | an AWS identity: UC service credential, instance profile, or (laptop driver) an AWS CLI profile |
 
 `fabric_spark` and `fabric_nee` run byte-identical notebooks. `batch_runner`
 sets `spark.native.enabled` for the session from the job's `enable_nee`
@@ -113,6 +114,63 @@ on Runtime 2.0 on the custom pool (15 executors x 8 cores, dynamic allocation
 off), and the NEE run's plans were native (`*Transformer`,
 `VeloxColumnarToRow`, `ColumnarExchange`).
 
+## Amazon EMR (on EC2)
+
+The same 16-node per-batch DAG as Fabric's `batch_runner`, run as **one EMR
+step per batch** on a fixed-size on-demand cluster (no managed scaling, no
+dynamic allocation, one whole-node executor per core node, driver on the
+primary node in client mode). Tables are Delta (EMR's bundled delta-spark) in
+the Glue database `{wh_db}_{sf}`, under `{s3}_emr/warehouse/`.
+
+**What's shared with Fabric.** `emr/jobs/tpcdi_sql.py` holds the transforms
+as SQL builders. `tests/test_emr_variant.py` checks they match the Fabric
+notebooks token for token. The one change is DimAccount: Fabric's
+`SELECT * except(...)` becomes an explicit column list, because OSS Spark 3.5
+has no star-except. The bronze tables drop Fabric's `CLUSTER BY` because OSS
+Delta only clusters on OPTIMIZE. They keep `dataSkippingNumIndexedCols=34`,
+so the per-batch date filters skip earlier days' files. `emr/jobs/tpcdi_dag.py`
+is the runMultiple DAG (same edges), run as threads on one SparkSession in
+FAIR mode.
+
+**Staging.** OSS Delta can't clone the UC staging tables, so EMR reads the
+parquet export at `{s3}staging_parquet_rs/sf={sf}/`. That's the export the
+Redshift setup makes; `setup_emr` creates it if it's missing. Each run's
+`setup` step rebuilds the 20 tables from it (CTAS) and creates the 6 empty
+bronze tables.
+
+**Two ways to drive it** (same `emr/_emr_conn.py` underneath):
+
+| | Databricks jobs (Competitor Driver → `emr`) | Laptop driver `emr/emr_bench.py` |
+|---|---|---|
+| Shape | parent `setup_emr` → for_each child (`simulate_filedrops_emr` = the Redshift drop notebook, `run_emr`) → `teardown_emr` (ALL_DONE: cleanup if `delete_tables_when_finished`, report, terminate) | `plan` / `create` / `setup` / `run` / `report` / `terminate` / `cleanup` / `smoke` |
+| AWS identity | UC service credential (`aws_service_credential`, serverless env v5) or an interactive cluster's instance profile; needs EMR + `iam:PassRole`. S3 goes through the UC volume | any boto3 credential (SSO profile) with EMR, S3 and Glue on the account |
+| Use when | the workspace has such an identity | it doesn't (the case today, see below) |
+
+`create`, `run` and `smoke` refuse to start without `--yes`. `plan` makes no
+AWS calls: it validates the RunJobFlow spec offline against the EMR API model
+and prints the cost estimate.
+
+**Measuring.** Per batch: the EMR step's start/end (`DescribeStep`), plus the
+runner's own per-table start/end/seconds (`batch={date}.json`). Both land in
+`{s3}_emr/metrics/{db}/{run_id}/` as `batches.csv` and `task_times.csv`.
+Batch cost = step seconds x the fleet's on-demand $/hr. The run total is
+`cluster_cost.json`: every instance's lifetime from `ListInstances`, billed
+per second with EC2's 60 s minimum. Rates are EC2 Linux on-demand + the EMR
+per-instance uplift + the gp3 root volume. The rates come from
+`emr/prices_snapshot.json` (AWS Pricing API, us-west-2, fetched 2026-11-13);
+`--prices live` re-fetches them. For example, m8gd.2xlarge = $0.46128 EC2 +
+$0.11532 EMR + 32 GB gp3 ($0.0035) = **$0.5801/hr per node**.
+
+**Sizing.** For comparison with Fabric's F64 (16 Medium nodes = 128 vCores),
+use 16 x m8gd.2xlarge core nodes (128 vCPUs) plus 1 primary: $9.86/hr. The
+SF=10 smoke test uses 2 core nodes + 1 primary: $1.74/hr.
+
+**Smoke test (laptop):**
+`python emr_bench.py smoke --yes --batches 2 --core-count 2 --profile <p> --s3-root s3://<bucket>/<prefix>/ --wh-db <prefix>_emr --sf 10 --subnet <subnet> --master-sg <sg> --slave-sg <sg>`.
+It creates the cluster, runs setup and 2 batches, and terminates the cluster
+even if a step fails. Then it writes the cost report. A pass is both batches
+reporting `SUCCESS`, with 16 SUCCESS rows each in `task_times.csv`.
+
 ## Layout
 
 ```
@@ -132,4 +190,17 @@ spark_competitors/
         └── incremental/*.py        the 8 silver/gold transforms
 ```
 
-Builder: `src/tools/workflow_builders/augmented_fabric_spark.py`.
+```
+└── emr/
+    ├── _emr_conn.py                boto3: cluster spec, steps, file drops, pricing, cost
+    ├── emr_bench.py                laptop driver (CLI)
+    ├── setup_emr.py / run_emr.py / teardown_emr.py   Databricks tasks
+    ├── prices_snapshot.json        on-demand EC2 + EMR + gp3 rates
+    └── jobs/                       uploaded to S3, run ON EMR by spark-submit
+        ├── emr_runner.py           setup | batch | drop
+        ├── tpcdi_sql.py            the transforms (Fabric port)
+        └── tpcdi_dag.py            per-batch DAG + scheduler
+```
+
+Builders: `src/tools/workflow_builders/augmented_fabric_spark.py`,
+`src/tools/workflow_builders/augmented_emr.py`.

@@ -13,7 +13,8 @@
 # MAGIC   BigQuery, Microsoft Fabric Data Warehouse.
 # MAGIC - **Spark engines, via the repo's PySpark notebooks** — Microsoft Fabric
 # MAGIC   Spark and Fabric NEE (Native Execution Engine). Same notebooks for both;
-# MAGIC   NEE on/off is the only difference.
+# MAGIC   NEE on/off is the only difference. Amazon EMR (on EC2) runs a PySpark
+# MAGIC   port of the same transforms as EMR steps.
 # MAGIC
 # MAGIC This is the counterpart to the Databricks `TPC-DI Driver`; run the two
 # MAGIC side by side to compare Databricks vs a competitor on identical data +
@@ -67,6 +68,7 @@
 # MAGIC | **BigQuery** | `bq_project`, `bq_gcs_volume_prefix` | service-account key JSON |
 # MAGIC | **Fabric DW** | `fab_workspace_id`, `fab_lakehouse_id`, `fab_lakehouse_name`, `fab_wh_host`, `fab_wh_name`, `fab_tenant_id`, `fab_client_id` | service principal client secret |
 # MAGIC | **Fabric Spark / NEE** | `fab_workspace_id`, `fab_lakehouse_id`, `fab_tenant_id`, `fab_client_id`, plus the Spark pool size (`fab_node_size`, `fab_node_count`) | service principal client secret |
+# MAGIC | **EMR** | `emr_s3_volume_prefix`, `emr_region`, `emr_subnet_id`, `emr_master_sg`, `emr_slave_sg` (or `emr_cluster_id`), `emr_instance_type`, `emr_core_count` | none: an AWS identity instead (UC service credential `emr_aws_service_credential`, or the interactive cluster's instance profile) |
 # MAGIC
 # MAGIC Note `sf_database` / `bq_project` are the *engine's* namespace and are
 # MAGIC distinct from the Databricks UC `catalog` (which stays `main` and drives
@@ -108,7 +110,7 @@
 # MAGIC TPC-DI data is generated in Databricks and read by the competitor in the
 # MAGIC **same cloud/region** (a different region incurs egress). So the
 # MAGIC Competitor dropdown only lists engines valid for this workspace's cloud:
-# MAGIC AWS → Redshift + Snowflake, GCP → BigQuery + Snowflake,
+# MAGIC AWS → Redshift + Snowflake + EMR, GCP → BigQuery + Snowflake,
 # MAGIC Azure → Snowflake + Fabric DW + Fabric Spark + Fabric NEE.
 # MAGIC
 # MAGIC ## Compute
@@ -308,6 +310,21 @@ elif competitor.startswith("fabric_"):
                          default_secret_name("fabric", _fab_client_now, kind="sp"),
                          "FAB: SP client secret name")
 
+elif competitor == "emr":
+    # The EMR cluster is EMR's equivalent of a warehouse size: fixed-size,
+    # on demand, one whole-node executor per core node. 16 x m8gd.2xlarge
+    # = 128 vCPUs, the same base vCores as Fabric's F64 pool.
+    dbutils.widgets.text("emr_s3_volume_prefix", "", "EMR: S3 prefix behind the volume (s3://.../)")
+    dbutils.widgets.text("emr_region", "us-west-2", "EMR: AWS region")
+    dbutils.widgets.text("emr_aws_service_credential", "",
+                         "EMR: UC service credential (blank = cluster instance profile)")
+    dbutils.widgets.text("emr_cluster_id", "", "EMR: existing cluster id (blank = create)")
+    dbutils.widgets.text("emr_subnet_id", "", "EMR: subnet id")
+    dbutils.widgets.text("emr_master_sg", "", "EMR: managed primary security group")
+    dbutils.widgets.text("emr_slave_sg", "", "EMR: managed core security group")
+    dbutils.widgets.text("emr_instance_type", "m8gd.2xlarge", "EMR: instance type")
+    dbutils.widgets.text("emr_core_count", "16", "EMR: core node count")
+
 print(f"Cloud: {_cloud}  |  competitors available: {_valid}")
 print(f"Selected competitor: {competitor}")
 print("Fill the inputs above, then run the Create cell.")
@@ -393,6 +410,27 @@ elif competitor.startswith("fabric_"):
     if _blank:
         raise ValueError(f"Fill these Fabric inputs first: {_blank}")
 
+elif competitor == "emr":
+    engine_params = dict(
+        s3_volume_prefix=dbutils.widgets.get("emr_s3_volume_prefix").strip(),
+        aws_region=dbutils.widgets.get("emr_region").strip(),
+        aws_service_credential=dbutils.widgets.get("emr_aws_service_credential").strip(),
+        emr_cluster_id=dbutils.widgets.get("emr_cluster_id").strip(),
+        emr_subnet_id=dbutils.widgets.get("emr_subnet_id").strip(),
+        emr_master_sg=dbutils.widgets.get("emr_master_sg").strip(),
+        emr_slave_sg=dbutils.widgets.get("emr_slave_sg").strip(),
+        emr_instance_type=dbutils.widgets.get("emr_instance_type").strip(),
+        emr_core_count=int(dbutils.widgets.get("emr_core_count")),
+    )
+    _need = ["s3_volume_prefix", "aws_region"] + (
+        [] if engine_params["emr_cluster_id"] else ["emr_subnet_id", "emr_master_sg", "emr_slave_sg"])
+    _blank = [k for k in _need if not engine_params[k]]
+    if _blank:
+        raise ValueError(f"Fill these EMR inputs first: {_blank}")
+    if not engine_params["aws_service_credential"] and not _cluster_id:
+        raise ValueError("EMR needs an AWS identity: a UC service credential, or an "
+                         "interactive_cluster_id whose instance profile may call EMR")
+
 # The engine `catalog` (the namespace the benchmark builds into) is NOT always
 # the Databricks UC catalog. UC catalog (`catalog`) always drives tpcdi_directory
 # above; the engine catalog can differ:
@@ -442,5 +480,5 @@ parent_job_id = generate_competitor_workflow(
     engine_params=engine_params,
 )
 _title = {"fabric_dw": "Fabric DW", "fabric_spark": "Fabric Spark",
-          "fabric_nee": "Fabric NEE"}.get(competitor, competitor.title())
+          "fabric_nee": "Fabric NEE", "emr": "Amazon EMR"}.get(competitor, competitor.title())
 displayHTML(f"<h2><a href=/#job/{parent_job_id}>{_title} Benchmark Workflow (parent)</a></h2>")

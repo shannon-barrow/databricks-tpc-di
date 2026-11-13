@@ -462,7 +462,7 @@ business logic — expressed as a stock dbt project (no custom materializations)
 non-Databricks engine via `tools/generate_competitor_workflow.py`, which
 dispatches to `workflow_builders/augmented_{engine}.py`. The dropdown only
 offers engines native to the workspace's cloud (`COMPETITOR_CLOUD`): AWS →
-Snowflake + Redshift, GCP → Snowflake + BigQuery, Azure → Snowflake + Fabric
+Snowflake + Redshift + EMR, GCP → Snowflake + BigQuery, Azure → Snowflake + Fabric
 DW + Fabric Spark + Fabric NEE.
 
 - **Warehouses (dbt):** `augmented_incremental/dbt/competitors/{snowflake,
@@ -473,7 +473,11 @@ DW + Fabric Spark + Fabric NEE.
   `enable_nee` job param (→ `spark.native.enabled` per session in
   `batch_runner`) is the only difference. `setup_fabric` provisions the Fabric
   side every run (fixed-size custom pool, Runtime 2.0 Environment, notebook
-  deploy). EMR / Dataproc would land next to `fabric/`.
+  deploy). `spark_competitors/emr/` (`augmented_emr.py`) runs the Fabric
+  transforms (ported to OSS Spark 3.5 + delta-spark, Glue catalog) as one EMR
+  step per batch on a fixed-size on-demand cluster; it can also be driven from
+  a laptop with boto3 (`emr/emr_bench.py`) when the workspace has no AWS
+  identity allowed to call EMR.
 - **Credentials:** UC secrets in `main.tpcdi_raw_data`, named for what they
   unlock (`default_secret_name`), passed to tasks as full `catalog.schema.key`
   paths; everything else is a plain param. Fabric: plain tenant/client ids +
@@ -658,6 +662,7 @@ src/
       augmented_dbt.py            # Augmented Incremental dbt benchmark parent
       augmented_{snowflake,redshift,bigquery,fabric}.py  # dbt competitor builders
       augmented_fabric_spark.py   # Fabric Spark + Fabric NEE builder (Spark competitor)
+      augmented_emr.py            # Amazon EMR (on EC2) builder (Spark competitor)
       warehouse.py                # DBSQL warehouse spec
     augmented_staging/            # Stage 0 notebooks for Augmented Incremental
       _stage_ingestion.py         # stage_to_files() helper — partitioned-CSV writer

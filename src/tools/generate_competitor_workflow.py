@@ -6,7 +6,7 @@ collects the per-engine inputs via widgets and calls ``generate_competitor_workf
 
 Scope: this ONLY creates a competitor's parent+child workflow — dbt for the
 warehouses (Snowflake / Redshift / BigQuery / Fabric DW), the repo's PySpark
-notebooks for the Spark engines (Fabric Spark / Fabric NEE). It does not
+notebooks for the Spark engines (Fabric Spark / Fabric NEE / EMR). It does not
 generate data and does not create the Databricks benchmark — the user must have
 already run the Databricks augmented-incremental benchmark to generate + stage
 the data the competitor reads.
@@ -25,6 +25,7 @@ from workflow_builders import augmented_redshift as _rs_builder
 from workflow_builders import augmented_bigquery as _bq_builder
 from workflow_builders import augmented_fabric as _fab_dw_builder
 from workflow_builders import augmented_fabric_spark as _fab_spark_builder
+from workflow_builders import augmented_emr as _emr_builder
 from _workflow_utils import submit_dag
 
 _JOBS_API_ENDPOINT = "/api/2.1/jobs/create"
@@ -40,12 +41,17 @@ COMPETITOR_CLOUD = {
     "fabric_dw": "Azure",
     "fabric_spark": "Azure",
     "fabric_nee": "Azure",
+    "emr": "AWS",
 }
 
 # Spark competitors run the repo's PySpark notebooks on the competitor's Spark
 # engine instead of a dbt project; their builders take an enable_nee-style
 # engine toggle rather than warehouse connection params.
 SPARK_COMPETITORS = ("fabric_spark", "fabric_nee")
+# Spark on EMR (EC2): own builder, AWS identity instead of an engine toggle.
+_EMR_PARENT_PARAMS = ("emr_cluster_id", "emr_subnet_id", "emr_master_sg", "emr_slave_sg",
+                      "emr_instance_type", "emr_core_count", "emr_release_label",
+                      "emr_service_role", "emr_instance_profile")
 
 
 def competitors_for_cloud(cloud: str) -> list[str]:
@@ -58,7 +64,7 @@ def _child_parent_names(engine: str, name_prefix: str, scale_factor: int) -> tup
     {prefix}-SF{sf}-AugmentedIncremental-{Engine}-{Child|Parent}."""
     label = {"snowflake": "Snowflake", "redshift": "Redshift", "bigquery": "BigQuery",
              "fabric_dw": "FabricDW", "fabric_spark": "FabricSpark",
-             "fabric_nee": "FabricNEE"}[engine]
+             "fabric_nee": "FabricNEE", "emr": "EMR"}[engine]
     base = f"{name_prefix}-SF{scale_factor}-AugmentedIncremental-{label}"
     return f"{base}-Child", f"{base}-Parent"
 
@@ -94,6 +100,11 @@ def generate_competitor_workflow(
                    tenant_id, client_id, client_secret_secret, and optionally
                    fabric_pool_name, fabric_node_size, fabric_node_count,
                    fabric_runtime, fabric_environment_name
+      - emr:       s3_volume_prefix, aws_region, aws_service_credential (blank =
+                   the interactive cluster's instance profile), and the
+                   cluster inputs emr_subnet_id, emr_master_sg, emr_slave_sg
+                   (or emr_cluster_id to reuse one), emr_instance_type,
+                   emr_core_count, ...
     """
     engine = engine.lower()
     ep = dict(engine_params or {})
@@ -175,6 +186,15 @@ def generate_competitor_workflow(
         parent_extra = {k: ep[k] for k in ("fabric_pool_name", "fabric_node_size",
                                            "fabric_node_count", "fabric_runtime",
                                            "fabric_environment_name") if ep.get(k)}
+    elif engine == "emr":
+        builder = _emr_builder
+        child_kwargs = dict(
+            common,
+            s3_volume_prefix=ep["s3_volume_prefix"],
+            aws_region=ep.get("aws_region", "us-west-2"),
+            aws_service_credential=ep.get("aws_service_credential", ""),
+        )
+        parent_extra = {k: ep[k] for k in _EMR_PARENT_PARAMS if ep.get(k) not in (None, "")}
     else:
         raise ValueError(
             f"Unknown competitor engine '{engine}'. "
