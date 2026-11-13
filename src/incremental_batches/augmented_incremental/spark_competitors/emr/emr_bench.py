@@ -74,6 +74,9 @@ def _args(argv=None):
     # run
     ap.add_argument("--cluster-mode", choices=["job", "shared"], default="job",
                     help="smoke: a job cluster per setup/batch (default) or one shared cluster")
+    ap.add_argument("--continue-run", action="store_true",
+                    help="job mode: skip setup and continue the existing database's batches "
+                         "(use with --start-batch)")
     ap.add_argument("--batches", type=int, default=2)
     ap.add_argument("--start-batch", type=int, default=0, help="0-based index of the first batch")
     ap.add_argument("--concurrency", type=int, default=8)
@@ -256,7 +259,7 @@ def cmd_smoke_jobs(a, sess, run_id: str) -> list[dict]:
     base = f"tpcdi-emr-{p['db']}"
     costs = {}
     # One retry: a transient S3 filesystem error must not fail the run.
-    for attempt in (1, 2):
+    for attempt in (() if a.continue_run else (1, 2)):
         res, cost, err = _job_cluster(a, sess, prices, f"{base}-setup", [
             emr_c.sync_code_step(p["code"]), emr_c.setup_step(p, a.shuffle_partitions)])
         costs[f"setup{'' if attempt == 1 else '_retry'}"] = cost
@@ -266,7 +269,9 @@ def cmd_smoke_jobs(a, sess, run_id: str) -> list[dict]:
         if not err:
             break
     else:
-        raise SystemExit(f"[setup] failed twice: {err}")
+        if not a.continue_run:
+            raise SystemExit(f"[setup] failed twice: {err}")
+        print(f"[setup] skipped: continuing {p['db']} from batch index {a.start_batch}", flush=True)
     print(f"[run] {counts} at ${rate:.4f}/hr while up; metrics -> {p['metrics']}", flush=True)
     batches, tasks = [], []
     for d in emr_c.batch_dates(a.batches, a.start_batch):
