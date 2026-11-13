@@ -20,6 +20,7 @@ for p in (EMR, EMR / "jobs", ROOT / "src" / "tools"):
     sys.path.insert(0, str(p))
 
 import _emr_conn as c  # noqa: E402
+import _emr_staging as stg  # noqa: E402
 import emr_bench  # noqa: E402
 import emr_runner  # noqa: E402
 import tpcdi_dag  # noqa: E402
@@ -101,14 +102,17 @@ def test_sql_avoids_non_oss_spark_syntax():
     import sqlglot
     sqls = [_ours(t) for t in FABRIC_NOTEBOOKS] + [
         q.create_bronze("db", s) for s in q.EMPTY_BRONZE] + [
-        q.clone_from_parquet("db", "dimdate", "s3://b/p/staging_parquet_rs/sf=10/")]
+        q.shallow_clone("db", "dimdate", "s3://b/p/_emr/staging_delta/sf=10/", "s3://b/w/db.db")]
     for sql in sqls:
         low = sql.lower()
         for banned in ("except(", "qualify", "replace using", "cluster by", "notebookutils",
                        "{", "}"):
             assert banned not in low, (banned, sql[:200])
-        sqlglot.parse_one(sql, read="spark")  # raises on a syntax error
-    assert "parquet.`s3://b/p/staging_parquet_rs/sf=10/dimdate`" in sqls[-1]
+        if "SHALLOW CLONE" not in sql:  # sqlglot's spark dialect has no CLONE
+            sqlglot.parse_one(sql, read="spark")  # raises on a syntax error
+    assert sqls[-1] == ("CREATE TABLE db.dimdate SHALLOW CLONE "
+                        "delta.`s3://b/p/_emr/staging_delta/sf=10/dimdate` "
+                        "LOCATION 's3://b/w/db.db/dimdate'")
     assert "dataSkippingNumIndexedCols' = '34'" in q.create_bronze("db", "customer")
 
 
@@ -197,11 +201,27 @@ def test_runner_batch_runs_every_node():
     assert loads == [f"s3://b/x/{D}"] * 7
 
 
+def test_runner_setup_shallow_clones_staging():
+    spark = FakeSpark()
+    with mock.patch.object(emr_runner, "_delete_path") as rm:
+        emr_runner.run_setup(spark, db="db", db_location="s3://b/w/db.db",
+                             staging_delta="s3://b/s/sf=10/")
+    rm.assert_called_once_with(spark, "s3://b/w/db.db")
+    assert spark.sqls[:2] == ["DROP DATABASE IF EXISTS db CASCADE",
+                              "CREATE DATABASE db LOCATION 's3://b/w/db.db'"]
+    clones = [x for x in spark.sqls if "SHALLOW CLONE" in x]
+    assert sorted(clones) == sorted(
+        q.shallow_clone("db", t, "s3://b/s/sf=10", "s3://b/w/db.db") for t in q.STAGING_TABLES)
+    assert [x for x in spark.sqls if x.startswith("CREATE TABLE db.bronze") and "CLONE" not in x] \
+        == [q.create_bronze("db", s) for s in q.EMPTY_BRONZE]
+    assert not any("parquet" in x for x in spark.sqls)
+
+
 def test_runner_cli_parses_each_mode():
     with mock.patch.object(emr_runner, "_spark", return_value=FakeSpark()), \
          mock.patch.object(emr_runner, "_delete_path"):
         assert emr_runner.main(["setup", "--db", "db", "--db-location", "s3://b/w/db.db",
-                                "--staging-parquet", "s3://b/s/sf=10"]) == 0
+                                "--staging-delta", "s3://b/s/sf=10"]) == 0
         assert emr_runner.main(["drop", "--db", "db", "--db-location", "s3://b/w/db.db"]) == 0
         assert emr_runner.main(["batch", "--db", "db", "--batch-date", D,
                                 "--batch-dir", "s3://b/d"]) == 0
@@ -221,7 +241,7 @@ def _spec(**kw):
 def test_paths_and_dates():
     assert P["db"] == "test_emr_10"
     assert P["dailybatches"] == "s3://bucket/prefix/augmented_incremental/_dailybatches/test_emr_10"
-    assert P["staging_parquet"] == "s3://bucket/prefix/staging_parquet_rs/sf=10"
+    assert P["staging_delta"] == "s3://bucket/prefix/_emr/staging_delta/sf=10"
     assert P["metrics"] == "s3://bucket/prefix/_emr/metrics/test_emr_10/r1"
     assert c.batch_dates(2) == ["2016-07-06", "2016-07-07"]
     assert len(c.batch_dates(999)) == 365 and c.batch_dates(999)[-1] == "2017-07-05"
@@ -258,7 +278,7 @@ def test_steps():
     assert args[args.index("--metrics-path") + 1] == f"{P['metrics']}/batch={D}.json"
     assert args[args.index("--concurrency") + 1] == "6"
     setup = c.setup_step(P)["HadoopJarStep"]["Args"]
-    assert setup[setup.index("--staging-parquet") + 1] == P["staging_parquet"]
+    assert setup[setup.index("--staging-delta") + 1] == P["staging_delta"]
     assert c.sync_code_step(P["code"])["HadoopJarStep"]["Args"][0] == "bash"
     # emr_runner's argparse accepts exactly what the step builders emit
     for step in (c.batch_step(P, D), c.setup_step(P), c.drop_step(P)):
@@ -315,6 +335,126 @@ def test_wait_cluster_ready_raises_on_termination():
 
 
 PRICES = json.loads((EMR / "prices_snapshot.json").read_text())
+
+
+class StagingSpark:
+    """Databricks for _emr_staging: rejects SQL on paths starting with
+    `reject`, and reports `features[table]` from DESCRIBE DETAIL."""
+
+    def __init__(self, reject=(), features=None):
+        self.sqls, self.reject, self.features = [], tuple(reject), dict(features or {})
+
+    def sql(self, s):
+        ref = re.search(r"delta\.`([^`]*)`", s)
+        if ref and self.reject and ref.group(1).startswith(self.reject):
+            raise RuntimeError("path not allowed")
+        self.sqls.append(s)
+        if s.startswith("DESCRIBE DETAIL"):
+            t = ref.group(1).rsplit("/", 1)[1]
+            row = mock.MagicMock()
+            row.asDict.return_value = {"tableFeatures": self.features.get(t, ["columnMapping"])}
+            df = mock.MagicMock()
+            df.collect.return_value = [row]
+            return df
+        if s.startswith("CREATE TABLE") and " AS SELECT " in s:  # the rewrite: plain protocol
+            self.features[ref.group(1).rsplit("/", 1)[1]] = []
+        return mock.MagicMock()
+
+
+def _materialize(spark, present=(), **kw):
+    removed = []
+    out = stg.materialize(spark, src_db="main.st_10", tables=["a", "b", "c"],
+                          roots=["/Volumes/m/s/v/x", "s3://b/x"],
+                          has_table=lambda t: t in present, remove=removed.append,
+                          log=lambda m: None, **kw)
+    return out, removed
+
+
+def test_materialize_clones_missing_tables_only():
+    spark = StagingSpark()
+    out, removed = _materialize(spark, present=("b",))
+    assert sorted(out["cloned"]) == ["a", "c"] and out["rewritten"] == [] and removed == []
+    assert out["root"] == "/Volumes/m/s/v/x"
+    clones = [x for x in spark.sqls if "DEEP CLONE" in x]
+    assert sorted(clones) == [
+        f"CREATE OR REPLACE TABLE delta.`/Volumes/m/s/v/x/{t}` DEEP CLONE main.st_10.{t} "
+        "TBLPROPERTIES ('delta.enableDeletionVectors' = 'false')" for t in ("a", "c")]
+    assert sorted(x for x in spark.sqls if x.startswith("REORG")) == [
+        f"REORG TABLE delta.`/Volumes/m/s/v/x/{t}` APPLY (PURGE)" for t in ("a", "c")]
+    # every copy, kept or new, gets its features checked
+    assert sum(x.startswith("DESCRIBE DETAIL") for x in spark.sqls) == 3
+
+
+def test_materialize_force_and_nothing_to_do():
+    spark = StagingSpark()
+    out, _ = _materialize(spark, present=("a", "b", "c"))
+    assert out["cloned"] == [] and not any("CLONE" in x for x in spark.sqls)
+    spark = StagingSpark()
+    out, _ = _materialize(spark, present=("a", "b", "c"), force=True)
+    assert sorted(out["cloned"]) == ["a", "b", "c"]
+
+
+def test_materialize_falls_back_to_the_s3_uri():
+    spark = StagingSpark(reject=("/Volumes",))
+    out, _ = _materialize(spark)
+    assert out["root"] == "s3://b/x"
+    assert all("delta.`s3://b/x/" in x for x in spark.sqls)
+    spark = StagingSpark(reject=("/Volumes", "s3://"))
+    try:
+        _materialize(spark)
+    except RuntimeError as e:
+        assert "/Volumes/m/s/v/x" in str(e) and "s3://b/x" in str(e)
+    else:
+        raise AssertionError("no path form worked, yet materialize returned")
+
+
+def test_materialize_rewrites_copies_oss_delta_cannot_read():
+    spark = StagingSpark(features={"b": ["deletionVectors", "checkpointProtection"],
+                                   "c": ["v2Checkpoint", "rowTracking", "clustering",
+                                         "domainMetadata", "columnMapping"]})
+    out, removed = _materialize(spark)
+    assert out["rewritten"] == ["b"] and removed == ["b"]
+    rw = [x for x in spark.sqls if " AS SELECT " in x]
+    assert rw == ["CREATE TABLE delta.`/Volumes/m/s/v/x/b` USING DELTA TBLPROPERTIES ("
+                  "'delta.enableDeletionVectors' = 'false', 'delta.enableRowTracking' = 'false', "
+                  "'delta.enableInCommitTimestamps' = 'false', "
+                  "'delta.checkpointPolicy' = 'classic', 'delta.columnMapping.mode' = 'none') "
+                  "AS SELECT * FROM main.st_10.b"]
+    assert stg.unsupported_features({}) == []
+    assert stg.unsupported_features({"tableFeatures": ["variantType", "appendOnly"]}) == \
+        ["variantType"]
+
+
+def test_materialize_sf_checks_and_removes_through_the_volume():
+    dbu = mock.MagicMock()
+    logf = mock.MagicMock()
+    logf.name = "00000000000000000000.json"
+    dbu.fs.ls.side_effect = lambda path: [logf] if "/dimdate/" in path else []
+    spark = StagingSpark()
+    with mock.patch.object(stg, "materialize", wraps=stg.materialize) as m:
+        stg.materialize_sf(spark, dbu, catalog="main", sf="10",
+                           staging_delta=P["staging_delta"],
+                           staging_delta_volume="/Volumes/main/s/v/_emr/staging_delta/sf=10/",
+                           tables=["dimdate", "taxrate"])
+    kw = m.call_args.kwargs
+    assert kw["src_db"] == "main.tpcdi_incremental_staging_10"
+    assert kw["roots"] == ["/Volumes/main/s/v/_emr/staging_delta/sf=10", P["staging_delta"]]
+    assert kw["has_table"]("dimdate") and not kw["has_table"]("taxrate")
+    kw["remove"]("taxrate")
+    dbu.fs.rm.assert_called_with("/Volumes/main/s/v/_emr/staging_delta/sf=10/taxrate", True)
+    assert [x for x in spark.sqls if "DEEP CLONE" in x] == [
+        "CREATE OR REPLACE TABLE delta.`/Volumes/main/s/v/_emr/staging_delta/sf=10/taxrate` "
+        "DEEP CLONE main.tpcdi_incremental_staging_10.taxrate "
+        "TBLPROPERTIES ('delta.enableDeletionVectors' = 'false')"]
+
+
+def test_staging_missing_needs_a_committed_log():
+    s3 = mock.MagicMock()
+    s3.list_objects_v2.side_effect = lambda **kw: {
+        "KeyCount": 0 if kw["Prefix"].endswith("taxrate/_delta_log/0") else 1}
+    assert c.staging_missing(s3, P, ["dimdate", "taxrate"]) == ["taxrate"]
+    assert s3.list_objects_v2.call_args_list[0].kwargs["Prefix"] == \
+        "prefix/_emr/staging_delta/sf=10/dimdate/_delta_log/0"
 
 
 def test_cost_math():

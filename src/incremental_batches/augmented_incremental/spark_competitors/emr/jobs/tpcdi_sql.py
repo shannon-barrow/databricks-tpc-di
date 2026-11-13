@@ -68,12 +68,14 @@ def drop_database(db: str) -> str:
     return f"DROP DATABASE IF EXISTS {db} CASCADE"
 
 
-def clone_from_parquet(db: str, table: str, parquet_root: str) -> str:
-    """Per-run copy of one staging table. OSS Delta has no clone from the
-    Databricks staging tables, so the staging lives as plain parquet and each
-    run rebuilds its Delta tables from it."""
-    return (f"CREATE TABLE {db}.{table} USING DELTA AS "
-            f"SELECT * FROM parquet.`{parquet_root.rstrip('/')}/{table}`")
+def shallow_clone(db: str, table: str, staging_root: str, db_location: str) -> str:
+    """Per-run zero-copy reset of one staging table, as Fabric's setup does:
+    the clone's log points at the Delta staging's files, and the batch's
+    writes land under the run's own location. The explicit LOCATION keeps
+    every run table under db_location, which drop and setup delete."""
+    return (f"CREATE TABLE {db}.{table} SHALLOW CLONE "
+            f"delta.`{staging_root.rstrip('/')}/{table}` "
+            f"LOCATION '{db_location.rstrip('/')}/{table}'")
 
 
 def create_bronze(db: str, source: str) -> str:

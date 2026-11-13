@@ -1,10 +1,11 @@
 """EMR entry point: `spark-submit emr_runner.py setup|batch|drop ...`.
 
 Runs ON the EMR cluster as one EMR step (client mode, driver on the primary
-node). `setup` resets the run database in the Glue catalog and rebuilds it
-from the parquet staging; `batch` runs one day's bronze -> silver/gold DAG and
-writes a per-node timing JSON to S3 next to the run's other metrics; `drop`
-removes the run database and its files (the gated cleanup).
+node). `setup` resets the run database in the Glue catalog: a SHALLOW
+CLONE of each Delta staging table plus the 6 empty bronze tables. `batch`
+runs one day's bronze -> silver/gold DAG and writes a per-node timing JSON
+to S3 next to the run's other metrics. `drop` removes the run database and
+its files (the gated cleanup); the Delta staging is never touched.
 
 The two modes are the EMR counterparts of the Fabric `setup` and
 `batch_runner` notebooks.
@@ -59,16 +60,16 @@ def _iso(ts):
 
 # --- setup -----------------------------------------------------------------
 
-def run_setup(spark, *, db: str, db_location: str, staging_parquet: str) -> dict:
+def run_setup(spark, *, db: str, db_location: str, staging_delta: str) -> dict:
     t0 = time.time()
     spark.sql(q.drop_database(db))
-    # A reused location with an old _delta_log would make the CTAS below fail.
+    # A reused location with an old _delta_log would make the clones below fail.
     _delete_path(spark, db_location)
     spark.sql(q.create_database(db, db_location))
 
     def _clone(t):
         s = time.time()
-        spark.sql(q.clone_from_parquet(db, t, staging_parquet))
+        spark.sql(q.shallow_clone(db, t, staging_delta, db_location))
         return t, round(time.time() - s, 1)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(q.STAGING_TABLES)) as ex:
@@ -165,7 +166,7 @@ def main(argv=None) -> int:
         p.add_argument("--shuffle-partitions", default="1000")
     sub.choices["setup"].add_argument("--db-location", required=True)
     sub.choices["drop"].add_argument("--db-location", required=True)
-    sub.choices["setup"].add_argument("--staging-parquet", required=True)
+    sub.choices["setup"].add_argument("--staging-delta", required=True)
     b = sub.choices["batch"]
     b.add_argument("--batch-date", required=True)
     b.add_argument("--batch-dir", required=True, help="s3 dir holding this day's {Dataset}.txt files")
@@ -175,7 +176,7 @@ def main(argv=None) -> int:
 
     spark = _spark(f"tpcdi-emr-{a.mode}-{a.db}", a.shuffle_partitions)
     if a.mode == "setup":
-        run_setup(spark, db=a.db, db_location=a.db_location, staging_parquet=a.staging_parquet)
+        run_setup(spark, db=a.db, db_location=a.db_location, staging_delta=a.staging_delta)
         return 0
     if a.mode == "drop":
         run_drop(spark, db=a.db, db_location=a.db_location)

@@ -3,9 +3,10 @@
 Spark competitor, not dbt: the transforms are the repo's PySpark job
 (spark_competitors/emr/jobs/), ported from the Fabric Spark notebooks, run as
 one EMR step per batch on a fixed-size on-demand cluster with Delta tables in
-the Glue catalog. Databricks orchestrates: it exports the parquet staging
-(once per SF), creates the cluster, drops each day's files into S3 through
-the UC volume and blocks on that day's step.
+the Glue catalog. Databricks orchestrates: it DEEP CLONEs the staging tables
+to Delta on S3 (once per SF; each run SHALLOW CLONEs them), creates the
+cluster, drops each day's files into S3 through the UC volume and blocks on
+that day's step.
 
   parent:  setup_emr -> for_each day (child) -> teardown_emr (ALL_DONE)
   child:   simulate_filedrops_emr -> run_emr
@@ -62,7 +63,8 @@ _CLUSTER_PARAMS = ("emr_cluster_id", "emr_subnet_id", "emr_master_sg", "emr_slav
                    "emr_service_role", "emr_instance_profile")
 _SETUP_PARAMS = dict(_COMMON_PARAMS,
                      **{k: f"{{{{job.parameters.{k}}}}}" for k in _CLUSTER_PARAMS},
-                     incremental_batches_to_run="{{job.parameters.incremental_batches_to_run}}")
+                     incremental_batches_to_run="{{job.parameters.incremental_batches_to_run}}",
+                     force_materialize="{{job.parameters.force_materialize}}")
 _SETUP_OUT = {k: f"{{{{tasks.setup_emr.values.{k}}}}}" for k in ("emr_cluster_id", "run_id")}
 
 
@@ -206,7 +208,7 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
     return {
         "name": job_name,
         "description": (f"TPC-DI Augmented Incremental (Amazon EMR, parent) SF={scale_factor}. "
-                        f"setup_emr exports the parquet staging (once per SF), creates a "
+                        f"setup_emr DEEP CLONEs the Delta staging (once per SF), creates a "
                         f"fixed-size on-demand EMR cluster ({emr_core_count} x "
                         f"{emr_instance_type} core + 1 primary, {emr_release_label}) unless "
                         f"emr_cluster_id is given, and resets the Glue database; the loop runs "
@@ -232,6 +234,7 @@ def build_parent(*, job_name: str, child_job_id: int, repo_src_path: str, catalo
             {"name": "emr_instance_profile",        "default": emr_instance_profile},
             {"name": "delete_tables_when_finished", "default": "TRUE"},
             {"name": "incremental_batches_to_run",  "default": "365"},
+            {"name": "force_materialize",           "default": "false"},
         ],
         "tasks": [setup_task, loop_task, teardown_task],
         "queue": {"enabled": True},

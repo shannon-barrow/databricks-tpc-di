@@ -154,8 +154,9 @@ def cmd_setup(a, sess, cid: str):
     p = emr_c.paths(a.s3_root, a.wh_db, a.sf)
     missing = emr_c.staging_missing(s3, p, tpcdi_sql.STAGING_TABLES)
     if missing:
-        raise SystemExit(f"parquet staging {p['staging_parquet']} lacks {missing}; run the "
-                         f"Databricks setup_emr task (or setup_rs) once for SF={a.sf}")
+        raise SystemExit(f"Delta staging {p['staging_delta']} lacks {missing}; run the "
+                         f"Databricks materialize_staging_emr notebook (or setup_emr) "
+                         f"once for SF={a.sf}")
     print(f"[setup] upload jobs -> {p['code']}: {emr_c.upload_code(s3, p['code'], os.path.join(_HERE, 'jobs'))}")
     emr_c.run_step(emr, cid, emr_c.sync_code_step(p["code"]))
     # One retry: a transient S3 filesystem error (e.g. "Audit Manager Service

@@ -7,7 +7,7 @@ service credential or an instance profile). No Spark here.
 
 S3 layout under `s3_root` (the bucket prefix behind the UC volume, e.g.
 `s3://<bucket>/<prefix>/`, the same root the Redshift variant reads):
-  staging_parquet_rs/sf={sf}/{table}/            parquet staging (shared with Redshift)
+  _emr/staging_delta/sf={sf}/{table}/            Delta staging (DEEP CLONE of the UC staging, once per SF)
   augmented_incremental/_staging/sf={sf}/...     pre-staged daily part files
   augmented_incremental/_dailybatches/{db}/{date}/{Dataset}.txt   the day's drop
   _emr/code/                                     jobs/*.py uploaded for the steps
@@ -57,7 +57,7 @@ def paths(s3_root: str, wh_db: str, scale_factor: int | str, run_id: str = "") -
     db = db_name(wh_db, scale_factor)
     p = {
         "db": db,
-        "staging_parquet": f"{root}staging_parquet_rs/sf={scale_factor}",
+        "staging_delta":   f"{root}_emr/staging_delta/sf={scale_factor}",
         "staging_files":   f"{root}augmented_incremental/_staging/sf={scale_factor}",
         "dailybatches":    f"{root}augmented_incremental/_dailybatches/{db}",
         "code":            f"{root}_emr/code/",
@@ -195,7 +195,7 @@ def _spark_submit(mode: str, args: list[str]) -> list[str]:
 def setup_step(p: dict, shuffle_partitions: str = "1000") -> dict:
     return _step(f"tpcdi setup {p['db']}", _spark_submit("setup", [
         "--db", p["db"], "--db-location", p["db_location"],
-        "--staging-parquet", p["staging_parquet"],
+        "--staging-delta", p["staging_delta"],
         "--shuffle-partitions", shuffle_partitions]))
 
 
@@ -367,10 +367,12 @@ def drop_files(s3, p: dict, batch_date: str, file_ext: str = "txt") -> list[tupl
 
 
 def staging_missing(s3, p: dict, tables: Iterable[str]) -> list[str]:
-    bucket, prefix = split_s3(p["staging_parquet"].rstrip("/") + "/")
+    """Tables of the Delta staging without a committed log (the materialize
+    writes _delta_log/ only when a table's clone commits)."""
+    bucket, prefix = split_s3(p["staging_delta"].rstrip("/") + "/")
     missing = []
     for t in tables:
-        r = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}{t}/", MaxKeys=1)
+        r = s3.list_objects_v2(Bucket=bucket, Prefix=f"{prefix}{t}/_delta_log/0", MaxKeys=1)
         if not r.get("KeyCount"):
             missing.append(t)
     return missing

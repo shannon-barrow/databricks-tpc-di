@@ -13,7 +13,7 @@
 #   2. batches.csv + task_times.csv from the per-batch metrics
 #   3. terminate the cluster if setup created it, then write cluster_cost.json
 #      from every instance's lifetime (EC2 + EMR uplift + EBS, on demand)
-# The parquet staging and the uploaded code are kept for the next run.
+# The Delta staging and the uploaded code are kept for the next run.
 
 import json
 import os

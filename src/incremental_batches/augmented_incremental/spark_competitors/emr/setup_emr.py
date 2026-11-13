@@ -8,13 +8,13 @@
 # ///
 # Parent `setup_emr` task (runs ON Databricks; the work runs on EMR).
 #
-#   1. parquet staging: export main.tpcdi_incremental_staging_{sf} to
-#      {tpcdi_directory}staging_parquet_rs/sf={sf}/ when it isn't there yet
-#      (the same export the Redshift setup makes; EMR reads it in place)
+#   1. Delta staging: DEEP CLONE main.tpcdi_incremental_staging_{sf} to
+#      {s3}_emr/staging_delta/sf={sf}/{table}, once per SF (tables already
+#      there are skipped unless force_materialize=true); see _emr_staging.py
 #   2. copy jobs/*.py to {s3}_emr/code/ through the volume
 #   3. create the fixed-size EMR cluster (or reuse emr_cluster_id)
 #   4. EMR steps: sync the code onto the primary node, then `setup` (reset the
-#      Glue database {wh_db}_{sf}: 20 Delta tables from the parquet staging +
+#      Glue database {wh_db}_{sf}: SHALLOW CLONE of the 20 staging tables +
 #      6 empty bronze tables)
 #   5. task values: batch_date_ls, emr_cluster_id, emr_created, run_id
 #
@@ -25,7 +25,6 @@
 
 import os
 import sys
-import time
 from datetime import datetime, timezone
 
 _nb = dbutils.notebook.entry_point.getDbutils().notebook().getContext().notebookPath().get()
@@ -34,6 +33,7 @@ for _p in (_here, os.path.join(_here, "jobs")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 import _emr_conn as emr_c
+import _emr_staging
 import tpcdi_sql
 
 # COMMAND ----------
@@ -56,12 +56,15 @@ dbutils.widgets.text("emr_service_role", "EMR_DefaultRole")
 dbutils.widgets.text("emr_instance_profile", "EMR_EC2_DefaultRole")
 dbutils.widgets.text("shuffle_partitions", "1000")
 dbutils.widgets.text("incremental_batches_to_run", "365")
+dbutils.widgets.dropdown("force_materialize", "false", ["true", "false"],
+                         "Re-DEEP-CLONE the Delta staging even if it already exists")
 
 w = {k: dbutils.widgets.get(k).strip() for k in (
     "catalog", "scale_factor", "wh_db", "tpcdi_directory", "s3_volume_prefix", "aws_region",
     "aws_service_credential", "emr_cluster_id", "emr_subnet_id", "emr_master_sg", "emr_slave_sg",
     "emr_instance_type", "emr_core_count", "emr_release_label", "emr_service_role",
-    "emr_instance_profile", "shuffle_partitions", "incremental_batches_to_run")}
+    "emr_instance_profile", "shuffle_partitions", "incremental_batches_to_run",
+    "force_materialize")}
 _missing = [k for k in ("wh_db", "s3_volume_prefix") if not w[k]]
 if not w["emr_cluster_id"]:
     _missing += [k for k in ("emr_subnet_id", "emr_master_sg", "emr_slave_sg") if not w[k]]
@@ -77,20 +80,11 @@ emr = sess.client("emr")
 
 # COMMAND ----------
 
-# 1. parquet staging (idempotent; a table counts as present once its dir has files)
-def _present(t):
-    try:
-        return any(f.name.startswith("part-") for f in dbutils.fs.ls(f"{vol(p['staging_parquet'])}/{t}"))
-    except Exception:
-        return False
-
-todo = [t for t in tpcdi_sql.STAGING_TABLES if not _present(t)]
-for t in todo:
-    t0 = time.time()
-    (spark.read.table(f"{w['catalog']}.tpcdi_incremental_staging_{sf}.{t}")
-     .write.mode("overwrite").parquet(f"{vol(p['staging_parquet'])}/{t}"))
-    print(f"[staging] {t} exported in {time.time() - t0:.1f}s")
-print(f"[staging] {p['staging_parquet']}: {len(tpcdi_sql.STAGING_TABLES) - len(todo)} present, {len(todo)} exported")
+# 1. Delta staging (idempotent: tables whose clone already committed are kept)
+_emr_staging.materialize_sf(
+    spark, dbutils, catalog=w["catalog"], sf=sf, staging_delta=p["staging_delta"],
+    staging_delta_volume=vol(p["staging_delta"]), tables=tpcdi_sql.STAGING_TABLES,
+    force=w["force_materialize"].lower() == "true")
 
 # 2. code -> S3 via the volume
 for f in emr_c.JOB_FILES:

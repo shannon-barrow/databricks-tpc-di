@@ -132,11 +132,33 @@ so the per-batch date filters skip earlier days' files. `emr/jobs/tpcdi_dag.py`
 is the runMultiple DAG (same edges), run as threads on one SparkSession in
 FAIR mode.
 
-**Staging.** OSS Delta can't clone the UC staging tables, so EMR reads the
-parquet export at `{s3}staging_parquet_rs/sf={sf}/`. That's the export the
-Redshift setup makes; `setup_emr` creates it if it's missing. Each run's
-`setup` step rebuilds the 20 tables from it (CTAS) and creates the 6 empty
-bronze tables.
+**Staging.** Same flow as Fabric. Once per SF, Databricks DEEP CLONEs the 20
+`main.tpcdi_incremental_staging_{sf}` tables to Delta on S3 at
+`{s3}_emr/staging_delta/sf={sf}/{table}` (`emr/_emr_staging.py`). `setup_emr`
+does this as its first step, and `emr/materialize_staging_emr.py` does it as a
+standalone one-time job (`scale_factor` = one SF or a comma list,
+`force_materialize`). Tables already there are skipped unless
+`force_materialize=true`. Each run's EMR `setup` step then SHALLOW CLONEs every
+table into the Glue database (`CREATE TABLE db.t SHALLOW CLONE
+delta.\`s3://.../t\` LOCATION '{db location}/t'`), a zero-copy reset, and
+creates the 6 empty bronze tables.
+
+How EMR still differs from Fabric:
+- The copies must be readable and writable by EMR's open-source delta-spark
+  3.x, because the shallow clones keep the source's protocol and the batches
+  MERGE into them. The materialize turns deletion vectors off on each copy and
+  purges any (REORG), so EMR only clones plain parquet paths and its MERGEs
+  rewrite files. It then checks each copy's `tableFeatures` against what
+  delta-spark 3.x implements. A copy with anything else is deleted and
+  rewritten as a plain CTAS with those features off: a CREATE OR REPLACE
+  can't drop a protocol feature. Column mapping (`name`), v2 checkpoints, row
+  tracking and liquid clustering are all in delta-spark 3.x and stay.
+- The clone target is tried as the `/Volumes` path first, then the `s3://`
+  uri; the first form Databricks accepts is used.
+- No ANALYZE after the clone: OSS Delta sizes a table from its log, so the
+  stat-less clones don't trip the broadcast misestimate Fabric guards against.
+- Don't force a re-clone while a run is using that SF: its shallow clones read
+  the staging's files. Nothing VACUUMs the staging.
 
 **Two ways to drive it** (same `emr/_emr_conn.py` underneath):
 
