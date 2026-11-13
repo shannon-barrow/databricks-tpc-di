@@ -153,6 +153,10 @@ How EMR still differs from Fabric:
   rewritten as a plain CTAS with those features off: a CREATE OR REPLACE
   can't drop a protocol feature. Column mapping (`name`), v2 checkpoints, row
   tracking and liquid clustering are all in delta-spark 3.x and stay.
+- A UniForm (Iceberg-enabled) staging table can't be DEEP CLONEd to a path
+  outside Unity Catalog (`DELTA_UNIFORM_NOT_SUPPORTED`). The tpcdi-fresh
+  staging tables are UniForm, so their copy is a plain CTAS rewrite instead,
+  still written once per SF.
 - The clone target is tried as the `/Volumes` path first, then the `s3://`
   uri; the first form Databricks accepts is used.
 - No ANALYZE after the clone: OSS Delta sizes a table from its log, so the
@@ -192,6 +196,19 @@ SF=10 smoke test uses 2 core nodes + 1 primary: $1.74/hr.
 It creates the cluster, runs setup and 2 batches, and terminates the cluster
 even if a step fails. Then it writes the cost report. A pass is both batches
 reporting `SUCCESS`, with 16 SUCCESS rows each in `task_times.csv`.
+
+**Validated (laptop driver, 2026-11-13, m8gd.2xlarge, 4 batches each, all
+SUCCESS):**
+
+| SF | Core nodes | Setup | Step per batch | $ per batch | Cluster total |
+|---|---|---|---|---|---|
+| 10 | 2 | 124 s | 58-60 s | $0.03 | $0.26 (2 batches) |
+| 100 | 4 | 86 s | 64-70 s | $0.05 | $0.56 |
+| 1000 | 8 | 84 s | 74-82 s | $0.11 | $1.12 |
+| 20000 | 16 | 174 s | 276-278 s | $0.76 | $4.57 |
+
+Step = the EMR step's wall (DescribeStep), file drop excluded. At SF=20000
+this is the F64-equivalent sizing above.
 
 ## Layout
 
