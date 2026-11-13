@@ -104,12 +104,11 @@ def cluster_spec(*, name: str, subnet_id: str, master_sg: str, slave_sg: str,
         "StepConcurrencyLevel": 1,
         "ScaleDownBehavior": "TERMINATE_AT_TASK_COMPLETION",
         "AutoTerminationPolicy": {"IdleTimeout": int(idle_timeout_secs)},
-        # Root volume pinned to gp3 baseline (3000 IOPS / 125 MiB/s cost
-        # nothing extra) so the EBS line of the cost model is exact. The
-        # d-type instances shuffle to local NVMe, so no EBS data volumes.
-        "EbsRootVolumeSize": int(root_gb),
-        "EbsRootVolumeIops": 3000,
-        "EbsRootVolumeThroughput": 125,
+        # No root-volume overrides: the account's EMR_DefaultRole carries the
+        # v1 AmazonElasticMapReduceRole policy, which lacks the EC2 rights a
+        # pinned gp3 root (IOPS/throughput) needs ("insufficient EC2
+        # permissions"). EMR's default root volume is used, as the account's
+        # other clusters do; the d-type instances shuffle to local NVMe.
         "Instances": {
             "InstanceGroups": [
                 {"Name": "primary", "InstanceRole": "MASTER", "Market": "ON_DEMAND",
