@@ -1,4 +1,4 @@
-black>=23,<24
+black>=26.10.1
 flake8>=6,<7
 jupyter-black>=0,<1
 sqlfluff>=2.2,<2.3
