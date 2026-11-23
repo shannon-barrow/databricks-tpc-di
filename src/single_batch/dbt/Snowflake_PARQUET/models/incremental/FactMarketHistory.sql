@@ -43,20 +43,53 @@ dailymarket AS (
             PATTERN     => '.*Batch[23]/DailyMarket[.]parquet'
         )
 ),
-markethistory AS (
+-- Snowflake has no MIN_BY/MAX_BY over a sliding window frame, so the 52-week
+-- low/high values come from MIN/MAX over the window, and the date each was set
+-- (earliest on ties) from a self-join back to the same 365-row window.
+dailymarket_rn AS (
   SELECT
     dm.*,
-    FIRST_VALUE(OBJECT_CONSTRUCT('dm_low', dm_low, 'dm_date', dm_date)) OVER (
+    ROW_NUMBER() OVER (PARTITION BY dm_s_symb ORDER BY dm_date) AS rn
+  FROM dailymarket dm
+),
+windowed AS (
+  SELECT
+    dm.*,
+    MIN(dm_low) OVER (
       PARTITION BY dm_s_symb
-      ORDER BY dm_low ASC, dm_date ASC
+      ORDER BY dm_date ASC
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweeklow,
-    FIRST_VALUE(OBJECT_CONSTRUCT('dm_high', dm_high, 'dm_date', dm_date)) OVER (
+    MAX(dm_high) OVER (
       PARTITION BY dm_s_symb
-      ORDER BY dm_high DESC, dm_date ASC
+      ORDER BY dm_date ASC
       ROWS BETWEEN 364 PRECEDING AND CURRENT ROW
     ) AS fiftytwoweekhigh
-  FROM dailymarket dm
+  FROM dailymarket_rn dm
+),
+lowdates AS (
+  SELECT w.dm_s_symb, w.rn, MIN(p.dm_date) AS fiftytwoweeklowdate
+  FROM windowed w
+  JOIN dailymarket_rn p
+    ON p.dm_s_symb = w.dm_s_symb
+    AND p.dm_low = w.fiftytwoweeklow
+    AND p.rn BETWEEN w.rn - 364 AND w.rn
+  GROUP BY ALL
+),
+highdates AS (
+  SELECT w.dm_s_symb, w.rn, MIN(p.dm_date) AS fiftytwoweekhighdate
+  FROM windowed w
+  JOIN dailymarket_rn p
+    ON p.dm_s_symb = w.dm_s_symb
+    AND p.dm_high = w.fiftytwoweekhigh
+    AND p.rn BETWEEN w.rn - 364 AND w.rn
+  GROUP BY ALL
+),
+markethistory AS (
+  SELECT w.*, l.fiftytwoweeklowdate, h.fiftytwoweekhighdate
+  FROM windowed w
+  JOIN lowdates l USING (dm_s_symb, rn)
+  JOIN highdates h USING (dm_s_symb, rn)
 )
 SELECT
   s.sk_securityid,
@@ -64,10 +97,10 @@ SELECT
   TO_NUMBER(TO_CHAR(dm_date, 'YYYYMMDD')) AS sk_dateid,
   DIV0(mh.dm_close, sum_fi_basic_eps) AS peratio,
   DIV0(DIV0(s.dividend, mh.dm_close), 100) AS yield,
-  fiftytwoweekhigh:dm_high::NUMBER AS fiftytwoweekhigh,
-  TO_NUMBER(TO_CHAR(fiftytwoweekhigh:dm_date::DATE, 'YYYYMMDD')) AS sk_fiftytwoweekhighdate,
-  fiftytwoweeklow:dm_low::NUMBER AS fiftytwoweeklow,
-  TO_NUMBER(TO_CHAR(fiftytwoweeklow:dm_date::DATE, 'YYYYMMDD')) AS sk_fiftytwoweeklowdate,
+  fiftytwoweekhigh,
+  TO_NUMBER(TO_CHAR(fiftytwoweekhighdate, 'YYYYMMDD')) AS sk_fiftytwoweekhighdate,
+  fiftytwoweeklow,
+  TO_NUMBER(TO_CHAR(fiftytwoweeklowdate, 'YYYYMMDD')) AS sk_fiftytwoweeklowdate,
   dm_close AS closeprice,
   dm_high AS dayhigh,
   dm_low AS daylow,
