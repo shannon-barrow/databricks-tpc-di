@@ -5,7 +5,6 @@
 # dependencies = [
 #   "dbt-core==1.9.*",
 #   "dbt-snowflake==1.9.*",
-#   "snowflake-connector-python",
 # ]
 # ///
 # Single-batch (traditional) TPC-DI on Snowflake: one `dbt run` of the
@@ -76,7 +75,7 @@ try:
 except ImportError:
     print("[install] dbt-core / dbt-snowflake / snowflake-connector not found, pip-installing...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-                           "dbt-core==1.9.*", "dbt-snowflake==1.9.*", "snowflake-connector-python"])
+                           "dbt-core==1.9.*", "dbt-snowflake==1.9.*"])
     import snowflake.connector  # noqa: F401
 
 # COMMAND ----------
