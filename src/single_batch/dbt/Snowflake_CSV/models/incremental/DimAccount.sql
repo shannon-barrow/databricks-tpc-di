@@ -16,7 +16,7 @@ WITH AccountIncremental AS (
     @{{ var('stage') }}
     (
       FILE_FORMAT => 'TXT_PIPE',
-      PATTERN     => '.*Account[.]txt'
+      PATTERN     => '.*Account(_[0-9]+)?[.]txt'
     ) t
 ),
 Account AS (

@@ -19,5 +19,5 @@ from
     @{{ var('stage') }}/Batch1/
     (
       FILE_FORMAT => 'TXT_FIXED_WIDTH',
-      PATTERN     => '.*FINWIRE[0-9][0-9][0-9][0-9]Q[1-4]'
+      PATTERN     => '.*FINWIRE([0-9][0-9][0-9][0-9]Q[1-4]|_[0-9]+[.]txt)'
     ) t

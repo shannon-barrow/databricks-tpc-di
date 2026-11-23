@@ -14,7 +14,7 @@ WITH Holdings as (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*HoldingHistory[.]txt'
+            PATTERN     => '.*HoldingHistory(_[0-9]+)?[.]txt'
         ) t
     UNION ALL
     SELECT
@@ -27,7 +27,7 @@ WITH Holdings as (
         @{{ var('stage') }}
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/HoldingHistory[.]txt'
+            PATTERN     => '.*Batch[23]/HoldingHistory(_[0-9]+)?[.]txt'
         )
 )
 SELECT 

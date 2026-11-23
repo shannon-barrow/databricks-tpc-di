@@ -32,7 +32,7 @@ with ProspectRaw as (
     @{{ var('stage') }}
     (
       FILE_FORMAT => 'TXT_CSV',
-      PATTERN     => '.*Prospect[.]csv'
+      PATTERN     => '.*Prospect(_[0-9]+)?[.]csv'
     ) t
 ),
 p AS (

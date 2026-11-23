@@ -26,7 +26,7 @@ WITH tradeincremental as (
       @{{ var('stage') }}
       (
         FILE_FORMAT => 'TXT_PIPE',
-        PATTERN     => '.*Batch[23]/Trade[.]txt'
+        PATTERN     => '.*Batch[23]/Trade(_[0-9]+)?[.]txt'
       ) t
 ),
 tradehistoryraw as (
@@ -38,7 +38,7 @@ tradehistoryraw as (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*TradeHistory[.]txt'
+            PATTERN     => '.*TradeHistory(_[0-9]+)?[.]txt'
         ) t
 ),
 tradehistory as (
@@ -61,7 +61,7 @@ tradehistory as (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Trade[.]txt'
+            PATTERN     => '.*Trade(_[0-9]+)?[.]txt'
         ) t
 ),
 trade_with_latest AS (

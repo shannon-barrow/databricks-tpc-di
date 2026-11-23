@@ -21,6 +21,6 @@ FROM
   @{{ var('stage') }}/Batch1
   (
     FILE_FORMAT => 'TXT_CSV',
-    PATTERN     => '.*HR[.]csv'
+    PATTERN     => '.*HR(_[0-9]+)?[.]csv'
   ) t
 WHERE $6::INT = 314

@@ -14,7 +14,7 @@ with cashtransactionhistorical as (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*CashTransaction[.]txt'
+            PATTERN     => '.*CashTransaction(_[0-9]+)?[.]txt'
         ) t
 ),
 cashtransactionincremental as (
@@ -28,7 +28,7 @@ cashtransactionincremental as (
         @{{ var('stage') }}
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/CashTransaction[.]txt'
+            PATTERN     => '.*Batch[23]/CashTransaction(_[0-9]+)?[.]txt'
         ) t
 ),
 dailytotals as (

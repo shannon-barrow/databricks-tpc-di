@@ -25,7 +25,7 @@ dailymarket AS (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*DailyMarket[.]txt'
+            PATTERN     => '.*DailyMarket(_[0-9]+)?[.]txt'
         )
     UNION ALL
     SELECT
@@ -40,7 +40,7 @@ dailymarket AS (
         @{{ var('stage') }}
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/DailyMarket[.]txt'
+            PATTERN     => '.*Batch[23]/DailyMarket(_[0-9]+)?[.]txt'
         )
 ),
 -- Snowflake has no MIN_BY/MAX_BY over a sliding window frame, so the 52-week

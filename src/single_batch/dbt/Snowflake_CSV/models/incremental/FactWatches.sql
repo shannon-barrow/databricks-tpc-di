@@ -14,7 +14,7 @@ WITH WatchHistory AS (
         @{{ var('stage') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*WatchHistory[.]txt'
+            PATTERN     => '.*WatchHistory(_[0-9]+)?[.]txt'
         )
     UNION ALL
     SELECT
@@ -27,7 +27,7 @@ WITH WatchHistory AS (
         @{{ var('stage') }}
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/WatchHistory[.]txt'
+            PATTERN     => '.*Batch[23]/WatchHistory(_[0-9]+)?[.]txt'
         )
 ),
 Watches AS (

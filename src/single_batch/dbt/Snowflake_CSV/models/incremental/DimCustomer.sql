@@ -43,7 +43,7 @@ WITH customer_incremental as (
     @{{ var('stage') }}
     (
       FILE_FORMAT => 'TXT_PIPE',
-      PATTERN     => '.*Customer[.]txt'
+      PATTERN     => '.*Customer(_[0-9]+)?[.]txt'
     ) t
 ),
 Customers AS (
