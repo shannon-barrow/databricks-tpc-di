@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "6"
 # dependencies = [
-#   "dbt-core==2.0.0",
-#   "dbt-snowflake",
+#   "dbt==2.0.0",
+#   "snowflake-connector-python",
 # ]
 # ///
 # Single-batch (traditional) TPC-DI on Snowflake: one `dbt run` of the
@@ -16,8 +16,8 @@
 #   - profiles.yml is written to a fresh /tmp dir per run
 # Before dbt runs, the notebook creates the run's schema, the stage over the
 # raw files and the file formats (all idempotent DDL, no warehouse needed).
-# The dbt project is copied to /tmp with model-paths pointed at
-# Snowflake_CSV/models; the committed dbt_project.yml stays untouched.
+# The dbt project is copied to /tmp with a minimal dbt_project.yml pointed
+# at Snowflake_CSV/models; the committed dbt_project.yml stays untouched.
 # Each warehouse gets its own schema ({wh_db}_{scale_factor}) so runs on
 # different warehouses never overwrite each other.
 
@@ -69,16 +69,29 @@ print(f"target {catalog}.{schema} on {warehouse}; raw files {raw_files_url}sf={s
 # COMMAND ----------
 
 # Defensive install: a no-op when the job environment already has them.
+# dbt v2 is the `dbt` package (Rust engine with the Snowflake adapter built
+# in), driven through its CLI rather than the v1 Python module.
+def _dbt_bin():
+    for cand in (os.path.join(os.path.dirname(sys.executable), "dbt"), shutil.which("dbt")):
+        if cand and os.path.exists(cand):
+            return cand
+    return None
+
 try:
-    import dbt.version  # noqa: F401
-    import dbt.adapters.snowflake  # noqa: F401
     import snowflake.connector  # noqa: F401
-    print("[ok] dbt-core + dbt-snowflake + snowflake-connector already installed")
+    have_connector = True
 except ImportError:
-    print("[install] dbt-core / dbt-snowflake / snowflake-connector not found, pip-installing...")
+    have_connector = False
+if not (_dbt_bin() and have_connector):
+    print("[install] dbt==2.0.0 / snowflake-connector-python not found, pip-installing...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-                           "dbt-core==2.0.0", "dbt-snowflake"])
-    import snowflake.connector  # noqa: F401
+                           "dbt==2.0.0", "snowflake-connector-python"])
+import snowflake.connector  # noqa: F401
+dbt_bin = _dbt_bin()
+if not dbt_bin:
+    raise RuntimeError("dbt CLI not found after installing dbt==2.0.0")
+dbt_version = subprocess.run([dbt_bin, "--version"], capture_output=True, text=True).stdout.strip()
+print(f"[versions] {dbt_bin}: {dbt_version}")
 
 # COMMAND ----------
 
@@ -141,11 +154,12 @@ with _connect() as conn:
 # Snowflake models use no dbt packages, so no `dbt deps` round trip).
 project_tmp = tempfile.mkdtemp(prefix="dbt_project_")
 shutil.copytree(os.path.join(dbt_project_dir, "Snowflake_CSV"), os.path.join(project_tmp, "Snowflake_CSV"))
-with open(os.path.join(dbt_project_dir, "dbt_project.yml")) as f:
-    proj = f.read()
-proj = re.sub(r"model-paths:.*", 'model-paths: ["Snowflake_CSV/models/"]', proj)
+# Minimal project file: the committed one carries {ENTER_YOUR_..._HERE}
+# placeholder vars, which dbt v2's stricter project parsing may reject.
 with open(os.path.join(project_tmp, "dbt_project.yml"), "w") as f:
-    f.write(proj)
+    f.write("name: 'dbsql_dbt_tpcdi'\nversion: '1.0.0'\nconfig-version: 2\n"
+            "profile: 'sql_endpoints'\nmodel-paths: [\"Snowflake_CSV/models/\"]\n"
+            "target-path: \"target\"\n")
 
 # query_tag lets SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY attribute every query
 # of this run without scraping dbt logs.
@@ -175,7 +189,10 @@ lines = [
     f"      threads: {threads}",
 ]
 if pk_path:
-    lines.append(f"      private_key_path: {pk_path}")
+    # dbt v2 documents only the inline private_key field (PEM, PKCS#8) for
+    # key-pair auth, so the key goes into the 0600 profile as a YAML block.
+    lines.append("      private_key: |")
+    lines.extend("        " + l for l in credential.strip().splitlines())
 else:
     lines.append(f"      password: {credential}")
     lines.append("      authenticator: username_password_mfa")
@@ -188,15 +205,12 @@ os.chmod(os.path.join(profiles_dir, "profiles.yml"), 0o600)
 
 vars_payload = {"stage": f"{stage_fqn}/sf={scale_factor}"}
 cmd = [
-    sys.executable, "-m", "dbt.cli.main", dbt_command,
+    dbt_bin, dbt_command,
     "--target", "snowflake",
     "--profiles-dir", profiles_dir,
     "--project-dir", project_tmp,
     "--vars", json.dumps(vars_payload),
-    "--no-version-check",
 ]
-from importlib.metadata import version as _v
-print(f"[versions] dbt-core {_v('dbt-core')}, dbt-snowflake {_v('dbt-snowflake')}")
 print("dbt cmd:", " ".join(cmd))
 t0 = time.time()
 res = subprocess.run(cmd, capture_output=True, text=True)
@@ -211,7 +225,7 @@ try:
     dbutils.fs.mkdirs(log_dir)
     dbutils.fs.put(
         log_path,
-        f"# dbt {dbt_command} target=snowflake dbt-core={_v('dbt-core')} dbt-snowflake={_v('dbt-snowflake')} warehouse={warehouse} schema={schema} exit_code={res.returncode} wall_s={wall:.1f}\n"
+        f"# dbt {dbt_command} target=snowflake dbt_version={dbt_version!r} warehouse={warehouse} schema={schema} exit_code={res.returncode} wall_s={wall:.1f}\n"
         f"# --- stdout ---\n{res.stdout}\n"
         f"# --- stderr ---\n{res.stderr}\n",
         overwrite=True,
