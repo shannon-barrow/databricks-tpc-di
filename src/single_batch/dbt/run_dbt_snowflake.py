@@ -3,8 +3,8 @@
 # [tool.databricks.environment]
 # environment_version = "6"
 # dependencies = [
-#   "dbt-core==1.9.*",
-#   "dbt-snowflake==1.9.*",
+#   "dbt-core==2.0.0",
+#   "dbt-snowflake",
 # ]
 # ///
 # Single-batch (traditional) TPC-DI on Snowflake: one `dbt run` of the
@@ -38,6 +38,7 @@ dbutils.widgets.text("sf_credential_secret", "main.tpcdi_raw_data.snowflake_cred
                      "Full UC secret path to the Snowflake credential (password OR PEM private key)")
 dbutils.widgets.text("snowflake_warehouse", "", "Snowflake warehouse that runs the models (plain value)")
 dbutils.widgets.text("threads", "21", "dbt threads")
+dbutils.widgets.dropdown("dbt_command", "run", ["run", "compile", "parse"], "compile/parse check the models without loading data")
 dbutils.widgets.text("dbt_project_dir", "", "Workspace-repo path to src/single_batch/dbt")
 
 catalog             = dbutils.widgets.get("catalog")
@@ -52,6 +53,7 @@ sf_credential_secret = dbutils.widgets.get("sf_credential_secret")
 warehouse           = dbutils.widgets.get("snowflake_warehouse")
 threads             = int(dbutils.widgets.get("threads") or 21)
 dbt_project_dir     = dbutils.widgets.get("dbt_project_dir")
+dbt_command         = dbutils.widgets.get("dbt_command") or "run"
 wh_db               = dbutils.widgets.get("wh_db") or f"shannon_tpcdi_sb_{warehouse}"
 
 if not (account and user and warehouse and dbt_project_dir):
@@ -75,7 +77,7 @@ try:
 except ImportError:
     print("[install] dbt-core / dbt-snowflake / snowflake-connector not found, pip-installing...")
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet",
-                           "dbt-core==1.9.*", "dbt-snowflake==1.9.*"])
+                           "dbt-core==2.0.0", "dbt-snowflake"])
     import snowflake.connector  # noqa: F401
 
 # COMMAND ----------
@@ -186,20 +188,22 @@ os.chmod(os.path.join(profiles_dir, "profiles.yml"), 0o600)
 
 vars_payload = {"stage": f"{stage_fqn}/sf={scale_factor}"}
 cmd = [
-    sys.executable, "-m", "dbt.cli.main", "run",
+    sys.executable, "-m", "dbt.cli.main", dbt_command,
     "--target", "snowflake",
     "--profiles-dir", profiles_dir,
     "--project-dir", project_tmp,
     "--vars", json.dumps(vars_payload),
     "--no-version-check",
 ]
+from importlib.metadata import version as _v
+print(f"[versions] dbt-core {_v('dbt-core')}, dbt-snowflake {_v('dbt-snowflake')}")
 print("dbt cmd:", " ".join(cmd))
 t0 = time.time()
 res = subprocess.run(cmd, capture_output=True, text=True)
 wall = time.time() - t0
 print(res.stdout)
 print(res.stderr, file=sys.stderr)
-print(f"[timing] dbt run wall {wall:.1f}s on {warehouse}")
+print(f"[timing] dbt {dbt_command} wall {wall:.1f}s on {warehouse}")
 
 log_dir = f"{tpcdi_directory}_dbt_run_logs/single_batch/{schema}"
 log_path = f"{log_dir}/{run_tag}.log"
@@ -207,7 +211,7 @@ try:
     dbutils.fs.mkdirs(log_dir)
     dbutils.fs.put(
         log_path,
-        f"# dbt run target=snowflake warehouse={warehouse} schema={schema} exit_code={res.returncode} wall_s={wall:.1f}\n"
+        f"# dbt {dbt_command} target=snowflake dbt-core={_v('dbt-core')} dbt-snowflake={_v('dbt-snowflake')} warehouse={warehouse} schema={schema} exit_code={res.returncode} wall_s={wall:.1f}\n"
         f"# --- stdout ---\n{res.stdout}\n"
         f"# --- stderr ---\n{res.stderr}\n",
         overwrite=True,
@@ -218,6 +222,6 @@ except Exception as e:
 
 if res.returncode != 0:
     tail = (res.stdout + res.stderr)[-3000:]
-    raise RuntimeError(f"dbt run failed exit={res.returncode}\nlog={log_path}\n---tail---\n{tail}")
+    raise RuntimeError(f"dbt {dbt_command} failed exit={res.returncode}\nlog={log_path}\n---tail---\n{tail}")
 
-print(f"[done] single-batch dbt run on {warehouse} into {catalog}.{schema} in {wall:.1f}s (query_tag run={run_tag})")
+print(f"[done] single-batch dbt {dbt_command} on {warehouse} into {catalog}.{schema} in {wall:.1f}s (query_tag run={run_tag})")
