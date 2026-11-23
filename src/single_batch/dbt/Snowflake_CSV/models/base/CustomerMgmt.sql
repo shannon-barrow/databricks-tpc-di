@@ -11,7 +11,7 @@ WITH actions AS (
     $1 AS action,
     XMLGET($1, 'Customer') AS c
   FROM
-    @{{ var('stage') }}/Batch1
+    @{{ var('stage').rstrip('/') }}/Batch1
     (
       FILE_FORMAT => 'TXT_XML',
       PATTERN     => '.*CustomerMgmt(_[0-9]+)?[.]xml'

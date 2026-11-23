@@ -13,7 +13,7 @@ WITH AccountIncremental AS (
     $8::string  as status,
     try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
   from
-    @{{ var('stage') }}
+    @{{ var('stage').rstrip('/') }}/
     (
       FILE_FORMAT => 'TXT_PIPE',
       PATTERN     => '.*Account(_[0-9]+)?[.]txt'

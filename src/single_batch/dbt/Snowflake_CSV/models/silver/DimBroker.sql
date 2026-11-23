@@ -18,7 +18,7 @@ SELECT
   (SELECT min(to_date(datevalue)) as effectivedate FROM {{ ref('DimDate') }}) effectivedate,
   date('9999-12-31') enddate
 FROM
-  @{{ var('stage') }}/Batch1
+  @{{ var('stage').rstrip('/') }}/Batch1
   (
     FILE_FORMAT => 'TXT_CSV',
     PATTERN     => '.*HR(_[0-9]+)?[.]csv'

@@ -29,7 +29,7 @@ with ProspectRaw as (
     $22::int    as networth,
     try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
   from
-    @{{ var('stage') }}
+    @{{ var('stage').rstrip('/') }}/
     (
       FILE_FORMAT => 'TXT_CSV',
       PATTERN     => '.*Prospect(_[0-9]+)?[.]csv'

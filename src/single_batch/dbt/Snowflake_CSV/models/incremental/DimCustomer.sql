@@ -40,7 +40,7 @@ WITH customer_incremental as (
     $33::string as nat_tx_id,
     try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
   from
-    @{{ var('stage') }}
+    @{{ var('stage').rstrip('/') }}/
     (
       FILE_FORMAT => 'TXT_PIPE',
       PATTERN     => '.*Customer(_[0-9]+)?[.]txt'

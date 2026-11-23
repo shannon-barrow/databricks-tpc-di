@@ -11,7 +11,7 @@ with cashtransactionhistorical as (
         $4::string    as ct_name,
         1          as batchid
     from
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
             PATTERN     => '.*CashTransaction(_[0-9]+)?[.]txt'
@@ -25,7 +25,7 @@ cashtransactionincremental as (
         $6::string    as ct_name,
         try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
     from
-        @{{ var('stage') }}
+        @{{ var('stage').rstrip('/') }}/
         (
             FILE_FORMAT => 'TXT_PIPE',
             PATTERN     => '.*Batch[23]/CashTransaction(_[0-9]+)?[.]txt'

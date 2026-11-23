@@ -22,7 +22,7 @@ dailymarket AS (
         $6::int    as dm_vol,
         1          as batchid
     FROM
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
             PATTERN     => '.*DailyMarket(_[0-9]+)?[.]txt'
@@ -37,7 +37,7 @@ dailymarket AS (
         $8::int    as dm_vol,
         try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
     FROM
-        @{{ var('stage') }}
+        @{{ var('stage').rstrip('/') }}/
         (
             FILE_FORMAT => 'TXT_PIPE',
             PATTERN     => '.*Batch[23]/DailyMarket(_[0-9]+)?[.]txt'

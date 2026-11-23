@@ -9,7 +9,7 @@ select
   $3::int    as tt_is_sell,
   $4::int    as tt_is_mrkt
 from
-  @{{ var('stage') }}/Batch1
+  @{{ var('stage').rstrip('/') }}/Batch1
   (
     FILE_FORMAT => 'TXT_PIPE',
     PATTERN     => '.*TradeType[.]txt'
