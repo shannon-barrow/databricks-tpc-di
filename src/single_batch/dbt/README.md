@@ -5,10 +5,9 @@
 - Ensure the required files have been loaded into BLOB storage and put the location in the dbt_project.yml file
 - Fill in remaining required fields in dbt_project.yml file
 - If executing in Snowflake:
-	- Refer to the file formats directory and create the required file formats in your schema
-	- Make a copy of the customermgmt table.  See the customermgmt helper file
-- If executing in Snowflake:
-	- The customermgmt table is a prequisite.  It can be run from the main portion of the repo as a Databricks job
+	- Create the file formats in the run's schema from the `helpers` directory (`Snowflake_CSV/helpers`: TXT_PIPE, TXT_CSV, TXT_FIXED_WIDTH, TXT_XML)
+	- `Snowflake_CSV` builds CustomerMgmt itself from Batch1's CustomerMgmt XML (DIGen's single file or the Spark generator's numbered `CustomerMgmt_N.xml` files), so no pre-built customermgmt table is needed
+	- `Snowflake_PARQUET` still expects a pre-built customermgmt table
 - Choose an execution type and replace the type in the model-paths field in dbt_project.yml file:  
  	`model-paths:  ["[Databricks|Snowflake]_[CSV|PARQUET|CSV_CLUSTERED]/models/"]`
 - Use the command `dbt run` to launch

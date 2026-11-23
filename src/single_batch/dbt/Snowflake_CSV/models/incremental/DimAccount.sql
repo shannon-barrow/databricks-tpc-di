@@ -29,7 +29,7 @@ Account AS (
     status,
     update_ts,
     1 AS batchid
-  FROM {{var('catalog')}}.{{var('stagingschema')}}.customermgmt_clean c
+  FROM {{ ref('CustomerMgmt') }} c
   WHERE ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL
   SELECT

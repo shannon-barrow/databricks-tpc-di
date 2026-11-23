@@ -72,7 +72,7 @@ Customers AS (
       nat_tx_id,
       1 AS batchid,
       update_ts
-    FROM {{var('catalog')}}.{{var('stagingschema')}}.customermgmt_clean c
+    FROM {{ ref('CustomerMgmt') }} c
     WHERE ActionType IN ('NEW', 'INACT', 'UPDCUST')
     UNION ALL
     SELECT
