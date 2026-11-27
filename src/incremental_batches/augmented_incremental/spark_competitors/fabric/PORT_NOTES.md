@@ -437,8 +437,8 @@ Full batch notebook set drafted under `fabric/notebooks_nee/` (mirrors `notebook
   `min_by/max_by(struct)`, FMH 52-week window) via the AQE Final Plan / Spark UI Gluten tab — see §7a.
 - Run the **NEE SF=20k** test on the F64 (16-Medium pool + schema-enabled lakehouse + SF=20k staging) for the
   perf story, after the SS 20k run frees the F64.
-- **Open parity watch-items** (from §7 capabilities): audit `round()` / `collect_list` ordering / `try_divide` /
-  `min_by`/`max_by`(struct) for JVM-vs-Velox parity; the FMH `dm_date == to_date(batch_date)` filter is
+- **Open parity watch-items** (from §7 capabilities): audit `round()` / `collect_list` ordering /
+  `min_by`/`max_by`(struct) for JVM-vs-Velox parity. NEE has no `try_*` functions (Gluten falls back to the JVM on `try_divide`, then Fabric re-plans the whole stage in the JVM and discards the Velox work), so FMH divides by `nullif(divisor, 0)` instead; the FMH `dm_date == to_date(batch_date)` filter is
   type-matched (should offload) — confirm.
 
 ---

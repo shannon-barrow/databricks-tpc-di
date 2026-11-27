@@ -23,10 +23,10 @@ WITH tradeincremental as (
         $16::double   as tax,
         try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
     from
-      @{{ var('stage') }}
+      @{{ var('stage').rstrip('/') }}/
       (
         FILE_FORMAT => 'TXT_PIPE',
-        PATTERN     => '.*Batch[23]/Trade[.]txt'
+        PATTERN     => '.*Batch[23]/Trade(_[0-9]+)?[.]txt'
       ) t
 ),
 tradehistoryraw as (
@@ -35,10 +35,10 @@ tradehistoryraw as (
         $2::timestamp as th_dts,
         $3::string    as status
     from
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*TradeHistory[.]txt'
+            PATTERN     => '.*TradeHistory(_[0-9]+)?[.]txt'
         ) t
 ),
 tradehistory as (
@@ -58,10 +58,10 @@ tradehistory as (
         $13::double   as commission,
         $14::double   as tax
     from
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Trade[.]txt'
+            PATTERN     => '.*Trade(_[0-9]+)?[.]txt'
         ) t
 ),
 trade_with_latest AS (

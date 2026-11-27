@@ -11,10 +11,10 @@ WITH WatchHistory AS (
         $4::string    AS w_action,
         1             AS batchid
     FROM
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*WatchHistory[.]txt'
+            PATTERN     => '.*WatchHistory(_[0-9]+)?[.]txt'
         )
     UNION ALL
     SELECT
@@ -24,10 +24,10 @@ WITH WatchHistory AS (
         $6::string    AS w_action,
         try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
     FROM
-        @{{ var('stage') }}
+        @{{ var('stage').rstrip('/') }}/
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/WatchHistory[.]txt'
+            PATTERN     => '.*Batch[23]/WatchHistory(_[0-9]+)?[.]txt'
         )
 ),
 Watches AS (

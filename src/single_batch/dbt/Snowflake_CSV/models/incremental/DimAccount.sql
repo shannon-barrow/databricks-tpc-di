@@ -13,10 +13,10 @@ WITH AccountIncremental AS (
     $8::string  as status,
     try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
   from
-    @{{ var('stage') }}
+    @{{ var('stage').rstrip('/') }}/
     (
       FILE_FORMAT => 'TXT_PIPE',
-      PATTERN     => '.*Account[.]txt'
+      PATTERN     => '.*Account(_[0-9]+)?[.]txt'
     ) t
 ),
 Account AS (
@@ -29,7 +29,7 @@ Account AS (
     status,
     update_ts,
     1 AS batchid
-  FROM {{var('catalog')}}.{{var('stagingschema')}}.customermgmt_clean c
+  FROM {{ ref('CustomerMgmt') }} c
   WHERE ActionType NOT IN ('UPDCUST', 'INACT')
   UNION ALL
   SELECT

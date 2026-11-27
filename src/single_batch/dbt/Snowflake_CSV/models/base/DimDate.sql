@@ -23,7 +23,7 @@ select
   $17::string  as fiscalqtrdesc,
   $18::boolean as holidayflag
 from
-  @{{ var('stage') }}/Batch1
+  @{{ var('stage').rstrip('/') }}/Batch1
   (
     FILE_FORMAT => 'TXT_PIPE',
     PATTERN     => '.*[/]Date[.]txt'

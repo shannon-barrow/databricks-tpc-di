@@ -11,10 +11,10 @@ WITH Holdings as (
         $4::INT as hh_after_qty,
         1 batchid
     FROM
-        @{{ var('stage') }}/Batch1
+        @{{ var('stage').rstrip('/') }}/Batch1
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*HoldingHistory[.]txt'
+            PATTERN     => '.*HoldingHistory(_[0-9]+)?[.]txt'
         ) t
     UNION ALL
     SELECT
@@ -24,10 +24,10 @@ WITH Holdings as (
         $6::INT    as hh_after_qty,
         try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
     FROM
-        @{{ var('stage') }}
+        @{{ var('stage').rstrip('/') }}/
         (
             FILE_FORMAT => 'TXT_PIPE',
-            PATTERN     => '.*Batch[23]/HoldingHistory[.]txt'
+            PATTERN     => '.*Batch[23]/HoldingHistory(_[0-9]+)?[.]txt'
         )
 )
 SELECT 

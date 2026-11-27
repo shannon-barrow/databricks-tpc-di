@@ -40,10 +40,10 @@ WITH customer_incremental as (
     $33::string as nat_tx_id,
     try_cast(SUBSTR(METADATA$FILENAME, position('/Batch' in METADATA$FILENAME) + 6, 1) as int) batchid
   from
-    @{{ var('stage') }}
+    @{{ var('stage').rstrip('/') }}/
     (
       FILE_FORMAT => 'TXT_PIPE',
-      PATTERN     => '.*Customer[.]txt'
+      PATTERN     => '.*Customer(_[0-9]+)?[.]txt'
     ) t
 ),
 Customers AS (
@@ -72,7 +72,7 @@ Customers AS (
       nat_tx_id,
       1 AS batchid,
       update_ts
-    FROM {{var('catalog')}}.{{var('stagingschema')}}.customermgmt_clean c
+    FROM {{ ref('CustomerMgmt') }} c
     WHERE ActionType IN ('NEW', 'INACT', 'UPDCUST')
     UNION ALL
     SELECT
